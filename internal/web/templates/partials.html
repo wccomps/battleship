@@ -1,0 +1,41 @@
+{{/* Shared pieces of pages. */}}
+
+{{/* panel is a page rendered for the grid's side panel: its flash and its
+     content, without the layout (see render). */}}
+{{define "panel" -}}
+{{template "flash" .Flash}}
+{{template "content" .}}
+{{- end}}
+
+{{/* flash shows a message carried across a redirect. A success needs no
+     words: the page it lands on shows the result. */}}
+{{define "flash" -}}
+{{- if and . (ne .Kind "success")}}
+<div class="flash" role="status"><p class="warn{{if eq .Kind "info"}} note{{end}}">{{icon (or (and (eq .Kind "info") "stale") "warn")}}<span>{{names .Message}}</span></p></div>
+{{- end}}
+{{- end}}
+
+{{/* live-off is the live dot's pop-over while the event stream is down. */}}
+{{define "live-off" -}}
+<div class="off"><b>Disconnected</b><span class="muted" data-retry>Reconnecting</span><a class="btn" href="">Reload</a></div>
+{{- end}}
+
+{{define "csrf" -}}
+<input type="hidden" name="csrf" value="{{.}}">
+{{- end}}
+
+{{/* st is a job, VM or log status: a glyph and a word. */}}
+{{define "st" -}}
+<span class="st {{.Class}}">{{if eq .Glyph "spin"}}<span class="spin" aria-hidden="true"></span>{{else}}{{icon .Glyph}}{{end}}{{.Label}}</span>
+{{- end}}
+
+{{/* problem is a banner: why a page is shown again, or what went wrong. */}}
+{{define "problem" -}}
+<div class="warn{{if eq .Level "warn"}} stale{{end}}" role="alert">{{icon (or (and (eq .Level "warn") "stale") "warn")}}<div><b>{{.Title}}</b>
+{{- range .Text}}<span>{{names .}}</span>{{end}}</div></div>
+{{- end}}
+
+{{/* close is a sheet's close button: back to href, or, in the panel, shut. */}}
+{{define "close" -}}
+<a class="btn ghost sq" href="{{.}}" data-close aria-label="Close">{{icon "close"}}</a>
+{{- end}}

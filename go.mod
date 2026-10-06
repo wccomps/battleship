@@ -1,0 +1,28 @@
+module github.com/wccomps/battleship
+
+go 1.25.1
+
+require (
+	github.com/BurntSushi/toml v1.4.1-0.20240526193622-a339e1f7089c
+	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
+	github.com/chromedp/chromedp v0.14.2
+	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/jackc/pgx/v5 v5.11.0
+	golang.org/x/oauth2 v0.36.0
+	golang.org/x/sync v0.17.0
+	pgregory.net/rapid v1.3.0
+)
+
+require (
+	github.com/chromedp/sysutil v1.1.0 // indirect
+	github.com/go-json-experiment/json v0.0.0-20250725192818-e39067aee2d2 // indirect
+	github.com/gobwas/httphead v0.1.0 // indirect
+	github.com/gobwas/pool v0.2.1 // indirect
+	github.com/gobwas/ws v1.4.0 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	golang.org/x/sys v0.34.0 // indirect
+	golang.org/x/text v0.29.0 // indirect
+)

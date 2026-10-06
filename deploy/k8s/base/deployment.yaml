@@ -1,0 +1,163 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: battleship
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: battleship
+      app.kubernetes.io/component: web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Bring the new replica up before an old one starts its (up to 16m)
+      # shutdown, so capacity never drops below 2 during a release.
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: battleship
+        app.kubernetes.io/component: web
+    spec:
+      serviceAccountName: battleship
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+
+      # Must exceed web.shutdown_timeout (15m) plus a margin. The chain is:
+      #   a stopped job's worst case (14m) < web.shutdown_timeout (15m) < this (16m).
+      # Shorter lets the kubelet SIGKILL a replica mid-cleanup and leave
+      # half-built VMs. Raise it whenever you raise web.shutdown_timeout.
+      terminationGracePeriodSeconds: 960
+
+      securityContext:
+        runAsNonRoot: true
+        # distroless "nonroot" user.
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            # k8s nodes may be VMs on one Proxmox host: spread replicas over
+            # Proxmox hosts by labelling each node with its host, e.g.
+            #   kubectl label node k8s-worker-1 topology.example.org/proxmox-host=alder
+            # (unlabelled nodes are ignored by this term).
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: topology.example.org/proxmox-host
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: battleship
+                    app.kubernetes.io/component: web
+            # Fallback: at least different Kubernetes nodes.
+            - weight: 50
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: battleship
+                    app.kubernetes.io/component: web
+
+      containers:
+        - name: battleship
+          image: ghcr.io/wccomps/battleship # tag pinned by the overlay (images:)
+          imagePullPolicy: IfNotPresent
+          # ENTRYPOINT is /usr/local/bin/battleship and WORKDIR is /config; battleship
+          # reads ./battleship.toml, i.e. /config/battleship.toml from the ConfigMap.
+          args: ["serve", "-log-format", "json"]
+          ports:
+            - name: http
+              containerPort: 8080 # web.listen
+              protocol: TCP
+          env:
+            # No Proxmox token: battleship acts as each signed-in person.
+            # The seal key encrypts the Proxmox credentials jobs keep.
+            - name: BATTLESHIP_SEAL_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: battleship-secrets
+                  key: seal-key
+            - name: BATTLESHIP_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: battleship-secrets
+                  key: oidc-client-secret
+            # Written by CloudNativePG for Cluster "battleship-db" (see
+            # ../postgres/cnpg-cluster.yaml): postgresql://battleship:...@battleship-db-rw.battleship:5432/battleship
+            # With another operator, point this at that operator's secret, or
+            # add a "database-url" key to battleship-secrets and reference it here.
+            - name: BATTLESHIP_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: battleship-db-app
+                  key: uri
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+
+          # Startup: migrations (under an advisory lock) and up to 30s of
+          # retries reaching Authentik happen BEFORE the listener opens.
+          # Allow 2 minutes before liveness takes over.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+            timeoutSeconds: 3
+          # 200 while Postgres answers; 503 when it doesn't or during
+          # shutdown. A Proxmox outage does NOT make it unready (by design,
+          # see README "Kubernetes"): readiness never calls Proxmox.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+            timeoutSeconds: 3
+          # Process responsiveness only; independent of Postgres and Proxmox.
+          # The kubelet stops liveness probing once the pod is terminating,
+          # so the HTTP server closing while jobs stop (up to 15m) is safe.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+
+          resources:
+            # Mostly I/O-bound: Proxmox API calls, Postgres, SSE fan-out.
+            # Revisit after the first competition with real numbers.
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+
+      volumes:
+        - name: config
+          configMap:
+            name: battleship-config # generated by kustomization.yaml (hash-suffixed)
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

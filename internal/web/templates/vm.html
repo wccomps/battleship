@@ -1,0 +1,102 @@
+{{define "content" -}}
+{{- $csrf := .CSRF}}
+{{- with .Data}}
+<div class="sheet" aria-labelledby="vm-title">
+<div class="ph">
+<h1 id="vm-title"><span class="vm">{{.Cell.Name}}</span></h1>
+<span class="chip is-{{.State}}"><i class="g" aria-hidden="true"></i>{{.State}}</span>
+<span class="sp"></span>
+{{template "close" "/"}}
+</div>
+<div class="pb">
+{{- if .ReadErr}}
+<p class="warn stale">{{icon "stale"}}<span>Couldn't read it from Proxmox just now: {{names .ReadErr}}</span></p>
+{{- end}}
+{{- if .Drift}}
+<ul class="reasons is-drifted" aria-label="Drift">
+{{- range .Drift}}
+<li><i class="g" aria-hidden="true"></i><span>{{names .Reason}}{{with .JobID}} · <a href="/logs/{{.}}" data-panel-link>#{{.}}</a>{{end}}</span></li>
+{{- end}}
+</ul>
+{{- end}}
+{{- if not .Missing}}
+<dl class="kv">
+<dt>Power</dt><dd><span class="gl is-{{if eq .Cell.Power "running"}}running{{else}}stopped{{end}}"><i class="g" aria-hidden="true"></i>{{.Cell.Power}}</span></dd>
+<dt>Node</dt><dd><span class="vm">{{.Cell.Node}}</span></dd>
+<dt>VMID</dt><dd><span class="vm">{{.Cell.VMID}}</span></dd>
+<dt>Pool</dt><dd>{{if .Cell.Pool}}<span class="vm">{{.Cell.Pool}}</span>{{else}}<span class="muted" title="your Proxmox user can't read pools">unknown</span>{{end}}</dd>
+</dl>
+<div class="sec">
+<h2 class="sub">Snapshots</h2>
+{{- if or .Snapshots (not .ReadErr)}}
+<div class="tscroll">
+<table class="tbl">
+<thead><tr><th scope="col">Name</th><th scope="col"><span class="sr">Baseline</span></th></tr></thead>
+<tbody>
+{{- if not .HasBaseline}}
+<tr><td><span class="gl is-missing"><i class="g" aria-hidden="true"></i><span class="vm">{{.Baseline}}</span></span></td><td class="muted">missing</td></tr>
+{{- end}}
+{{- range .Snapshots}}
+<tr><td><span class="vm">{{.Name}}</span></td><td class="muted">{{if .Baseline}}baseline{{end}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- else}}
+<p class="muted">unknown</p>
+{{- end}}
+</div>
+{{- with .Network}}
+<div class="sec">
+<h2 class="sub">Network</h2>
+<dl class="kv">
+{{- range .}}
+<dt>{{.Key}}</dt><dd><code>{{.Value}}</code></dd>
+{{- end}}
+</dl>
+</div>
+{{- end}}
+{{- end}}
+{{- with .LastJob}}
+<div class="sec">
+<h2 class="sub">Last job</h2>
+<a class="lastjob" href="/logs/{{.ID}}" data-panel-link><span class="st {{.Look.Class}}">{{if eq .Look.Glyph "spin"}}<span class="spin" aria-hidden="true"></span>{{else}}{{icon .Look.Glyph}}{{end}}{{.Op.Label}}<span class="sr"> {{.Look.Label}}</span></span><span class="muted" title="{{.At}}">#{{.ID}} · {{.When}}</span></a>
+</div>
+{{- end}}
+</div>
+{{- if or .CanPower .CanReset .CanSnapshot .Deploy}}
+<div class="pf start">
+{{- if .CanPower}}
+<form method="post" action="/power/preview">
+{{template "csrf" $csrf}}
+<input type="hidden" name="teams" value="{{.Cell.Team}}">
+<input type="hidden" name="hosts" value="{{.Cell.Host}}">
+{{- range .PowerActions}}
+<button type="submit" class="btn{{if eq .Value "stop"}} bad{{end}}" name="action" value="{{.Value}}">{{icon .Value}}{{.Label}}</button>
+{{- end}}
+</form>
+{{- end}}
+{{- if .CanReset}}
+<form method="post" action="/reset">
+{{template "csrf" $csrf}}
+<input type="hidden" name="from" value="grid">
+<input type="hidden" name="vms" value="{{.Cell.Name}}">
+<button type="submit" class="btn">{{icon "reset"}}Reset to snapshot…</button>
+</form>
+{{- end}}
+{{- if .CanSnapshot}}
+<form method="post" action="/snapshot">
+{{template "csrf" $csrf}}
+<input type="hidden" name="from" value="grid">
+<input type="hidden" name="vms" value="{{.Cell.Name}}">
+<button type="submit" class="btn">{{icon "snapshot"}}Take snapshot…</button>
+</form>
+{{- end}}
+{{- with .Deploy}}
+<a class="btn" href="{{.}}" data-panel-link>{{icon "deploy"}}Deploy</a>
+{{- end}}
+</div>
+{{- end}}
+</div>
+{{- end}}
+{{- end}}

@@ -1,0 +1,63 @@
+{{define "layout" -}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · battleship</title>
+<link rel="icon" type="image/svg+xml" href="{{asset "favicon.svg"}}">
+<link rel="stylesheet" href="{{asset "app.css"}}">
+<script src="{{asset "app.js"}}" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="app" id="app"{{with .Live}} data-live="{{.}}"{{end}}>
+<header class="top">
+{{- if .User}}
+<a class="brand" href="/" aria-label="battleship, grid">{{template "mark"}}<span>battleship</span></a>
+<nav class="nav" aria-label="Main">
+{{- range .Nav}}<a href="{{.Href}}"{{if eq .Key $.Active}} aria-current="page"{{end}}>{{.Label}}</a>{{end -}}
+</nav>
+{{- else}}
+<span class="brand">{{template "mark"}}<span>battleship</span></span>
+{{- end}}
+<span class="sp"></span>
+{{- block "legend" .}}{{end}}
+{{- if .Live}}
+<span class="sr" id="live-note" role="status"></span>
+<details class="live" id="live"><summary aria-label="Live updates" title="Live updates"><span class="dot"></span></summary>
+{{- block "live-pop" .}}
+<div class="pop" role="status"><div class="on"><b>Live</b><span class="muted">updates as they happen</span></div>{{template "live-off"}}</div>
+{{- end}}
+</details>
+{{- end}}
+{{- if .Lead}}
+<nav class="lead-ops" aria-label="Team operations">
+{{- range .Lead}}<a class="btn{{if eq .Key "teardown"}} bad{{end}}" href="{{.Href}}" data-panel-link{{if eq .Key $.Active}} aria-current="page"{{end}}>{{opIcon .Key}}{{.Label}}</a>{{end -}}
+</nav>
+{{- end}}
+{{- with .User}}
+<details class="menu me"><summary aria-label="Account: {{.Name}}, {{$.PVEUser}}"><span class="who" aria-hidden="true">{{$.Initial}}</span></summary>
+<div class="pop list">
+<div class="whoami"><span>{{.Name}}</span><span class="role">{{$.PVEUser}} · {{.Email}}</span></div>
+<hr>
+<form method="post" action="/auth/logout">
+{{template "csrf" $.CSRF}}
+<button type="submit">Log out</button>
+</form>
+</div>
+</details>
+{{- else}}
+{{- block "anon" .}}{{end}}
+{{- end}}
+</header>
+{{- template "flash" .Flash}}
+<main id="main">
+{{template "content" .}}
+</main>
+</div>
+</body>
+</html>
+{{end}}
+
+{{define "mark"}}<svg class="mark" viewBox="0 0 15 15" aria-hidden="true"><circle class="hole" cx="2.5" cy="2.5" r="1"/><circle class="hole" cx="7.5" cy="2.5" r="1"/><circle class="miss" cx="12.5" cy="2.5" r="1.3"/><circle class="hole" cx="2.5" cy="7.5" r="1"/><circle class="hole" cx="7.5" cy="7.5" r="1"/><circle class="hole" cx="12.5" cy="7.5" r="1"/><path class="ship" d="M0.5 10.8h10.6l3.4 1.9-3.4 1.9H2.2a1.7 1.7 0 0 1-1.7-1.7z"/><circle class="hit" cx="7.5" cy="12.5" r="1.3"/></svg>{{end}}

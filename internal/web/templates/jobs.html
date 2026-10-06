@@ -1,0 +1,47 @@
+{{define "content" -}}
+{{- with .Data}}
+<div class="page mid">
+<h1 class="ptitle">Logs</h1>
+{{- if .Live}}
+<div id="jobs-live" data-events="/events/jobs">
+{{template "jobs-table" .}}
+</div>
+{{- else}}
+{{template "jobs-table" .}}
+{{- end}}
+{{- if or .Newer .Older}}
+<nav class="pages" aria-label="Pages of logs">
+{{- if .Newer}}
+<a class="btn" href="/logs">Newest</a>
+{{- end}}
+{{- with .Older}}
+<a class="btn" href="{{.}}">Older</a>
+{{- end}}
+</nav>
+{{- end}}
+</div>
+{{- end}}
+{{- end}}
+
+{{define "jobs-table" -}}
+<div class="jobs" id="jobs-table">
+{{- if .Rows}}
+<div class="jobs-h" aria-hidden="true"><span>Status</span><span>#</span><span>Operation</span><span>Teams</span><span>Started by</span><span>Started</span><span>Took</span></div>
+<ol>
+{{- range .Rows}}
+<li><a class="job" href="/logs/{{.ID}}">
+<span class="j-st">{{template "st" .Look}}{{with .Note}}<small>{{.}}</small>{{end}}</span>
+<span class="j-id vm">#{{.ID}}</span>
+<span class="j-op">{{opIcon .Op.Icon}}{{.Op.Label}}{{with .Op.Detail}} <span class="vm">{{.}}</span>{{end}}</span>
+<span class="j-teams"><span class="vm">{{.Teams}}</span>{{with .Hosts}}<small class="vm">{{.}}</small>{{end}}</span>
+<span class="j-by" title="{{.By}}">{{.Who}} <span class="role">{{or .Role "command line"}}</span></span>
+<span class="j-when" title="{{.At}}">{{.When}}</span>
+<span class="j-took">{{or .Took "—"}}</span>
+</a></li>
+{{- end}}
+</ol>
+{{- else}}
+<p class="jobs-empty">Nothing has run yet.</p>
+{{- end}}
+</div>
+{{- end}}

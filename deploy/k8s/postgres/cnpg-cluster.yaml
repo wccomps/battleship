@@ -1,0 +1,71 @@
+# Postgres for battleship, as a CloudNativePG (CNPG) Cluster.
+#
+# ASSUMPTION: the cluster's Postgres operator is CNPG (not confirmed; for
+# another, see deploy/README.md section 4). battleship needs a database its
+# user owns (migrations run at startup) and plain Postgres LISTEN/NOTIFY and
+# advisory locks (no PgBouncer in transaction mode).
+#
+# bootstrap.initdb makes database "battleship" owned by user "battleship"; CNPG
+# writes Secret "battleship-db-app", whose "uri" key deployment.yaml reads as
+# BATTLESHIP_DATABASE_URL. The URI's host is the "-rw" Service, which follows
+# the primary across failovers; with no sslmode, pgx uses prefer (encrypted,
+# not verified).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: battleship-db
+spec:
+  instances: 2 # primary + one streaming replica, on different nodes
+  imageName: ghcr.io/cloudnative-pg/postgresql:16 # matches CI (Postgres 16)
+
+  bootstrap:
+    initdb:
+      database: battleship
+      owner: battleship
+      # secret: omitted, so CNPG generates the password into battleship-db-app.
+
+  # Put the two instances on different Kubernetes nodes (ideally different
+  # Proxmox hosts too; see the proxmox-host label note in deployment.yaml).
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: preferred
+
+  storage:
+    size: 5Gi # jobs, items, events, sessions: small; events grow with jobs
+    # storageClass: CHANGE-ME   # omit to use the cluster default
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+  # Backups: strongly recommended (job history is the audit trail). CNPG
+  # >= 1.26 prefers the Barman Cloud plugin over the in-tree
+  # barmanObjectStore shown here; follow whatever the cluster already uses.
+  # backup:
+  #   retentionPolicy: "30d"
+  #   barmanObjectStore:
+  #     destinationPath: s3://CHANGE-ME-bucket/battleship
+  #     endpointURL: https://CHANGE-ME-s3-endpoint
+  #     s3Credentials:
+  #       accessKeyId:
+  #         name: battleship-db-backup
+  #         key: ACCESS_KEY_ID
+  #       secretAccessKey:
+  #         name: battleship-db-backup
+  #         key: ACCESS_SECRET_KEY
+  #     wal:
+  #       compression: gzip
+  # ---
+  # A ScheduledBackup (separate object) for nightly base backups:
+  # apiVersion: postgresql.cnpg.io/v1
+  # kind: ScheduledBackup
+  # metadata:
+  #   name: battleship-db-nightly
+  # spec:
+  #   schedule: "0 0 3 * * *"
+  #   cluster:
+  #     name: battleship-db

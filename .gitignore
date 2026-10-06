@@ -1,0 +1,7 @@
+battleship.toml
+/battleship
+# Deploy configs hold no secrets and are part of the manifests
+!deploy/**/battleship.toml
+# rapid writes a failfile per failing property test
+**/testdata/rapid/
+/docs/

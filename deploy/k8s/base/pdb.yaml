@@ -1,0 +1,13 @@
+# Keeps at least one replica serving during node drains. With 2 replicas a
+# drain evicts one at a time; each evicted replica gets its full
+# terminationGracePeriodSeconds (16m) to let running jobs clean up.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: battleship
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: battleship
+      app.kubernetes.io/component: web

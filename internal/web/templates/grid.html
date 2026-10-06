@@ -1,0 +1,123 @@
+{{/* The grid page. The header carries its legend (grid-counts) and its
+     live dot's pop-over (grid-status); both are pieces of the event stream,
+     swapped in by id like the cells. */}}
+{{define "legend"}}{{template "grid-counts" .Data.Live}}{{end}}
+{{define "live-pop"}}{{template "grid-status" .Data.Live}}{{end}}
+
+{{define "content" -}}
+<div class="gwrap">
+{{- /* The grid is a form: each VM's box is a "vms" value, and each button
+       of the action bar posts the ticked VMs to an operation's preview (or,
+       for reset and snapshot, to its form). The script shows those pages
+       in the side panel; without it they are ordinary pages. A button
+       offers its action only if a ticked VM's box doesn't list its
+       privilege in data-lacks (any of a data-needs list will do).
+       Everything here outside grid-live depends on the request (the CSRF
+       token, Details), so it is rendered per request; grid-live is shared
+       by one viewer's pages. */}}
+<form id="grid-form" class="gform" method="post" action="/power/preview" data-panel>
+{{template "csrf" .CSRF}}
+<input type="hidden" name="from" value="grid">
+<div id="grid-live" data-events="/events/grid">
+{{template "grid-live" .Data.Live}}
+</div>
+<div class="ab" role="region" aria-label="Selection actions" id="actionbar">
+<span class="ab-n"><b class="ab-c" id="sel-count" aria-live="polite"></b>selected</span>
+<a class="btn sq" href="/" data-select="none" aria-label="Clear selection">{{icon "close"}}</a>
+<span class="ab-sep"></span>
+<p class="ab-why" id="ab-why" hidden>{{icon "lock" "lock-i"}}{{icon "stale" "stale-i"}}<span id="ab-why-text"></span></p>
+<div class="ab-ops">
+<button type="submit" class="btn" formaction="/power/preview" name="action" value="start" data-needs="{{needs "power"}}">{{icon "start"}}Start</button>
+<button type="submit" class="btn" formaction="/power/preview" name="action" value="shutdown" data-needs="{{needs "power"}}">{{icon "shutdown"}}Shut down</button>
+<button type="submit" class="btn bad" formaction="/power/preview" name="action" value="stop" data-needs="{{needs "power"}}">{{icon "stop"}}Force stop</button>
+<button type="submit" class="btn" formaction="/power/preview" name="action" value="reboot" data-needs="{{needs "power"}}">{{icon "reboot"}}Reboot</button>
+<button type="submit" class="btn" formaction="/reset" data-needs="{{needs "reset"}}">{{icon "reset"}}Reset to snapshot…</button>
+<button type="submit" class="btn" formaction="/snapshot" data-needs="{{needs "snapshot"}}">{{icon "snapshot"}}Take snapshot…</button>
+</div>
+<span class="ab-sep" id="ab-details-sep"{{if not .Data.Details}} hidden{{end}}></span><a class="btn" id="ab-details" href="{{or .Data.Details "/"}}" data-panel-link{{if not .Data.Details}} hidden{{end}}>Details</a>
+</div>
+</form>
+</div>
+<dialog class="panel" id="panel" aria-label="Details"></dialog>
+{{- end}}
+
+{{/* grid-live is the part of the page that live updates change. Its
+     pieces with an id (each cell, the empty grid's grid-start, and the header's grid-status and
+     grid-counts) are rendered on their own too: the event stream sends
+     just the pieces that changed, and the script swaps them in by id. */}}
+{{define "grid-live" -}}
+{{- if .Empty}}
+{{- with .Start}}
+{{template "grid-start" .}}
+{{- end}}
+{{- else}}
+<div class="gscroll{{if .Tall}} tall{{end}}" role="region" aria-label="VM grid" tabindex="0">
+<div class="grid{{with .GridClass}} {{.}}{{end}}" id="grid-table" role="table" aria-label="VMs by team and host">
+<div class="gr hr" role="row"><div class="gh rh" role="columnheader"><label class="all"><input type="checkbox" data-select="all"><span class="sr">Select all VMs</span></label></div>
+{{- range .Hosts}}<div class="gh" role="columnheader"><a class="hb" href="/?select=host:{{.}}" data-select="host:{{.}}" role="button" aria-pressed="false"><span class="sr">Select every </span>{{.}}</a></div>{{end -}}
+</div>
+{{- range .Rows}}
+<div class="gr{{if .Grp}} grp{{end}}" role="row">{{template "grid-row-head" .}}
+{{- range .Cells}}{{template "grid-cell" .}}{{end -}}
+</div>
+{{- end}}
+</div>
+</div>
+{{- end}}
+{{- end}}
+
+{{/* The empty grid's next step: the template sets to deploy. */}}
+{{define "grid-start" -}}
+<section class="start" id="grid-start" aria-labelledby="sets-h">
+<p class="lede">No ships in the water.</p>
+<h2 class="sub sets-h" id="sets-h">Template sets</h2>
+{{- if .Sets}}
+<div class="sets">
+{{- range .Sets}}
+<article class="card">
+<div class="row"><h3>{{.Name}}</h3>{{with .Deploy}}<span class="sp"></span><a class="btn set-deploy" href="{{.}}" data-panel-link>{{icon "deploy"}}Deploy</a>{{end}}</div>
+<ul class="hosts" aria-label="Hosts">{{range .Hosts}}<li>{{.}}</li>{{end}}</ul>
+<div class="masters" aria-label="{{.Running}} of {{.Masters}} master VMs running">
+{{- with .RunDots}}<span class="is-running dots" aria-hidden="true">{{range .}}<i class="g"></i>{{end}}</span>{{end}}
+{{- with .StopDots}}<span class="is-stopped dots" aria-hidden="true">{{range .}}<i class="g"></i>{{end}}</span>{{end -}}
+<b>{{.Running}}/{{.Masters}}</b><span>masters</span>
+</div>
+</article>
+{{- end}}
+</div>
+{{- else}}
+<p class="warn note">{{icon "blocked"}}<span>No master VM is tagged <code>{{.MasterTag}}</code>.</span></p>
+{{- end}}
+{{- with .Others}}
+<p class="muted others">Not in a set: {{range $i, $m := .}}{{if $i}}, {{end}}<span class="vm">{{$m}}</span>{{end}}</p>
+{{- end}}
+</section>
+{{- end}}
+
+{{/* A row's header: it selects the team's VMs. */}}
+{{define "grid-row-head" -}}
+<div class="gh rh" role="rowheader"><a class="hb" href="/?select=team:{{.Team}}" data-select="team:{{.Team}}" role="button" aria-pressed="false"><span class="sr">Select team </span>{{.Team}}</a></div>
+{{- end}}
+
+{{define "grid-status" -}}
+<div class="pop" id="grid-status" role="status" data-live="{{.Live.State}}"{{with .Live.Since}} data-since="{{.}}"{{end}}>
+<div class="on"><b>{{.Live.Title}}</b>{{with .Live.LastUpdate}}<span class="muted"><span data-age></span> · last update {{.}}</span>{{end}}{{range .Live.Lines}}<span class="muted">{{names .}}</span>{{end}}</div>
+{{- template "live-off"}}
+</div>
+{{- end}}
+
+{{define "grid-counts" -}}
+<ul class="legend" id="grid-counts" aria-label="VM states"{{if .Empty}} hidden{{end}}>
+{{- range .Counts}}<li class="is-{{.State}}"><i class="g" aria-hidden="true"></i><b>{{.N}}</b>{{.State}}</li>{{end -}}
+</ul>
+{{- end}}
+
+{{/* A cell: a box that ticks the VM, a link to the job working on it, or,
+     for a missing VM, just its outline. */}}
+{{define "grid-cell" -}}
+<div class="gc" role="cell" id="{{.ID}}">
+{{- if .Busy}}<a class="cell is-busy" href="/logs/{{.Busy}}" data-panel-link title="{{.Tip}}"><span class="cv"><i class="g" aria-hidden="true"></i></span><span class="sr">{{.Label}}</span></a>
+{{- else if .Pick}}<label class="cell is-{{.State}}" title="{{.Tip}}"><input type="checkbox" name="vms" value="{{.Pick}}" data-team="{{.Team}}" data-host="{{.Host}}"{{with .Lacks}} data-lacks="{{.}}"{{end}}{{if .Checked}} checked{{end}}><span class="cv"><i class="g" aria-hidden="true"></i></span><span class="sr">{{.Label}}</span></label>
+{{- else}}<span class="cell is-{{.State}}" title="{{.Tip}}"><span class="cv"><i class="g" aria-hidden="true"></i></span><span class="sr">{{.Label}}</span></span>
+{{- end}}</div>
+{{- end}}

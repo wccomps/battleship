@@ -1,0 +1,109 @@
+{{define "content" -}}
+{{- $csrf := .CSRF}}
+{{- with .Data}}
+{{- /* The sheet is the confirm form. Its inputs also post, for
+       "Change", back to the operation's form (the snapshot picker, or a
+       snapshot's name). */}}
+<form class="sheet" method="post" action="{{.Op.Path}}{{if .Confirm}}/confirm{{end}}" aria-labelledby="pv-title">
+{{template "csrf" $csrf}}
+{{- with .Confirm}}
+<input type="hidden" name="nonce" value="{{.Nonce}}">
+<input type="hidden" name="fingerprint" value="{{.Fingerprint}}">
+{{- with .RetryOf}}<input type="hidden" name="retry_of" value="{{.}}">{{end}}
+{{- end}}
+{{- if .FromGrid}}<input type="hidden" name="from" value="grid">{{end}}
+{{- range .Fields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+<div class="ph">
+<h1 id="pv-title">{{opIcon .Title.Icon}}{{.Title.Label}}{{with .Title.Detail}} <span class="vm">{{.}}</span>{{end}}</h1>
+<span class="sp"></span>
+{{template "close" .EditHref}}
+</div>
+<div class="pb">
+{{- with .Problem}}{{template "problem" .}}{{end}}
+{{- with .Asked}}
+<dl class="kv">
+{{- range .}}<dt>{{.Label}}</dt><dd>{{if eq .Label "Teams"}}<span class="vm">{{.Value}}</span>{{else}}{{names .Value}}{{end}}</dd>{{end}}
+</dl>
+{{- end}}
+{{- if .Nothing}}
+<p class="warn note">{{icon "blocked"}}<span>{{.Nothing}}</span></p>
+{{- end}}
+{{- if .Items}}
+<div class="chips">
+{{- if .Runnable}}<span class="chip is-running">{{icon "done"}}{{.Runnable}} will run</span>{{end}}
+{{- if .Blocked}}<span class="chip">{{icon "blocked"}}{{.Blocked}} blocked</span>{{end}}
+{{- if .AlreadyN}}<span class="chip">{{icon "dash"}}{{.AlreadyN}} already {{.AlreadyWord}}</span>{{end}}
+</div>
+{{- end}}
+{{- with .Consequence}}
+{{- if $.Data.Calm}}
+<p class="warn note">{{opIcon $.Data.Title.Icon}}<span>{{names .}}</span></p>
+{{- else}}
+<p class="warn">{{icon "warn"}}<span>{{names .}}</span></p>
+{{- end}}
+{{- end}}
+{{- with .Warnings}}
+<div class="warn stale">{{icon "warn"}}<ul>{{range .}}<li>{{names .}}</li>{{end}}</ul></div>
+{{- end}}
+{{- with .Capacity}}
+<div class="sec">
+<h2 class="sub">Capacity</h2>
+<ul class="cap">
+{{- range .Rows}}
+<li class="cap-{{.Level}}"><span class="vm">{{.Label}}</span><span class="bar" aria-hidden="true"><span class="u w{{.Used}}"></span><span class="n w{{.Need}}"></span></span><span class="cap-text">{{.Text}}</span></li>
+{{- end}}
+</ul>
+{{- range .Notices}}<p class="meta">{{.}}</p>{{end}}
+{{- range .Notes}}<p class="meta">{{.}}</p>{{end}}
+</div>
+{{- end}}
+{{- if .Templates}}
+<div class="sec">
+<h2 class="sub">Templates</h2>
+<div class="tscroll short">
+<table class="tbl">
+<thead><tr><th scope="col">Template</th><th scope="col">Node</th><th scope="col">Steps</th><th scope="col">Blocked</th></tr></thead>
+<tbody>
+{{- range .Templates}}
+<tr{{if .Blocked}} class="blk"{{end}}><td><span class="vm">{{.Name}}</span></td><td><span class="vm">{{.Node}}</span></td><td>{{if .Blocked}}—{{else}}{{.State}}{{end}}</td><td>{{with .Blocked}}<span class="st s-cancel">{{icon "blocked"}}{{names .}}</span>{{end}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+</div>
+{{- end}}
+{{- if .Items}}
+<div class="tscroll{{if gt (len .Items) 8}} short{{end}}">
+<table class="tbl">
+<thead><tr><th scope="col">VM</th><th scope="col">Node</th><th scope="col">Steps</th><th scope="col">Blocked</th></tr></thead>
+<tbody>
+{{- range .Items}}
+<tr{{if .Blocked}} class="blk"{{end}}><td><span class="vm">{{.Name}}</span></td><td><span class="vm">{{.Node}}</span></td><td>{{if .Blocked}}—{{else}}{{.Steps}}{{end}}</td><td>{{with .Blocked}}<span class="st s-cancel">{{icon "blocked"}}{{names .}}</span>{{end}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- end}}
+{{- with .Confirm}}{{with .TypeTeams}}
+<div class="confirm">
+<label for="typed">Type <code>{{.}}</code> to confirm</label>
+<input class="inp" type="text" id="typed" name="typed" required pattern="\s*{{.}}\s*" autocomplete="off" spellcheck="false" placeholder="{{.}}" data-typed="{{.}}">
+</div>
+{{- end}}{{end}}
+</div>
+<div class="pf">
+{{- if .FromGrid}}
+{{- with .Reselect}}
+<button type="submit" class="btn first" formaction="{{$.Data.Op.Path}}" formnovalidate>{{.}}</button>
+{{- end}}
+<a class="btn" href="/" data-close>Cancel</a>
+{{- else}}
+<a class="btn" href="{{.EditHref}}" data-panel-link>Back</a>
+{{- end}}
+{{- with .Confirm}}
+<button type="submit" class="btn pri{{if .Danger}} bad{{end}}">{{opIcon $.Data.Title.Icon}}{{.Button}}</button>
+{{- end}}
+</div>
+</form>
+{{- end}}
+{{- end}}

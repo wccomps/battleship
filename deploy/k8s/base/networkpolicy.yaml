@@ -1,0 +1,75 @@
+# Default-deny for the battleship web pods, then only what they need.
+# Selects only the app's pods, not the CloudNativePG instances in the same
+# namespace (those get their own policy from the operator/admin, if any).
+#
+# Every CIDR below is a PLACEHOLDER (RFC 5737 documentation ranges). Replace
+# them before applying, or battleship will fail to start (it can't reach Authentik).
+#
+# Probes: the kubelet's health checks come from the node, which most CNIs
+# (Calico, Cilium, Canal/Flannel) allow regardless of NetworkPolicy. If yours
+# doesn't, add an ingress rule for the node CIDR on port 8080.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: battleship
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: battleship
+      app.kubernetes.io/component: web
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only the ingress controller. CHANGE ME if its namespace isn't
+    # "ingress-nginx".
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    # Cluster DNS (CoreDNS / kube-dns in kube-system).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Postgres: the CloudNativePG instances of Cluster "battleship-db" in this
+    # namespace. CHANGE the selector if you use another operator.
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: battleship-db
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Proxmox API. CHANGE ME: the address(es) behind proxmox.url (or every
+    # one of proxmox.urls), e.g. the management IPs of every node (or the
+    # VIP) of the "competitions" cluster.
+    - to:
+        - ipBlock:
+            cidr: 192.0.2.0/24
+      ports:
+        - protocol: TCP
+          port: 8006
+    # Authentik (auth.example.org): OIDC discovery, JWKS, token refresh.
+    # CHANGE ME: the address auth.example.org resolves to FROM INSIDE the
+    # cluster. If Authentik runs in this cluster behind the same ingress,
+    # traffic may hairpin through the ingress controller's LoadBalancer IP;
+    # allow that IP here, or allow the ingress-nginx namespace on 443.
+    - to:
+        - ipBlock:
+            cidr: 198.51.100.0/24
+      ports:
+        - protocol: TCP
+          port: 443

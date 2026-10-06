@@ -1,0 +1,32 @@
+{{define "content" -}}
+{{- with .Data}}
+{{- if $.Panel}}
+<div class="sheet" aria-labelledby="msg-title">
+<div class="ph">
+<h1 id="msg-title">{{if ge .Status 400}}{{icon "blocked"}}{{end}}{{$.Title}}</h1>
+<span class="sp"></span>
+{{template "close" "/"}}
+</div>
+<div class="pb">
+<p>{{names .Message}}</p>
+</div>
+<div class="pf">
+{{- if .Link}}
+<a class="btn" href="{{.Link}}" data-close>{{.LinkText}}</a>
+{{- end}}
+</div>
+</div>
+{{- else}}
+<div class="deny">
+<div>
+{{icon (or (and (or (eq .Status 401) (eq .Status 403)) "lock") "blocked") "big"}}
+<h1>{{$.Title}}</h1>
+<p>{{names .Message}}</p>
+{{- if .Link}}
+<p><a class="btn" href="{{.Link}}">{{.LinkText}}</a></p>
+{{- end}}
+</div>
+</div>
+{{- end}}
+{{- end}}
+{{- end}}

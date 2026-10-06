@@ -1,0 +1,119 @@
+# battleship configuration. Every value except [proxmox] (and, for battleship serve,
+# web.base_url and the [oidc] client) has a default matching the current
+# competition setup; uncomment to change it.
+# Patterns use {team} (two digits, e.g. 07) and {host} (e.g. teak).
+
+[proxmox]
+url = "https://192.0.2.123:8006"
+# Or, to fail over between nodes, list several instead of url (not both);
+# "battleship nodes" prints this line for your cluster:
+# urls = ["https://192.0.2.121:8006", "https://192.0.2.122:8006", "https://192.0.2.123:8006"]
+# battleship holds no Proxmox token: every call is made as the person who
+# asked (their Proxmox ticket from signing in, or their own API token on
+# the command line), so Proxmox's ACLs decide what each person may do.
+# realm = "auth.example.org"     # the Proxmox OpenID realm people sign in to Proxmox through
+# ticket_renew_after = "60m"     # renew a ticket (a session's or a job's) once it is this old; tickets last 2h
+# ticket_max_age = "12h"         # sign in to Proxmox again after this; renewal never re-reads Authentik groups
+# sdn_zone = "teams"             # the SDN zone of the team bridges; a deploy needs SDN.Use on their vnets
+# The CLI uses your own API token: BATTLESHIP_PROXMOX_TOKEN_ID and _SECRET in the environment.
+# Proxmox's certificate is always checked. battleship serve and battleship worker
+# need ca_file, the cluster CA (public; copy it from any node:
+# cat /etc/pve/pve-root-ca.pem), or, to skip the check on purpose,
+# insecure_skip_verify = true (they then log a warning). Not both.
+# ca_file = "/config/pve-root-ca.pem"
+# insecure_skip_verify = false
+
+# [naming]
+# vm_name = "team{team}-{host}"
+# pool = "pool-{team}"
+# clone_vmid_base = 10000        # clone VMID = base + team*stride + template_vmid%100
+# clone_vmid_team_stride = 100
+# template_vmid_base = 9000      # template VMID = base + master_vmid%100
+# template_suffix = ".tpl"
+
+# [network]
+# ext_bridge = "ext{team}"
+# int_bridge = "int{team}"
+# ext_subnet = "10.50.1{team}"  # cloud-init VMs get .2/30 with gateway .1
+# cicustom = "vendor=competitions:snippets/ssh-keys.yaml"
+
+# [deploy]
+# storage = "competitions"
+# linked = true
+# master_tag = "dev"
+# disk_mbps_rd = 300
+# disk_mbps_wr = 300
+# snapshot_name = "initial"          # the baseline a deploy takes
+# Other snapshots that count as a baseline when a VM has no snapshot_name,
+# e.g. the old Python tool's fresh_clone_<timestamp>. A reset that names no
+# snapshot rolls back to snapshot_name, else the newest match. [] for none.
+# baseline_patterns = ["fresh_clone_*"]
+# gpu_vga = "virtio-gl"
+
+# clones_per_node, config_calls and template_builds are per process: each
+# replica of battleship serve or battleship worker has its own. workers applies
+# to each job. With a database, deletes is shared by every process, capped at
+# the largest value any running process has: keep it the same everywhere.
+# [concurrency]
+# workers = 20                   # VMs processed at once, per job
+# clones_per_node = 10           # clone tasks at once per source node
+# config_calls = 5               # Proxmox API calls at once, task-starting POSTs included
+# template_builds = 4            # templates built at once; each copy also takes a clone slot
+# deletes = 4                    # VM deletes at once; more time out on Proxmox's user.cfg lock and leave VMs half-deleted
+
+# Teardown shuts running VMs down cleanly before deleting them, so routers
+# release their DHCP lease and the next deploy gets the address.
+# [teardown]
+# shutdown_timeout = "60s"       # then Proxmox hard-stops the VM
+
+# [retry]
+# transient_patterns = ["file exists", "does not exist", "got no worker upid", "can't lock file", "is locked", "timeout"]
+# attempts = 6
+# initial_backoff = "1s"
+# max_backoff = "30s"
+# rounds = 1
+# round_pause = "2s"
+# task_poll = "2s"
+
+# The job worker, web app and -queue need a database. When it is set, direct
+# CLI runs also go through the job system, so they wait for overlapping jobs.
+# [database]
+# url = ""                       # prefer the BATTLESHIP_DATABASE_URL environment variable
+# max_conns = 16                 # main pool size per process (at least 4); +2 more for heartbeats and readiness, +1 for delete and storage slots, +1 to listen for job changes
+# seal_key = ""                  # prefer BATTLESHIP_SEAL_KEY: 32+ random characters, the same in every process; encrypts jobs' Proxmox credentials
+
+# [jobs]
+# heartbeat = "10s"              # how often a running job proves it's alive
+# stale_after = "60s"            # a running job silent this long is marked interrupted (>= 5 x heartbeat)
+# poll = "2s"                    # how often an idle worker looks for jobs
+# cancel_grace = "30s"           # after a cancel, how long a step may wait for a Proxmox task it already started (0s-5m)
+
+# battleship serve: the volunteer web app. It also runs job workers, so a separate
+# battleship worker is optional.
+[web]
+base_url = "https://battleship.example.org"  # the public URL; required for battleship serve
+# listen = ":8080"
+# workers = 2                    # job workers per replica
+# templates = "*.kilo.alpha"    # the competition's template set (a deploy pattern): its hosts are grid columns,
+#                                # missing for a team without them; empty (the default) shows only hosts with team VMs
+# session_idle = "90m"           # log out after this long without a request; must exceed proxmox.ticket_renew_after
+# session_max = "12h"            # log out this long after login regardless
+# session_refresh = "5m"         # how often a session re-checks the user's groups with Authentik
+# status_poll = "5s"             # how often each viewer's grid reads the cluster, with their ticket, while open
+# drift_scan = "2m"              # how often every team VM's config and snapshots are checked (the full scan, which finds most changes)
+# shutdown_timeout = "15m"       # on SIGTERM, how long running jobs get to clean up and end; keep it above
+#                                # the 14m a stopped job may take, and Kubernetes' terminationGracePeriodSeconds above it
+# trusted_proxies = []           # CIDRs of reverse proxies whose X-Forwarded-* headers are believed, e.g. ["10.42.0.0/16"]
+
+# Login through Authentik (OpenID Connect). The redirect URI is
+# <web.base_url>/auth/callback.
+[oidc]
+client_id = "battleship"             # or the BATTLESHIP_OIDC_CLIENT_ID environment variable
+# client_secret = ""            # prefer the BATTLESHIP_OIDC_CLIENT_SECRET environment variable; changing it logs everyone out at their next refresh
+# issuer = "https://auth.example.org/application/o/battleship/"
+# scopes = ["openid", "profile", "email", "groups", "offline_access"]  # battleship serve needs openid and offline_access
+# groups_claim = "groups"
+
+# battleship has no roles: who may open it is decided in Authentik (the
+# application's policy bindings), and what each person may do by Proxmox's
+# ACLs on their own login. See the README.

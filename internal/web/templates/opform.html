@@ -1,0 +1,173 @@
+{{define "content" -}}
+{{- $csrf := .CSRF}}
+{{- with .Data}}
+{{- if eq .Op.Kind "reset"}}
+<div class="sheet" aria-labelledby="form-title">
+{{template "form-head" .}}
+<div class="pb form">
+{{- with .Error}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
+{{- if not .FromGrid}}
+<form method="get" action="{{.Op.Path}}" class="stack" id="reset-which">
+{{template "team-fields" .}}
+<div><button type="submit" class="btn">{{if .Picker.HasPicked}}Choose again{{else}}Next{{end}}</button></div>
+</form>
+{{- end}}
+{{- if .Picker.HasPicked}}
+<form method="post" action="{{.Op.Path}}/preview" class="stack" id="reset-pick">
+{{template "csrf" $csrf}}
+{{- if .FromGrid}}
+<input type="hidden" name="from" value="grid">
+{{- end}}
+<input type="hidden" name="teams" value="{{.In.Teams}}">
+{{- if .HostsText}}
+<input type="hidden" name="hosts" value="{{.HostsText}}">
+{{- end}}
+{{- if .VMsText}}
+<input type="hidden" name="vms" value="{{.VMsText}}">
+{{- end}}
+{{- if .FromGrid}}
+<ul class="hosts" aria-label="VMs">{{range .In.VMs}}<li>{{.}}</li>{{end}}</ul>
+{{- end}}
+<fieldset class="field">
+<legend>Snapshot</legend>
+<div class="opts">
+{{- range .Picker.Options}}
+<label class="opt"><input type="radio" name="snapshot" value="{{.Name}}"{{if eq .Name $.Data.Picker.Selected}} checked{{end}}><span>{{if .Baseline}}baseline{{with $.Data.Picker.BaselineIs}} ({{.}}){{end}}{{else}}{{.Name}}{{end}}</span></label>
+{{- end}}
+</div>
+{{- with .Picker.Source}}
+<span class="hint">{{names .}}</span>
+{{- end}}
+<span class="hint">baseline: {{.Picker.BaselineText}}</span>
+</fieldset>
+{{- with .Picker.Note}}
+<p class="warn note">{{icon "stale"}}<span>{{names .}}</span></p>
+{{- end}}
+</form>
+{{- end}}
+</div>
+<div class="pf">
+<a class="btn" href="/" data-close>Cancel</a>
+{{- if .Picker.HasPicked}}
+<button type="submit" class="btn pri" form="reset-pick">Preview</button>
+{{- end}}
+</div>
+</div>
+{{- else if eq .Op.Kind "snapshot"}}
+<form class="sheet" method="post" action="{{.Op.Path}}/preview" aria-labelledby="form-title">
+{{template "csrf" $csrf}}
+{{template "form-head" .}}
+<div class="pb form">
+{{- with .Error}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
+{{- if .FromGrid}}
+<input type="hidden" name="from" value="grid">
+<input type="hidden" name="teams" value="{{.In.Teams}}">
+{{- if .HostsText}}
+<input type="hidden" name="hosts" value="{{.HostsText}}">
+{{- end}}
+<input type="hidden" name="vms" value="{{.VMsText}}">
+<ul class="hosts" aria-label="VMs">{{range .In.VMs}}<li>{{.}}</li>{{end}}</ul>
+{{- else}}
+{{template "team-fields" .}}
+{{- end}}
+<div class="field">
+<label class="lbl" for="snap-name">Name</label>
+<input class="inp" type="text" id="snap-name" name="snapshot" value="{{.In.Snapshot}}" required maxlength="{{.NameMax}}" pattern="[A-Za-z][A-Za-z0-9_\-]{1,{{.NameMaxRest}}}" autocomplete="off" spellcheck="false" aria-describedby="snap-name-hint">
+<span class="hint" id="snap-name-hint">letters, digits, _ and - · starts with a letter · not {{.Baseline}}</span>
+</div>
+<div class="field">
+<label class="lbl" for="snap-desc">Description <span class="muted">· optional</span></label>
+<input class="inp" type="text" id="snap-desc" name="description" value="{{.In.Description}}" maxlength="{{.DescMax}}" autocomplete="off">
+</div>
+<div class="toggles">
+<label class="sw">Include RAM<input type="checkbox" name="vmstate" value="yes"{{if .In.VMState}} checked{{end}}></label>
+</div>
+</div>
+<div class="pf">
+<a class="btn" href="/" data-close>Cancel</a>
+<button type="submit" class="btn pri">Preview</button>
+</div>
+</form>
+{{- else}}
+<form class="sheet" method="post" action="{{.Op.Path}}/preview" aria-labelledby="form-title"{{if eq .Op.Kind "deploy"}} data-deploy{{end}}>
+{{template "csrf" $csrf}}
+{{template "form-head" .}}
+<div class="pb form">
+{{- with .Error}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
+{{- if eq .Op.Kind "deploy"}}
+<fieldset class="field">
+<legend>Template set</legend>
+{{- if or .TemplateSets .OtherPattern}}
+<div class="opts">
+{{- range .TemplateSets}}
+<label class="opt"><input type="radio" name="pattern" value="{{.Pattern}}" required data-hosts="{{.HostsText}}"{{if .Checked}} checked{{end}}><span>{{.Name}}</span></label>
+{{- end}}
+{{- with .OtherPattern}}
+<label class="opt"><input type="radio" name="pattern" value="{{.}}" required checked><span>{{.}}</span></label>
+{{- end}}
+</div>
+{{- else}}
+<input class="inp" type="text" name="pattern" value="{{.In.Pattern}}" required autocomplete="off" spellcheck="false" aria-label="Template set" placeholder="*.kilo.alpha">
+{{- with .SetsErr}}<span class="hint">{{.}}</span>{{end}}
+{{- end}}
+</fieldset>
+{{- end}}
+{{template "team-fields" .}}
+{{- if eq .Op.Kind "power"}}
+<fieldset class="field">
+<legend>Action</legend>
+<div class="opts">
+{{- range .PowerActions}}
+<label class="opt sans"><input type="radio" name="action" value="{{.Value}}" required{{if eq .Value $.Data.In.Action}} checked{{end}}><span>{{icon .Value}}{{.Label}}</span></label>
+{{- end}}
+</div>
+</fieldset>
+{{- else if eq .Op.Kind "deploy"}}
+<div class="toggles">
+<label class="sw">Rebuild templates<input type="checkbox" name="rebuild" value="yes"{{if .In.Rebuild}} checked{{end}}></label>
+<label class="sw">Take baseline snapshot<input type="checkbox" name="baseline" value="yes"{{if not .In.NoSnapshot}} checked{{end}}></label>
+</div>
+{{- end}}
+</div>
+<div class="pf">
+<a class="btn" href="/" data-close>Cancel</a>
+{{- if eq .Op.Kind "teardown"}}
+<button type="submit" class="btn pri bad">{{icon "teardown"}}Preview teardown</button>
+{{- else}}
+<button type="submit" class="btn pri">Preview</button>
+{{- end}}
+</div>
+</form>
+{{- end}}
+{{- end}}
+{{- end}}
+
+{{define "form-head" -}}
+<div class="ph">
+<h1 id="form-title">{{opIcon (or .In.Action (print .Op.Kind))}}{{.Op.Title}}</h1>
+<span class="sp"></span>
+{{template "close" "/"}}
+</div>
+{{- end}}
+
+{{define "team-fields" -}}
+<div class="field">
+<label class="lbl" for="teams">Teams</label>
+<input class="inp" type="text" id="teams" name="teams" value="{{.In.Teams}}" required autocomplete="off" spellcheck="false" aria-describedby="teams-hint">
+<span class="hint" id="teams-hint">{{with .AllTeams}}{{.}} · {{end}}3,7 · 12-14</span>
+</div>
+<fieldset class="field" id="host-field">
+<legend>Hosts{{if .HostsAll}} <span class="muted">· none = all</span>{{end}}</legend>
+<div class="opts" id="host-opts">
+{{- range .HostOpts}}
+<label class="opt"><input type="checkbox" name="hosts" value="{{.Name}}"{{if .Checked}} checked{{end}}><span>{{.Name}}</span></label>
+{{- end}}
+</div>
+</fieldset>
+{{- if .VMsText}}
+<div class="field">
+<label class="lbl" for="vms">Only these VMs</label>
+<input class="inp" type="text" id="vms" name="vms" value="{{.VMsText}}" autocomplete="off" spellcheck="false">
+</div>
+{{- end}}
+{{- end}}
