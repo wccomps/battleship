@@ -544,7 +544,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	v.AskCancel = j.Active() && !j.CancelRequested && !v.CanCancel
 	// A stale or failed job ran nothing, and a cancelled one stopped: the
 	// way on is a new preview, when retrying isn't offered.
-	if j.Status == store.StatusStale || j.Status == store.StatusFailed || j.Status == store.StatusCancelled {
+	if store.JobStatus(j.Status).StartAgain() {
 		if op, ok := operationFor(pods.Kind(j.Kind)); ok {
 			if mayOp {
 				v.StartAgain = formQuery(op, in)
@@ -553,7 +553,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 			}
 		}
 	}
-	if jobs.CanRetry(j.Status) {
+	if store.JobStatus(j.Status).CanRetry() {
 		retry, err := jobs.RetryInputs(j, items)
 		switch {
 		case err == nil && !mayOp:
@@ -624,7 +624,8 @@ func jobItemsOf(j store.Job, items []store.Item) jobItems {
 	return t
 }
 
-// itemRank orders the item counts: the ones needing attention first.
+// itemRank orders the item counts, the ones needing attention first; it is
+// display order only, not a rule over statuses.
 func itemRank(status string) int {
 	for i, s := range []string{store.ItemFailed, store.ItemInterrupted, store.ItemRemoved, store.ItemBlocked, store.ItemNotRun,
 		store.ItemRunning, store.ItemPending, store.ItemDone} {

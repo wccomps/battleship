@@ -187,12 +187,12 @@ func (w *Worker) RunJob(ctx context.Context, job *store.Job) {
 		// Stopped before another worker may reap the job. Stale and failed
 		// outcomes stand. Cleanup still runs, so a partition that outlasts
 		// StaleAfter can overlap a new job on the team (accepted risk).
-		if outcome.Status == store.StatusStale || outcome.Status == store.StatusFailed {
+		if store.JobStatus(outcome.Status).RanNothing() {
 			break
 		}
 		outcome.Status = store.StatusInterrupted
 		outcome.Error = "lost contact with the database, so the job stopped before another worker could take over; re-run it to finish"
-	case ctx.Err() != nil && outcome.Status != store.StatusStale && outcome.Status != store.StatusFailed:
+	case ctx.Err() != nil && !store.JobStatus(outcome.Status).RanNothing():
 		outcome.Status = store.StatusInterrupted
 		outcome.Error = "the worker shut down during the job; re-run it to finish"
 	}

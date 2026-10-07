@@ -37,7 +37,7 @@ const lastItemResultsSQL = `SELECT n.name, x.job_id, x.kind, x.finished_at, x.st
 		WHERE i.name = n.name
 		  AND j.finished_at IS NOT NULL
 		  AND j.kind = ANY($2::text[])
-		  AND i.status IN ('done', 'failed', 'removed', 'interrupted')
+		  AND i.status IN ` + touchedItemsSQL + `
 		  AND NOT ` + legacyNotRunSQL + `
 		  AND NOT (i.status = 'interrupted' AND i.left_config = '` + LeftUntouched + `')
 		ORDER BY j.finished_at DESC, j.id DESC
