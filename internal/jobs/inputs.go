@@ -1,7 +1,6 @@
-// Package jobs turns confirmed requests into stored jobs and runs them:
-// a job stores what the user asked for and a fingerprint of the plan they
-// confirmed; the worker re-plans at run time and runs only if the plan still
-// matches.
+// Package jobs stores confirmed requests as jobs and runs them. A job keeps
+// the user's inputs and the confirmed plan's fingerprint; the worker
+// re-plans and runs only if it still matches.
 package jobs
 
 import (
@@ -15,8 +14,7 @@ import (
 	"github.com/wccomps/battleship/internal/pods"
 )
 
-// Inputs is what a user asked for. It is stored with the job and planned
-// again when the job runs.
+// Inputs is what a user asked for; it is replanned when the job runs.
 type Inputs struct {
 	Kind       pods.Kind `json:"kind"`
 	Teams      string    `json:"teams"` // as typed, e.g. "1-32"
@@ -24,20 +22,18 @@ type Inputs struct {
 	Pattern    string    `json:"pattern,omitempty"`     // deploy
 	Rebuild    bool      `json:"rebuild,omitempty"`     // deploy
 	NoSnapshot bool      `json:"no_snapshot,omitempty"` // deploy
-	// Snapshot is a reset's snapshot to roll back to, empty for each VM's
-	// baseline (pods.BaselineSnapshot), or a snapshot job's new snapshot.
+	// Snapshot is a reset's target (empty: baseline) or a snapshot job's
+	// new snapshot.
 	Snapshot    string `json:"snapshot,omitempty"`
 	Description string `json:"description,omitempty"` // snapshot
 	VMState     bool   `json:"vmstate,omitempty"`     // snapshot: also save the RAM of running VMs
 	Action      string `json:"action,omitempty"`      // power
-	// VMs, if set, are the exact team VMs to act on, by name, e.g. a
-	// retry's failed VMs: the plan keeps only these of the VMs Teams and
-	// Hosts select. Each must be a team VM name of one of Teams.
+	// VMs, if set, narrows the plan to these team VMs (e.g. a retry's
+	// failures). Each must belong to one of Teams.
 	VMs []string `json:"vms,omitempty"`
 }
 
-// MaxSnapshotDescription is the longest snapshot description, in
-// characters, a job takes: a note, not a document.
+// MaxSnapshotDescription is the longest snapshot description, in characters.
 const MaxSnapshotDescription = 500
 
 // Validate checks the inputs without contacting Proxmox.
@@ -81,11 +77,8 @@ func (in Inputs) Validate() error {
 	return errors.Join(errs...)
 }
 
-// BuildPlan plans the inputs against the cluster's current state. With
-// VMs set, it checks each is a team VM name of one of the teams, then
-// keeps only those VMs of the plan (see keepVMs). With p.Access, it then
-// blocks what the planning user lacks privileges for, so a preview and the
-// job's own plan, made with the same person's privileges, agree.
+// BuildPlan plans the inputs against the cluster. With p.Access it blocks
+// what the user lacks privileges for, so preview and job plan agree.
 func BuildPlan(ctx context.Context, p pods.Planner, in Inputs) (*pods.Plan, error) {
 	if err := in.Validate(); err != nil {
 		return nil, err
@@ -121,9 +114,8 @@ func checkVMs(in Inputs, teams []string, naming pods.Naming) error {
 	return errors.Join(errs...)
 }
 
-// keepVMs narrows plan to the items named in vms, if any, and a deploy's
-// templates to those the kept items clone from. Plan teams stay as asked,
-// so the job still locks every team of them.
+// keepVMs narrows plan (and a deploy's templates) to vms. Plan teams stay as
+// asked, so the job still locks every one.
 func keepVMs(plan *pods.Plan, vms []string) {
 	if len(vms) == 0 {
 		return
@@ -146,8 +138,7 @@ func keepVMs(plan *pods.Plan, vms []string) {
 	plan.Templates = templates
 }
 
-// MissingVMs lists, sorted, the names in in.VMs that plan has no item
-// for: VMs that no longer exist or no longer match the teams and hosts.
+// MissingVMs lists, sorted, the names in in.VMs that plan has no item for.
 func MissingVMs(in Inputs, plan *pods.Plan) []string {
 	var out []string
 	for _, name := range in.VMs {
@@ -178,8 +169,7 @@ func planFor(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*p
 	}
 }
 
-// SplitList splits a comma-separated list of hosts or VMs, as the command
-// line's flags and the web forms take them, trimming spaces and dropping
+// SplitList splits a comma-separated list, trimming spaces and dropping
 // empty entries.
 func SplitList(s string) []string {
 	var out []string

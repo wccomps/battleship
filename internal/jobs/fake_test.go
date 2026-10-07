@@ -26,9 +26,8 @@ type fakeAPI struct {
 	listing  chan struct{}
 	// deleteErr, if set, fails every DeleteVM of these VMIDs.
 	deleteErr map[int]error
-	// accept, if set, decides which credentials Proxmox still takes; the
-	// others get 401. used records the credential of every call made
-	// through as.
+	// accept, if set, decides which credentials get through (others 401);
+	// used records each call's credential.
 	accept func(proxmox.Credential) bool
 	used   []proxmox.Credential
 	// pve, if set, answers the privileges of whoever calls (see as).
@@ -44,9 +43,8 @@ func newFake(vms ...proxmox.VM) *fakeAPI {
 	return f
 }
 
-// addVM puts a VM on the cluster with a one-NIC config, enough for masters
-// and templates in deploy plans, and the "initial" snapshot every VM has.
-// It doesn't take Mu.
+// addVM adds a VM with a one-NIC config and the "initial" snapshot. It
+// doesn't take Mu.
 func (f *fakeAPI) addVM(vm proxmox.VM) {
 	f.Add(vm, map[string]string{"net0": "virtio=BC:24:11:00:00:01,bridge=vmbr0"}, "initial")
 }
@@ -90,9 +88,8 @@ func (f *fakeAPI) hold(ctx context.Context, key string) (func(), error) {
 	return nil, deleteErr
 }
 
-// as is the fake seen through a credential, as Worker.Bind makes it: each
-// call records whose credential it carried, and fails with 401 unless
-// accept (if set) takes it.
+// as is the fake bound to a credential, like Worker.Bind: calls record it
+// and get 401 unless accept takes it.
 func (f *fakeAPI) as(src func() proxmox.Credential, refused func()) pods.API {
 	if f.pve != nil {
 		return &permsFake{boundFake: &boundFake{Fake: f.Fake, f: f, src: src, refused: refused}}

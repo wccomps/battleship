@@ -362,9 +362,8 @@ func scanCluster(h *harness, teams, hosts int) {
 	}
 }
 
-// gatedScan runs a scan whose reads each wait for the gate. It waits until
-// want reads are in flight, then lets every read through, and returns the
-// most reads that were in flight at once.
+// gatedScan holds scan reads until want are in flight, releases them, and
+// returns the peak in-flight count.
 func gatedScan(t *testing.T, h *harness, want int) int {
 	t.Helper()
 	h.api.gate = make(chan struct{})

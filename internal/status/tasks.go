@@ -8,14 +8,11 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// Proxmox has no event stream for VM changes, so the grid polls: the
-// cluster's VMs every web.status_poll, and every team VM's config and
-// snapshots every web.drift_scan (the full scan, which is what finds
-// changes: config edits, cloud-init regeneration and pool changes make no
-// task). As a speed-up only, each poll also reads the task list of each
-// node the viewer has Sys.Audit on, and reads again at once the VMs those
-// tasks touched. Without Sys.Audit on a node, Proxmox would list only the
-// viewer's own tasks there, so it isn't asked.
+// Proxmox has no VM change stream, and config edits, cloud-init
+// regeneration and pool changes make no task, so the full scan is what finds
+// changes. As a speed-up, each poll reads task lists of nodes the viewer has
+// Sys.Audit on (without it Proxmox lists only the viewer's own tasks) and
+// re-reads the VMs those tasks touched.
 
 // TaskReader lists a node's tasks; *proxmox.Client is one.
 type TaskReader interface {
@@ -28,9 +25,8 @@ const auditRecheck = 5 * time.Minute
 // taskFollow is where the poller's reading of task lists has got to.
 type taskFollow struct {
 	since map[string]time.Time // per node: ask for tasks started at or after this
-	// seen, per node, is each listed task's state when its VM was last
-	// re-read (true: running), so a task causes a re-read when it starts
-	// and when it ends, not on every poll while it runs.
+	// seen, per node, is each task's state at its VM's last re-read (true:
+	// running), so a task triggers re-reads only at start and end.
 	seen  map[string]map[string]bool
 	audit map[string]auditAnswer
 }
@@ -48,9 +44,8 @@ var vmTasks = map[string]bool{
 	"qmigrate": true, "hastart": true, "hastop": true,
 }
 
-// touchedByTasks reads the task lists of the nodes team VMs are on that
-// the viewer may audit, and re-reads the team VMs those tasks touched.
-// Failures are only logged: the full scan still finds the changes.
+// touchedByTasks re-reads team VMs touched by tasks on auditable nodes.
+// Failures are only logged; the full scan still finds the changes.
 func (p *Poller) touchedByTasks(ctx context.Context, teamVMs []proxmox.VM, offset time.Duration) scanResults {
 	tasks, ok1 := p.api.(TaskReader)
 	perms, ok2 := p.api.(pods.PermissionReader)
@@ -119,8 +114,8 @@ func (p *Poller) touchedByTasks(ctx context.Context, teamVMs []proxmox.VM, offse
 	return out
 }
 
-// mayAudit reports whether the viewer has Sys.Audit on node, asking
-// Proxmox at most every auditRecheck.
+// mayAudit reports whether the viewer has Sys.Audit on node, cached for
+// auditRecheck.
 func (p *Poller) mayAudit(ctx context.Context, perms pods.PermissionReader, node string, now time.Time) bool {
 	if a, ok := p.follow.audit[node]; ok && now.Sub(a.at) < auditRecheck {
 		return a.ok

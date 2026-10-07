@@ -10,11 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// legacyNotRunSQL matches, in job_items i joined to jobs j, an item an
-// older battleship ended without marking it not run: its job finished
-// before it reached a step, and it was left pending or running, or marked
-// interrupted. Such binaries may still run beside this one (another
-// replica, a CLI) after migration 005 converted the rows already there.
+// legacyNotRunSQL matches (in job_items i JOIN jobs j) an item that older
+// binaries left unmarked though it never reached a step. Those binaries may
+// still run beside this one after migration 005, so rows keep appearing.
 const legacyNotRunSQL = `(j.finished_at IS NOT NULL AND i.step = '' AND i.status IN ` + notRunNoStepSQL + `)`
 
 // itemStatusSQL is an item's status as the store reports it, with legacy
@@ -67,14 +65,11 @@ type NewJob struct {
 	CreatedBy   string
 	CreatedAs   string // the Proxmox user (or API token ID) it acts as
 	Items       []NewItem
-	// Preview, if set, is the web preview this job submits. CreateJob
-	// fails with ErrPreviewNotFound, ErrPreviewUsed or ErrPreviewExpired,
-	// storing nothing, unless the preview exists, hasn't expired and no job
-	// has submitted it yet.
+	// Preview, if set, is the web preview this job submits; CreateJob fails
+	// (ErrPreview*) unless it exists, is unexpired and unused.
 	Preview *PreviewClaim
-	// Credential, if set, gives the credential the job runs with, sealed
-	// for the job's ID, which it is passed. CreateJob stores it with the
-	// job, or stores nothing if it fails.
+	// Credential, if set, returns the job's credential sealed for its ID.
+	// If it fails, CreateJob stores nothing.
 	Credential func(jobID int64) (JobCredential, error)
 }
 
@@ -96,8 +91,8 @@ type Item struct {
 	Step   string
 	Status string
 	Error  string
-	// Steps is how each step that reported an outcome last ended: done,
-	// skipped, failed or interrupted, by step name.
+	// Steps maps step name to its last outcome (done, skipped, failed,
+	// interrupted).
 	Steps map[string]string
 }
 
@@ -189,9 +184,8 @@ func (s *Store) Jobs(ctx context.Context, limit int) ([]Job, error) {
 	return s.JobsBefore(ctx, 0, limit)
 }
 
-// JobsBefore lists up to limit jobs with IDs below before, newest first; a
-// before of 0 or less starts from the newest job. Pages of the job list
-// pass the last ID of the previous page.
+// JobsBefore lists up to limit jobs with IDs below before (<= 0: from the
+// newest), newest first.
 func (s *Store) JobsBefore(ctx context.Context, before int64, limit int) ([]Job, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+jobColumns+` FROM jobs
 		WHERE $1::bigint <= 0 OR id < $1 ORDER BY id DESC LIMIT $2`, before, limit)
@@ -248,27 +242,21 @@ func (s *Store) Events(ctx context.Context, jobID, afterID int64, limit int) ([]
 	return events, rows.Err()
 }
 
-// beforeEventCommit is a test-only hook called after AddEvent stores an
-// event but before its transaction commits, so tests can hold one event's
-// commit back while another is added.
+// beforeEventCommit is a test hook run just before AddEvent commits.
 var beforeEventCommit func(jobID int64, ev Event)
 
-// AddEvent records progress of a running job: the matching item becomes
-// running at the event's step (unless blocked, interrupted or not run), and
-// a failed event's message is its latest error; Finish, ReapStale and
-// RequestCancel set final statuses. One job's events are added one at a
-// time, so their IDs follow commit order. It returns ErrNotFound for an
-// unknown job and ErrNotActive, storing nothing, for one that isn't running.
+// AddEvent records progress of a running job and moves its item to the
+// event's step. One job's events are serialized so their IDs follow commit
+// order. ErrNotActive (nothing stored) if the job isn't running.
 func (s *Store) AddEvent(ctx context.Context, jobID int64, ev Event) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	// Lock the job's row first, so one job's events commit in ID order (a
-	// reader past an early ID would never see it committed late), and in
-	// the job-row-then-items order Finish, RequestCancel, Heartbeat and
-	// ReapStale use, so they can't deadlock.
+	// Lock the job row first: events then commit in ID order (a reader past
+	// an ID never sees it committed late), and job-row-then-items is the
+	// lock order every writer uses, avoiding deadlock.
 	var status string
 	if err := tx.QueryRow(ctx, `SELECT status FROM jobs WHERE id = $1 FOR UPDATE`, jobID).Scan(&status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -304,14 +292,12 @@ func (s *Store) AddEvent(ctx context.Context, jobID int64, ev Event) error {
 	return tx.Commit(ctx)
 }
 
-// beforeCancelRecheck is a test-only hook called inside RequestCancel's
-// transaction when its UPDATE matched no active job, before it checks
-// whether the job exists, so tests can hold it there with the row's lock.
+// beforeCancelRecheck is a test hook run in RequestCancel's transaction when
+// its UPDATE matched nothing, while it may hold the row lock.
 var beforeCancelRecheck func(jobID int64)
 
-// RequestCancel cancels a pending job at once, marking its items not run,
-// or asks a running job's worker to stop. It returns
-// ErrNotActive for a job that already finished.
+// RequestCancel cancels a pending job at once or asks a running job's worker
+// to stop. ErrNotActive if the job already finished.
 func (s *Store) RequestCancel(ctx context.Context, jobID int64, by string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -329,9 +315,8 @@ func (s *Store) RequestCancel(ctx context.Context, jobID int64, by string) error
 		if beforeCancelRecheck != nil {
 			beforeCancelRecheck(jobID)
 		}
-		// Ask within tx: the UPDATE above can still hold the row's lock, and
-		// waiting for another pool connection while holding it can starve
-		// the pool of the AddEvent calls waiting on that lock.
+		// Ask within tx: waiting for another pool connection while holding
+		// the row lock can starve the pool of AddEvents blocked on it.
 		var exists bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM jobs WHERE id = $1)`, jobID).Scan(&exists); err != nil {
 			return err
@@ -356,11 +341,8 @@ func (s *Store) RequestCancel(ctx context.Context, jobID int64, by string) error
 	return tx.Commit(ctx)
 }
 
-// BusyVMs names the VMs that active jobs still have to work on: each
-// pending or running item of a pending or running job, with the oldest
-// such job's ID. Blocked items aren't busy: their jobs skip them. It
-// returns at most limit VMs, so a backlog of queued jobs can't make the
-// answer unbounded, though the query still reads every active job's items.
+// BusyVMs maps each VM that active jobs still have to work on to the oldest
+// such job's ID, at most limit entries. Blocked items aren't busy.
 func (s *Store) BusyVMs(ctx context.Context, limit int) (map[string]int64, error) {
 	rows, err := s.pool.Query(ctx, `SELECT i.name, min(j.id) FROM jobs j JOIN job_items i ON i.job_id = j.id
 		WHERE j.status IN `+activeJobsSQL+` AND i.status IN `+unfinishedItemsSQL+`

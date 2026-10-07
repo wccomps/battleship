@@ -1,12 +1,9 @@
-// Package status keeps the live status grid of team VMs for the web app, and
-// the hub that fans change notifications out to its pages.
+// Package status keeps the web app's live grid of team VMs (teams × hosts)
+// and the hub that fans change notifications out to its pages.
 //
-// A Poller reads the cluster every web.status_poll and builds a Grid, teams ×
-// hosts. It marks a VM drifted when its pool is wrong, when the last finished
-// deploy, reset or teardown that touched it failed on it or was interrupted while working
-// on it, or when the deep scan, which reads every team VM's config and
-// snapshots every web.drift_scan, finds it isn't wired the way a deploy
-// leaves it. The drift rules are the engine's own.
+// A VM is drifted when its pool is wrong, its last deploy/reset/teardown
+// failed or was cut off on it, or the periodic deep scan finds it isn't
+// wired the way a deploy leaves it. The drift rules are the engine's own.
 package status
 
 import (
@@ -65,31 +62,26 @@ type Row struct {
 	Cells []Cell
 }
 
-// Grid is the status of every team VM. The Poller hands out copies, so a
-// Grid may be read and changed freely.
+// Grid is the status of every team VM. The Poller hands out copies.
 type Grid struct {
-	// Version goes up by one whenever anything but PolledAt changes, and is
-	// what the poller publishes on TopicGrid.
+	// Version increments when anything but PolledAt changes.
 	Version uint64
 	Teams   []string // the rows: the teams with team VMs, sorted
 	Hosts   []string // the columns, sorted
 	Rows    []Row
-	// PolledAt is when the cluster was last read successfully; zero before
-	// the first good poll.
+	// PolledAt is the last good poll; zero before one.
 	PolledAt time.Time
-	// Stale is set while polling fails, or before the first good poll. The
-	// cells then show the last good poll, and Err says what went wrong.
+	// Stale is set while polling fails or before the first good poll; cells
+	// show the last good poll and Err says why.
 	Stale bool
 	Err   string
-	// ScannedAt is when the last deep scan finished; zero before the first.
-	// ScanErr says which VMs it couldn't read; they keep the drift an
-	// earlier scan found.
+	// ScannedAt is the last deep scan's end. VMs listed in ScanErr keep the
+	// drift an earlier scan found.
 	ScannedAt time.Time
 	ScanErr   string
-	// Sets are the template sets on the cluster, from the masters tagged
-	// deploy.master_tag in the last good poll, and OtherMasters the names
-	// of tagged masters in no set: what the empty grid offers to deploy.
-	// Both are nil before the first good poll.
+	// Sets are the template sets from masters tagged deploy.master_tag, and
+	// OtherMasters tagged masters in no set: what an empty grid offers to
+	// deploy. Nil before the first good poll.
 	Sets         []pods.MasterSet
 	OtherMasters []string
 }
@@ -125,8 +117,7 @@ func (g Grid) clone() Grid {
 	return out
 }
 
-// sameContent reports whether a and b show the same thing: everything but
-// Version and PolledAt.
+// sameContent compares everything but Version and PolledAt.
 func sameContent(a, b Grid) bool {
 	if a.Stale != b.Stale || a.Err != b.Err || !a.ScannedAt.Equal(b.ScannedAt) || a.ScanErr != b.ScanErr ||
 		!slices.Equal(a.Teams, b.Teams) || !slices.Equal(a.Hosts, b.Hosts) || len(a.Rows) != len(b.Rows) ||

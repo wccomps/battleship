@@ -11,24 +11,17 @@ import (
 )
 
 var (
-	// ErrNotRetryable is returned for a job that is still active, or that
-	// ended without running anything (stale or failed: start it again from
-	// its form instead) or with everything done.
+	// ErrNotRetryable: the job is active, ran nothing (start it from its
+	// form instead), or finished everything.
 	ErrNotRetryable = errors.New("only jobs that completed with failures, were interrupted or were cancelled can be retried")
 	// ErrNothingToRetry is returned when every VM of a job finished.
 	ErrNothingToRetry = errors.New("nothing to retry: every VM of the job finished")
 )
 
-// RetryInputs works out how to retry a finished job for exactly its items
-// that didn't finish (see store.ItemStatus.Retryable): its stored inputs with VMs set to
-// those items' names, and Teams and Hosts narrowed to their teams and
-// hosts (the hosts come from the job's stored plan; with a teardown item
-// that has no host among them, a gone VM's disks or a half-deleted VM,
-// every host). A deploy's Rebuild is
-// cleared: the first run rebuilt the templates (or was blocked from doing
-// so), and the planner blocks rebuilding a template that team VMs, such as
-// the finished ones, still use, which would block every VM of the retry. It
-// returns ErrNotRetryable or ErrNothingToRetry when there's nothing to retry.
+// RetryInputs returns the job's inputs narrowed to its retryable items
+// (store.ItemStatus.Retryable), their teams and hosts. A deploy's Rebuild is
+// cleared: the planner blocks rebuilding a template team VMs still use,
+// which would block every VM of the retry.
 func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 	if !store.JobStatus(job.Status).CanRetry() {
 		return Inputs{}, fmt.Errorf("job %d is %s: %w", job.ID, job.Status, ErrNotRetryable)
@@ -54,8 +47,8 @@ func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 		p, ok := planned[it.Name]
 		switch {
 		case ok && it.Team != "" && p.Host == "" && plan.Kind == pods.KindTeardown:
-			// No host: a gone VM's disks, or a half-deleted VM, which only
-			// a whole-team teardown plans.
+			// A gone VM's disks or half-deleted VM: only a whole-team
+			// teardown plans those.
 			wholeTeams = true
 		case !ok || p.Host == "" || it.Team == "":
 			return Inputs{}, fmt.Errorf("job %d's plan has no team VM named %s", job.ID, it.Name)

@@ -162,9 +162,7 @@ func TestGridStates(t *testing.T) {
 	}
 }
 
-// The rows are the teams that have team VMs, whatever their numbers: each
-// with its hosts' columns, its job and scan drift, and its cell details.
-// Once a team's VMs are gone, so is its row.
+// Rows are exactly the teams with team VMs; a team's row goes with its VMs.
 func TestGridRowsAreTeamsWithVMs(t *testing.T) {
 	h := newHarness(t, nil)
 	h.api.add(teamVM("01", "dc", 10101), cleanConfig("01"), "initial")
@@ -429,9 +427,9 @@ func TestGridTemplatesShowsSetHosts(t *testing.T) {
 	}
 }
 
-// With web.templates set, the drift rules still judge the team VMs shown,
-// the deep scan still reads only team VMs (never masters), and a cell of
-// the set's host with no team VM is missing, which Detail reads nothing for.
+// With web.templates set, drift still judges team VMs, the scan never reads
+// masters, and a host column without a team VM is missing (Detail reads
+// nothing).
 func TestGridTemplatesDriftScanAndDetail(t *testing.T) {
 	h := newHarness(t, func(c *config.Config, _ *Options) { c.Web.Templates = "*.kilo.alpha" })
 	wrongPool := teamVM("01", "dc", 10101)
@@ -477,9 +475,8 @@ func TestGridTemplatesDriftScanAndDetail(t *testing.T) {
 	}
 }
 
-// The grid carries the cluster's template sets, from the same poll as the
-// cells: the empty grid offers them. A change to them (a master started)
-// is a new grid version, so renderings cached per version follow it.
+// The grid carries the template sets; a change to them bumps the version,
+// so per-version caches follow.
 func TestGridListsTemplateSets(t *testing.T) {
 	h := newHarness(t, nil)
 	for i, name := range []string{"web.kilo.alpha", "dc.kilo.alpha", "bugs.looney.tunes", "y"} {
@@ -515,9 +512,8 @@ func TestGridListsTemplateSets(t *testing.T) {
 	}
 }
 
-// The log says once when polling starts failing, including before any
-// good poll, and once when it works again; a first good poll after
-// start-up is no recovery.
+// Polling failure and recovery are each logged once; the first good poll
+// isn't a recovery.
 func TestPollLogsFailureAndRecoveryOnce(t *testing.T) {
 	var logs logLines
 	h := newHarness(t, func(_ *config.Config, o *Options) { o.Logf = logs.Logf })

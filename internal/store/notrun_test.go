@@ -7,10 +7,8 @@ import (
 	"github.com/wccomps/battleship/internal/store/storetest"
 )
 
-// Rows written before items had a "not run" status get it from migration
-// 005: finished jobs' items that never reached a step, whether left pending
-// or marked interrupted. Items of active jobs, and items that reached a
-// step, keep theirs.
+// Migration 005 marks finished jobs' never-stepped items not run; active
+// jobs' items and stepped items keep theirs.
 func TestMigrationMarksOldItemsNotRun(t *testing.T) {
 	s := storetest.New(t)
 	stale := create(t, s, "team:01")
@@ -57,10 +55,8 @@ func TestMigrationMarksOldItemsNotRun(t *testing.T) {
 	}
 }
 
-// An older battleship still running beside this one (another replica, or a
-// CLI) ends jobs the old way after migration 005: items that never reached
-// a step stay pending, or become interrupted with no step. The store reads
-// them as not run.
+// Rows an older binary writes after migration 005 (never-stepped items left
+// pending or interrupted) read as not run.
 func TestOldBinaryRowsReadAsNotRun(t *testing.T) {
 	s := storetest.New(t)
 	finished := create(t, s, "team:01") // team01-teak left pending
@@ -107,9 +103,8 @@ func TestOldBinaryRowsReadAsNotRun(t *testing.T) {
 	}
 }
 
-// Migration 008 carries the old power-step rule into left_config for rows
-// written before 007: an item interrupted at stop, start or power left the
-// config as the job before did. Others keep ”.
+// Migration 008 backfills left_config for pre-007 rows: an item interrupted
+// at stop, start or power is untouched; others keep "".
 func TestMigrationMarksOldPowerStepInterruptionsUntouched(t *testing.T) {
 	s := storetest.New(t)
 	stopped := create(t, s, "team:01")

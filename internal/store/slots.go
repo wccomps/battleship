@@ -11,16 +11,13 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// slotPoll is about how often AcquireSlot tries again while every slot is
-// taken.
+// slotPoll is roughly how often AcquireSlot retries while all slots are taken.
 const slotPoll = time.Second
 
-// slots holds this process's cluster-wide slots (see AcquireSlot) as
-// session-level advisory locks on one connection of its own. Postgres
-// grants a session a lock it already holds, so held keeps this process
-// from taking one slot twice. gen counts sessions: a release names the
-// session its lock was taken on, so one from a dead session is ignored
-// rather than freeing the same slot taken again on its replacement.
+// slots holds this process's slots as session advisory locks on one
+// connection. Postgres re-grants a lock a session already holds, so held
+// stops this process taking a slot twice. gen counts sessions, so a release
+// from a dead session can't free the slot retaken on its replacement.
 type slots struct {
 	cfg    *pgx.ConnConfig
 	mu     sync.Mutex // guards the fields below; never held while connecting
@@ -30,20 +27,15 @@ type slots struct {
 	closed bool
 }
 
-// slotQueryTimeout bounds each lock and unlock query, so a release never
-// waits long behind another one on the session.
+// slotQueryTimeout bounds each lock/unlock query on the shared session.
 const slotQueryTimeout = 10 * time.Second
 
-// AcquireSlot takes one of n slots called name, shared with every process
-// that uses this database, waiting until one is free or ctx ends. Calling
-// release frees it; calling it again does nothing. A slot is a Postgres
-// advisory lock held by this store's slot session: if that session dies,
-// its slots are freed at once, while their holders may still be working,
-// and the next AcquireSlot opens a new session.
+// AcquireSlot takes one of n database-wide slots called name, waiting until
+// one is free or ctx ends. release is idempotent. If the slot session dies
+// its slots free at once, even while holders still work.
 //
-// Each caller's n is its own: one passing n may take any of slots 0 to
-// n-1, so processes that pass different n for one name run up to the
-// largest of them at once.
+// n is per caller: callers passing different n for one name run up to the
+// largest n at once.
 func (s *Store) AcquireSlot(ctx context.Context, name string, n int) (release func(), err error) {
 	h := fnv.New32a()
 	h.Write([]byte(name))

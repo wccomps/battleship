@@ -15,9 +15,8 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// fakeAPI is the shared fake cluster on n1, with the failures the status
-// tests set and a gate that holds and counts its VM reads. Its fields are
-// guarded by the fake's Mu.
+// fakeAPI is the fake cluster on n1 with injectable failures and a gate on
+// VM reads. Fields are guarded by Mu.
 type fakeAPI struct {
 	*podstest.Fake
 	listErr error         // ClusterVMs fails with it
@@ -89,9 +88,8 @@ func (f *fakeAPI) counts() (reads, lists, max int) {
 	return f.reads, f.lists, f.max
 }
 
-// hold is the fake's Gate. It counts listings and fails them with listErr.
-// It counts each VM read, reports it on entered, waits for the gate, and
-// fails a config read with readErr.
+// hold is the fake's Gate: it counts listings and VM reads, reports reads
+// on entered, waits for the gate, and injects listErr/readErr.
 func (f *fakeAPI) hold(ctx context.Context, key string) (func(), error) {
 	if key == "cluster" {
 		f.Mu.Lock()
@@ -284,9 +282,8 @@ func (c *fakeClock) BlockUntil(t testing.TB, n int) {
 	}
 }
 
-// BlockUntilWait waits until a pending waiter fires d from now, such as a
-// poller's next poll, rather than any waiter (its drift scan's has another
-// length). It fails the test if that doesn't happen within 10s.
+// BlockUntilWait waits (up to 10s) for a waiter firing exactly d from now,
+// e.g. the next poll rather than the scan's.
 func (c *fakeClock) BlockUntilWait(t testing.TB, d time.Duration) {
 	t.Helper()
 	deadline := time.After(10 * time.Second)

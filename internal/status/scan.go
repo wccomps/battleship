@@ -13,14 +13,10 @@ import (
 
 var errNoPoll = errors.New("no good poll of the cluster yet")
 
-// Scan reads the config and snapshots of every team VM in the last good poll
-// and records the drift it finds, replacing the previous scan's. A VM it
-// can't read keeps its previous result, and Grid.ScanErr says so. Each read
-// holds one of the shared config-call slots and gives it back before the
-// next, so jobs keep getting slots while a scan runs. A scan cut off by ctx
-// records nothing and returns ctx's error. Each scan first measures the
-// database clock's offset from the poller's, and keeps its read times in
-// the database's clock; if it can't, it keeps the last offset.
+// Scan reads every team VM's config and snapshots and records the drift
+// found. Unreadable VMs keep their previous result (Grid.ScanErr). Each read
+// holds one shared config-call slot at a time, so jobs still get slots. A
+// cancelled scan records nothing. Read times are kept in database time.
 func (p *Poller) Scan(ctx context.Context) error {
 	p.mu.Lock()
 	if p.polledAt.IsZero() {
@@ -87,14 +83,11 @@ func (p *Poller) Scan(ctx context.Context) error {
 	return nil
 }
 
-// dbClockReadTimeout bounds a scan's read of the database's clock, so a hung
-// database connection can't stall the drift scan.
+// dbClockReadTimeout keeps a hung connection from stalling the drift scan.
 const dbClockReadTimeout = 10 * time.Second
 
-// measureOffset reads the database's clock and records and returns its
-// offset from p.clock, taking the local time halfway through the query. If
-// the read fails or takes longer than p.dbClockTimeout it returns the last
-// offset.
+// measureOffset records and returns the database clock's offset from
+// p.clock (local time taken mid-query), or the last offset on failure.
 func (p *Poller) measureOffset(ctx context.Context) time.Duration {
 	rctx, cancel := context.WithTimeout(ctx, p.dbClockTimeout)
 	defer cancel()
@@ -113,8 +106,7 @@ func (p *Poller) measureOffset(ctx context.Context) time.Duration {
 	return p.dbOffset
 }
 
-// scanVM reads one team VM and judges it. offset is the database clock's
-// offset from p.clock.
+// scanVM reads and judges one team VM.
 func (p *Poller) scanVM(ctx context.Context, vm proxmox.VM, offset time.Duration) (scanResult, error) {
 	team, _, _ := p.rules.naming.ParseVMName(vm.Name)
 	readAt := p.clock.Now().Add(offset)

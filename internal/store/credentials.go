@@ -15,20 +15,18 @@ const (
 	CredentialToken  = "token"
 )
 
-// ErrNoCredential means a job holds no credential: it ended, or its
-// ticket lapsed and the renewer dropped it.
+// ErrNoCredential means the job ended or the renewer dropped its ticket.
 var ErrNoCredential = errors.New("job has no credential")
 
-// JobCredential is the Proxmox credential a job runs with, sealed for the
-// job by the caller (the store never sees it in the clear).
+// JobCredential is a job's Proxmox credential, sealed by the caller.
 type JobCredential struct {
 	JobID    int64
 	Kind     string // CredentialTicket or CredentialToken
 	User     string // the Proxmox user, or the token ID
 	Sealed   string
 	IssuedAt time.Time
-	// LoginAt is when the submitter's Proxmox login ran; renewals keep it.
-	// For a token, when it was stored.
+	// LoginAt is the submitter's login time (renewals keep it); for a token,
+	// when it was stored.
 	LoginAt time.Time
 	// RenewAfter is when a ticket is due for renewal; zero for a token.
 	RenewAfter time.Time
@@ -94,24 +92,19 @@ type Renewal int
 const (
 	// Renewed: store the credential the renewal returned.
 	Renewed Renewal = iota
-	// RenewalLapsed: the ticket expired or was refused; drop it. The job
-	// can no longer act as its submitter.
+	// RenewalLapsed: the ticket expired or was refused; drop it.
 	RenewalLapsed
-	// RenewalFailed: Proxmox couldn't be asked; keep the credential and
-	// try again later.
+	// RenewalFailed: Proxmox unreachable; keep it and retry later.
 	RenewalFailed
 )
 
-// renewLockID is the first key of the advisory lock that claims one job's
-// credential for renewal; the job ID (folded into an int) is the second.
+// renewLockID and the job ID (folded to int) key the renewal advisory lock.
 const renewLockID = 727073
 
-// RenewCredential renews job jobID's ticket if it is due at now, claiming
-// it first with a session advisory lock so replicas don't renew one ticket
-// twice. renew is given the current row and decides (see Renewal); it may
-// call Proxmox, which is why the claim is a session lock rather than a
-// transaction. claimed is false, and renew isn't called, if the row is
-// gone, not due, or another replica holds it. renew's error is returned.
+// RenewCredential calls renew on the job's row if it is due, under a session
+// advisory lock so replicas don't renew one ticket twice. It's a session
+// lock, not a transaction, because renew calls Proxmox. claimed is false if
+// the row is gone, not due, or held elsewhere.
 func (s *Store) RenewCredential(ctx context.Context, jobID int64, now time.Time,
 	renew func(cur JobCredential) (JobCredential, Renewal, error)) (claimed bool, err error) {
 	conn, err := s.pool.Acquire(ctx)
@@ -158,8 +151,8 @@ func (s *Store) RenewCredential(ctx context.Context, jobID int64, now time.Time,
 	return true, errors.Join(rerr, err)
 }
 
-// SealCheck stores sealed as the seal key check if none is stored yet, and
-// returns the one stored, which another process may have stored first.
+// SealCheck stores sealed if no key check exists yet and returns the stored
+// one (possibly another process's).
 func (s *Store) SealCheck(ctx context.Context, sealed string) (string, error) {
 	if _, err := s.pool.Exec(ctx, `INSERT INTO seal_check (id, sealed) VALUES (1, $1) ON CONFLICT (id) DO NOTHING`, sealed); err != nil {
 		return "", fmt.Errorf("storing the seal key check: %w", err)

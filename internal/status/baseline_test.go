@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// A VM the old deploy tool made has a fresh_clone_<timestamp> baseline and
-// no "initial": it has a baseline, so it isn't drifted, and its detail
-// names that snapshot as its baseline.
+// A fresh_clone_<timestamp> baseline (no "initial") counts as a baseline:
+// no drift, and Detail names it.
 func TestPatternBaselineIsNotDrift(t *testing.T) {
 	h := newHarness(t, nil)
 	h.api.add(teamVM("01", "dc", 10101), cleanConfig("01"), "fresh_clone_20261002034615")

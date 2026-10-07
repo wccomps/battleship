@@ -19,9 +19,7 @@ func SetBeforeEventCommit(f func(jobID int64, ev Event)) {
 	beforeEventCommit = f
 }
 
-// SetBeforeCancelRecheck sets the test hook that runs inside RequestCancel's
-// transaction when it found no active job, before it checks the job exists.
-// Pass nil to reset.
+// SetBeforeCancelRecheck sets beforeCancelRecheck; nil resets it.
 func SetBeforeCancelRecheck(f func(jobID int64)) {
 	beforeCancelRecheck = f
 }

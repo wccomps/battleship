@@ -12,9 +12,8 @@ import (
 	"github.com/wccomps/battleship/internal/store/storetest"
 )
 
-// For any history of jobs of any kind and status, each over some VMs,
-// LastJobOf a VM is the newest job with an item for it, with that item,
-// and ErrNotFound for a VM no job had.
+// For any job history, LastJobOf is the newest job with an item for the VM,
+// or ErrNotFound.
 func TestPropLastJobOf(t *testing.T) {
 	s := storetest.New(t)
 	round := 0

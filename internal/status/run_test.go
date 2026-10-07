@@ -33,9 +33,7 @@ func TestRunPollsAndScansOnCadence(t *testing.T) {
 	start := h.clock.Now()
 	startRun(t, h)
 
-	// The first poll, then the first scan, which needs the poll's VM list.
-	// The hub merges a message into one its reader hasn't taken yet, so
-	// under load the two can arrive as one.
+	// First poll, then first scan; the hub may merge their messages.
 	for recv(t, sub); h.p.Grid().ScannedAt.IsZero(); recv(t, sub) {
 	}
 	h.clock.BlockUntil(t, 2) // both loops wait for their next turn

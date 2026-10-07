@@ -17,24 +17,23 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// ErrNoCredential is returned by Submit without the submitter's Proxmox
-// credential: a job acts only as the person who submitted it.
+// ErrNoCredential: Submit needs the submitter's credential, since a job acts
+// only as its submitter.
 var ErrNoCredential = errors.New("a job needs its submitter's Proxmox credential")
 
 // lapsedMessage is a job's error when its credential lapsed before it ran.
 const lapsedMessage = "authorization lapsed; preview it again"
 
-// Credentials seals the credential a job runs with into the job's row
-// and opens it again, bound to the job's ID (see package seal), and knows
-// when a ticket is due for renewal and when it has lapsed.
+// Credentials seals and opens job credentials, bound to the job's ID (see
+// package seal), and judges renewal and lapse.
 type Credentials struct {
 	key        seal.Key
 	renewAfter time.Duration
 	maxAge     time.Duration
 }
 
-// credentialPurpose is part of every stored job credential's key: changing
-// its text makes those unreadable.
+// credentialPurpose is part of every job credential's key; changing it makes
+// stored credentials unreadable.
 const credentialPurpose = "rangekiln job credential v1"
 
 // NewCredentials needs database.seal_key, the same in every process that
@@ -61,8 +60,7 @@ type sealed struct {
 
 func binding(jobID int64) string { return "job:" + strconv.FormatInt(jobID, 10) }
 
-// Seal returns what store.NewJob.Credential wants: cred sealed for the job
-// ID it is given.
+// Seal returns a store.NewJob.Credential that seals cred for the job ID.
 func (c Credentials) Seal(cred proxmox.Credential) func(jobID int64) (store.JobCredential, error) {
 	return func(jobID int64) (store.JobCredential, error) {
 		return c.row(jobID, cred, time.Now())
@@ -90,9 +88,8 @@ func (c Credentials) row(jobID int64, cred proxmox.Credential, now time.Time) (s
 	return jc, nil
 }
 
-// errSealKey means a credential didn't open: this process's
-// database.seal_key isn't the one it was sealed with. It says nothing about
-// whether the credential has lapsed.
+// errSealKey means this process's seal key differs from the sealing one; it
+// says nothing about lapse.
 var errSealKey = errors.New("database.seal_key differs from the key it was sealed with; give every process the same key")
 
 // Open reverses Seal for the job the row belongs to.
@@ -113,16 +110,14 @@ func (c Credentials) Open(jc store.JobCredential) (proxmox.Credential, error) {
 	return cred, nil
 }
 
-// RowLapsed is proxmox.Credential.Lapsed decided from a row's own columns,
-// without opening it, so a process with the wrong seal key can't take a
-// credential for lapsed.
+// RowLapsed is proxmox.Credential.Lapsed from the row's columns, without
+// opening it, so a wrong seal key can't make a credential look lapsed.
 func (c Credentials) RowLapsed(jc store.JobCredential, now time.Time) bool {
 	view := proxmox.Credential{Issued: jc.IssuedAt, LoginAt: jc.LoginAt} // a ticket: no token secret
 	return jc.Kind == store.CredentialTicket && view.Lapsed(now, c.maxAge)
 }
 
-// OpenCredentials is NewCredentials checked against st's key (CheckKey):
-// what every process that submits or runs jobs uses.
+// OpenCredentials is NewCredentials plus CheckKey.
 func OpenCredentials(ctx context.Context, cfg config.Config, st *store.Store) (Credentials, error) {
 	c, err := NewCredentials(cfg)
 	if err != nil {
@@ -131,13 +126,11 @@ func OpenCredentials(ctx context.Context, cfg config.Config, st *store.Store) (C
 	return c, c.CheckKey(ctx, st)
 }
 
-// keyCheckText is what the seal key check seals; a database stores it
-// sealed once, so its text can't change.
+// keyCheckText is sealed once per database, so it can't change.
 const keyCheckText = "rangekiln seal key check v1"
 
-// CheckKey checks this process's seal key against the one the database
-// was first used with (storing it the first time), so a process with
-// another key fails at startup instead of failing every job.
+// CheckKey checks this process's seal key against the database's first one,
+// so a wrong key fails at startup instead of failing every job.
 func (c Credentials) CheckKey(ctx context.Context, st *store.Store) error {
 	stored, err := st.SealCheck(ctx, c.key.Seal("check", []byte(keyCheckText)))
 	if err != nil {
@@ -154,11 +147,9 @@ type TicketRenewer interface {
 	RenewTicket(ctx context.Context, cred proxmox.Credential, now time.Time) (proxmox.Credential, error)
 }
 
-// Renewer keeps the tickets of waiting and running jobs alive. Each
-// replica runs one; replicas claim each ticket before renewing it, so
-// they don't renew one twice. A ticket that can't be renewed (it expired,
-// its login is past proxmox.ticket_max_age, or Proxmox refuses it) is
-// dropped, and its job then stops as "authorization lapsed" (see Worker).
+// Renewer keeps active jobs' tickets alive. Each replica runs one and claims
+// a ticket before renewing it. A ticket that can't be renewed is dropped and
+// its job stops as "authorization lapsed".
 type Renewer struct {
 	Store       *store.Store
 	Proxmox     TicketRenewer
@@ -185,8 +176,7 @@ func (r *Renewer) Run(ctx context.Context) {
 	}
 }
 
-// RenewDue renews every ticket due now, once, and says how many it renewed
-// and how many lapsed.
+// RenewDue renews every ticket due now, once.
 func (r *Renewer) RenewDue(ctx context.Context) (renewed, lapsed int) {
 	now := time.Now
 	if r.Now != nil {
@@ -203,8 +193,8 @@ func (r *Renewer) RenewDue(ctx context.Context) (renewed, lapsed int) {
 		}
 		return 0, 0
 	}
-	// A few at once, so a backlog of due tickets is renewed well within
-	// the hour they have left; each claim takes a pooled connection.
+	// Bounded: a backlog must finish within the tickets' remaining hour, but
+	// each claim takes a pooled connection.
 	var g errgroup.Group
 	g.SetLimit(renewParallel)
 	var mu sync.Mutex

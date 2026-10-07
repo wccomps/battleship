@@ -158,9 +158,8 @@ func TestCapacityLeavesFingerprintAlone(t *testing.T) {
 	}
 }
 
-// Two deploys of different masters can pick the same free VMID for their
-// new templates (masters 1021 and 2021 both prefer 9021), so their lock keys
-// overlap on it and they run one after the other.
+// Deploys of masters 1021 and 2021 both pick VMID 9021, so their lock keys
+// overlap.
 func TestLockKeysCoverTemplateVMIDs(t *testing.T) {
 	a := &pods.Plan{Teams: []string{"01"}, Templates: []pods.TemplateSpec{{Name: "teak.a.tpl", VMID: 9021}}}
 	b := &pods.Plan{Teams: []string{"02"}, Templates: []pods.TemplateSpec{{Name: "teak.b.tpl", VMID: 9021}}}
