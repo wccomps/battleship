@@ -2,9 +2,9 @@ package web
 
 import "html/template"
 
-// iconPaths are the app's icons: a 24px grid, 2px stroke, round joins,
-// drawn at 16px (see .i in app.css). They are inline SVG, which the CSP
-// allows, and decorative: the words next to them say what they mean.
+// iconPaths are the app's icons (24px grid, 2px stroke, drawn at 16px; see .i
+// in app.css), inline SVG the CSP allows. They are decorative: adjacent words
+// carry the meaning.
 var iconPaths = map[string]string{
 	"start":    `<path d="M7 4.5v15l12-7.5z"/>`,
 	"shutdown": `<path d="M12 3v8M6.4 6.6a8 8 0 1 0 11.2 0"/>`,

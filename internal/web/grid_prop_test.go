@@ -28,9 +28,8 @@ type clusterModel struct {
 	rows   []string // the rows the grid should have: the teams with a team VM
 }
 
-// drawCluster draws hosts, team VMs of teams with gaps in every state
-// (including some with unpadded numbers, in the wrong pool, duplicated or
-// templates) and tagged and untagged masters of this set and another.
+// drawCluster draws a cluster with odd team VMs (unpadded, wrong pool,
+// duplicated, templates) and masters of this set and another.
 func drawCluster(t *rapid.T) clusterModel {
 	var m clusterModel
 	hostPool := rapid.SliceOfNDistinct(rapid.StringMatching(`[a-z][a-z0-9]{0,4}(-[a-z0-9]{1,2})?`), 1, 8, rapid.ID).Draw(t, "hosts")
@@ -121,12 +120,8 @@ func (m clusterModel) wantState(team, host string) (status.State, []string) {
 	return status.StateStopped, nil
 }
 
-// For any cluster: a sorted row per team with team VMs, a gap every 8
-// teams, and a sorted column per host of their
-// VMs and web.templates' masters; one cell per team × host, in the
-// model's state and saying so; a legend counting each cell once, listing only the states shown; busy
-// cells linking to their job and, like missing ones, not tickable; and
-// ?select ticking exactly the other cells it names.
+// For any cluster, the grid's rows, columns, cells, legend and ?select
+// ticks match the model; busy and missing cells aren't tickable.
 func TestPropGridViewOfAnyCluster(t *testing.T) {
 	ctx := context.Background()
 	rapid.Check(t, func(t *rapid.T) {
@@ -280,9 +275,7 @@ func TestPropGridViewOfAnyCluster(t *testing.T) {
 	})
 }
 
-// checkAllTeams checks that "all teams" is every team that exists: the
-// forms' hint is exactly the teams with a team VM, and a range counts as
-// every team only if it covers them all.
+// checkAllTeams checks that "all teams" is exactly the teams with a team VM.
 func checkAllTeams(t *rapid.T, spec string, m clusterModel) {
 	all, err := pods.ParseTeams(spec)
 	if spec == "" {
@@ -326,9 +319,8 @@ func checkRowHeader(t *rapid.T, row rowView) {
 	t.Fatalf("row header of team %s doesn't select it:\n%s", row.Team, h)
 }
 
-// checkCellWords checks a cell's hover text and screen-reader label: both
-// name the VM and the state it shows, and a drifted one's reasons, which
-// only a drifted cell has.
+// checkCellWords checks a cell's hover text and screen-reader label name
+// the VM, its state and (drifted only) the reasons.
 func checkCellWords(t *rapid.T, c cellView, why []string) {
 	for _, words := range []string{c.Tip(), c.Label()} {
 		if !strings.HasPrefix(words, c.Name) || !strings.Contains(words, c.Shown()) {

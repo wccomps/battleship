@@ -1,28 +1,21 @@
-# Written for ingress-nginx. With another controller (Traefik, HAProxy,
-# Gateway API), translate the annotations: buffering off and long read
-# timeouts for server-sent events (SSE).
+# Written for ingress-nginx. Other controllers need the equivalent: buffering
+# off and long read timeouts for SSE.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: battleship
   annotations:
-    # SSE: stream responses instead of buffering them. battleship also sends
-    # "X-Accel-Buffering: no", but don't rely on that alone.
+    # SSE: don't buffer. battleship also sends "X-Accel-Buffering: no".
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
-    # The read timeout is how long nginx waits for battleship to send anything,
-    # on every request (the send timeout matches it).
-    # Live-update streams send a heartbeat every 15s, so they need only more
-    # than that. The hour is for previews: making a plan reads the cluster
-    # with several Proxmox requests in turn, each allowed up to 60s, and no
-    # deadline over all of them, so nginx must not be what cuts one off.
+    # SSE heartbeats every 15s; the hour is for previews, which make several
+    # sequential Proxmox requests (up to 60s each) with no overall deadline.
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     # Forms are small; nothing is uploaded.
     nginx.ingress.kubernetes.io/proxy-body-size: "1m"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    # TLS via cert-manager. CHANGE ME: the ClusterIssuer's name, or delete
-    # this annotation and create the TLS secret yourself.
+    # cert-manager. CHANGE ME: the ClusterIssuer, or delete and supply the TLS secret.
     cert-manager.io/cluster-issuer: CHANGE-ME-cluster-issuer
 spec:
   ingressClassName: nginx # CHANGE ME if the cluster's class differs

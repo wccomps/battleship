@@ -12,23 +12,15 @@ import (
 	"strings"
 )
 
-// do calls the API at the active endpoint and, when that fails in a way
-// that makes it safe to send the call again elsewhere, at the others in
-// turn, starting after the active one and wrapping around, each at most
-// once. The first endpoint that answers becomes the active one, and the
-// switch is logged once.
+// do calls the active endpoint and, when safe, each other endpoint once in
+// turn; the first that answers becomes active.
 //
-// Safety: a write (POST, PUT, DELETE) is sent to another endpoint only if
-// it provably never reached the first: the connection was never made
-// (refused, no route, DNS) or the TLS handshake failed. A write that may
-// have arrived (a timeout or reset after sending, or any HTTP answer) is
-// never sent again here, or a clone or delete could run twice; the caller's
-// Retrier decides about it. Reads are also sent again after any
-// other connection error, a timeout, or a proxy-level 5xx (see proxyDown).
+// A write fails over only if it provably never left (no connection or a
+// failed TLS handshake); otherwise a clone or delete could run twice. Reads
+// also fail over on timeouts and proxy-level 5xx (see proxyDown).
 //
-// With one endpoint, errors come back unchanged. When every endpoint fails,
-// the error is an *EndpointsError naming them all; it wraps each failure,
-// so errors.As and the Classifier see through it.
+// When every endpoint fails, the *EndpointsError wraps each failure, so
+// errors.As and the Classifier see through it.
 func (c *Client) do(ctx context.Context, method, path string, params url.Values, out any) error {
 	_, err := c.doServed(ctx, method, path, params, out)
 	if c.refused != nil && IsLapsed(err) {
@@ -37,9 +29,8 @@ func (c *Client) do(ctx context.Context, method, path string, params url.Values,
 	return err
 }
 
-// doPinned calls the API at the endpoint whose host:port is host, and
-// nowhere else: for calls that only the node that served an earlier one
-// can answer.
+// doPinned calls only the endpoint host, for calls that only the node that
+// served an earlier one can answer.
 func (c *Client) doPinned(ctx context.Context, host, method, path string, params url.Values, out any) error {
 	for _, e := range c.endpoints {
 		if e.host == host {
@@ -86,8 +77,8 @@ func (c *Client) doServed(ctx context.Context, method, path string, params url.V
 	return "", &EndpointsError{Method: method, Path: path, Failures: failed}
 }
 
-// switchTo makes to the active endpoint if from still is, and logs it.
-// Calls failing at the same time all try; one wins and logs.
+// switchTo makes to the active endpoint if from still is, and logs it once
+// even when concurrent calls race.
 func (c *Client) switchTo(from, to int, reason string) {
 	if !c.active.CompareAndSwap(int64(from), int64(to)) {
 		return
@@ -125,12 +116,8 @@ func (e *EndpointsError) Unwrap() []error {
 	return out
 }
 
-// proxyDown reports whether a status is pveproxy (or a proxy in front of
-// it) saying it couldn't reach the API, rather than the API answering:
-// 502/503/504, and Proxmox's 595 (connection failed), 596 (node
-// unreachable or timed out) and 599. Plain 500 is not: Proxmox uses it for
-// ordinary errors such as a missing VM config, which another node would
-// answer the same way.
+// proxyDown reports whether status is a proxy failing to reach the API.
+// Not 500: Proxmox uses it for ordinary errors every node would repeat.
 func proxyDown(status int) bool {
 	switch status {
 	case 502, 503, 504, 595, 596, 599:
@@ -139,9 +126,8 @@ func proxyDown(status int) bool {
 	return false
 }
 
-// failoverReason reports whether err from method makes it safe to try the
-// call at another endpoint, and a short reason for the log. transport says
-// err came from the connection, not from an HTTP answer.
+// failoverReason reports whether err makes it safe to try another endpoint,
+// and a short reason for the log.
 func failoverReason(method string, err error, transport bool) (string, bool) {
 	if err == nil {
 		return "", false
@@ -169,9 +155,8 @@ func failoverReason(method string, err error, transport bool) (string, bool) {
 	return transportText(err), true
 }
 
-// neverSent recognizes the errors that prove a request never left: the
-// connection was never made, or its TLS handshake failed (Go sends the
-// request only after the handshake).
+// neverSent recognizes errors that prove a request never left; Go sends it
+// only after the TLS handshake.
 func neverSent(err error) (string, bool) {
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
@@ -210,8 +195,7 @@ func innerText(e *net.OpError) string {
 	return e.Error()
 }
 
-// transportText is a connection error without the request URL that
-// url.Error puts in front.
+// transportText is a connection error without url.Error's URL prefix.
 func transportText(err error) string {
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) && urlErr.Err != nil {

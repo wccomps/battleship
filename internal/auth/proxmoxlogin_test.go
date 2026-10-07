@@ -208,8 +208,8 @@ func TestLapsedTicketSendsBackThroughProxmox(t *testing.T) {
 	})
 }
 
-// A session from before battleship kept usernames can't start the Proxmox
-// sign-in: it is asked to log in again, which records the username.
+// A session without a recorded username can't start the Proxmox sign-in:
+// it is asked to log in again, which records the username.
 func TestSessionWithoutAUsernameLogsInAgain(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()

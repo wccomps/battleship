@@ -1,27 +1,18 @@
 // Command battleship deploys, resets, powers and tears down team pods on Proxmox.
 //
-// Every operation prints its plan first. Run interactively, it then asks for
-// confirmation (teardown asks you to type the team range), and applies exactly
-// the plan it printed. -yes skips the prompt, for scripts, and applies the plan
-// it has just printed. Without -yes and without a terminal, nothing changes.
+// Every operation prints its plan, asks for confirmation (teardown wants the
+// team range typed), and applies exactly that plan. -yes skips the prompt;
+// without -yes and without a terminal, nothing changes. Any character device
+// on stdin (even /dev/null) counts as a terminal, so automation should pass
+// -yes or redirect stdin from a file.
 //
-// With -queue, the confirmed plan is stored as a job instead, and a worker
-// (battleship worker) runs it; the worker plans again and refuses to run if the
-// cluster changed since the preview. With a database configured, a direct
-// run also goes through the job system: it stores its plan as a job, waits
-// for older jobs on the same teams or templates, then runs it here.
+// -queue stores the plan as a job for battleship worker, which replans and
+// refuses to run if the cluster changed. With a database configured, direct
+// runs are jobs too and wait for older jobs on the same teams or templates.
 //
-// Interactive detection treats any character device on stdin (including
-// /dev/null) as a terminal, so in automation pass -yes or redirect stdin from
-// a file.
-//
-// battleship serve runs the volunteer web app: login through Authentik, the live
-// status grid, the operation forms with preview and confirm, and the job
-// pages, together with job workers, in one process per replica. It logs to
-// stderr (text, or JSON with -log-format json). On SIGTERM or Ctrl-C it
-// fails readiness, stops its running jobs cleanly (they clean up and end
-// interrupted) and exits within web.shutdown_timeout; a second signal exits
-// at once.
+// battleship serve runs the volunteer web app and job workers in one process
+// per replica. On SIGTERM it fails readiness, stops running jobs cleanly and
+// exits within web.shutdown_timeout; a second signal exits at once.
 //
 //	battleship deploy   -config battleship.toml -templates '*.kilo.alpha' -teams 1-32
 //	battleship teardown -config battleship.toml -teams 1-32 -yes
@@ -52,9 +43,8 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
-	// After the first signal, restore default handling so a second one
-	// kills the process while the executor is winding down. battleship serve logs
-	// its own shutdown.
+	// After the first signal, restore default handling so a second one kills
+	// the process while the executor winds down.
 	serving := len(os.Args) > 1 && os.Args[1] == "serve"
 	go func() {
 		<-ctx.Done()

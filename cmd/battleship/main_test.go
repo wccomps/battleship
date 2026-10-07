@@ -23,9 +23,8 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// fakeAPI is the shared fake cluster on n1, each VM with one disk, and
-// deletes that fail as the CLI tests set. Its fields are guarded by the
-// fake's Mu.
+// fakeAPI is the shared fake cluster on n1, each VM with one disk, with
+// deletes that fail as tests set. Its fields are guarded by the fake's Mu.
 type fakeAPI struct {
 	*podstest.Fake
 	deleteErr map[int]error // fails every DeleteVM of these VMIDs

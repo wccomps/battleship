@@ -109,8 +109,7 @@ func TestPermissionsResolveLikeProxmox(t *testing.T) {
 	}
 }
 
-// Item 22: a client given the cluster CA (here the fake's certificate)
-// verifies Proxmox; one without it refuses to talk to it.
+// A client verifies Proxmox with the CA and refuses it without.
 func TestClientVerifiesTheFakeWithItsCA(t *testing.T) {
 	pve := pvetest.New(t)
 	verified := proxmox.New(proxmox.Options{URLs: []string{pve.URL()}, RootCAs: pve.CertPool()})

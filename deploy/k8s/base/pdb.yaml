@@ -1,6 +1,5 @@
-# Keeps at least one replica serving during node drains. With 2 replicas a
-# drain evicts one at a time; each evicted replica gets its full
-# terminationGracePeriodSeconds (16m) to let running jobs clean up.
+# Keeps one replica serving during node drains; each evicted replica still gets
+# its full terminationGracePeriodSeconds (16m) for running jobs.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

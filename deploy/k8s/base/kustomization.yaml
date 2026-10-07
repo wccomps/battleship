@@ -3,8 +3,8 @@ kind: Kustomization
 
 namespace: battleship
 
-# Labels on metadata only. includeSelectors stays false so kustomize does not
-# rewrite the NetworkPolicy's Postgres selector or the Deployment selector.
+# includeSelectors: false so kustomize doesn't rewrite the NetworkPolicy's
+# Postgres selector or the Deployment selector.
 labels:
   - pairs:
       app.kubernetes.io/part-of: battleship
@@ -21,8 +21,7 @@ resources:
   - networkpolicy.yaml
   # secret.example.yaml is deliberately NOT listed: create battleship-secrets out of band.
 
-# The ConfigMap is generated from battleship.toml; its hashed name makes any
-# config change roll the Deployment.
+# The ConfigMap's hashed name makes any config change roll the Deployment.
 configMapGenerator:
   - name: battleship-config
     files:

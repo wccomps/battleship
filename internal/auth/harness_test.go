@@ -50,9 +50,8 @@ func (l *logBuffer) String() string {
 	return strings.Join(l.lines, "\n")
 }
 
-// harness is the app (auth routes plus a few protected test routes) on
-// httptest, with the fake identity provider, the test database and a fake
-// clock shared by both.
+// harness is the app on httptest with the fake identity provider, the test
+// database and a shared fake clock.
 type harness struct {
 	t     *testing.T
 	clock *clock
@@ -326,8 +325,7 @@ func (h *harness) sessionGone(token string) {
 	}
 }
 
-// countSessions removes every session and reports how many there were; it
-// ends the test's use of sessions.
+// countSessions removes every session and reports how many there were.
 func (h *harness) countSessions() int64 {
 	h.t.Helper()
 	n, err := h.st.DeleteExpiredSessions(ctx, h.clock.Now().Add(100*365*24*time.Hour))

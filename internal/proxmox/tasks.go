@@ -35,9 +35,8 @@ func ParseUPID(s string) (UPID, error) {
 	return u, nil
 }
 
-// WaitTask polls a task until it stops. It returns a *TaskError, including the
-// end of the task log, if the task did not finish OK or with warnings. An
-// empty upid means the call finished synchronously and returns nil.
+// WaitTask polls a task until it stops, returning a *TaskError with the log
+// tail unless it ended OK or with warnings. An empty upid returns nil.
 func (c *Client) WaitTask(ctx context.Context, upid string, poll time.Duration) error {
 	if upid == "" {
 		return nil
@@ -54,9 +53,7 @@ func (c *Client) WaitTask(ctx context.Context, upid string, poll time.Duration) 
 			ExitStatus string `json:"exitstatus"`
 		}
 		if err := c.do(ctx, http.MethodGet, path+"/status", nil, &st); err != nil {
-			// The task keeps running on the node even when a poll fails, so
-			// a flaky pveproxy must not make us abandon it: only a 4xx is
-			// an answer.
+			// The task keeps running when a poll fails; only a 4xx is an answer.
 			var apiErr *APIError
 			switch {
 			case ctx.Err() != nil:
@@ -82,8 +79,7 @@ func (c *Client) WaitTask(ctx context.Context, upid string, poll time.Duration) 
 	}
 }
 
-// StopTask asks Proxmox to stop a running task. The task may take a moment
-// to end; WaitTask says when it has.
+// StopTask asks Proxmox to stop a running task; WaitTask says when it has.
 func (c *Client) StopTask(ctx context.Context, upid string) error {
 	u, err := ParseUPID(upid)
 	if err != nil {
@@ -118,9 +114,8 @@ type Task struct {
 	Running bool // no end time yet
 }
 
-// NodeTasks lists the tasks on node that started at or after since, from
-// the node's task archive. Proxmox lists other users' tasks only to a
-// caller with Sys.Audit on /nodes/<node>; others see their own.
+// NodeTasks lists node's tasks started at or after since. Without Sys.Audit
+// on /nodes/<node>, Proxmox lists only the caller's own.
 func (c *Client) NodeTasks(ctx context.Context, node string, since time.Time) ([]Task, error) {
 	var raw []struct {
 		UPID      string      `json:"upid"`

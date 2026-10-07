@@ -43,13 +43,10 @@ func CSRFToken(ctx context.Context) string {
 	return ra.csrf
 }
 
-// SessionRefreshedAt returns when the request's session last checked the
-// user's groups with the identity provider (its login, or its last
-// successful refresh, including one this request just made), or the zero
-// time outside RequireUser. The next check falls due web.session_refresh
-// later; long-lived responses such as event streams end around then (the
-// web app's add up to a tenth more at random), so they pass through the
-// check again.
+// SessionRefreshedAt returns when the session last checked the user's
+// groups with the identity provider, or the zero time outside RequireUser.
+// Long-lived responses such as event streams end around session_refresh
+// later so they pass through the check again.
 func SessionRefreshedAt(ctx context.Context) time.Time {
 	ra, ok := ctx.Value(ctxKey{}).(*requestAuth)
 	if !ok {
@@ -58,10 +55,8 @@ func SessionRefreshedAt(ctx context.Context) time.Time {
 	return ra.refreshedAt
 }
 
-// SessionID returns the store ID of the request's session (the hash of
-// its cookie token, never the token), or "" outside RequireUser. Records
-// that belong to a session, such as the web app's previews, are keyed by
-// it.
+// SessionID returns the store ID of the request's session (a hash of its
+// cookie token, never the token), or "" outside RequireUser.
 func SessionID(ctx context.Context) string {
 	ra, ok := ctx.Value(ctxKey{}).(*requestAuth)
 	if !ok {
@@ -75,11 +70,10 @@ type subjectKey struct{}
 // subjectSlot is where RequireUser notes the subject for TrackSubject.
 type subjectSlot struct{ subject string }
 
-// TrackSubject returns a context for a request and a function that, once
-// the request is served, says who made it: the subject of the session
-// RequireUser or logout accepted, or of the identity the login callback
-// verified, even if the request was then refused; "" if none. It is for a
-// request log, which wraps the handlers and can't see their context.
+// TrackSubject returns a context and a function that, after the request is
+// served, reports the subject that made it ("" if none), even if the
+// request was then refused. It lets a request log that wraps the handlers
+// see what they learned.
 func TrackSubject(ctx context.Context) (context.Context, func() string) {
 	slot := &subjectSlot{}
 	return context.WithValue(ctx, subjectKey{}, slot), func() string { return slot.subject }
@@ -93,22 +87,10 @@ func noteSubject(ctx context.Context, subject string) {
 }
 
 // RequireUser serves next only for a live session, with the User in the
-// request context (UserFrom, CSRFToken). For each request it:
-//
-//   - ends sessions past session_idle or session_max;
-//   - refuses state-changing requests without the CSRF token (see
-//     csrfProblem), before refreshing the session;
-//   - every session_refresh, re-reads the user's groups from the identity
-//     provider with the refresh token (see refreshSession for when a
-//     failed refresh ends the session);
-//   - records activity, sliding the idle expiry;
-//   - finds the session's Proxmox ticket, renewing it when it is due, and
-//     sends the user through the Proxmox sign-in when there is none
-//     usable (see sessionTicket); handlers find it with
-//     ProxmoxCredential.
-//
-// Without a session, GET and HEAD redirect to the login page, which comes
-// back to the same URL; event streams and other methods get 401.
+// request context. It enforces session expiry, checks CSRF before
+// refreshing (csrfProblem), re-checks groups every session_refresh
+// (refreshSession), and finds or renews the Proxmox ticket
+// (sessionTicket). Without a session, see unauthenticated.
 func (s *Service) RequireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -137,9 +119,8 @@ func (s *Service) RequireUser(next http.Handler) http.Handler {
 			return
 		}
 
-		// The refresh finishes even if the browser goes away: the provider
-		// rotates the refresh token as it answers, so an abandoned refresh
-		// would leave the session with a spent one.
+		// Finish even if the browser goes away: the provider rotates the
+		// refresh token, so an abandoned refresh would strand a spent one.
 		sess, ok := s.refreshSession(context.WithoutCancel(ctx), w, r, sess, now)
 		if !ok {
 			return
@@ -182,17 +163,10 @@ const refreshBackoff = time.Minute
 const refreshGrace = 3
 
 // refreshSession re-checks the session with the identity provider once
-// session_refresh has passed. ok is false once it has responded (the
-// session ended, or the database failed).
-//
-//   - Only the request that wins the claim refreshes; concurrent ones, and
-//     requests during a backoff, carry on with the groups they read.
-//   - A rejection (an OAuth error answer such as invalid_grant, an ID
-//     token that fails verification, another subject) ends the session.
-//   - If the provider is unreachable, the session keeps its current groups
-//     and the next refresh is tried refreshBackoff later; the first try
-//     that fails refreshGrace × session_refresh or more after the last
-//     success ends it.
+// session_refresh has passed; ok is false once it has responded. Only the
+// request that wins the claim refreshes. A rejection ends the session; an
+// unreachable provider keeps the current groups until refreshGrace ×
+// session_refresh have passed since the last success.
 func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *http.Request, sess store.Session, now time.Time) (_ store.Session, ok bool) {
 	every := s.cfg.Web.SessionRefresh
 	if now.Sub(sess.RefreshedAt) < every {
@@ -261,10 +235,9 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
-// csrfProblem returns why an unsafe request fails the CSRF check, or "".
-// Requests other than GET and HEAD need the session's CSRF token (want) in
-// the CSRFField form field, and any Origin header must match web.base_url.
-// DELETE bodies aren't parsed, so a DELETE never passes.
+// csrfProblem returns why a non-GET/HEAD request fails the CSRF check, or
+// "". Any Origin must match web.base_url. DELETE bodies aren't parsed, so
+// a DELETE never passes.
 func (s *Service) csrfProblem(r *http.Request, want string) string {
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return ""
@@ -297,11 +270,10 @@ func (s *Service) rejectCSRF(w http.ResponseWriter, r *http.Request, subject, re
 	})
 }
 
-// unauthenticated sends a browser without a session to log in. Only GET and
-// HEAD redirect, back to the same URL afterwards; a form post or script gets
-// 401, since replaying it after login would be surprising. So does a request
-// for an event stream (Accept: text/event-stream): EventSource can't follow
-// a redirect to a login page, and the page's script reloads on the 401.
+// unauthenticated redirects GET and HEAD to log in and back. Other methods
+// get 401, since replaying them after login would surprise; so do event
+// streams, as EventSource can't follow a login redirect (the page's script
+// reloads on the 401).
 func (s *Service) unauthenticated(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	if (r.Method == http.MethodGet || r.Method == http.MethodHead) && !wantsEventStream(r) {
@@ -330,9 +302,8 @@ func wantsEventStream(r *http.Request) bool {
 	return false
 }
 
-// endSession deletes a session and clears its cookie. The delete finishes
-// even if the browser has gone. A failed delete is logged; the session
-// still can't be used past its expiry.
+// endSession deletes a session and clears its cookie, even if the browser
+// has gone. A failed delete still expires on its own.
 func (s *Service) endSession(w http.ResponseWriter, r *http.Request, sess store.Session) {
 	if err := s.st.DeleteSession(context.WithoutCancel(r.Context()), sess.ID); err != nil {
 		s.logf("auth: deleting session of subject=%q: %v", sess.Subject, err)

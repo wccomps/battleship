@@ -1,12 +1,6 @@
-// Package pvetest is a fake Proxmox access layer on httptest, for tests of
-// battleship's delegated authorization: users, login tickets that expire
-// and renew, per-path ACLs answering /access/permissions, 401 for a
-// ticket Proxmox no longer takes and 403 for a missing privilege, and the
-// OpenID login (auth-url, the identity provider's redirect, login) a
-// browser goes through. Its identity provider signs in, without a form,
-// whoever SignIn named last.
-//
-// The real proxmox.Client talks to it; Client returns one.
+// Package pvetest is a fake Proxmox access layer for delegated-auth tests:
+// users, expiring tickets, per-path ACLs, 401/403, and the OpenID login.
+// Its IdP signs in, without a form, whoever SignIn named last.
 package pvetest
 
 import (
@@ -172,9 +166,8 @@ func (s *Server) Counts() (logins, renews, perms int) {
 	return s.logins, s.renews, s.perms
 }
 
-// Accepts reports whether Proxmox would take cred now: a known ticket of
-// an enabled user, not expired. Tokens are always taken. In-memory fakes
-// use it to answer 401 like the real cluster.
+// Accepts reports whether Proxmox would take cred now. Tokens are always
+// taken.
 func (s *Server) Accepts(cred proxmox.Credential) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -207,9 +200,8 @@ func (s *Server) valid(t string) (string, bool) {
 	return tk.user, true
 }
 
-// effective is name's privileges at path: the ACL at path, else what the
-// nearest ancestor's ACL propagates. As in Proxmox, a deeper ACL replaces
-// the inherited one rather than adding to it.
+// effective is name's privileges at path. As in Proxmox, a deeper ACL
+// replaces the inherited one rather than adding to it.
 func (s *Server) effective(name, path string) map[string]bool {
 	u := s.users[name]
 	if u == nil {

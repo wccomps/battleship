@@ -24,12 +24,11 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	plain(w, r, http.StatusOK, "ok")
 }
 
-// readyz is the readiness probe: 200 while the database answers, 503 when
-// it doesn't or the server is draining. It doesn't call Proxmox: battleship
-// has no credential of its own to call it with, and every replica shares
-// Proxmox anyway, so taking them all out of the load balancer would hide
-// the job pages and cancel when they are needed most. The probe needs no
-// login, so the body names what failed but never how.
+// readyz is the readiness probe: 200 while the database answers, 503 if not
+// or while draining. It skips Proxmox: battleship has no credential of its
+// own, and all replicas share Proxmox, so failing them all would hide the job
+// pages and cancel when most needed. The probe is unauthenticated, so the
+// body names what failed but never how.
 func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	if s.draining.Load() {
 		plain(w, r, http.StatusServiceUnavailable, "shutting down")

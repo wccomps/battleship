@@ -6,10 +6,8 @@ import (
 	"strings"
 )
 
-// checkMarkup is the property tests' strict check of rendered markup:
-// well-formed tags and comments, quoted attributes, no event handlers or
-// inline styles (the CSP allows neither), no script but app.js, no
-// javascript: URLs, and elements that nest and close.
+// checkMarkup strictly checks rendered markup: well-formed and nested, and
+// nothing the CSP refuses (event handlers, inline styles, other scripts).
 
 var (
 	tagNameRE  = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)

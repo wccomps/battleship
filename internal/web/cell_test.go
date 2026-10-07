@@ -78,7 +78,7 @@ func TestCellPageShowsDrift(t *testing.T) {
 		`<span class="gl is-missing"><i class="g" aria-hidden="true"></i><span class="vm">initial</span></span></td><td class="muted">missing</td>`,
 		`<tr><td><span class="vm">other</span></td>`,
 	)
-	// The live read is now in the viewer's grid too.
+	// The live read also updates the viewer's grid.
 	if c, _ := h.gridOf(asOperator).Cell("02", "web"); c.State != status.StateDrifted || len(c.Drift) < 2 {
 		t.Errorf("grid cell after the page = %+v", c)
 	}
@@ -168,8 +168,7 @@ func TestCellPageOffersOnlyWhatYouMayDo(t *testing.T) {
 	contains(t, "operator's page", h.get(&op, "/vm/01/dc").Body.String(), `action="/reset"`, `action="/power/preview"`)
 }
 
-// getAsync serves a GET in the background and returns its recorder once
-// the request is done.
+// getAsync serves a GET in the background, sending its recorder when done.
 func (h *harness) getAsync(sess *authtest.Session, target string) <-chan *httptest.ResponseRecorder {
 	out := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
@@ -182,8 +181,7 @@ func (h *harness) getAsync(sess *authtest.Session, target string) <-chan *httpte
 	return out
 }
 
-// awaitRead waits for the fake cluster to start a VMConfig read. The 10s
-// limit only guards against a hang.
+// awaitRead waits for a VMConfig read to start (10s hang guard).
 func awaitRead(t *testing.T, entered <-chan int) int {
 	t.Helper()
 	select {
@@ -195,8 +193,7 @@ func awaitRead(t *testing.T, entered <-chan int) int {
 	return 0
 }
 
-// awaitJoin waits for a request to join a cell read. The 10s limit only
-// guards against a hang.
+// awaitJoin waits for a request to join a cell read (10s hang guard).
 func awaitJoin(t *testing.T, joined <-chan struct{}) {
 	t.Helper()
 	select {
@@ -319,9 +316,8 @@ func TestCellPageReadTimeoutShowsGridCell(t *testing.T) {
 	)
 }
 
-// Shutting the server down cancels the shared cell reads, which run on its
-// lifetime rather than a request's; the page waiting on one falls back to
-// the grid's copy of the cell.
+// Shared cell reads run on the server's lifetime, not a request's: shutdown
+// cancels them and a waiting page falls back to the grid's copy.
 func TestCellPageReadStopsAtShutdown(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -368,9 +364,8 @@ func TestCellPageShowsLastJob(t *testing.T) {
 	contains(t, "VM with a pending job", h.get(&op, "/vm/01/dc").Body.String(), `href="/logs/`+itoa(power)+`"`, `<span class="st s-wait">`, "Reboot<span class=\"sr\"> pending</span>")
 }
 
-// The reset form's snapshot picker narrows the first VM's snapshots to
-// those every VM has without touching the cell read it shares with others
-// (run with -race, it also catches the two reaching the one list at once).
+// The snapshot picker narrows the snapshot list without mutating the shared
+// cell read (run with -race to catch concurrent access).
 func TestSnapshotPickerLeavesSharedReadAlone(t *testing.T) {
 	h := newHarness(t)
 	h.api.setSnapshots(10101, "initial", "extra", "before-scoring")

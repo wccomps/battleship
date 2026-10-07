@@ -25,10 +25,8 @@ import (
 // jobsPerPage is how many jobs a page of the job list shows.
 const jobsPerPage = 50
 
-// statusLook is how a job, item or log status is shown: a glyph (an
-// icon's name, or "spin" for a turning ring), a word and a class that
-// colours the glyph (s-ok and so on); for an item, also its pip in the
-// job's field of pips.
+// statusLook is how a job, item or log status is shown: a glyph (icon name,
+// or "spin"), a word, a colour class (s-ok …) and, for items, a pip.
 type statusLook struct {
 	Glyph, Label, Class, Pip string
 }
@@ -55,8 +53,8 @@ var itemLooks = map[string]statusLook{
 	store.ItemNotRun:      {"dash", "not run", "s-skip", "skip"},
 }
 
-// opLabel is how a job's operation is shown: an icon, a few words, and a
-// detail in mono, e.g. Deploy kilo.alpha.
+// opLabel is how a job's operation is shown: icon, words and a mono detail,
+// e.g. Deploy kilo.alpha.
 type opLabel struct {
 	Icon   string // an operation kind or power action, for opIcon
 	Label  string
@@ -100,13 +98,11 @@ type jobRow struct {
 	When  string // the time of day it was created; no "ago", which a live table can't keep current
 	At    string // When in full, for a title
 	Took  string // how long a finished job ran, e.g. "22 min"; "" otherwise
-	// Note is the line under the status: "after #423" for a pending job,
-	// "nothing ran" for a stale one, "cancel requested".
+	// Note is the line under the status, e.g. "after #423" or "cancel requested".
 	Note string
 }
 
-// whoShort is the part of an actor (an email address) people say: "sean"
-// of "sean@example.org".
+// whoShort is the local part of an actor's email: "sean" of "sean@example.org".
 func whoShort(actor string) string {
 	if i := strings.IndexByte(actor, '@'); i > 0 {
 		return actor[:i]
@@ -114,8 +110,8 @@ func whoShort(actor string) string {
 	return actor
 }
 
-// took is how long a job ran, the way people say it: "14 s", "3 min",
-// "1 h 5 min"; "" for a job that hasn't finished or never started.
+// took is how long a job ran ("14 s", "1 h 5 min"); "" if it hasn't finished
+// or never started.
 func took(j store.Job) string {
 	if j.FinishedAt == nil || j.StartedAt == nil {
 		return ""
@@ -140,8 +136,8 @@ type jobsList struct {
 	Live  bool   // the first page updates by itself
 }
 
-// jobsPage lists jobs, newest first, a page at a time: ?before=<id>
-// continues after the job with that ID.
+// jobsPage lists jobs newest first, a page at a time; ?before=<id> continues
+// after that job.
 func (s *Server) jobsPage(w http.ResponseWriter, r *http.Request) {
 	var before int64
 	if b := r.URL.Query().Get("before"); b != "" {
@@ -229,8 +225,8 @@ func hostsText(hosts []string) string {
 	return strings.Join(hosts, ", ")
 }
 
-// jobsEvents streams the first page of the job list: a "patch" event with
-// the whole table whenever what it shows changes.
+// jobsEvents streams the job list's first page as a "patch" event whenever it
+// changes.
 func (s *Server) jobsEvents(w http.ResponseWriter, r *http.Request) {
 	var last string
 	s.stream(w, r, []string{status.TopicJobs}, 0, func(sw *sseWriter, resync bool, _ uint64) error {
@@ -263,8 +259,8 @@ type jobView struct {
 	Role  string
 	Teams string // e.g. "01-03"
 	Hosts string // e.g. "dc, web", or "all"
-	// Ran is when it ran, e.g. "13:12–13:34", or when it was made while
-	// it hasn't started; RanAt says it in full, for a title.
+	// Ran is when it ran ("13:12–13:34"), or when it was made if not started;
+	// RanAt is the full time, for a title.
 	Ran, RanAt string
 	Asked      []fact // the inputs beyond teams and hosts, e.g. the snapshot
 	Error      string
@@ -294,15 +290,15 @@ type summaryView struct {
 	CleanupAdvice []string // cleanup that failed, with what to do
 }
 
-// jobItems is a job's VM table, its pips and its tally: the same for
-// every viewer, so its rendering is shared.
+// jobItems is a job's VM table, pips and tally; the same for every viewer, so
+// its rendering is shared.
 type jobItems struct {
 	JobID int64
 	Rows  []jobItemView // the ones needing attention first
 	Pips  []string      // one class per VM, in plan order
 	Tally []tallyPart
-	// Fold is how many done rows the panel folds into one line; the job's
-	// page shows them all.
+	// Fold is how many done rows the panel folds into one line; the job page
+	// shows them all.
 	Fold int
 }
 
@@ -355,11 +351,9 @@ func (v jobItemView) StepsText() string {
 	return strings.Join(parts, ", ")
 }
 
-// itemSteps is an item's planned steps and how far it got: the outcome
-// each reported, the next one running while the item runs, the rest
-// waiting. A done item's steps that reported nothing weren't needed (an
-// already-deleted VM's stop), except in a job from before outcomes were
-// kept, where none did.
+// itemSteps is an item's planned steps: each one's reported outcome, the next
+// running, the rest waiting. A done item's unreported steps weren't needed
+// (an already-deleted VM's stop), except in old jobs that kept no outcomes.
 func itemSteps(planned []pods.Step, it store.Item) []stepView {
 	pips := map[string]string{"done": "done", "skipped": "skip", "failed": "fail", "interrupted": "int"}
 	out := make([]stepView, 0, len(planned))
@@ -392,8 +386,7 @@ type eventView struct {
 	Err  bool
 }
 
-// eventText is what a log line says beyond its VM: the step and how it
-// went, and the message.
+// eventText is a log line beyond its VM: step, outcome and message.
 func eventText(ev store.Event) string {
 	var head string
 	switch apply.EventStatus(ev.Status) {
@@ -419,8 +412,8 @@ func eventText(ev store.Event) string {
 	return head + ": " + ev.Message
 }
 
-// jobPage shows one job: who asked for what, how far it got per VM, and
-// its log, which follows the job live while it is active.
+// jobPage shows one job: request, per-VM progress, and a log that follows the
+// job live while active.
 func (s *Server) jobPage(w http.ResponseWriter, r *http.Request) {
 	snap, ok := s.jobOf(w, r)
 	if !ok {
@@ -442,8 +435,7 @@ func (s *Server) jobPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, http.StatusOK, "job", view)
 }
 
-// jobID reads the job ID from the path, answering 404 itself if it isn't
-// one.
+// jobID reads the job ID from the path, answering 404 itself if invalid.
 func (s *Server) jobID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -453,14 +445,14 @@ func (s *Server) jobID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return id, true
 }
 
-// jobSnap is what a job's page shows of it, apart from its log: the job,
-// its items and, while it is pending, the jobs it waits for.
+// jobSnap is a job page's data apart from the log: the job, its items and,
+// while pending, the jobs it waits for.
 type jobSnap struct {
 	job     store.Job
 	items   []store.Item
 	waiting []int64
-	// itemsHTML is the rendered job-items fragment, the same for every
-	// viewer; "" until an event stream renders it (see sharedJobSnap).
+	// itemsHTML is the rendered job-items fragment, shared by every viewer; ""
+	// until an event stream renders it (see sharedJobSnap).
 	itemsHTML string
 }
 
@@ -482,8 +474,7 @@ func (s *Server) readJobSnap(ctx context.Context, id int64) (jobSnap, error) {
 	return snap, nil
 }
 
-// jobOf reads the job the path names (readJobSnap), answering itself when
-// there's no such job (404) or it can't be read (500).
+// jobOf reads the job the path names, answering 404 or 500 itself on failure.
 func (s *Server) jobOf(w http.ResponseWriter, r *http.Request) (jobSnap, bool) {
 	id, ok := s.jobID(w, r)
 	if !ok {
@@ -542,8 +533,8 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	mayOp := s.mayAnywhere(ctx, pods.OfferPrivileges(pods.Kind(j.Kind))...)
 	v.CanCancel = j.Active() && !j.CancelRequested && s.mayCancel(ctx, j, items, u)
 	v.AskCancel = j.Active() && !j.CancelRequested && !v.CanCancel
-	// A stale or failed job ran nothing, and a cancelled one stopped: the
-	// way on is a new preview, when retrying isn't offered.
+	// A stale, failed or cancelled job is restarted from a new preview when
+	// retry isn't offered.
 	if store.JobStatus(j.Status).StartAgain() {
 		if op, ok := operationFor(pods.Kind(j.Kind)); ok {
 			if mayOp {
@@ -580,13 +571,11 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	return v
 }
 
-// foldAbove is how many VMs a job may have before the panel folds its
-// done ones into a single line.
+// foldAbove is the VM count above which the panel folds done rows into one line.
 const foldAbove = 12
 
-// jobItemsOf is the VM table of job j: a row per item, the ones needing
-// attention first, a pip per item and the tally by status, e.g. 381 done,
-// 3 failed. It is the same for every viewer.
+// jobItemsOf is job j's VM table: rows (needing attention first), pips and
+// the tally by status. It is the same for every viewer.
 func jobItemsOf(j store.Job, items []store.Item) jobItems {
 	t := jobItems{JobID: j.ID}
 	var plan pods.Plan
@@ -624,8 +613,7 @@ func jobItemsOf(j store.Job, items []store.Item) jobItems {
 	return t
 }
 
-// itemRank orders the item counts, the ones needing attention first; it is
-// display order only, not a rule over statuses.
+// itemRank orders item counts for display, needing attention first.
 func itemRank(status string) int {
 	for i, s := range []string{store.ItemFailed, store.ItemInterrupted, store.ItemRemoved, store.ItemBlocked, store.ItemNotRun,
 		store.ItemRunning, store.ItemPending, store.ItemDone} {
@@ -636,8 +624,8 @@ func itemRank(status string) int {
 	return 99
 }
 
-// cancelNote says who asked to cancel the job, if anyone did, and whether
-// the cancel stopped it or came too late, once that is known.
+// cancelNote says who asked to cancel, and whether it stopped the job or came
+// too late, once known.
 func cancelNote(j store.Job) string {
 	if !j.CancelRequested {
 		return ""
@@ -655,9 +643,8 @@ func cancelNote(j store.Job) string {
 	return "cancel requested by " + by
 }
 
-// fleetHeadline is a succeeded deploy's or teardown's one-line result, in
-// the game's words: the VMs it made or deleted, not those already gone.
-// Any other outcome keeps its plain status.
+// fleetHeadline is a succeeded deploy's or teardown's one-line result: the VMs
+// it made or deleted, not those already gone. Other outcomes keep their status.
 func fleetHeadline(kind, status string, items []store.Item, sum *summaryView) string {
 	if status != store.StatusSucceeded {
 		return ""
@@ -705,10 +692,9 @@ func readSummary(raw json.RawMessage) *summaryView {
 // eventBatch is how many log lines one read takes.
 const eventBatch = 500
 
-// jobEventsAfter reads the job's log after event ID after, in order, and
-// the ID of the last event read (after itself if there were none). Lines
-// that say a step was already done, with nothing more to say, are left
-// out, as on the command line; their IDs still count.
+// jobEventsAfter reads the job's log after event ID after, and the last ID
+// read (after if none). Like the CLI, it skips bare "already done" lines, but
+// their IDs still count.
 func (s *Server) jobEventsAfter(ctx context.Context, id, after int64) ([]eventView, int64, error) {
 	now := s.now()
 	var out []eventView
@@ -733,22 +719,18 @@ func (s *Server) jobEventsAfter(ctx context.Context, id, after int64) ([]eventVi
 	}
 }
 
-// errJobOver ends a job's event stream once the job has finished and
-// everything about it was sent.
+// errJobOver ends a job's event stream once the job finished and all was sent.
 var errJobOver = errors.New("the job finished")
 
-// jobEvents streams a job's page as it runs:
+// jobEvents streams a running job's page:
 //
-//   - "log" events carry new log lines, with the ID of the last one as the
-//     event ID, so a browser that reconnects (sending Last-Event-ID)
-//     resumes where it was;
-//   - "patch" events carry the job's header, its buttons and its item
-//     table when they change (and after a Resync, everything shown);
-//   - the markup of both comes wrapped in <template>s (see piece);
-//   - "end" says the job finished; the stream then closes.
+//   - "log": new log lines; the event ID is the last line's, so a reconnecting
+//     browser (Last-Event-ID) resumes where it was;
+//   - "patch": header, buttons and item table when they change (everything
+//     after a Resync), wrapped in <template>s (see piece);
+//   - "end": the job finished; the stream closes.
 //
-// Without Last-Event-ID, the stream starts after ?after=, the last event
-// the page itself showed.
+// Without Last-Event-ID, it starts after ?after=, the page's last event.
 func (s *Server) jobEvents(w http.ResponseWriter, r *http.Request) {
 	snap, ok := s.jobOf(w, r)
 	if !ok {
@@ -764,9 +746,8 @@ func (s *Server) jobEvents(w http.ResponseWriter, r *http.Request) {
 	defer s.jobSnaps.hold(id)()
 	var shown pieceSet
 	s.stream(w, r, topics, 500*time.Millisecond, func(sw *sseWriter, resync bool, seq uint64) error {
-		// The job first: once it has finished, every event it will ever
-		// have is already stored, so the read below gets them all. The
-		// read is shared with the job's other streams (see sharedJobSnap).
+		// Read the job first: once finished, all its events are stored, so the read
+		// below gets them all. Shared with the job's other streams (sharedJobSnap).
 		snap, err := s.sharedJobSnap(r.Context(), id, seq)
 		if err != nil {
 			s.logf("web: reading job %d for its event stream: %v", id, err)
@@ -817,8 +798,8 @@ func (s *Server) jobEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// resumeFrom is the last log event the browser has: Last-Event-ID when it
-// reconnects, else ?after= from the page.
+// resumeFrom is the browser's last log event: Last-Event-ID on reconnect,
+// else ?after=.
 func resumeFrom(r *http.Request) int64 {
 	for _, v := range []string{r.Header.Get("Last-Event-ID"), r.URL.Query().Get("after")} {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
@@ -828,8 +809,8 @@ func resumeFrom(r *http.Request) int64 {
 	return 0
 }
 
-// cancelJob asks a pending or running job to stop. A pending job is
-// cancelled at once; a running one stops starting new steps.
+// cancelJob asks a job to stop: a pending one is cancelled at once, a running
+// one stops starting new steps.
 func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 	// Fail closed: nothing is cancelled unless the check below ran.
 	snap, ok := s.jobOf(w, r)
@@ -861,10 +842,9 @@ func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, logHref(id), http.StatusSeeOther)
 }
 
-// mayCancel reports whether u may cancel j: whoever started it, and anyone
-// who holds its operation's privilege on every VM of the job (on the VM,
-// or on its team's pool, which a VM a deploy is still to create will be
-// in), as Proxmox resolves it.
+// mayCancel reports whether u may cancel j: its starter, or anyone holding the
+// operation's privilege on every VM of the job (on the VM or its team pool,
+// for VMs a deploy has yet to create), as Proxmox resolves it.
 func (s *Server) mayCancel(ctx context.Context, j store.Job, items []store.Item, u auth.User) bool {
 	if j.CreatedBy == actor(u) {
 		return true
@@ -886,8 +866,8 @@ func notPermitted(kind string) string {
 	return "You don't have " + strings.Join(pods.OfferPrivileges(pods.Kind(kind)), " or ") + " in Proxmox."
 }
 
-// actsAs is who a job acts as, for its pages: the Proxmox user or token,
-// or, for jobs from before battleship dropped its roles, the role.
+// actsAs is who a job acts as: the Proxmox user or token, or the role for
+// jobs from before roles were dropped.
 func actsAs(j store.Job) string {
 	if j.CreatedAs != "" {
 		return j.CreatedAs
@@ -895,9 +875,8 @@ func actsAs(j store.Job) string {
 	return j.CreatedRole
 }
 
-// retryJob previews running a job again for just the VMs it didn't
-// finish. The preview is an ordinary one: confirming it goes through the
-// operation's confirm, with its checks.
+// retryJob previews re-running a job for the VMs it didn't finish. Confirming
+// goes through the operation's usual confirm and checks.
 func (s *Server) retryJob(w http.ResponseWriter, r *http.Request) {
 	snap, ok := s.jobOf(w, r)
 	if !ok {
@@ -931,11 +910,9 @@ func (s *Server) retryJob(w http.ResponseWriter, r *http.Request) {
 // jobSnapTimeout bounds a shared job read.
 const jobSnapTimeout = 30 * time.Second
 
-// sharedJobSnap returns job id as read at or after the hub's sequence
-// number need, sharing the read with the job's other event streams (see
-// seqFlight), which hold the job's entry while they are open. The read
-// runs on the server's lifetime, not the request's, since other streams
-// may be waiting for it.
+// sharedJobSnap returns job id as read at or after hub sequence need, shared
+// with the job's other streams (see seqFlight). It runs on the server's
+// lifetime, not the request's, since other streams may wait for it.
 func (s *Server) sharedJobSnap(ctx context.Context, id int64, need uint64) (jobSnap, error) {
 	return s.jobSnaps.get(ctx, id, need, s.hub.Seq, func() (jobSnap, error) {
 		s.jobReads.Add(1)
@@ -945,8 +922,8 @@ func (s *Server) sharedJobSnap(ctx context.Context, id int64, need uint64) (jobS
 		if err != nil {
 			return jobSnap{}, err
 		}
-		// Every viewer's VM table is the same, and shows no time words
-		// that could go out of date: render it once.
+		// Every viewer's VM table is the same and has no time words that go stale:
+		// render it once.
 		var v jobView
 		v.Items = jobItemsOf(snap.job, snap.items)
 		snap.itemsHTML, err = fragment("job", "job-items", v)

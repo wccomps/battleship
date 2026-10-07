@@ -18,9 +18,7 @@ import (
 )
 
 // runOp previews and applies (or queues) deploy, teardown, reset, power or
-// snapshot.
-// With a database configured, an applied plan runs here as a job (see
-// runAsJob), so it waits for overlapping jobs.
+// snapshot. With a database, an applied plan runs here as a job (see runAsJob).
 func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 	stdout, stderr := d.stdout, d.stderr
 	fs := flag.NewFlagSet("battleship "+cmd, flag.ContinueOnError)
@@ -193,8 +191,7 @@ func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 		}
 		return runAsJob(ctx, d, cfg, client, in, plan, token)
 	}
-	// No database: run in-process, trusting that nothing else works on
-	// these teams or templates right now.
+	// No database: run in-process, trusting no one else is on these teams or templates.
 	// The executor calls OnEvent from many goroutines.
 	var evMu sync.Mutex
 	exec := &apply.Executor{API: api, Cfg: cfg, OnEvent: func(e apply.Event) {
@@ -223,9 +220,9 @@ func queueJob(ctx context.Context, d deps, cfg config.Config, in jobs.Inputs, pl
 	return 0
 }
 
-// submitJob stores a job for plan, carrying the user's token sealed with
-// the configured key, and returns the store it opened (closeStore closes
-// it) with the key and the job's ID. On an error nothing is left open.
+// submitJob stores a job for plan with the user's token sealed, and returns
+// the open store (closeStore closes it), the key and the job's ID. On an
+// error nothing is left open.
 func submitJob(ctx context.Context, d deps, cfg config.Config, in jobs.Inputs, plan *pods.Plan, token proxmox.Credential) (st *store.Store, creds jobs.Credentials, id int64, closeStore func(), err error) {
 	if err = cfg.RequireSealKey(); err != nil {
 		return nil, creds, 0, nil, err
@@ -262,9 +259,8 @@ func confirm(d deps, cmd, teamSpec string) bool {
 // isAllTeams reports whether a -teams value is "all".
 func isAllTeams(spec string) bool { return strings.EqualFold(strings.TrimSpace(spec), "all") }
 
-// resolveAllTeams works out what -teams all stands for now: every team that
-// has team VMs on the cluster, as the web app's grid shows them. It returns
-// them as a team range, and a line that says so.
+// resolveAllTeams resolves -teams all to every team with VMs on the cluster,
+// as the grid shows them, returning a team range and a line saying so.
 func resolveAllTeams(ctx context.Context, api pods.API, cfg config.Config) (spec, says string, err error) {
 	vms, err := api.ClusterVMs(ctx)
 	if err != nil {

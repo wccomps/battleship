@@ -46,11 +46,8 @@ type loginFailure struct {
 func (f *loginFailure) Error() string { return f.err.Error() }
 func (f *loginFailure) Unwrap() error { return f.err }
 
-// unreachableError means battleship couldn't get a usable answer from the
-// identity provider. Each call decides what counts: the token endpoint
-// anything but an OAuth rejection (oauthRejection), the signing keys any
-// fetch failure, userinfo a transport error, timeout or 5xx
-// (userinfoUnreachable). Every other refresh failure is a rejection.
+// unreachableError means the identity provider gave no usable answer, as
+// opposed to a rejection. See oauthRejection and userinfoUnreachable.
 type unreachableError struct{ err error }
 
 func (e *unreachableError) Error() string { return e.err.Error() }
@@ -63,8 +60,8 @@ func unreachable(err error) bool {
 	return errors.As(err, &u)
 }
 
-// keyFetchKey carries, through Verify, where keySet records a failure to
-// fetch the provider's signing keys; Verify itself flattens that error.
+// keyFetchKey carries a slot through Verify where keySet records a JWKS
+// fetch failure; Verify itself flattens that error.
 type keyFetchKey struct{}
 
 // keySet is the provider's JWKS with key-fetch failures made visible, so a
@@ -73,8 +70,7 @@ type keySet struct{ remote *oidc.RemoteKeySet }
 
 func (k keySet) VerifySignature(ctx context.Context, jwt string) ([]byte, error) {
 	payload, err := k.remote.VerifySignature(ctx, jwt)
-	// RemoteKeySet wraps (%w) only failures to fetch keys; bad signatures
-	// and malformed tokens are unwrapped errors. The auth tests pin this.
+	// RemoteKeySet wraps (%w) only key-fetch failures; the auth tests pin this.
 	if err != nil && errors.Unwrap(err) != nil {
 		if slot, ok := ctx.Value(keyFetchKey{}).(*error); ok {
 			*slot = err
@@ -87,9 +83,9 @@ func unverified(format string, args ...any) error {
 	return &loginFailure{page: unverifiedPage, err: fmt.Errorf(format, args...)}
 }
 
-// identify reads the user's identity and groups from a token response. The
-// groups come from the ID token's groups claim, or from userinfo when the
-// ID token lacks it (or there is none, as some refresh responses do).
+// identify reads the user's identity and groups from a token response.
+// Groups fall back to userinfo when the ID token lacks the claim or is
+// absent (some refresh responses have none).
 func (s *Service) identify(ctx context.Context, tok *oauth2.Token, want expect) (identity, error) {
 	var id identity
 	claims := map[string]json.RawMessage{}
@@ -177,12 +173,9 @@ func (s *Service) identify(ctx context.Context, tok *oauth2.Token, want expect) 
 }
 
 // refresh spends the session's refresh token for a fresh identity. It
-// returns the refresh token to keep, sealed for the store, which the
-// provider may have rotated; once the token endpoint has answered and the
-// token is sealed, that is returned even when identify then fails, so an
-// unreachable later step doesn't strand a spent token. A stored token that
-// doesn't open (the client secret changed, or it belongs to another
-// session) is a rejection, and nothing is sent to the provider.
+// returns the (possibly rotated) sealed token to keep, even when identify
+// then fails, so a later failure doesn't strand a spent token. A stored
+// token that doesn't open is a rejection and is never sent.
 func (s *Service) refresh(ctx context.Context, sess store.Session) (identity, string, error) {
 	current, err := s.openRefreshToken(sess.ID, sess.RefreshToken)
 	if err != nil {
@@ -209,11 +202,8 @@ func (s *Service) refresh(ctx context.Context, sess store.Session) (identity, st
 }
 
 // oauthRejection reports whether a token endpoint error is the provider
-// saying no: a 400 or 401 whose body parses as an OAuth error with an
-// error code (e.g. invalid_grant, invalid_client). Anything else, such as
-// a 429, a proxy's or WAF's 403 or 404 page, a 400 page with no OAuth
-// error, a garbled 200, a 5xx or a timeout, means the provider couldn't be
-// reached properly; the refresh grace bounds how long that is tolerated.
+// saying no: a 400 or 401 with an OAuth error code. Anything else (a 429,
+// a proxy's error page, a 5xx) counts as unreachable.
 func oauthRejection(err error) bool {
 	var re *oauth2.RetrieveError
 	if !errors.As(err, &re) || re.Response == nil || re.ErrorCode == "" {
@@ -223,9 +213,8 @@ func oauthRejection(err error) bool {
 	return code == http.StatusBadRequest || code == http.StatusUnauthorized
 }
 
-// userinfoUnreachable classifies a userinfo failure from go-oidc: a
-// transport error or timeout, or a 5xx status. go-oidc reports a non-200
-// status as an error text starting with the status line.
+// userinfoUnreachable reports a transport error, timeout or 5xx. go-oidc
+// reports a non-200 status only as error text starting with the status.
 func userinfoUnreachable(err error) bool {
 	var ue *url.Error
 	if errors.As(err, &ue) || errors.Is(err, context.DeadlineExceeded) {
@@ -238,10 +227,8 @@ func userinfoUnreachable(err error) bool {
 // providerTextLimit bounds how much of a provider's answer an error repeats.
 const providerTextLimit = 200
 
-// providerError is a go-oidc error whose text can carry a response body
-// from the identity provider, or from a proxy in front of it. Error quotes
-// and truncates that text, so a body can't forge log lines or flood them;
-// Unwrap keeps the original for classification.
+// providerError quotes and truncates a go-oidc error, whose text can carry
+// a response body, so it can't forge or flood log lines.
 type providerError struct {
 	what string
 	err  error
@@ -288,10 +275,8 @@ func displayName(claims map[string]json.RawMessage) string {
 	return ""
 }
 
-// describe is an error from the token endpoint without the response body,
-// which could echo what was sent: an OAuth error as its status, code and
-// description, a transport error as it is, and anything else quoted and
-// truncated, since it may carry a piece of the body.
+// describe renders a token endpoint error without its response body,
+// which could echo the request.
 func describe(err error) string {
 	var re *oauth2.RetrieveError
 	if !errors.As(err, &re) {

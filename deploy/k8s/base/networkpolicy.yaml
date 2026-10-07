@@ -1,13 +1,10 @@
-# Default-deny for the battleship web pods, then only what they need.
-# Selects only the app's pods, not the CloudNativePG instances in the same
-# namespace (those get their own policy from the operator/admin, if any).
+# Default-deny for the battleship pods (not the CNPG instances), then only what they need.
 #
-# Every CIDR below is a PLACEHOLDER (RFC 5737 documentation ranges). Replace
-# them before applying, or battleship will fail to start (it can't reach Authentik).
+# Every CIDR below is a PLACEHOLDER: replace them, or battleship can't reach
+# Authentik and fails to start.
 #
-# Probes: the kubelet's health checks come from the node, which most CNIs
-# (Calico, Cilium, Canal/Flannel) allow regardless of NetworkPolicy. If yours
-# doesn't, add an ingress rule for the node CIDR on port 8080.
+# Most CNIs allow kubelet probes from the node regardless; if yours doesn't,
+# allow the node CIDR on port 8080.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -21,8 +18,7 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Only the ingress controller. CHANGE ME if its namespace isn't
-    # "ingress-nginx".
+    # Only the ingress controller. CHANGE ME if its namespace isn't "ingress-nginx".
     - from:
         - namespaceSelector:
             matchLabels:
@@ -53,20 +49,16 @@ spec:
       ports:
         - protocol: TCP
           port: 5432
-    # Proxmox API. CHANGE ME: the address(es) behind proxmox.url (or every
-    # one of proxmox.urls), e.g. the management IPs of every node (or the
-    # VIP) of the "competitions" cluster.
+    # Proxmox API. CHANGE ME: every address in proxmox.url / proxmox.urls.
     - to:
         - ipBlock:
             cidr: 192.0.2.0/24
       ports:
         - protocol: TCP
           port: 8006
-    # Authentik (auth.example.org): OIDC discovery, JWKS, token refresh.
-    # CHANGE ME: the address auth.example.org resolves to FROM INSIDE the
-    # cluster. If Authentik runs in this cluster behind the same ingress,
-    # traffic may hairpin through the ingress controller's LoadBalancer IP;
-    # allow that IP here, or allow the ingress-nginx namespace on 443.
+    # Authentik (OIDC discovery, JWKS, token refresh). CHANGE ME: its address
+    # as resolved FROM INSIDE the cluster. If it sits behind the same ingress,
+    # traffic may hairpin via the LoadBalancer IP: allow that, or ingress-nginx on 443.
     - to:
         - ipBlock:
             cidr: 198.51.100.0/24

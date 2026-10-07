@@ -362,9 +362,8 @@ func TestOutageLongerThanGraceEndsSession(t *testing.T) {
 				90 * time.Second, 90 * time.Second, 90 * time.Second},
 			last: 90 * time.Second,
 		},
-		// The retry at 14m30s fails; at 15m the grace has run out but the
-		// session is backing off, so it is kept until its next retry fails
-		// at 15m30s.
+		// The grace runs out at 15m during a backoff, so the session lasts
+		// until the retry at 15m30s fails.
 		"after the backoff": {
 			served: []time.Duration{5 * time.Minute, 9*time.Minute + 30*time.Second, 30 * time.Second},
 			last:   30 * time.Second,
@@ -398,10 +397,8 @@ func TestOutageLongerThanGraceEndsSession(t *testing.T) {
 }
 
 func TestRefreshSurvivesClientDisconnect(t *testing.T) {
-	// The provider rotates the refresh token as it answers. If the refresh
-	// were tied to the browser's request, a user closing the tab mid-refresh
-	// would leave the session holding a spent token, ending it at the next
-	// refresh.
+	// A tab closed mid-refresh must not leave the session holding a spent
+	// (rotated) refresh token.
 	h := newHarness(t)
 	b := h.browser()
 	b.login(alice)
@@ -589,8 +586,7 @@ func TestCSRFTokenIsPerSession(t *testing.T) {
 	}
 }
 
-// SessionID names the session in the store, for records that belong to
-// it (the web app's previews): the token's hash, never the token.
+// SessionID is the token's hash, never the token.
 func TestSessionIDIsTheStoredKey(t *testing.T) {
 	h := newHarness(t)
 	a, l := h.browser(), h.browser()

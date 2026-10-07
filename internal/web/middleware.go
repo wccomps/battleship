@@ -12,9 +12,9 @@ import (
 	"github.com/wccomps/battleship/internal/auth"
 )
 
-// contentSecurityPolicy allows only this app's own scripts, styles and
-// images: no inline script or style. Forms may post here and follow the
-// logout redirect to the identity provider (issuerOrigin).
+// contentSecurityPolicy allows only this app's scripts, styles and images, no
+// inline script or style. Forms may post here and follow the logout redirect
+// to the identity provider (issuerOrigin).
 func contentSecurityPolicy(issuerOrigin string) string {
 	return "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self' " + issuerOrigin
 }
@@ -43,16 +43,14 @@ type peer struct {
 	https bool
 }
 
-// forwardedHeaders are the proxy headers forwarded reads and then removes,
-// so no handler can trust them by mistake.
+// forwardedHeaders are the proxy headers forwarded reads and then removes, so
+// no handler can trust them by mistake.
 var forwardedHeaders = []string{"X-Forwarded-For", "X-Forwarded-Proto", "X-Forwarded-Host", "Forwarded", "X-Real-Ip"}
 
-// forwarded works out each request's client address and scheme. Only a peer
-// inside trusted may speak for the client: X-Forwarded-For is read from the
-// right, skipping trusted proxies, and the first other address is the
-// client; X-Forwarded-Proto's last value is the scheme the client used.
-// Everyone else's forwarded headers are ignored. Handlers read the result
-// with clientIP and isHTTPS.
+// forwarded works out each request's client address and scheme. Only a
+// trusted peer may speak for the client: X-Forwarded-For is read from the
+// right, skipping trusted proxies, and X-Forwarded-Proto's last value is the
+// scheme. Others' forwarded headers are ignored. Read via clientIP and isHTTPS.
 func forwarded(trusted []netip.Prefix, next http.Handler) http.Handler {
 	isTrusted := func(a netip.Addr) bool {
 		a = a.Unmap()
@@ -98,8 +96,8 @@ func forwarded(trusted []netip.Prefix, next http.Handler) http.Handler {
 	})
 }
 
-// clientIP is the client's address as forwarded worked it out, or the
-// connection's peer outside forwarded.
+// clientIP is the client address forwarded worked out, or the connection's
+// peer outside forwarded.
 func clientIP(r *http.Request) string {
 	if p, ok := r.Context().Value(peerKey{}).(peer); ok {
 		return p.ip
@@ -111,8 +109,8 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-// isHTTPS reports whether the client reached the app over HTTPS, directly or
-// through a trusted proxy.
+// isHTTPS reports whether the client used HTTPS, directly or via a trusted
+// proxy.
 func isHTTPS(r *http.Request) bool {
 	if p, ok := r.Context().Value(peerKey{}).(peer); ok {
 		return p.https
@@ -120,12 +118,10 @@ func isHTTPS(r *http.Request) bool {
 	return r.TLS != nil
 }
 
-// logRequests logs requests for looking back at what happened during an
-// event. With an access log, every request but the health probes gets a
-// record naming the user (auth.TrackSubject). Without one, Logf gets a
-// line, with the client's address, for each request that could change
-// something (anything but GET and HEAD) and each server error. Neither
-// logs query strings or cookies.
+// logRequests logs requests for post-event review. With an access log, every
+// non-probe request gets a record naming the user (auth.TrackSubject).
+// Without one, Logf gets a line per non-GET/HEAD request and per server
+// error. Neither logs query strings or cookies.
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := s.now()
@@ -159,8 +155,8 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 // probe are the health check paths, which the request log skips.
 var probe = map[string]bool{"/healthz": true, "/readyz": true}
 
-// statusWriter records the status of a response. Unwrap lets
-// http.ResponseController reach the connection, for flushing event streams.
+// statusWriter records a response's status. Unwrap lets
+// http.ResponseController reach the connection to flush event streams.
 type statusWriter struct {
 	http.ResponseWriter
 	status int

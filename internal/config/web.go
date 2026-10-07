@@ -11,31 +11,23 @@ import (
 	"time"
 )
 
-// Web configures battleship serve: the volunteer web app and the job workers it
-// runs.
+// Web configures battleship serve: the web app and its job workers.
 type Web struct {
 	Listen  string `toml:"listen"`   // address to serve HTTP on, e.g. ":8080"
 	BaseURL string `toml:"base_url"` // public URL, e.g. https://battleship.example.org; required for serve
 	Workers int    `toml:"workers"`  // job workers per process (per replica)
-	// Templates is the competition's template set, a master pattern like the
-	// deploy form's, e.g. "*.kilo.alpha". The grid's columns are the hosts
-	// that have team VMs plus, when it is set, the hosts of the tagged
-	// masters it matches, so a set's hosts show before every team has them.
-	// Empty (the default) shows only hosts that have team VMs.
+	// Templates is a master pattern, e.g. "*.kilo.alpha", whose hosts the grid
+	// shows even before every team has them. Empty shows only hosts with VMs.
 	Templates string `toml:"templates"`
-	// SessionIdle ends a session after this long without a request, and
-	// SessionMax ends it this long after login regardless. Every
-	// SessionRefresh, a session re-checks the user's groups with the identity
-	// provider, so removing someone from a group takes effect within it.
+	// SessionIdle and SessionMax end a session after idle time and after
+	// login. Every SessionRefresh it re-checks the user's groups with the IdP.
 	SessionIdle    time.Duration `toml:"session_idle"`
 	SessionMax     time.Duration `toml:"session_max"`
 	SessionRefresh time.Duration `toml:"session_refresh"`
 	StatusPoll     time.Duration `toml:"status_poll"` // how often the grid reads the cluster's VMs
 	DriftScan      time.Duration `toml:"drift_scan"`  // how often every team VM's config and snapshots are checked
-	// ShutdownTimeout is how long battleship serve waits, from the stop signal,
-	// for running jobs to clean up and end before it exits anyway. Keep it
-	// above the 14m a stopped job may take (apply.StopBudget), and keep
-	// Kubernetes' terminationGracePeriodSeconds above it.
+	// ShutdownTimeout is how long serve waits for running jobs on stop. Keep
+	// it above apply.StopBudget (14m) and below terminationGracePeriodSeconds.
 	ShutdownTimeout time.Duration `toml:"shutdown_timeout"`
 	// TrustedProxies are the CIDRs of reverse proxies whose X-Forwarded-For
 	// and X-Forwarded-Proto headers are believed. Empty trusts none.
@@ -102,8 +94,7 @@ func defaultOIDC() OIDC {
 	}
 }
 
-// validateWeb checks the [web] and [oidc] values that have
-// defaults. Settings only battleship serve needs are checked by RequireWeb.
+// validateWeb checks the [web] and [oidc] values that have defaults.
 func (c Config) validateWeb() []error {
 	var errs []error
 	w := c.Web
@@ -126,8 +117,7 @@ func (c Config) validateWeb() []error {
 	if w.SessionIdle < time.Minute {
 		errs = append(errs, errors.New("web.session_idle must be at least 1m"))
 	}
-	// A ticket renews on use once ticket_renew_after old, while it lives
-	// (2h); the idle limit shouldn't log people out before that.
+	// The idle limit shouldn't log people out before a ticket renews on use.
 	if w.SessionIdle <= c.Proxmox.TicketRenewAfter {
 		errs = append(errs, errors.New("web.session_idle must be longer than proxmox.ticket_renew_after, so a session outlasts a break longer than the wait before its ticket renews"))
 	}
@@ -169,9 +159,8 @@ func (c Config) validateWeb() []error {
 	return errs
 }
 
-// RequireWeb reports an error for each setting battleship serve needs that has no
-// default, and for the offline_access scope, which only serve needs (Validate
-// already requires openid). The CLI and battleship worker don't need them.
+// RequireWeb reports an error for each serve-only setting without a default,
+// including the offline_access scope.
 func (c Config) RequireWeb() error {
 	var errs []error
 	if strings.TrimSpace(c.Web.BaseURL) == "" {

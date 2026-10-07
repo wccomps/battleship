@@ -1,16 +1,11 @@
-// Package web is the volunteer web app that battleship serve runs: the live status
-// grid, VM pages, the operation forms with their preview and confirm steps,
-// the job pages, and health checks, all server-rendered with html/template.
-// Pages work without JavaScript; one small script, served from /static,
-// applies live updates that arrive as server-sent events, and lets the grid
-// select VMs and show previews in a side panel.
+// Package web is the volunteer web app battleship serve runs: the live status
+// grid, VM pages, operation forms with preview and confirm, job pages and
+// health checks, server-rendered with html/template. Pages work without
+// JavaScript; a small script in /static applies server-sent-event updates and
+// drives grid selection and the preview side panel.
 //
-// Routes are registered in groups:
-//
-//   - authRoutes: login, logout and the Proxmox sign-in;
-//   - healthRoutes: liveness and readiness probes;
-//   - assetRoutes: the embedded stylesheet, script, fonts and icon;
-//   - volunteerRoutes: the grid, operation forms and job pages.
+// Route groups: authRoutes (login, Proxmox sign-in), healthRoutes (probes),
+// assetRoutes (embedded static files), volunteerRoutes (grid, forms, jobs).
 package web
 
 import (
@@ -40,19 +35,19 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// Deps are what the web app runs on. Everything but Clock, Logf and
-// AccessLog is required.
+// Deps are what the web app runs on. All but Clock, Logf and AccessLog are
+// required.
 type Deps struct {
 	Config config.Config
 	Store  *store.Store
-	// As is the Proxmox API acting as the person whose credential it is
-	// given: previews, confirms and forms read the cluster as the
-	// signed-in user (auth.ProxmoxCredential), never as battleship.
+	// As is the Proxmox API acting as the given credential's owner: previews,
+	// confirms and forms read the cluster as the signed-in user, never as
+	// battleship.
 	As func(cred proxmox.Credential) pods.API
 	// Credentials seals the credential a confirmed job carries.
 	Credentials jobs.Credentials
-	// Auth logs users in and guards routes. New has it render its pages
-	// in this app's layout (AuthPage).
+	// Auth logs users in and guards routes; New has it render its pages in this
+	// app's layout (AuthPage).
 	Auth *auth.Service
 	// Views keep each viewer's grid, read with their own ticket.
 	Views *status.Views
@@ -63,10 +58,9 @@ type Deps struct {
 	Clock status.Clock
 	// Logf receives server problems. Default log.Printf.
 	Logf func(format string, args ...any)
-	// AccessLog, if set, gets a "request" record per request but health
-	// probes, without the query string (the login callback's code) or
-	// cookies. Without it, Logf gets a line per request other than GET and
-	// HEAD, and per server error.
+	// AccessLog, if set, gets a "request" record per non-probe request, without
+	// the query string (the login callback's code) or cookies. Without it, Logf
+	// gets a line per non-GET/HEAD request and per server error.
 	AccessLog *slog.Logger
 }
 
@@ -91,9 +85,8 @@ type Server struct {
 	closeOnce sync.Once
 	closed    chan struct{} // closed by CloseStreams
 
-	// life is the server's lifetime, cancelled by CloseStreams at
-	// shutdown. Work that outlives the request that started it (the
-	// shared cell reads) runs on it.
+	// life is the server's lifetime, cancelled by CloseStreams at shutdown. Work
+	// that outlives its request (the shared cell reads) runs on it.
 	life    context.Context
 	endLife context.CancelFunc
 
@@ -102,18 +95,17 @@ type Server struct {
 	readyMu sync.Mutex
 	ready   readiness // last readiness answer, for logging changes only
 
-	// Cell pages' live reads: at most cellReadSlots at once, and one per
-	// cell at a time, shared by everyone asking for that cell meanwhile.
+	// Cell pages' live reads: at most cellReadSlots at once, one per cell, shared
+	// by everyone asking for that cell meanwhile.
 	cellSlots  chan struct{}
 	cellFlight singleflight.Group
-	// cellTimeout bounds each shared cell read: cellReadTimeout, which
-	// tests shorten.
+	// cellTimeout bounds each shared cell read (cellReadTimeout; tests shorten it).
 	cellTimeout time.Duration
-	// afterCellJoin, if set, is called once a request has joined (or
-	// started) its cell's read; tests use it.
+	// afterCellJoin, if set, runs once a request has joined or started its cell's
+	// read (tests).
 	afterCellJoin func()
-	// beforeSubmit, if set, is called by a confirm after its checks, just
-	// before it stores the job. Tests use it to let time pass there.
+	// beforeSubmit, if set, runs in a confirm after its checks, just before it
+	// stores the job (tests let time pass there).
 	beforeSubmit func()
 
 	gridsMu     sync.Mutex
@@ -130,12 +122,12 @@ type Server struct {
 	busy      busyCache
 	busyReads atomic.Int64 // reads of the busy VMs; tests read it
 
-	// firstPoll bounds how long the grid page waits for a new view's first
-	// poll: firstPollWait, which tests set to 0.
+	// firstPoll bounds the grid page's wait for a new view's first poll
+	// (firstPollWait; tests set 0).
 	firstPoll time.Duration
 
-	// jitter returns a number in [0, 1) that spreads the ends of event
-	// streams; tests replace it.
+	// jitter returns a number in [0, 1) to spread event-stream ends; tests
+	// replace it.
 	jitter func() float64
 }
 
@@ -204,8 +196,8 @@ func New(d Deps) (*Server, error) {
 	return s, nil
 }
 
-// Handler serves the whole app: every route group behind the forwarded
-// header handling, the security headers and the request log.
+// Handler serves every route group behind forwarded-header handling, security
+// headers and the request log.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.authRoutes(mux)
@@ -216,11 +208,10 @@ func (s *Server) Handler() http.Handler {
 	return forwarded(s.proxies, s.secure(s.logRequests(mux)))
 }
 
-// CloseStreams ends every open server-sent event stream and refuses new
-// ones, and ends the server's lifetime, cancelling the shared cell reads
-// (the pages waiting on them show the grid's copy of the cell), so an HTTP
-// server shutting down isn't held open by either. Call it from
-// http.Server.RegisterOnShutdown. It may be called more than once.
+// CloseStreams ends every open event stream, refuses new ones, and cancels the
+// server's lifetime (shared cell reads fall back to the grid's copy), so
+// neither holds an HTTP shutdown open. Call it from
+// http.Server.RegisterOnShutdown; it is idempotent.
 func (s *Server) CloseStreams() {
 	s.closeOnce.Do(func() {
 		close(s.closed)
@@ -228,17 +219,16 @@ func (s *Server) CloseStreams() {
 	})
 }
 
-// Drain makes readiness answer 503 from now on, so load balancers stop
-// sending this replica new requests while it shuts down. Everything else,
-// including liveness and open event streams, keeps working until the HTTP
-// server stops (see CloseStreams). It may be called more than once.
+// Drain makes readiness answer 503 so load balancers stop sending new
+// requests during shutdown. Everything else keeps working until the HTTP
+// server stops (see CloseStreams). It is idempotent.
 func (s *Server) Drain() { s.draining.Store(true) }
 
 // authRoutes are the login flow and the Proxmox sign-in (from auth).
 func (s *Server) authRoutes(mux *http.ServeMux) {
 	s.auth.Routes(mux)
-	// The access page is gone: who may use battleship is Authentik's
-	// decision. Old links land on the grid.
+	// Who may use battleship is Authentik's decision; old /access links land on
+	// the grid.
 	mux.Handle("GET /access", http.RedirectHandler("/", http.StatusSeeOther))
 }
 
@@ -248,10 +238,9 @@ func (s *Server) healthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /readyz", s.readyz)
 }
 
-// volunteerRoutes are the pages for signed-in users. Battleship enforces
-// nothing about who may do what: Proxmox does, with each user's ticket
-// (previews show what it would refuse). Every POST is checked for the
-// session's CSRF token before its handler runs.
+// volunteerRoutes are the signed-in pages. Battleship enforces no permissions:
+// Proxmox does, with each user's ticket (previews show what it would refuse).
+// Every POST is CSRF-checked before its handler runs.
 func (s *Server) volunteerRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /{$}", s.require(http.HandlerFunc(s.gridPage)))
 	mux.Handle("GET /events/grid", s.require(http.HandlerFunc(s.gridEvents)))
@@ -262,16 +251,16 @@ func (s *Server) volunteerRoutes(mux *http.ServeMux) {
 	for _, op := range operations {
 		mux.Handle("GET "+op.Path, s.require(s.opForm(op)))
 		if op.Kind == pods.KindReset || op.Kind == pods.KindSnapshot {
-			// The grid's "Reset to snapshot…" and "Take snapshot…" post
-			// the ticked VMs here, for the snapshot picker or the name.
+			// The grid's "Reset to snapshot…" and "Take snapshot…" post the ticked VMs
+			// here.
 			mux.Handle("POST "+op.Path, s.require(s.opForm(op)))
 		}
 		mux.Handle("POST "+op.Path+"/preview", s.require(s.opPreview(op)))
 		mux.Handle("POST "+op.Path+"/confirm", s.require(s.opConfirm(op)))
 	}
 
-	// What ran is shown as Logs, at /logs, so nobody looks there for a way
-	// to start something. Old /jobs addresses move there for good.
+	// Job history lives at /logs so nobody looks there to start something; old
+	// /jobs addresses redirect permanently.
 	mux.Handle("GET /logs", s.require(http.HandlerFunc(s.jobsPage)))
 	mux.Handle("GET /logs/{id}", s.require(http.HandlerFunc(s.jobPage)))
 	mux.Handle("POST /logs/{id}/cancel", s.require(http.HandlerFunc(s.cancelJob)))
@@ -283,9 +272,9 @@ func (s *Server) volunteerRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /events/jobs/{id}", s.require(http.HandlerFunc(s.jobEvents)))
 }
 
-// movedToLogs redirects an old /jobs address to its /logs one, query
-// included, with code: 301 for pages, 308 for a cancel or retry posted by
-// a page loaded before the move, so the post is made again there.
+// movedToLogs redirects an old /jobs address to /logs, query included: 301 for
+// pages, 308 for a cancel or retry posted from an old page, so the POST is
+// repeated.
 func movedToLogs(code int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		target := logsPath + strings.TrimPrefix(r.URL.Path, "/jobs")
@@ -305,30 +294,27 @@ func logHref(id int64) string { return logsPath + "/" + strconv.FormatInt(id, 10
 // proxies don't close it as idle.
 const heartbeatEvery = 15 * time.Second
 
-// streamJitter is the most, as a fraction of web.session_refresh, that an
-// event stream's end is put back by.
+// streamJitter is the most, as a fraction of web.session_refresh, an event
+// stream's end is delayed by.
 const streamJitter = 0.1
 
-// minStreamLifetime is the shortest an event stream lasts, when its
-// session's group check is overdue (another request is making it, or the
-// identity provider is unreachable and it is backing off for a minute):
-// ending at once would have the browser reconnect every couple of seconds.
+// minStreamLifetime is the shortest an event stream lasts when its session's
+// group check is overdue (in flight elsewhere, or the IdP is backing off);
+// ending at once would have the browser reconnect every few seconds.
 const minStreamLifetime = time.Minute
 
-// streamLifetime is how long an event stream opened now lasts: see
-// streamEnd, with up to streamJitter of session_refresh added at random so
-// pages opened together don't reconnect together. refreshedAt is zero
-// outside a session.
+// streamLifetime is how long a stream opened now lasts (see streamEnd), plus
+// random jitter so pages opened together don't reconnect together.
+// refreshedAt is zero outside a session.
 func (s *Server) streamLifetime(refreshedAt time.Time) time.Duration {
 	r := s.cfg.Web.SessionRefresh
 	extra := time.Duration(s.jitter() * streamJitter * float64(r))
 	return streamEnd(s.now(), refreshedAt, r, extra)
 }
 
-// streamEnd is how long after start a stream ends: at the earlier of
-// start+refresh and the session's next check (refreshedAt+refresh), plus
-// extra, but no sooner than minStreamLifetime (unless refresh+extra is
-// shorter still).
+// streamEnd is how long after start a stream ends: the earlier of
+// start+refresh and refreshedAt+refresh, plus extra, but at least
+// minStreamLifetime (unless refresh+extra is shorter).
 func streamEnd(start, refreshedAt time.Time, refresh, extra time.Duration) time.Duration {
 	d := refresh
 	if !refreshedAt.IsZero() {
@@ -341,7 +327,7 @@ func streamEnd(start, refreshedAt time.Time, refresh, extra time.Duration) time.
 
 func (s *Server) now() time.Time { return s.clock.Now() }
 
-// accessTTL is how long a session's privileges are kept before Proxmox is
+// accessTTL is how long a session's privileges are cached before Proxmox is
 // asked again.
 const accessTTL = 60 * time.Second
 
@@ -351,8 +337,8 @@ type accessEntry struct {
 }
 
 // accessFor is the signed-in user's Proxmox privileges, read with their
-// ticket and kept per session for accessTTL; nil if the API can't read
-// privileges (only test fakes can't).
+// ticket and cached per session for accessTTL; nil if the API can't read
+// privileges (only test fakes).
 func (s *Server) accessFor(ctx context.Context) *pods.UserAccess {
 	r, ok := s.apiFor(ctx).(pods.PermissionReader)
 	if !ok {
@@ -383,9 +369,9 @@ func (s *Server) planner(ctx context.Context) pods.Planner {
 	return p
 }
 
-// apiFor is the Proxmox API acting as the request's signed-in user, with
-// their ticket (see auth.RequireUser). Outside a session it carries no
-// credential, and its calls fail without reaching Proxmox.
+// apiFor is the Proxmox API acting as the request's signed-in user (see
+// auth.RequireUser). Outside a session it has no credential and its calls
+// fail without reaching Proxmox.
 func (s *Server) apiFor(ctx context.Context) pods.API {
 	cred, _ := auth.ProxmoxCredential(ctx)
 	return s.as(cred)

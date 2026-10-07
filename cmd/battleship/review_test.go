@@ -9,9 +9,8 @@ import (
 	"time"
 )
 
-// Item 9: the worker, like serve, holds no Proxmox token: one in its
-// environment is the old service token, or a user's own, which a worker
-// must never act as.
+// The worker, like serve, holds no Proxmox token; one in its environment
+// must never be acted as.
 func TestWorkerRefusesAProxmoxToken(t *testing.T) {
 	for _, k := range []string{"BATTLESHIP_PROXMOX_TOKEN_ID", "BATTLESHIP_PROXMOX_TOKEN_SECRET"} {
 		t.Run(k, func(t *testing.T) {
@@ -34,8 +33,7 @@ func TestWorkerRefusesAProxmoxToken(t *testing.T) {
 	}
 }
 
-// Item 11: a process whose seal key isn't the one the database's jobs were
-// sealed with refuses to start.
+// A process whose seal key isn't the database's jobs' key refuses to start.
 func TestWorkerRefusesAnotherSealKey(t *testing.T) {
 	e := newEnv(t, false, "", vm(10701, "team07-dc"))
 	withStore(t, e)
@@ -52,8 +50,7 @@ func TestWorkerRefusesAnotherSealKey(t *testing.T) {
 	}
 }
 
-// Item 22: the worker, like serve, refuses to send people's credentials to
-// a Proxmox whose certificate it doesn't check.
+// The worker, like serve, won't send credentials to an unchecked Proxmox.
 func TestWorkerRefusesUncheckedProxmox(t *testing.T) {
 	e := newEnv(t, false, "")
 	withStore(t, e)
@@ -70,7 +67,7 @@ func TestWorkerRefusesUncheckedProxmox(t *testing.T) {
 	}
 }
 
-// Item 22: serve warns when told not to check Proxmox's certificate.
+// serve warns when told not to check Proxmox's certificate.
 func TestServeWarnsWhenProxmoxIsUnchecked(t *testing.T) {
 	e := startServe(t)
 	if recs := e.records("Proxmox's certificate is not checked"); len(recs) != 1 || recs[0]["level"] != "WARN" {

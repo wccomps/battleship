@@ -161,10 +161,8 @@ func next(t *testing.T, events <-chan sseEvent, names ...string) sseEvent {
 	}
 }
 
-// TestEndToEndPowerJob is a volunteer's whole journey through battleship serve,
-// over real HTTP: log in through the identity provider, open the grid,
-// preview and confirm a power job, watch an embedded worker run it on the
-// job page's live stream, and see it succeed.
+// TestEndToEndPowerJob is a volunteer's whole journey over real HTTP: log
+// in, preview and confirm a power job, and watch an embedded worker run it.
 func TestEndToEndPowerJob(t *testing.T) {
 	e := startServe(t, withLogin())
 	e.idp.SignIn(authtest.User{Subject: "sub-olive", Name: "Olive Operator", Email: "olive@example.org", Groups: []string{"volunteers"}})

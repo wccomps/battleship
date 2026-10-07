@@ -16,10 +16,8 @@ type Retrier struct {
 	Sleep func(ctx context.Context, d time.Duration) error
 }
 
-// Do calls fn until it succeeds, returns an error Retryable refuses, or has been tried
-// Attempts times. It returns fn's last error, including when ctx is cancelled
-// during a backoff; callers that need to tell cancellation apart check
-// ctx.Err(). Config validation guarantees Attempts >= 1 and Initial <= Max.
+// Do calls fn until it succeeds, fails non-retryably, or runs out of
+// Attempts, returning fn's last error even on cancel (check ctx.Err()).
 func (r Retrier) Do(ctx context.Context, fn func() error) error {
 	sleep := r.Sleep
 	if sleep == nil {

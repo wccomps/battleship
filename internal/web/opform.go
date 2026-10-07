@@ -28,16 +28,16 @@ type formPage struct {
 	SetsErr      string        // deploy: why the master groups couldn't be listed
 	// OtherPattern is a deploy's pattern when it is none of the sets'.
 	OtherPattern string
-	// HostOpts are the hosts to tick: the grid's columns, or a deploy's
-	// set's hosts. HostsAll says ticking none means all of them.
+	// HostOpts are the host boxes: the grid's columns, or a deploy set's hosts.
+	// HostsAll means ticking none means all.
 	HostOpts []hostOpt
 	HostsAll bool
 	Picker   *snapshotPicker
-	// FromGrid: the VMs were ticked on the grid, so the form skips choosing
-	// teams and hosts and lists the VMs instead.
+	// FromGrid means the VMs were ticked on the grid: the form lists them instead
+	// of asking for teams and hosts.
 	FromGrid bool
-	// NameMax and DescMax bound a snapshot's name and description, as the
-	// server checks them; NameMaxRest is NameMax less the first letter.
+	// NameMax and DescMax are the server's snapshot name/description limits;
+	// NameMaxRest is NameMax less the first letter.
 	NameMax, NameMaxRest, DescMax int
 }
 
@@ -47,8 +47,8 @@ type hostOpt struct {
 	Checked bool
 }
 
-// hostOpts are names as boxes, ticked if in ticked, with ticked names
-// that aren't among them added.
+// hostOpts makes a box per name, ticked if in ticked; ticked names not in
+// names are added.
 func hostOpts(names, ticked []string) []hostOpt {
 	var out []hostOpt
 	for _, n := range names {
@@ -62,27 +62,24 @@ func hostOpts(names, ticked []string) []hostOpt {
 	return out
 }
 
-// snapshotPicker is step 2 of the reset form: the snapshots to choose from,
-// read from the first VM the reset covers, or, for exact VMs, those the
-// VMs have in common.
+// snapshotPicker is the reset form's step 2: snapshots read from the reset's
+// first VM or, for exact VMs, those they have in common.
 type snapshotPicker struct {
 	Source  string         // where the list comes from, e.g. "The snapshots of team01-dc, the first VM this covers."
 	Options []snapshotView // the first, with no name, is each VM's own baseline
-	// BaselineText says what the baseline option means, e.g.
-	// "initial, else the newest fresh_clone_*".
+	// BaselineText explains the baseline option, e.g. "initial, else the newest
+	// fresh_clone_*".
 	BaselineText string
-	// BaselineIs is the snapshot that is the baseline of every VM the list
-	// comes from (Source: the VMs read, or a team range's first VM), if it
-	// is one snapshot; it isn't offered again under its own name.
+	// BaselineIs is the snapshot that is every source VM's baseline, if it is one
+	// snapshot; it isn't offered again under its own name.
 	BaselineIs string
 	Selected   string // "" is the baseline
 	Note       string // e.g. why the list is short
 	HasPicked  bool   // teams (and hosts) were chosen, so step 2 shows
 }
 
-// opForm serves an operation's form, filled in from the query string (so
-// "change" links and retries can prefill it), or, for the reset and
-// snapshot forms, from the grid's form posting the ticked VMs.
+// opForm serves an operation's form, prefilled from the query string ("change"
+// links, retries) or, for reset and snapshot, from the grid's ticked VMs.
 func (s *Server) opForm(op operation) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -108,8 +105,8 @@ func (s *Server) opForm(op operation) http.Handler {
 	})
 }
 
-// newFormPage prepares an operation's form for in. picked says the reset
-// form's first step was submitted, so its snapshots are listed.
+// newFormPage prepares an operation's form for in. picked means the reset
+// form's first step was submitted, so snapshots are listed.
 func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, picked bool) formPage {
 	p := formPage{
 		Op:        op,
@@ -163,8 +160,8 @@ func (s *Server) renderForm(w http.ResponseWriter, r *http.Request, status int, 
 	s.render(w, r, status, "opform", s.newView(w, r, op.Title, string(op.Kind), p))
 }
 
-// deploySets lists the template sets a deploy can use, from the viewer's
-// grid, so the form offers what the grid's Deploy links do.
+// deploySets lists the template sets on the viewer's grid, matching the grid's
+// Deploy links.
 func (s *Server) deploySets(ctx context.Context) ([]setView, string) {
 	g := s.polledGrid(ctx)
 	switch {
@@ -176,10 +173,9 @@ func (s *Server) deploySets(ctx context.Context) ([]setView, string) {
 	return s.startOf(g, false).Sets, ""
 }
 
-// snapshotPicker reads the snapshots of the first VM a reset of in covers:
-// the first of its teams, and the first host on the grid that matches its
-// hosts. The baseline, which resolves per VM, is always offered first, and
-// preselected unless in names another snapshot.
+// snapshotPicker reads the snapshots of the first VM a reset of in covers
+// (first team, first matching grid host). The per-VM baseline is always
+// offered first, preselected unless in names another snapshot.
 func (s *Server) snapshotPicker(ctx context.Context, in jobs.Inputs, picked bool) *snapshotPicker {
 	p := &snapshotPicker{HasPicked: picked, Selected: in.Snapshot, BaselineText: pods.BaselineText(s.cfg.Deploy)}
 	if !picked {
@@ -225,17 +221,14 @@ func (s *Server) snapshotPicker(ctx context.Context, in jobs.Inputs, picked bool
 	return p
 }
 
-// pickerReads is the most VMs the snapshot picker reads for exact VMs.
-// Each read takes one of the cell-read slots, so a big selection can't
-// hold them all for long; VMs without the snapshot chosen are shown as
-// blocked in the preview anyway.
+// pickerReads caps the VMs the picker reads for exact VMs: each read takes a
+// cell-read slot, and VMs lacking the chosen snapshot show as blocked in the
+// preview anyway.
 const pickerReads = 4
 
-// commonSnapshots reads the snapshots of up to pickerReads of the named
-// VMs that the grid shows, and returns those all of the read ones have,
-// in the first one's order, saying in p where the list comes from, and
-// the snapshot that is the baseline of every one of them, if all were read
-// and it is the same snapshot.
+// commonSnapshots reads up to pickerReads of the named grid VMs and returns
+// the snapshots all have, in the first one's order. It records the source in
+// p, and their shared baseline if all were read and it is one snapshot.
 func (s *Server) commonSnapshots(ctx context.Context, p *snapshotPicker, names []string) (_ []string, baseline string) {
 	var cells []status.Cell
 	for _, row := range s.view(ctx).Grid().Rows {
@@ -284,8 +277,8 @@ func (s *Server) commonSnapshots(ctx context.Context, p *snapshotPicker, names [
 	return common, baseline
 }
 
-// firstVM is the first VM on the grid of teams whose host matches hosts
-// (as the planner matches them), skipping missing VMs.
+// firstVM is the first non-missing grid VM of teams whose host matches hosts
+// (as the planner matches them).
 func (s *Server) firstVM(ctx context.Context, teams, hosts []string) (team, host string, ok bool) {
 	g := s.view(ctx).Grid()
 	for _, t := range teams {

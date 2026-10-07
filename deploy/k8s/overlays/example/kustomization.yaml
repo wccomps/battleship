@@ -1,10 +1,7 @@
-# Example production overlay. In the GitOps repo, copy this directory (e.g.
-# to overlays/prod) and point Argo CD / Flux at it.
+# Example production overlay: copy it (e.g. to overlays/prod) and point Argo CD / Flux at it.
 #
-# RELEASING = bumping newTag below. CI pushes ghcr.io/wccomps/battleship:<vX.Y.Z>
-# on a git tag (and :sha-<short> for every main commit). Commit the new tag
-# here; the GitOps controller rolls the Deployment. Rolling back = reverting
-# that commit. Never deploy :latest.
+# Release by bumping newTag below (CI pushes :<vX.Y.Z> per git tag, :sha-<short>
+# per main commit); roll back by reverting that commit. Never deploy :latest.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -17,21 +14,18 @@ images:
   - name: ghcr.io/wccomps/battleship
     newTag: v0.1.0 # CHANGE ME on each release (or pin a digest: "digest: sha256:...")
 
-# Replace the base's placeholder config with this competition's config.
-# Anything not set in overlays/example/battleship.toml takes battleship's built-in default.
+# Replace the base's placeholder config; unset keys take battleship's built-in defaults.
 configMapGenerator:
   - name: battleship-config
     behavior: replace
     files:
       - battleship.toml
-      # Proxmox cluster root CA (public). The operator copies it here from a
-      # node (see deploy/README.md); it is gitignored in this example directory.
-      # If it is missing, `kustomize build` fails, so a CA-less deploy can't ship.
+      # Proxmox cluster root CA, copied from a node (see deploy/README.md).
+      # Gitignored here so `kustomize build` fails until it is provided.
       - pve-root-ca.pem
 
 patches:
-  # Public hostname: Ingress rule + TLS. Must equal web.base_url's host in
-  # battleship.toml and the Authentik redirect URI.
+  # Public hostname (Ingress rule + TLS); must match web.base_url and the Authentik redirect URI.
   - target:
       group: networking.k8s.io
       version: v1

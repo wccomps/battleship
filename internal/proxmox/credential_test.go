@@ -314,8 +314,7 @@ func TestClassifyAuthorization(t *testing.T) {
 	if !IsForbidden(forbidden) || IsForbidden(lapsed) {
 		t.Error("IsForbidden is wrong")
 	}
-	// Through every endpoint failing, as with one node answering 401 and
-	// another refusing connections.
+	// Through an EndpointsError.
 	multi := &EndpointsError{Method: "GET", Path: "/x", Failures: []endpointFailure{{host: "a", reason: "401", err: lapsed}}}
 	if got := c.Classify(multi); got != Lapsed {
 		t.Errorf("401 inside EndpointsError = %v, want Lapsed", got)
@@ -401,9 +400,8 @@ func TestPermissionsParses(t *testing.T) {
 	}
 }
 
-// Proxmox keeps a login's state on the disk of the node that started it,
-// so the login must finish there: never on another node, even if that one
-// is down.
+// Proxmox keeps login state on the starting node's disk, so the login
+// finishes there even if it is down.
 func TestOpenIDLoginStaysOnTheNodeThatStartedIt(t *testing.T) {
 	answer := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -483,9 +481,8 @@ func TestNodeTasksSince(t *testing.T) {
 	}
 }
 
-// A ticket's age counts from when battleship asked for it, by its clock,
-// not from the time Proxmox wrote in it: a clock difference between the
-// hosts (here, years) can't make a fresh ticket look expired.
+// A ticket's age counts by battleship's clock, so clock skew (here, years)
+// can't make a fresh ticket look expired.
 func TestTicketIssueTimeIsWhenAsked(t *testing.T) {
 	n := newNode(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

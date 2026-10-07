@@ -1,6 +1,5 @@
-{{/* The grid page. The header carries its legend (grid-counts) and its
-     live dot's pop-over (grid-status); both are pieces of the event stream,
-     swapped in by id like the cells. */}}
+{{/* The grid page. The header's legend and live pop-over are event-stream
+     pieces, swapped in by id like the cells. */}}
 {{define "legend"}}{{template "grid-counts" .Data.Live}}{{end}}
 {{define "live-pop"}}{{template "grid-status" .Data.Live}}{{end}}
 
@@ -41,10 +40,9 @@
 <dialog class="panel" id="panel" aria-label="Details"></dialog>
 {{- end}}
 
-{{/* grid-live is the part of the page that live updates change. Its
-     pieces with an id (each cell, the empty grid's grid-start, and the header's grid-status and
-     grid-counts) are rendered on their own too: the event stream sends
-     just the pieces that changed, and the script swaps them in by id. */}}
+{{/* grid-live is the live-updated part. Its pieces with an id (cells,
+     grid-start, the header's grid-status and grid-counts) also render alone,
+     so the stream sends only changed ones and the script swaps them by id. */}}
 {{define "grid-live" -}}
 {{- if .Empty}}
 {{- with .Start}}

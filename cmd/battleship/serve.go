@@ -30,18 +30,16 @@ const (
 	// httpShutdownTimeout bounds the wait for requests in flight once the
 	// HTTP server stops; event streams end at once.
 	httpShutdownTimeout = 10 * time.Second
-	// oidcStartupWait is how long startup keeps trying to reach the identity
-	// provider, so a pod that starts before its network is ready still comes
-	// up; oidcRetryEvery is the pause between tries.
+	// oidcStartupWait is how long startup retries the identity provider, so a
+	// pod up before its network still starts; oidcRetryEvery is the pause between.
 	oidcStartupWait = 30 * time.Second
 	oidcRetryEvery  = 2 * time.Second
 	// cleanupEvery is how often expired sessions and previews are deleted.
 	cleanupEvery = time.Hour
 	// cleanupTimeout bounds each of a cleanup's database calls.
 	cleanupTimeout = 30 * time.Second
-	// viewLinger is how long a viewer's grid keeps polling after their last
-	// grid page closes, so a reload or the stream of a page just rendered
-	// takes it over.
+	// viewLinger keeps a viewer's grid polling after their last grid page
+	// closes, so a reload or a just-rendered page's stream can take it over.
 	viewLinger = time.Minute
 )
 
@@ -85,25 +83,15 @@ func runServe(ctx context.Context, args []string, d deps) int {
 	return 0
 }
 
-// serve runs battleship serve with cfg until ctx is done (the stop signal), then
-// shuts down, and logs and returns any error. At startup it checks the
-// config, opens and migrates the database, and reaches the identity
-// provider, failing clearly if any of that doesn't work. It then runs, all
-// sharing one Proxmox client and one set of concurrency limits:
+// serve runs battleship serve with cfg until ctx is done, then shuts down and
+// returns any error. Startup fails clearly if the config, database or identity
+// provider doesn't work. The workers, viewers' grids, ticket renewer, hub (the
+// process's only LISTEN connection), hourly cleanup and HTTP server share one
+// Proxmox client and one set of limits.
 //
-//   - web.workers job workers;
-//   - each viewer's status grid (polls and drift scans with their own
-//     ticket, while they have the grid open), and the ticket renewer;
-//   - one hub, which holds the process's only LISTEN connection;
-//   - an hourly cleanup of expired sessions and previews;
-//   - the HTTP server.
-//
-// On the stop signal, readiness fails at once and the running jobs are
-// told to stop: each stops starting steps, runs its cleanup and ends
-// interrupted. After a short drain for the load balancer, the HTTP server
-// stops, ending the event streams. serve then waits for the workers until
-// web.shutdown_timeout after the signal, and exits anyway after that,
-// returning an error.
+// On the stop signal readiness fails and running jobs stop and clean up. After
+// a short drain the HTTP server stops; serve waits for the workers until
+// web.shutdown_timeout after the signal, then gives up with an error.
 func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	if d.listen == nil {
 		d.listen = net.Listen
@@ -261,10 +249,9 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	return failure
 }
 
-// noServiceToken refuses to run what (battleship serve or battleship worker)
-// with a Proxmox token in the environment: they act only as the people who
-// asked, so a token there is a leftover of the old service token (or a
-// user's own token, which only their CLI runs may use), and must not linger.
+// noServiceToken refuses to run what with a Proxmox token in the
+// environment: serve and worker act only as the people who asked, so a token
+// there is a leftover (or a user's own, for their CLI only) and must not linger.
 func noServiceToken(what string) error {
 	for _, k := range []string{"BATTLESHIP_PROXMOX_TOKEN_ID", "BATTLESHIP_PROXMOX_TOKEN_SECRET"} {
 		if os.Getenv(k) != "" {
@@ -275,10 +262,8 @@ func noServiceToken(what string) error {
 	return nil
 }
 
-// connectAuth builds the auth service, which discovers the identity
-// provider. It retries for d.oidcWait, so a pod that starts before the
-// provider is reachable still comes up; after that, startup fails with a
-// hint to check oidc.issuer.
+// connectAuth builds the auth service, retrying provider discovery for
+// d.oidcWait so a pod that starts before the provider is reachable still comes up.
 func connectAuth(ctx context.Context, cfg config.Config, st *store.Store, login auth.ProxmoxLogin, d serveDeps) (*auth.Service, error) {
 	opts := auth.Options{Logf: logfFor(d.log, "auth"), Proxmox: login} // web.New renders its pages
 	wait, cancel := context.WithTimeout(ctx, d.oidcWait)
@@ -387,9 +372,8 @@ type cleaner interface {
 	DeleteExpiredPreviews(ctx context.Context, now time.Time) (int64, error)
 }
 
-// cleanUp deletes the sessions and previews that expired by now. Sessions
-// take their previews with them; previews also expire on their own, well
-// before a long session does.
+// cleanUp deletes the sessions and previews that expired by now; sessions
+// take their previews with them.
 func cleanUp(parent context.Context, st cleaner, now time.Time, timeout time.Duration, log *slog.Logger) {
 	// Each delete gets its own timeout, so one that hangs doesn't use up
 	// the other's.

@@ -38,9 +38,8 @@ import (
 //	docker run -d --rm --network host chromedp/headless-shell
 //	BATTLESHIP_BROWSER=http://127.0.0.1:9222 go test ./internal/web -run Browser
 //
-// and are skipped without it. BATTLESHIP_SHOTS, if set, is a directory to
-// save screenshots of each state in, at laptop and phone sizes, light and
-// dark.
+// and are skipped without it. BATTLESHIP_SHOTS, if set, is a directory for
+// screenshots of each state.
 
 // browser is a tab on the app under test.
 type browser struct {
@@ -52,9 +51,8 @@ type browser struct {
 	errs []string // script errors and CSP refusals
 	// allow403: the page under test is a 403 page, which Chrome logs.
 	allow403 bool
-	// phone: clicks go to the element itself, not to a point on the
-	// screen, where the sticky team column may cover a cell scrolled under
-	// it.
+	// phone: click elements directly, since the sticky team column may
+	// cover a cell scrolled under it.
 	phone bool
 }
 
@@ -87,8 +85,7 @@ func browserHarness(t *testing.T, mut ...func(*config.Config)) *harness {
 		srv.Close()
 	})
 	browserServers.Store(h, srv)
-	// The app's clock is the harness's fake one; the event streams pace
-	// their sends by it. Let it run at twice real time.
+	// Run the fake clock, which paces the event streams, at twice real time.
 	stop := make(chan struct{})
 	ticked := make(chan struct{})
 	go func() {
@@ -295,9 +292,8 @@ var sizes = []struct {
 // competitionHosts are a typical pod's hosts.
 var competitionHosts = []string{"dc", "web", "ftp", "mail", "dns", "db", "fs", "wks1", "wks2", "wks3", "siem", "fw"}
 
-// bigHarness is a competition of 32 teams of 12 hosts, polled and
-// scanned: mostly running, some stopped, a few missing, drifted (a wrong
-// pool, a failed job) and busy (a pending job).
+// bigHarness is a polled and scanned competition of 32 teams × 12 hosts,
+// with VMs in every state.
 func bigHarness(t *testing.T, mut ...func(*config.Config)) (*harness, int64) {
 	t.Helper()
 	h := browserHarness(t, mut...)
@@ -372,8 +368,7 @@ func TestBrowserGridSelection(t *testing.T) {
 			if n := b.text("#sel-count"); n != "0" {
 				t.Errorf("after unselecting the dc column, count = %q", n)
 			}
-			// 07 db, then a shift-click on 07 dns takes the range (db, dc,
-			// dns: hosts are in name order), then 08's three: 6 selected.
+			// Shift-click 07 db→dns (db, dc, dns), then 08's three: 6.
 			b.click(`#cell-07-db label`)
 			b.eval(`(function(){var e=new MouseEvent("click",{bubbles:true,shiftKey:true});document.querySelector('#cell-07-dns input').dispatchEvent(e);})()`, nil)
 			b.click(`#cell-08-db label`)
@@ -506,10 +501,8 @@ func TestBrowserPreviewAndJob(t *testing.T) {
 	}
 }
 
-// The action bar offers an action only if a ticked VM allows it: an
-// operator, who may power and snapshot every VM, is offered everything over
-// every team (the preview asks them to type the range); a user who may
-// only power team 01's VMs is offered power, and nothing else, and told so.
+// The action bar offers an action only if a ticked VM allows it, and says
+// when one isn't.
 func TestBrowserActionsFollowPrivileges(t *testing.T) {
 	h, _ := bigHarness(t)
 	op := h.login(asOperator)
@@ -549,10 +542,8 @@ func TestBrowserActionsFollowPrivileges(t *testing.T) {
 	b.clean()
 }
 
-// An operator takes a snapshot of VMs ticked on the grid: Take snapshot…
-// opens the form in the panel, which checks the name as Proxmox does
-// before it is sent; the preview shows the VM that already has the name as
-// blocked; confirming opens the job.
+// Snapshot from the grid: the panel form checks the name as Proxmox does,
+// the preview blocks a VM that already has it, and confirming opens the job.
 func TestBrowserSnapshotFlow(t *testing.T) {
 	h, _ := bigHarness(t)
 	op := h.login(asOperator)
@@ -738,8 +729,7 @@ func TestBrowserEmptyGridAndDeploy(t *testing.T) {
 			if !b.is(`document.querySelector('#panel .kv').textContent.includes("all")`) {
 				t.Errorf("recap = %q (want all hosts: none sent)", b.text("#panel .kv"))
 			}
-			// Only a teardown is typed (pods.Kind.TypedConfirm): the deploy
-			// is confirmed with its button.
+			// Only a teardown is typed (pods.Kind.TypedConfirm).
 			if b.is(`!!document.querySelector('#typed')`) || b.is(`document.querySelector('#panel button.pri').disabled`) {
 				t.Error("the deploy asks for the range typed, or its button is off")
 			}
@@ -753,9 +743,8 @@ func TestBrowserEmptyGridAndDeploy(t *testing.T) {
 	}
 }
 
-// The template sets come and go with the live grid: they give way to the
-// grid when a team VM appears, come back when the last one goes, and show
-// a master starting, all without a reload.
+// Template sets come and go live: replaced by the grid when a team VM
+// appears, back when the last goes, without a reload.
 func TestBrowserTemplateSetsFollowTheGrid(t *testing.T) {
 	h := browserHarness(t)
 	h.noTeamVMs()
@@ -837,8 +826,7 @@ func TestBrowserGridSizes(t *testing.T) {
 	}
 }
 
-// publishJob tells the streams job id changed, as the store's
-// notifications do in production.
+// publishJob notifies the streams that job id changed, as the store does.
 func publishJob(h *harness, id int64) {
 	h.hub.Publish(status.Msg{Topic: status.TopicJobs})
 	h.hub.Publish(status.Msg{Topic: status.JobTopic(id)})
@@ -851,9 +839,8 @@ func parseID(s string) (int64, error) {
 	return n, err
 }
 
-// The production leftover: test team 00 deployed with teams 1-32 (9 of
-// its 12 VMs). Its row shows, selects and opens like any other, and the
-// live grid drops it once its VMs are torn down.
+// A partial team 00 alongside teams 1-32 behaves like any other row and
+// is dropped live once torn down.
 func TestBrowserTeam00Row(t *testing.T) {
 	h, _ := bigHarness(t)
 	for j, host := range competitionHosts[:9] {
@@ -887,8 +874,7 @@ func TestBrowserTeam00Row(t *testing.T) {
 			b.shot("grid-team00-selected-" + size.name)
 			b.click(`#grid-table a.hb[data-select="team:00"]`)
 
-			// Every team's dc: the operator may power them all (the
-			// preview asks to type the range).
+			// Every team's dc: the operator may power them all.
 			b.click(`#grid-table a.hb[data-select="host:dc"]`)
 			if n, why := b.text("#sel-count"), b.text("#ab-why"); n != "33" || why != "" {
 				t.Errorf("dc column: count %q, why %q", n, why)

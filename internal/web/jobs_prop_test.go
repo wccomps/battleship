@@ -24,10 +24,8 @@ func drawTime(t *rapid.T, base time.Time, label string) time.Time {
 	return at.In(time.FixedZone("Z"+strconv.Itoa(offset), offset))
 }
 
-// The three ways pages write a time agree for any time and any zone it
-// comes in: in UTC, the time of day alone on the same UTC day as now and
-// with the date otherwise; the short forms are the full one (the title)
-// cut short; and the full one reads back as the time, to the second.
+// The three time formats agree for any time and zone: UTC, date only when
+// not today, short forms are prefixes of the full one, which round-trips.
 func TestPropTimeFormats(t *testing.T) {
 	base := time.Date(2026, 12, 31, 22, 30, 0, 0, time.UTC) // years and days roll over nearby
 	rapid.Check(t, func(t *rapid.T) {
@@ -94,12 +92,9 @@ func TestPropTook(t *testing.T) {
 	})
 }
 
-// For any history of jobs, the job list is newest first; "cancel
-// requested" marks exactly the active jobs being cancelled, "after #N"
-// only pending ones, with N an earlier job still active that shares a lock
-// key with it (a team, or a template both deploys use), and "nothing ran"
-// exactly the stale ones; and each row's time is the short form of its
-// title's.
+// For any job history the list is newest first and its markers ("cancel
+// requested", "after #N", "nothing ran") match the model. "after #N" names
+// an earlier active job sharing a lock key (a team or a template).
 func TestPropJobsList(t *testing.T) {
 	h := newHarness(t)
 	h.poll()

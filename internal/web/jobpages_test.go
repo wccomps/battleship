@@ -19,8 +19,7 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// submitJob plans in against the harness's cluster and stores it as a job
-// of by, as a confirm does.
+// submitJob plans in and stores it as by's job, as a confirm does.
 func (h *harness) submitJob(in jobs.Inputs, by jobs.Submitter) int64 {
 	h.t.Helper()
 	plan, err := jobs.BuildPlan(context.Background(), pods.NewPlanner(h.api, h.cfg), in)
@@ -28,8 +27,7 @@ func (h *harness) submitJob(in jobs.Inputs, by jobs.Submitter) int64 {
 		h.t.Fatal(err)
 	}
 	if !by.Credential.Usable() {
-		// The submitter's own Proxmox user: lena@example.org acts as
-		// lena@auth.example.org.
+		// lena@example.org acts as Proxmox user lena@auth.example.org.
 		name, _, _ := strings.Cut(strings.TrimPrefix(by.User, "cli:"), "@")
 		by.Credential, by.Seal = h.ticket(name), h.creds
 		if strings.HasPrefix(by.User, "cli:") { // their own API token
@@ -178,8 +176,7 @@ func TestJobPage(t *testing.T) {
 		`<tr><td><span class="vm">team01-dc</span></td><td class="muted c-vmid">10101</td><td class="c-steps"><span class="steps" role="img" aria-label="stop: waiting, rollback: waiting, start: waiting"><span class="pip wait" title="stop: waiting"></span><span class="pip wait" title="rollback: waiting"></span><span class="pip wait" title="start: waiting"></span></span></td><td><span class="st s-wait">`,
 		`<ol class="log" id="job-log" aria-live="polite">`,
 	)
-	// Whoever may reset VMs may cancel it; someone with no privileges sees
-	// why the button isn't there.
+	// Whoever may reset VMs may cancel; others see why not.
 	contains(t, "operator's job page", body, "/cancel")
 	nobody := h.login(asNobody)
 	body = h.get(&nobody, "/logs/"+itoa(id)).Body.String()
@@ -198,8 +195,8 @@ func TestJobPage(t *testing.T) {
 	}
 }
 
-// A job's page recaps what was asked as its preview did (askedFacts): the
-// inputs its title, teams and hosts don't say.
+// A job's page recaps the inputs its title, teams and hosts don't show
+// (askedFacts).
 func TestJobPageRecapsWhatWasAsked(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -219,8 +216,7 @@ func TestJobPageRecapsWhatWasAsked(t *testing.T) {
 	lacks(t, "named reset's job page", h.get(&op, "/logs/"+itoa(id)).Body.String(), " · Snapshot ")
 }
 
-// Items of jobs that ended before running them never ran: they read "not
-// run", not "pending".
+// Items of a job that ended before running them read "not run".
 func TestJobPageShowsItemsThatNeverRan(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -328,8 +324,7 @@ func TestCancelJob(t *testing.T) {
 	op := h.login(asOperator)
 	lead := h.login(asLead)
 
-	// Someone who neither started it nor may power VMs can't, even with
-	// a valid form.
+	// Nobody else can, even with a valid form.
 	nobody := h.login(asNobody)
 	if rec := h.post(&nobody, "/logs/"+itoa(pending)+"/cancel", url.Values{}); rec.Code != http.StatusForbidden {
 		t.Errorf("nobody's cancel = %d, want 403", rec.Code)
@@ -386,9 +381,8 @@ func flashOf(rec *httptest.ResponseRecorder) string {
 	return ""
 }
 
-// A retry targets exactly the VMs that didn't finish. Here the failed
-// VMs' teams × hosts also cover two that succeeded; a retried reset must
-// not roll those back.
+// A retry targets exactly the unfinished VMs: the failed VMs' teams × hosts
+// also cover two that succeeded, which a retried reset must not roll back.
 func TestRetryFailed(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -424,8 +418,8 @@ func TestRetryFailed(t *testing.T) {
 		t.Errorf("retry confirm = %s %v", action, form)
 	}
 
-	// The VM list is bound to the preview like every other input: a
-	// confirm that widens or drops it is refused.
+	// The VM list is bound to the preview: a confirm that changes it is
+	// refused.
 	for _, vms := range []string{"team01-dc,team01-web,team02-dc,team02-web", ""} {
 		f := url.Values{}
 		for k, v := range form {
@@ -466,8 +460,7 @@ func TestRetryFailed(t *testing.T) {
 	}
 }
 
-// A VM asked for by name that no longer exists is left out, and the
-// preview says so.
+// A named VM that no longer exists is left out, with a note.
 func TestPreviewOfNamedVMs(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -488,10 +481,8 @@ func TestPreviewOfNamedVMs(t *testing.T) {
 	contains(t, "VM outside the teams", rec.Body.String(), "team02-dc is not in teams 1", `name="vms" value="team02-dc"`)
 }
 
-// Retrying is offered to whoever could run the job's operation: an
-// operator, who lacks VM.Clone, sees a lock on a deploy job's retry, and a
-// retry they post anyway gets a preview with every VM blocked, saying
-// which privilege is missing.
+// Retry is offered to whoever could run the operation: an operator gets a
+// lock on a deploy's retry, and posting it anyway blocks every VM.
 func TestRetryFollowsPrivileges(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -534,8 +525,8 @@ func TestRetryFollowsPrivileges(t *testing.T) {
 	}
 }
 
-// A job whose stored plan can't be read is a fault of battleship's: retrying it is a server error, and its page says why
-// retry isn't offered.
+// An unreadable stored plan is battleship's fault: retrying is a server
+// error, and the page says why retry isn't offered.
 func TestRetryOfAnUnreadablePlan(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -575,8 +566,7 @@ func TestJobEvents(t *testing.T) {
 	if c.resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /events/jobs/%d = %d", id, c.resp.StatusCode)
 	}
-	// What the page may have missed: the log so far, with its last ID,
-	// then the header and the VMs.
+	// First the catch-up: log so far (with its last ID), header, VMs.
 	ev := c.next()
 	if ev.Event != "log" || !strings.Contains(ev.Data, `<span class="vm">team01-dc</span><span>power done</span></li>`) || ev.ID == "" {
 		t.Fatalf("first event = %+v, want the log line", ev)
@@ -604,8 +594,7 @@ func TestJobEvents(t *testing.T) {
 		t.Fatalf("event after a new line = %+v, want a patch of the VMs only", ev)
 	}
 
-	// After a Resync (the hub may have missed notices), everything shown
-	// is sent again; the log has nothing new.
+	// A Resync (the hub may have missed notices) resends everything shown.
 	h.clock.BlockUntil(t, 2)
 	h.hub.Publish(status.Msg{Topic: status.JobTopic(id), Resync: true})
 	h.clock.BlockUntil(t, 3)
@@ -615,8 +604,7 @@ func TestJobEvents(t *testing.T) {
 		t.Fatalf("event after a resync = %+v, want a patch of everything", ev)
 	}
 
-	// A browser that reconnects resumes after the last line it got,
-	// whatever the page's own ?after= says.
+	// A reconnect resumes after its Last-Event-ID, overriding ?after=.
 	c3 := h.openSSEWith(&op, "/events/jobs/"+itoa(id)+"?after=0", http.Header{"Last-Event-ID": {firstID}})
 	ev = c3.next()
 	if ev.Event != "log" || ev.ID != secondID || strings.Contains(ev.Data, "team01-dc") || !strings.Contains(ev.Data, "team01-web") {
@@ -701,8 +689,7 @@ func TestJobsEvents(t *testing.T) {
 	}
 }
 
-// A retry's preview, shown again by its confirm (an expired preview, a
-// changed cluster), still says which job it retries.
+// A retry's preview, re-shown by its confirm, still names the retried job.
 func TestReshownRetryPreviewKeepsItsJob(t *testing.T) {
 	h := newHarness(t, longSessions)
 	h.poll()
@@ -736,8 +723,8 @@ func TestReshownRetryPreviewKeepsItsJob(t *testing.T) {
 	}
 }
 
-// The job list says which jobs came from the command line, and each web
-// job's role; a stale or failed job's page links to its form, filled in.
+// The job list marks CLI jobs and each web job's role; a stale or failed
+// job's page links to its filled-in form.
 func TestJobsShowOriginAndStartAgain(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -758,8 +745,7 @@ func TestJobsShowOriginAndStartAgain(t *testing.T) {
 		`<span class="j-by" title="cli:alice">cli:alice <span class="role">alice@auth.example.org!cli</span></span>`,
 		`<span class="j-by" title="olive@example.org">olive <span class="role">olive@auth.example.org</span></span>`,
 		`<span class="j-by" title="lena@example.org">lena <span class="role">lena@auth.example.org</span></span>`,
-		// A stale job ran nothing; it says so, not to be read as a job
-		// that failed part way.
+		// A stale job ran nothing, and says so.
 		"stale</span><small>nothing ran</small>")
 	if !regexp.MustCompile(`<span class="j-took">[0-9]+ s</span>`).MatchString(body) {
 		t.Error("the finished job doesn't say how long it took")
@@ -784,9 +770,8 @@ func TestJobsShowOriginAndStartAgain(t *testing.T) {
 	contains(t, "lead's page of a stale deploy", h.get(&lead, "/logs/"+itoa(dep)).Body.String(), "Preview again</a>")
 }
 
-// Every stream of one job shares one read of it per change: a crowd
-// watching a job costs the database one read per notice, not one per
-// browser.
+// All streams of a job share one read per change, so a crowd costs one
+// database read per notice, not per browser.
 func TestJobStreamsShareReads(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -818,8 +803,7 @@ func TestJobStreamsShareReads(t *testing.T) {
 	if n := h.srv.jobReads.Load() - before; n != 1 {
 		t.Errorf("three streams read the job %d times for one change, want 1", n)
 	}
-	// Each viewer still gets their own buttons: the lead's head has the
-	// cancel button, the other's doesn't.
+	// Buttons are still per viewer.
 	h.clock.BlockUntil(t, 6)
 	h.hub.Publish(status.Msg{Topic: status.JobTopic(id), Resync: true})
 	h.clock.BlockUntil(t, 9)
@@ -838,8 +822,8 @@ func TestJobStreamsShareReads(t *testing.T) {
 	}
 }
 
-// A shared read is reused only by streams whose notice it can reflect: one
-// that started at or after the notice's sequence number.
+// A shared read is reused only if it started at or after the notice's
+// sequence number.
 func TestSharedJobSnapFreshness(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -868,9 +852,7 @@ func TestSharedJobSnapFreshness(t *testing.T) {
 	}
 }
 
-// A job's shared read is kept only while a stream of the job is open: a
-// job watched while it ran, by streams that all closed before it finished,
-// leaves nothing behind.
+// A job's shared read lives only while one of its streams is open.
 func TestJobSnapDroppedWhenLastStreamCloses(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -899,8 +881,7 @@ func jobSnapCached(h *harness, id int64) bool {
 	return ok
 }
 
-// A pending job's page says which job it waits for, and follows that job:
-// when it ends, the page stops saying so.
+// A pending job's page names the job it waits for, until that one ends.
 func TestPendingJobPageFollowsItsBlocker(t *testing.T) {
 	h := newListeningHarness(t)
 	h.poll()
@@ -928,9 +909,8 @@ func TestPendingJobPageFollowsItsBlocker(t *testing.T) {
 	lacks(t, "patch after the job it waited for ended", ev.Data, waiting)
 }
 
-// "Retry · lead only" is for what a lead could do: a job whose stored plan
-// can't be read can't be retried by anyone, so its page offers no retry
-// and claims no lead could.
+// An unreadable plan can't be retried by anyone, so the page doesn't
+// claim "Retry · lead only".
 func TestUnreadableJobOffersNoLeadOnlyRetry(t *testing.T) {
 	h := newHarness(t)
 	h.poll()

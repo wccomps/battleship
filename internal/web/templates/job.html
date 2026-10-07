@@ -1,7 +1,5 @@
-{{/* A job: as a page, or in the grid's panel as a sheet. Both follow the
-     job live while it is active: the event stream sends job-head,
-     job-actions and job-items again when they change, and new
-     job-log-lines. */}}
+{{/* A job, as a page or a panel sheet. While active, the stream resends
+     job-head, job-actions and job-items on change, plus new job-log-lines. */}}
 {{define "content" -}}
 {{- with .Data}}
 {{- if $.Panel}}

@@ -156,9 +156,8 @@ func TestGridShowsOnlyWhatProxmoxShows(t *testing.T) {
 }
 
 func TestGridFragmentSize(t *testing.T) {
-	// At competition scale, 32 teams × 12 hosts, the whole grid (sent when
-	// a stream starts) stays small, and a change to one VM sends a patch of
-	// a few hundred bytes.
+	// At 32 teams × 12 hosts the full grid stays small and a one-VM change
+	// is a patch of a few hundred bytes.
 	h := newHarness(t)
 	for team := 1; team <= 32; team++ {
 		for host := range 10 {
@@ -273,10 +272,9 @@ func TestMarkupIsEscaped(t *testing.T) {
 	lacks(t, "cell page 02/dc", job, raw...)
 }
 
-// With no team VMs (and no web.templates), the grid has no columns: the
-// page shows the template sets and no grid. The empty state is the same
-// for everyone, so the live fragment's cache stays viewer-independent; the
-// Deploy buttons are rendered per request, for leads only.
+// With no team VMs the page shows template sets and no grid. The empty
+// state is viewer-independent so the live fragment can be cached; Deploy
+// buttons are rendered per request, for leads only.
 func TestGridEmptyState(t *testing.T) {
 	h := newHarness(t)
 	h.noTeamVMs()

@@ -22,14 +22,13 @@ type asset struct {
 	version string
 }
 
-// assets are the static files by name. Stylesheets are served with the
-// files they name in url(...) linked by version, like pages link the
-// stylesheet, so a font is fetched once and then cached for good.
+// assets are the static files by name. Stylesheets' url(...) references are
+// versioned like page links, so fonts are fetched once and cached for good.
 var assets = loadAssets()
 
-// assetVersions maps each static file's name to a short hash of its
-// content as served. Pages link assets with it (assetURL), so a new
-// release's files are fetched at once while unchanged ones stay cached.
+// assetVersions maps each static file to a short hash of its served content,
+// so a release's changed files are fetched at once and unchanged ones stay
+// cached.
 var assetVersions = func() map[string]string {
 	out := map[string]string{}
 	for name, a := range assets {
@@ -81,8 +80,8 @@ func hashOf(b []byte) string {
 	return hex.EncodeToString(sum[:6])
 }
 
-// assetTypes fixes the content types of the assets, rather than trusting
-// the host's MIME tables.
+// assetTypes fixes the assets' content types rather than trusting the host's
+// MIME tables.
 var assetTypes = map[string]string{
 	".css":   "text/css; charset=utf-8",
 	".js":    "text/javascript; charset=utf-8",
@@ -91,16 +90,14 @@ var assetTypes = map[string]string{
 	".txt":   "text/plain; charset=utf-8",
 }
 
-// assetURL is the versioned URL of a static file, e.g.
-// "/static/app.js?v=3f2a…".
+// assetURL is a static file's versioned URL, e.g. "/static/app.js?v=3f2a…".
 func assetURL(name string) string {
 	return "/static/" + name + "?v=" + assetVersions[name]
 }
 
-// assetRoutes serve the embedded stylesheet, script, fonts and icon. A
-// request with the current version may be cached for good; any other must
-// be revalidated. /favicon.ico, which browsers ask for on their own, sends
-// them to the icon.
+// assetRoutes serve the embedded static files. A request with the current
+// version may be cached for good; others must revalidate. /favicon.ico, which
+// browsers request on their own, redirects to the icon.
 func (s *Server) assetRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, assetURL("favicon.svg"), http.StatusFound)

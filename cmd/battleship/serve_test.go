@@ -30,9 +30,8 @@ import (
 	"github.com/wccomps/battleship/internal/store/storetest"
 )
 
-// serveAPI is the fake Proxmox for battleship serve: the CLI fake plus a
-// listing that can fail, task waits that tests can hold, and Proxmox's
-// sign-in. Its fields are guarded by the fake's Mu.
+// serveAPI is the CLI fake plus a listing that can fail, holdable task waits
+// and Proxmox's sign-in. Its fields are guarded by the fake's Mu.
 type serveAPI struct {
 	*fakeAPI
 	powered chan int // gets the VMID of every power call
@@ -352,9 +351,8 @@ func TestServeHealthAndReadiness(t *testing.T) {
 	}
 }
 
-// Readiness never calls Proxmox (serve holds no credential to call it
-// with), so a Proxmox outage, shared by every replica, can't take them all
-// out of the load balancer.
+// Readiness never calls Proxmox (serve holds no credential), so a Proxmox
+// outage can't take every replica out of the load balancer.
 func TestServeStaysReadyWithoutProxmox(t *testing.T) {
 	e := startServe(t)
 	e.api.Mu.Lock()

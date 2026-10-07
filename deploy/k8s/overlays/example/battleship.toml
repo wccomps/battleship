@@ -1,20 +1,17 @@
-# battleship config for the example overlay: the values that differ from
-# battleship's built-in defaults (which match the current competition setup),
-# plus defaults this deployment depends on (the shutdown timeouts and the
-# issuer), stated so a change to the defaults can't move them. See
-# ../../base/battleship.toml for every key with comments.
+# Example overlay config: values that differ from the built-in defaults, plus
+# defaults this deployment depends on (shutdown timeouts, issuer), pinned so a
+# default change can't move them. See ../../base/battleship.toml for comments.
 
 [proxmox]
 url = "https://proxmox.example.invalid:8006" # CHANGE ME
-# Or fail over between nodes: replace url with urls (not both). "battleship
-# nodes" prints this line; allow every listed IP in networkpolicy.yaml.
+# Or fail over: replace url with urls (not both); "battleship nodes" prints this
+# line. Allow every listed IP in networkpolicy.yaml.
 # urls = ["https://192.0.2.121:8006", "https://192.0.2.123:8006", "https://192.0.2.125:8006"]
 # The cluster CA from the ConfigMap (see kustomization.yaml and the base's note).
 ca_file = "/config/pve-root-ca.pem"
 
-# Clone, config-call and build limits are per replica (2 replicas double
-# them); workers is per job; deletes is shared by every process, capped at
-# the largest value any of them has.
+# Clone, config-call and build limits are per replica; workers is per job;
+# deletes is shared by every process.
 [concurrency]
 workers = 10
 clones_per_node = 5
@@ -35,6 +32,5 @@ shutdown_timeout = "15m"               # < terminationGracePeriodSeconds (960s)
 issuer = "https://auth.example.org/application/o/battleship/"
 client_id = "battleship"
 
-# No [roles]: who may open battleship is decided in Authentik (the
-# application's policy bindings exclude students), what each user may do by
-# Proxmox.
+# No [roles]: Authentik policy bindings (which exclude students) decide who may
+# open battleship, Proxmox what each user may do.

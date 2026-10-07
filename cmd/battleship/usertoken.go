@@ -22,10 +22,9 @@ func userToken() (proxmox.Credential, error) {
 	return proxmox.TokenCredential(id, secret), nil
 }
 
-// asUser is api acting as the person whose credential cred returns: a
-// view of the Proxmox client that sends it, and calls refused, if set,
-// each time Proxmox refuses it. Any other API (a test's fake) is returned
-// as is.
+// asUser is api acting as cred's person: a client view that sends it and
+// calls refused (if set) whenever Proxmox refuses it. Other APIs (test fakes)
+// are returned as is.
 func asUser(api pods.API, cred func() proxmox.Credential, refused func()) pods.API {
 	if c, ok := api.(*proxmox.Client); ok {
 		return c.AsSource(cred).WhenRefused(refused)

@@ -129,9 +129,8 @@ func TestRefreshTokenIsSealedAtRest(t *testing.T) {
 	check("after a rotation")
 }
 
-// A sealed token is bound to its session: copied into another session's
-// row, it doesn't open, and that session is rejected at its next refresh
-// without the token being spent.
+// A sealed token copied into another session's row doesn't open; that
+// session is rejected at its next refresh without spending the token.
 func TestSealedRefreshTokenIsBoundToItsSession(t *testing.T) {
 	h := newHarness(t)
 	ba, bl := h.browser(), h.browser()
@@ -262,8 +261,8 @@ func checkNoLeak(t *testing.T, logs string, secrets map[string]string) {
 	}
 }
 
-// A token endpoint that echoes the request (code, verifier, refresh
-// token, client secret) in its error body doesn't get any of it logged.
+// A token endpoint that echoes the request in its error body doesn't get
+// any of it logged.
 func TestFailureLogsOmitCodeBodyAndSecret(t *testing.T) {
 	for _, jsonEcho := range []bool{false, true} {
 		name := "html page"

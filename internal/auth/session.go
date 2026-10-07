@@ -29,10 +29,8 @@ func randomToken() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// HashToken is the ID under which a secret token is stored: its SHA-256
-// hex. Sessions (keyed by the cookie value) and the web app's previews
-// (keyed by their nonce) store only this, so a database leak hands out
-// neither live sessions nor confirmable previews.
+// HashToken is the SHA-256 hex ID under which a secret token is stored, so
+// a database leak hands out no live sessions or confirmable previews.
 func HashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
@@ -48,10 +46,8 @@ func wellFormed(token string) bool {
 	return err == nil
 }
 
-// expired reports whether sess has ended at now under the current config:
-// idle for session_idle, older than session_max, or past its stored expiry.
-// Using the current config means a redeploy with shorter limits applies to
-// existing sessions.
+// expired reports whether sess has ended at now. It uses the current
+// config so a redeploy with shorter limits applies to existing sessions.
 func expired(w config.Web, sess store.Session, now time.Time) bool {
 	return !now.Before(sess.ExpiresAt) ||
 		!now.Before(sess.CreatedAt.Add(w.SessionMax)) ||
@@ -69,15 +65,12 @@ func expiresAt(w config.Web, created, seen time.Time) time.Time {
 }
 
 // touchEvery is how stale last_seen may get before a request records
-// activity: a tenth of the idle window, at most a minute. Skipping the
-// write in between costs at most that much of the idle window.
+// activity, saving a write per request at a small cost to the idle window.
 func touchEvery(w config.Web) time.Duration {
 	return min(time.Minute, w.SessionIdle/10)
 }
 
-// lookup finds the request's session. It returns errNoSession when there is
-// no well-formed cookie or no such session, and other errors for database
-// failures.
+// lookup finds the request's session, or errNoSession.
 func (s *Service) lookup(r *http.Request) (store.Session, error) {
 	c, err := r.Cookie(s.names.session)
 	if err != nil || !wellFormed(c.Value) {
@@ -118,9 +111,8 @@ func (s *Service) clearSessionCookie(w http.ResponseWriter) {
 // noStore keeps responses that set or clear cookies out of caches.
 func noStore(w http.ResponseWriter) { w.Header().Set("Cache-Control", "no-store") }
 
-// hostPrefix is the cookie name prefix browsers accept only on a Secure
-// cookie with Path=/ and no Domain, so a subdomain or a plain-http page
-// can't plant or overwrite the cookie.
+// hostPrefix makes browsers accept the cookie only Secure, Path=/ and
+// without Domain, so a subdomain or plain-http page can't plant it.
 const hostPrefix = "__Host-"
 
 // cookieNames are the names (and the login cookie's path) the service uses.
@@ -128,10 +120,8 @@ type cookieNames struct {
 	session, login, loginPath string
 }
 
-// namesFor is the one place cookie names are chosen: with an https
-// base_url (secure) the cookies take the __Host- prefix, which needs
-// Path=/; plain http, for development, keeps the plain names and the
-// login cookie stays on /auth/.
+// namesFor chooses cookie names: __Host- prefixed for https, plain names
+// (login cookie on /auth/) for development over http.
 func namesFor(secure bool) cookieNames {
 	if secure {
 		return cookieNames{session: hostPrefix + SessionCookie, login: hostPrefix + loginCookie, loginPath: "/"}
@@ -146,7 +136,5 @@ func SecureBaseURL(baseURL string) bool {
 	return err == nil && u.Scheme == "https" // Parse lowercases the scheme
 }
 
-// SessionCookieName is the name of the session cookie for a service with
-// this web.base_url: SessionCookie with the __Host- prefix when it is
-// https, else SessionCookie.
+// SessionCookieName is the session cookie's name for this web.base_url.
 func SessionCookieName(baseURL string) string { return namesFor(SecureBaseURL(baseURL)).session }

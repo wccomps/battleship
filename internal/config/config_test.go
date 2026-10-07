@@ -488,8 +488,7 @@ func TestLoadProxmoxCAFile(t *testing.T) {
 	if _, err := Load(writeFile(t, proxmoxTOML+"ca_file = \""+ca+"\"\ninsecure_skip_verify = false\n")); err != nil {
 		t.Errorf("ca_file with insecure_skip_verify = false: %v", err)
 	}
-	// Without it, verification stays on (against the system's CAs), with
-	// no pool; serve and worker refuse that (RequireTLSVerify).
+	// Without it, verification uses system CAs; serve and worker refuse that.
 	cfg, err = Load(writeFile(t, proxmoxTOML))
 	if err != nil {
 		t.Fatalf("Load: %v", err)

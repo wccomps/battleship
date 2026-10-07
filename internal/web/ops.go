@@ -12,9 +12,8 @@ import (
 	"github.com/wccomps/battleship/internal/pods"
 )
 
-// operation is one of the things volunteers do to team VMs. Each has
-// a form (GET Path), a preview (POST Path/preview) and a confirm (POST
-// Path/confirm).
+// operation is something volunteers do to team VMs: a form (GET Path), a
+// preview (POST Path/preview) and a confirm (POST Path/confirm).
 type operation struct {
 	Kind  pods.Kind
 	Path  string // e.g. "/reset"
@@ -22,8 +21,8 @@ type operation struct {
 	Noun  string // e.g. "reset", for the confirm's summary: "reset of team 01"
 }
 
-// operations are the operation pages, in order: the header shows deploy
-// and teardown's buttons in this order.
+// operations are the operation pages; the header shows deploy and teardown in
+// this order.
 var operations = []operation{
 	{Kind: pods.KindPower, Path: "/power", Title: "Power", Noun: "power action"},
 	{Kind: pods.KindReset, Path: "/reset", Title: "Reset", Noun: "reset"},
@@ -41,9 +40,9 @@ func operationFor(kind pods.Kind) (operation, bool) {
 	return operation{}, false
 }
 
-// Form field names. The VM page's quick forms and the confirm form's
-// hidden fields use the same names, so every step reads inputs the same
-// way (formInputs) and writes them the same way (inputFields).
+// Form field names, shared by the VM page's quick forms and the confirm's
+// hidden fields, so every step reads (formInputs) and writes (inputFields)
+// inputs the same way.
 const (
 	fieldTeams       = "teams"
 	fieldHosts       = "hosts"       // comma-separated
@@ -64,11 +63,10 @@ const (
 	yes              = "yes"
 )
 
-// formInputs reads an operation's inputs from form values. Values that
-// don't belong to kind are ignored. A reset without a snapshot rolls each
-// VM back to its own baseline (see pods.BaselineSnapshot). VMs may come as
-// one comma-separated value (a confirm's hidden field) or one value per
-// ticked box (the grid's form), or both.
+// formInputs reads an operation's inputs from form values, ignoring those
+// that don't belong to kind. A reset without a snapshot uses each VM's own
+// baseline (pods.BaselineSnapshot). VMs may come comma-separated (a confirm's
+// hidden field), one per ticked box (the grid), or both.
 func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 	in := jobs.Inputs{
 		Kind:  kind,
@@ -93,8 +91,8 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 	return in
 }
 
-// postedForm is the request's form body. A body that can't be parsed reads
-// as empty, which fails validation.
+// postedForm is the request's form body; an unparsable body reads as empty
+// and fails validation.
 func postedForm(r *http.Request) url.Values {
 	if err := r.ParseForm(); err != nil {
 		return url.Values{}
@@ -141,9 +139,9 @@ func inputFields(in jobs.Inputs) []field {
 	return fs
 }
 
-// formQuery is the address of an operation's form filled in with in, for
-// "change" links. A deploy's baseline box is written either way, since
-// the form ticks it when the query doesn't say.
+// formQuery is an operation's form URL prefilled with in, for "change" links.
+// A deploy's baseline box is always written, since the form ticks it when the
+// query is silent.
 func formQuery(op operation, in jobs.Inputs) string {
 	q := url.Values{}
 	for _, f := range inputFields(in) {
@@ -158,13 +156,10 @@ func formQuery(op operation, in jobs.Inputs) string {
 // fromGrid reports whether form is the grid's selection form.
 func fromGrid(form url.Values) bool { return form.Get(fieldFrom) == fromGridValue }
 
-// selected completes the inputs of a grid selection, which names the
-// ticked VMs but no teams: the teams and hosts are those of the VMs, and
-// the VMs are sorted, as a retry's are. Only the grid's teams count (the
-// teams with VMs), so a VM of any other team (an edited form) is left for
-// BuildPlan's check to refuse, as is anything that isn't a team VM name.
-// Teams typed into the form are kept as they are; BuildPlan refuses VMs
-// outside them.
+// selected completes a grid selection's inputs: teams and hosts from the
+// ticked VMs, VMs sorted as a retry's are. Only grid teams count, so VMs of
+// other teams (an edited form) or non-team names are left for BuildPlan to
+// refuse. Typed teams are kept; BuildPlan refuses VMs outside them.
 func (s *Server) selected(ctx context.Context, in jobs.Inputs) jobs.Inputs {
 	in.VMs = slices.Compact(slices.Sorted(slices.Values(in.VMs)))
 	if in.Teams != "" {
@@ -191,8 +186,8 @@ func (s *Server) nothingTicked(w http.ResponseWriter, r *http.Request) {
 		"Tick at least one VM on the grid, then choose what to do with it. Nothing has changed.", "/", "Back to the grid")
 }
 
-// actor is how jobs record a web user: the email address, which Authentik
-// keeps unique, or the subject when there is none.
+// actor is how jobs record a web user: the email (Authentik keeps it unique),
+// or the subject when there is none.
 func actor(u auth.User) string {
 	if u.Email != "" {
 		return u.Email

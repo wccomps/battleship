@@ -17,12 +17,9 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// runAsJob runs a confirmed plan in this process, but as a job: it is stored
-// first and starts only once no older job uses its teams or templates, so a
-// direct run never overlaps a worker's job or another direct run.
-//
-// The job carries the user's token like a queued one, so a worker that
-// takes it over runs it as the user too.
+// runAsJob runs a confirmed plan in this process as a stored job, starting
+// only once no older job uses its teams or templates. The job carries the
+// user's token, so a worker that takes it over runs it as the user too.
 func runAsJob(ctx context.Context, d deps, cfg config.Config, client pods.API, in jobs.Inputs, plan *pods.Plan, token proxmox.Credential) int {
 	bg := context.WithoutCancel(ctx)
 	st, creds, id, closeStore, err := submitJob(ctx, d, cfg, in, plan, token)
@@ -104,9 +101,8 @@ func waitForClaim(ctx context.Context, d deps, cfg config.Config, st *store.Stor
 	}
 }
 
-// reapStale marks jobs whose runners went silent as interrupted, as a worker
-// does each poll, so a force-quit direct run can't block its teams forever
-// when no worker is running.
+// reapStale marks silent jobs interrupted, as a worker's poll does, so a
+// force-quit direct run can't block its teams forever when no worker runs.
 func reapStale(bg context.Context, d deps, cfg config.Config, st *store.Store) {
 	ctx, stop := context.WithTimeout(bg, jobs.DBCallTimeout)
 	defer stop()
@@ -128,8 +124,8 @@ func cancelWaiting(bg context.Context, d deps, st *store.Store, id int64) error 
 	return fmt.Errorf("job %d: %w", id, store.ErrNotActive)
 }
 
-// blockersMessage says which jobs job id waits for, and on what, or "". It
-// also says how to give up on job id, from here (Ctrl-C) or another terminal.
+// blockersMessage says which jobs job id waits for, on what, and how to give
+// up on it; or "" if none.
 func blockersMessage(ctx context.Context, st *store.Store, id int64, keys []string) string {
 	callCtx, stop := context.WithTimeout(ctx, jobs.DBCallTimeout)
 	defer stop()
@@ -204,8 +200,7 @@ func followJob(ctx context.Context, d deps, cfg config.Config, st *store.Store, 
 	}
 }
 
-// reportJob prints how job id ended and returns the exit code: 0 only if it
-// succeeded.
+// reportJob prints how job id ended; the exit code is 0 only on success.
 func reportJob(ctx context.Context, d deps, st *store.Store, id int64) int {
 	j, err := st.Job(ctx, id)
 	if err != nil {

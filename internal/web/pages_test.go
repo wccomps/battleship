@@ -18,8 +18,7 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// The access page is gone: who may use battleship is Authentik's decision.
-// Old links land on the grid.
+// /access redirects to the grid: who may use battleship is Authentik's call.
 func TestAccessPageIsGone(t *testing.T) {
 	h := newHarness(t)
 	rec := h.get(nil, "/access")
@@ -117,8 +116,8 @@ func TestStaticAssets(t *testing.T) {
 			t.Errorf("GET %s Cache-Control = %q, want no-cache for an old version", stale, rec.Header().Get("Cache-Control"))
 		}
 	}
-	// Pages link the icon, and /favicon.ico, which browsers ask for on
-	// their own, sends them to it, logged in or not.
+	// Pages link the icon; /favicon.ico, which browsers fetch unprompted,
+	// redirects to it, logged in or not.
 	contains(t, "error page", h.get(nil, "/no-such-page").Body.String(),
 		`<link rel="icon" type="image/svg+xml" href="`+assetURL("favicon.svg")+`">`)
 	if rec := h.get(nil, "/favicon.ico"); rec.Code != http.StatusFound || rec.Header().Get("Location") != assetURL("favicon.svg") {
@@ -313,9 +312,8 @@ func TestRenderLogsThroughDeps(t *testing.T) {
 	contains(t, "logs", h.logs.String(), "web: rendering test-broken:", "NoSuchField", `web: no page template "no-such-page"`)
 }
 
-// The connection's state has a live region that stays in the page, for
-// screen readers: the live dot's pop-over is in a <details>, which they
-// don't announce while it is closed.
+// The connection state needs its own live region: screen readers don't
+// announce the live dot's pop-over inside a closed <details>.
 func TestConnectionNoteStaysInPage(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -369,9 +367,8 @@ func TestFleetHeadline(t *testing.T) {
 	}
 }
 
-// An item's strip shows each step's outcome, the next step running while
-// it runs, and the rest waiting; a done item's unreported steps weren't
-// needed, unless nothing was kept (a job from before outcomes were).
+// An item's step strip; a done item's unreported steps weren't needed,
+// unless it recorded no outcomes at all (older jobs).
 func TestItemSteps(t *testing.T) {
 	planned := []pods.Step{pods.StepClone, pods.StepNetwork, pods.StepCDROM, pods.StepStart}
 	states := func(it store.Item) string {

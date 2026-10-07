@@ -13,10 +13,8 @@ import (
 	"github.com/wccomps/battleship/internal/pods"
 )
 
-// hostileStrings are text that breaks pages that don't escape it: markup,
-// attribute and URL breakouts, template syntax, line breaks of every
-// kind, NUL and invalid UTF-8, mixed with names that look like the real
-// thing.
+// hostileStrings break pages that don't escape them, mixed with names that
+// look real.
 var hostileStrings = []string{
 	`<script>alert(1)</script>`, `"><img src=x onerror=alert(1)>`, `' onmouseover='alert(1)`,
 	`javascript:alert(1)`, ` JaVaScRiPt:alert(1)`, `</template><script>x()</script>`, `</div></main>`,
@@ -35,10 +33,8 @@ func hostile(t *rapid.T, label string) string {
 	return strings.Join(rapid.SliceOfN(piece, 1, 3).Draw(t, label), "")
 }
 
-// fillHostile sets every settable field of v, recursively: strings to
-// hostile ones, numbers small (sizes come from them), slices of up to 3,
-// pointers set or nil. Fields that are always set by the app are fixed up
-// by the callers.
+// fillHostile recursively fills v with hostile strings and small values
+// (sizes derive from numbers); callers fix up fields the app always sets.
 func fillHostile(t *rapid.T, v reflect.Value, path string) {
 	switch v.Kind() {
 	case reflect.String:
@@ -81,9 +77,7 @@ func drawHostile[T any](t *rapid.T, label string) T {
 	return x
 }
 
-// pageData draws the data of page, as hostile as the app could make it:
-// any text, but the shapes the handlers always give (a reset form has its
-// picker, an operation is one of the four).
+// pageData draws hostile data for page, in the shapes handlers always give.
 func pageData(t *rapid.T, page string) any {
 	switch page {
 	case "grid":
@@ -112,10 +106,8 @@ func pageData(t *rapid.T, page string) any {
 	return nil
 }
 
-// Every page, in the layout and in the panel, renders whatever text the
-// cluster, the jobs and the users put in it: without error, as markup
-// that nests and closes, with all of that text escaped (no new tags or
-// attributes), and with nothing the CSP would refuse.
+// Every page, in layout and panel, renders hostile text without error, with
+// it escaped, in well-formed markup the CSP accepts.
 func TestPropPagesEscapeHostileText(t *testing.T) {
 	names := slices.Sorted(maps.Keys(pages))
 	rapid.Check(t, func(t *rapid.T) {

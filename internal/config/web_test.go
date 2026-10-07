@@ -157,8 +157,7 @@ func TestWebValidation(t *testing.T) {
 	}
 }
 
-// web.templates is optional: empty (the default) shows only the hosts that
-// have team VMs.
+// web.templates is optional.
 func TestTemplatesDefaultAndValid(t *testing.T) {
 	if got := Default().Web.Templates; got != "" {
 		t.Errorf("default web.templates = %q, want empty", got)

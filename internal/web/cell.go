@@ -26,16 +26,15 @@ type driftView struct {
 // snapshotView is one of the VM's snapshots.
 type snapshotView struct {
 	Name string
-	// Baseline: the VM's baseline (pods.BaselineSnapshot), or, in the
-	// reset form's picker, the nameless option meaning each VM's own.
+	// Baseline marks the VM's baseline snapshot or, in the reset picker, the
+	// nameless option meaning each VM's own.
 	Baseline bool
 }
 
 // configRow is one line of the VM's Proxmox config.
 type configRow struct{ Key, Value string }
 
-// lastJobView is the newest job that has the VM: its operation, number,
-// status and when.
+// lastJobView is the newest job that has the VM.
 type lastJobView struct {
 	ID   int64
 	Op   opLabel
@@ -52,8 +51,8 @@ type cellPage struct {
 	ReadErr   string // the live read failed; the page shows the grid's cell
 	Drift     []driftView
 	Snapshots []snapshotView
-	// Baseline is the VM's baseline snapshot, or what a baseline is when
-	// it has none (e.g. "initial"), and HasBaseline whether it has it.
+	// Baseline is the VM's baseline snapshot, or what a baseline is when it has
+	// none (e.g. "initial"); HasBaseline says which.
 	Baseline    string
 	HasBaseline bool
 	Network     []configRow
@@ -64,13 +63,13 @@ type cellPage struct {
 	Deploy                          string        // a missing VM: the deploy form for its team and host
 }
 
-// networkKey matches the config keys the page shows: NICs and their
-// cloud-init addresses.
+// networkKey matches the config keys the page shows: NICs and cloud-init
+// addresses.
 var networkKey = regexp.MustCompile(`^(net|ipconfig)[0-9]+$`)
 
-// powerActionsFor are the power actions that make sense for a VM in
-// Proxmox status power: a running one can be shut down, stopped or
-// rebooted, any other started (or stopped, if it is stuck).
+// powerActionsFor lists the sensible power actions for Proxmox status power:
+// a running VM can be shut down, stopped or rebooted; any other started (or
+// stopped, if stuck).
 func powerActionsFor(power string) []powerChoice {
 	var out []pods.PowerAction
 	for _, a := range pods.PowerActions {
@@ -82,9 +81,8 @@ func powerActionsFor(power string) []powerChoice {
 	return powerChoicesOf(out)
 }
 
-// cellPage shows one team VM: a live read of its state, why it is drifted,
-// its snapshots, its last job, and power, reset and snapshot buttons that
-// lead to a preview.
+// cellPage shows one team VM: a live read of its state, drift reasons,
+// snapshots, last job, and power/reset/snapshot buttons leading to a preview.
 func (s *Server) cellPage(w http.ResponseWriter, r *http.Request) {
 	team, host := r.PathValue("team"), r.PathValue("host")
 	d, err := s.detail(r.Context(), team, host)
@@ -144,9 +142,8 @@ func (s *Server) cellPage(w http.ResponseWriter, r *http.Request) {
 // webTemplates is web.templates, the set the grid shows, as a pattern.
 func (s *Server) webTemplates() string { return strings.TrimSpace(s.cfg.Web.Templates) }
 
-// lastJobLook is how a VM's last job is shown: by the job's status while
-// it is active or if it ended without touching the VM, else by how it
-// left this VM.
+// lastJobLook shows a VM's last job by the job's status while active or if it
+// never touched the VM, else by how it left this VM.
 func lastJobLook(j store.Job, it store.Item) statusLook {
 	if j.Active() {
 		return lookOf(jobLooks, j.Status)
@@ -160,21 +157,19 @@ func lastJobLook(j store.Job, it store.Item) statusLook {
 	return lookOf(jobLooks, j.Status)
 }
 
-// cellReadSlots is how many cell reads (cell pages and the reset form's
-// snapshot picker) may run at once. Each read also takes the config-call
-// slots it uses one at a time, like the drift scan, so a crowd of cell
-// pages can hold at most this many of the slots the job executors share.
+// cellReadSlots caps concurrent cell reads (cell pages, snapshot picker). Each
+// read takes config-call slots one at a time, so a crowd of cell pages holds
+// at most this many of the slots job executors share.
 const cellReadSlots = 2
 
-// cellReadTimeout bounds a shared cell read, which carries on after the
-// request that started it has gone, for the others waiting on it.
+// cellReadTimeout bounds a shared cell read, which outlives its starting
+// request for the others waiting on it.
 const cellReadTimeout = time.Minute
 
-// detail reads a cell live with status.Poller.Detail, sharing a read of
-// the cell already under way, at most cellReadSlots at once. The read runs
-// on the server's lifetime, bounded by s.cellTimeout, since others may wait
-// on it; the caller stops waiting when ctx ends. A failed read's Detail
-// still carries the grid's copy of the cell.
+// detail reads a cell live (status.Poller.Detail), joining any read already
+// under way, at most cellReadSlots at once. The read runs on the server's
+// lifetime, bounded by s.cellTimeout; the caller stops waiting when ctx ends.
+// A failed read's Detail still carries the grid's copy.
 func (s *Server) detail(ctx context.Context, team, host string) (status.Detail, error) {
 	view := s.view(ctx) // the viewer's: their ticket, their grid
 	ch := s.cellFlight.DoChan(view.User+"\x00"+team+"/"+host, func() (any, error) {
@@ -214,8 +209,7 @@ func (s *Server) detail(ctx context.Context, team, host string) (status.Detail, 
 	return d, err
 }
 
-// cutOff explains why a shared cell read's context ended while it was
-// doing what.
+// cutOff explains why a shared cell read's context ended, and during what.
 func (s *Server) cutOff(rctx context.Context, doing string) error {
 	if s.life.Err() != nil {
 		return fmt.Errorf("the server is shutting down, which stopped %s", doing)

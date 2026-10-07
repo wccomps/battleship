@@ -20,18 +20,14 @@ import (
 )
 
 const (
-	// SessionCookie names the cookie that carries a session token. The
-	// database keeps only the token's hash (see HashToken). With an https
-	// web.base_url the cookie is "__Host-" + SessionCookie; see
-	// SessionCookieName.
+	// SessionCookie names the session token cookie; see SessionCookieName
+	// for the __Host- prefixed form.
 	SessionCookie = "battleship_session"
 	// CSRFField is the form field that carries a session's CSRF token on
 	// state-changing requests.
 	CSRFField = "csrf"
 
-	// loginCookie holds a login in progress (state, nonce, PKCE verifier and
-	// next), sealed, for loginTTL. With an https web.base_url it is __Host-
-	// prefixed, like the session cookie (see namesFor).
+	// loginCookie holds a sealed login in progress for loginTTL.
 	loginCookie = "battleship_oidc"
 	loginTTL    = 10 * time.Minute
 	// providerTimeout bounds each exchange with the identity provider.
@@ -46,9 +42,8 @@ type Options struct {
 	// Now is the clock for session expiry, refresh timing and ID token
 	// expiry. Default time.Now.
 	Now func() time.Time
-	// Logf receives security events: logins, logouts, expiries, refresh
-	// failures, refused Proxmox sign-ins and CSRF rejections. It never
-	// receives tokens or cookies. Default log.Printf.
+	// Logf receives security events, never tokens or cookies. Default
+	// log.Printf.
 	Logf func(format string, args ...any)
 	// Proxmox signs users in to Proxmox and renews their tickets; it is
 	// required. It holds no credential of its own.
@@ -77,23 +72,20 @@ type Service struct {
 	pve           ProxmoxLogin
 }
 
-// SetRender makes render draw the pages auth shows itself (login errors,
-// 401 and 403) in the web layer's layout. The web server, built after the
-// service, calls it before serving; until then auth answers in plain text.
+// SetRender makes auth's own pages (login errors, 401, 403) use the web
+// layout. The web server is built after the service, so it sets this.
 func (s *Service) SetRender(render func(w http.ResponseWriter, r *http.Request, p Page)) {
 	s.render = render
 }
 
-// plainPage is the render a service has until SetRender: the page's title
-// and message as text.
+// plainPage is the render a service has until SetRender.
 func plainPage(w http.ResponseWriter, _ *http.Request, p Page) {
 	http.Error(w, p.Title+": "+p.Message, p.Status)
 }
 
-// NewService checks the config battleship serve needs (config.RequireWeb) and
-// runs OIDC discovery against oidc.issuer, so a wrong issuer or an
-// unreachable provider fails at startup. cfg is expected to have passed
-// config.Load's validation.
+// NewService checks the web config and runs OIDC discovery, so a wrong
+// issuer or unreachable provider fails at startup. cfg must have passed
+// config.Load.
 func NewService(ctx context.Context, cfg config.Config, st *store.Store, opts Options) (*Service, error) {
 	if st == nil {
 		return nil, ErrNoStore
@@ -187,9 +179,7 @@ var signingAlgs = []string{
 	oidc.PS256, oidc.PS384, oidc.PS512, oidc.EdDSA,
 }
 
-// Routes registers the login flow: GET /auth/login, GET /auth/callback,
-// POST /auth/logout, and the Proxmox step, GET /auth/proxmox and GET
-// /auth/proxmox/callback.
+// Routes registers the login, logout and Proxmox sign-in routes.
 func (s *Service) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/login", s.login)
 	mux.HandleFunc("GET /auth/callback", s.callback)
