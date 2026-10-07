@@ -79,16 +79,16 @@ func TestWorkerRunningJobStopsWhenProxmoxRefusesTheTicket(t *testing.T) {
 	done := make(chan struct{})
 	go func() { defer close(done); w.RunJob(bg, claim(t, st)) }()
 	<-f.waiting // the first VM's first task is running
-	f.mu.Lock()
+	f.Mu.Lock()
 	f.accept = func(proxmox.Credential) bool { return false } // alice is disabled in Proxmox
-	f.mu.Unlock()
+	f.Mu.Unlock()
 	close(f.gate)
 	<-done
 	j := job(t, st, id)
 	if j.Status != store.StatusInterrupted || !strings.Contains(j.Error, "authorization lapsed") {
 		t.Fatalf("job = %s: %q", j.Status, j.Error)
 	}
-	if got := f.deletedIDs(); len(got) != 0 {
+	if got := f.DeletedIDs(); len(got) != 0 {
 		t.Fatalf("deleted %v after the ticket was refused", got)
 	}
 	items, _ := st.Items(bg, id)
@@ -126,7 +126,7 @@ func TestWorkerRunningJobStopsWhenItsCredentialIsDropped(t *testing.T) {
 	if j.Status != store.StatusInterrupted || !strings.Contains(j.Error, "authorization lapsed") {
 		t.Fatalf("job = %s: %q", j.Status, j.Error)
 	}
-	if got := f.deletedIDs(); len(got) > 1 {
+	if got := f.DeletedIDs(); len(got) > 1 {
 		t.Fatalf("deleted %v: the job kept starting steps after its credential was dropped", got)
 	}
 }
@@ -203,9 +203,9 @@ func TestWorkerPlansWithTheSubmittersPrivileges(t *testing.T) {
 	if j.Status != store.StatusCompletedWithFailures {
 		t.Fatalf("job = %s: %s", j.Status, j.Error)
 	}
-	f.mu.Lock()
-	teak, dc := f.vms[10121].Status, f.vms[10105].Status
-	f.mu.Unlock()
+	f.Mu.Lock()
+	teak, dc := f.VMs[10121].Status, f.VMs[10105].Status
+	f.Mu.Unlock()
 	if teak != "running" || dc != "stopped" {
 		t.Fatalf("teak %s, dc %s: the job acted beyond the submitter's privileges", teak, dc)
 	}

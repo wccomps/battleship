@@ -7,10 +7,11 @@ import (
 	"testing"
 
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-func snapshotPlan(t *testing.T, f *fakeAPI, req pods.SnapshotRequest) *pods.Plan {
+func snapshotPlan(t *testing.T, f *podstest.Fake, req pods.SnapshotRequest) *pods.Plan {
 	t.Helper()
 	if req.Teams == nil {
 		req.Teams = []string{"01"}
@@ -24,7 +25,7 @@ func snapshotPlan(t *testing.T, f *fakeAPI, req pods.SnapshotRequest) *pods.Plan
 
 func TestTakeSnapshot(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil, "initial")
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil, "initial")
 	plan := snapshotPlan(t, f, pods.SnapshotRequest{Name: "before-scoring", Description: "round 2", VMState: true})
 	rec := &recorder{}
 
@@ -33,14 +34,14 @@ func TestTakeSnapshot(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 	want := []proxmox.SnapshotRequest{{Name: "before-scoring", Description: "round 2", VMState: true}}
-	if !slices.Equal(f.snapshotReqs, want) {
-		t.Errorf("requests = %+v, want %+v", f.snapshotReqs, want)
+	if !slices.Equal(f.SnapshotReqs, want) {
+		t.Errorf("requests = %+v, want %+v", f.SnapshotReqs, want)
 	}
-	if got := f.vms[10121].Snapshots; !slices.Equal(got, []string{"initial", "before-scoring"}) {
+	if got := f.VMs[10121].Snapshots; !slices.Equal(got, []string{"initial", "before-scoring"}) {
 		t.Errorf("snapshots = %v", got)
 	}
-	if f.called("power:") != 0 {
-		t.Errorf("calls = %v: taking a snapshot doesn't change power", f.calls)
+	if f.Called("power:") != 0 {
+		t.Errorf("calls = %v: taking a snapshot doesn't change power", f.Calls)
 	}
 	if done := rec.find("team01-teak", EventDone); len(done) != 1 || done[0].Step != pods.StepSnapshot {
 		t.Errorf("done events = %+v", done)
@@ -52,16 +53,16 @@ func TestTakeSnapshot(t *testing.T) {
 // sent.
 func TestTakeSnapshotNeverReplacesOne(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "initial")
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "initial")
 	plan := snapshotPlan(t, f, pods.SnapshotRequest{Name: "before-scoring"})
-	f.vms[10121].Snapshots = append(f.vms[10121].Snapshots, "before-scoring")
+	f.VMs[10121].Snapshots = append(f.VMs[10121].Snapshots, "before-scoring")
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	err := res.Failed["team01-teak"]
 	if err == nil || !strings.Contains(err.Error(), `already has a snapshot named "before-scoring", taken since the preview; battleship never replaces a snapshot`) {
 		t.Errorf("error = %v", err)
 	}
-	if n := f.called("snapshot:"); n != 0 {
+	if n := f.Called("snapshot:"); n != 0 {
 		t.Errorf("snapshot POSTed %d times, want 0", n)
 	}
 }
@@ -70,16 +71,16 @@ func TestTakeSnapshotNeverReplacesOne(t *testing.T) {
 // and doesn't send it again, and the item succeeds.
 func TestTakeSnapshotLostAnswerIsNotResent(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
 	plan := snapshotPlan(t, f, pods.SnapshotRequest{Name: "before-scoring"})
-	f.snapshotThenFail = map[int]error{10121: &proxmox.APIError{Status: 500, Message: "Connection timed out"}}
+	f.SnapshotThenFail = map[int]error{10121: &proxmox.APIError{Status: 500, Message: "Connection timed out"}}
 	rec := &recorder{}
 
 	res := testExecutor(f, rec).Run(context.Background(), plan)
 	if len(res.Failed) != 0 || !slices.Equal(res.Succeeded, []string{"team01-teak"}) {
 		t.Fatalf("result = %+v", res)
 	}
-	if n := f.called("snapshot:"); n != 1 {
+	if n := f.Called("snapshot:"); n != 1 {
 		t.Errorf("snapshot POSTed %d times, want 1", n)
 	}
 	for _, e := range rec.find("team01-teak", EventFailed) {
@@ -92,15 +93,15 @@ func TestTakeSnapshotLostAnswerIsNotResent(t *testing.T) {
 // this run took and accepts it rather than calling it someone else's.
 func TestTakeSnapshotRetryRoundAcceptsItsOwnSnapshot(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
 	plan := snapshotPlan(t, f, pods.SnapshotRequest{Name: "before-scoring"})
-	f.snapshotThenFail = map[int]error{10121: &proxmox.APIError{Status: 400, Message: "bad gateway, permanently"}}
+	f.SnapshotThenFail = map[int]error{10121: &proxmox.APIError{Status: 400, Message: "bad gateway, permanently"}}
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	if len(res.Failed) != 0 || !slices.Equal(res.Succeeded, []string{"team01-teak"}) {
 		t.Fatalf("result = %+v", res)
 	}
-	if n := f.called("snapshot:"); n != 1 {
+	if n := f.Called("snapshot:"); n != 1 {
 		t.Errorf("snapshot POSTed %d times, want 1", n)
 	}
 }
@@ -108,11 +109,11 @@ func TestTakeSnapshotRetryRoundAcceptsItsOwnSnapshot(t *testing.T) {
 // A task that ended OK is checked: the snapshot must be there, finished.
 func TestTakeSnapshotIsVerified(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
-	f.add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil)
 	plan := snapshotPlan(t, f, pods.SnapshotRequest{Name: "before-scoring"})
-	f.snapshotNoop = map[int]bool{10121: true}
-	f.snapshotLeaves = map[int]string{10125: "prepare"}
+	f.SnapshotNoop = map[int]bool{10121: true}
+	f.SnapshotLeaves = map[int]string{10125: "prepare"}
 
 	exec := testExecutor(f, &recorder{})
 	exec.Cfg.Retry.Rounds = 0
@@ -131,7 +132,7 @@ func TestTakeSnapshotIsVerified(t *testing.T) {
 func TestBaselineLostAnswerIsNotResent(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
-	f.snapshotThenFail = map[int]error{10121: &proxmox.APIError{Status: 500, Message: "Connection timed out"}}
+	f.SnapshotThenFail = map[int]error{10121: &proxmox.APIError{Status: 500, Message: "Connection timed out"}}
 
 	exec := testExecutor(f, &recorder{})
 	exec.Cfg.Retry.Rounds = 0
@@ -139,7 +140,7 @@ func TestBaselineLostAnswerIsNotResent(t *testing.T) {
 	if len(res.Failed) != 0 || !slices.Equal(res.Succeeded, []string{"team01-teak"}) {
 		t.Fatalf("result = %+v", res)
 	}
-	if n := f.called("snapshot:10121"); n != 1 {
+	if n := f.Called("snapshot:10121"); n != 1 {
 		t.Errorf("baseline POSTed %d times, want 1", n)
 	}
 }

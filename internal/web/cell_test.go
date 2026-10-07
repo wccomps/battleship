@@ -60,10 +60,10 @@ func TestCellPage(t *testing.T) {
 func TestCellPageShowsDrift(t *testing.T) {
 	h := newHarness(t)
 	h.hist.set("team02-web", store.ItemResult{JobID: 41, JobKind: "deploy", Status: store.ItemFailed, Step: "network", Error: "bridge int02 missing"})
-	h.api.mu.Lock()
-	delete(h.api.configs[10202], "net1")
-	h.api.snaps[10202] = []string{"other"}
-	h.api.mu.Unlock()
+	h.api.Mu.Lock()
+	delete(h.api.VMs[10202].Config, "net1")
+	h.api.VMs[10202].Snapshots = []string{"other"}
+	h.api.Mu.Unlock()
 	h.poll()
 	op := h.login(asOperator)
 

@@ -3,12 +3,12 @@ package web
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +26,7 @@ import (
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/status"
 	"github.com/wccomps/battleship/internal/store"
@@ -300,9 +301,9 @@ var competitionHosts = []string{"dc", "web", "ftp", "mail", "dns", "db", "fs", "
 func bigHarness(t *testing.T, mut ...func(*config.Config)) (*harness, int64) {
 	t.Helper()
 	h := browserHarness(t, mut...)
-	h.api.mu.Lock()
-	h.api.vms = nil
-	h.api.mu.Unlock()
+	h.api.Mu.Lock()
+	clear(h.api.VMs)
+	h.api.Mu.Unlock()
 	missing := map[string]bool{"14-dns": true, "30-siem": true, "31-siem": true, "32-siem": true}
 	stopped := map[string]bool{"02-wks3": true, "05-wks1": true, "05-wks2": true, "17-fs": true, "23-mail": true}
 	for i := 1; i <= 32; i++ {
@@ -669,9 +670,9 @@ func TestBrowserEmptyGridAndDeploy(t *testing.T) {
 	h := browserHarness(t, func(c *config.Config) {
 		c.Web.Templates = "*.kilo.alpha"
 	})
-	h.api.mu.Lock()
-	h.api.vms = nil
-	h.api.mu.Unlock()
+	h.api.Mu.Lock()
+	clear(h.api.VMs)
+	h.api.Mu.Unlock()
 	for i, host := range competitionHosts {
 		h.api.add(proxmox.VM{VMID: 5001 + i, Name: host + ".kilo.alpha", Node: []string{"n1", "n2"}[i%2], Status: "running", Tags: "dev"},
 			map[string]string{"net0": "virtio=BC:24:11:00:00:01,bridge=vmbr0"})
@@ -813,9 +814,9 @@ func TestBrowserGridSizes(t *testing.T) {
 	}{{"grid-20x8", 8, 20, 768}, {"grid-12x50", 50, 12, 768}} {
 		t.Run(c.name, func(t *testing.T) {
 			h := browserHarness(t)
-			h.api.mu.Lock()
-			h.api.vms = nil
-			h.api.mu.Unlock()
+			h.api.Mu.Lock()
+			clear(h.api.VMs)
+			h.api.Mu.Unlock()
 			for i := 1; i <= c.teams; i++ {
 				team := fmt.Sprintf("%02d", i)
 				for j := 0; j < c.hosts; j++ {
@@ -899,9 +900,9 @@ func TestBrowserTeam00Row(t *testing.T) {
 
 	b := newBrowser(t, h, &op, 1366, 768, false)
 	b.open("/")
-	h.api.mu.Lock()
-	h.api.vms = slices.DeleteFunc(h.api.vms, func(vm proxmox.VM) bool { return strings.HasPrefix(vm.Name, "team00-") })
-	h.api.mu.Unlock()
+	h.api.Mu.Lock()
+	maps.DeleteFunc(h.api.VMs, func(_ int, vm *podstest.VM) bool { return strings.HasPrefix(vm.Name, "team00-") })
+	h.api.Mu.Unlock()
 	h.poll()
 	b.waitFor("team 00's row to go", `!document.querySelector('[data-select="team:00"]') && !document.getElementById("cell-00-dc")`)
 	b.clean()

@@ -11,17 +11,9 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-func (f *fakeAPI) CreateSnapshot(_ context.Context, _ string, vmid int, r proxmox.SnapshotRequest) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.snapshots[vmid] = append(f.snapshots[vmid], r.Name)
-	f.snapReqs = append(f.snapReqs, r)
-	return "UPID:x", nil
-}
-
 func TestSnapshotCommand(t *testing.T) {
 	e := newEnv(t, false, "", vm(10701, "team07-dc"), vm(10702, "team07-web"))
-	e.api.snapshots[10702] = []string{"initial", "round2"}
+	e.api.setSnapshots(10702, "initial", "round2")
 	code := e.run("snapshot", "-teams", "7", "-name", "round2", "-description", "after lunch", "-vmstate", "-yes")
 	if code != 1 { // team07-web is blocked
 		t.Fatalf("code = %d, want 1 (one VM blocked)\n%s%s", code, e.stdout, e.stderr)
@@ -38,8 +30,8 @@ func TestSnapshotCommand(t *testing.T) {
 		}
 	}
 	want := []proxmox.SnapshotRequest{{Name: "round2", Description: "after lunch", VMState: true}}
-	if !slices.Equal(e.api.snapReqs, want) {
-		t.Errorf("requests = %+v, want %+v", e.api.snapReqs, want)
+	if !slices.Equal(e.api.SnapshotReqs, want) {
+		t.Errorf("requests = %+v, want %+v", e.api.SnapshotReqs, want)
 	}
 
 	// Interactive, it asks first.
@@ -47,8 +39,8 @@ func TestSnapshotCommand(t *testing.T) {
 	if code := e.run("snapshot", "-teams", "7", "-hosts", "dc", "-name", "round3"); code != 0 {
 		t.Fatalf("code = %d\n%s%s", code, e.stdout, e.stderr)
 	}
-	if !strings.Contains(e.stdout.String(), "Apply this plan? Type yes: ") || len(e.api.snapReqs) != 1 || e.api.snapReqs[0].VMState {
-		t.Errorf("requests = %+v\n%s", e.api.snapReqs, e.stdout)
+	if !strings.Contains(e.stdout.String(), "Apply this plan? Type yes: ") || len(e.api.SnapshotReqs) != 1 || e.api.SnapshotReqs[0].VMState {
+		t.Errorf("requests = %+v\n%s", e.api.SnapshotReqs, e.stdout)
 	}
 }
 
@@ -70,8 +62,8 @@ func TestSnapshotCommandChecksTheName(t *testing.T) {
 	if code := e.run("snapshot", "-teams", "7", "-name", "initial", "-yes"); code != 1 || !strings.Contains(e.stderr.String(), "is the baseline snapshot a deploy takes") {
 		t.Errorf("code = %d, stderr = %q", code, e.stderr)
 	}
-	if len(e.api.snapReqs) != 0 {
-		t.Errorf("requests = %+v", e.api.snapReqs)
+	if len(e.api.SnapshotReqs) != 0 {
+		t.Errorf("requests = %+v", e.api.SnapshotReqs)
 	}
 }
 

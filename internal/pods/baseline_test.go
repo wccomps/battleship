@@ -53,9 +53,9 @@ func TestBaselineSnapshot(t *testing.T) {
 
 func TestResetBaselineUsesSnaptime(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "fresh_clone_20261003000000", "fresh_clone_20261002034615")
-	f.setSnapTime(10121, "fresh_clone_20261003000000", 1000)
-	f.setSnapTime(10121, "fresh_clone_20261002034615", 2000)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "fresh_clone_20261003000000", "fresh_clone_20261002034615")
+	f.SetSnapTime(10121, "fresh_clone_20261003000000", 1000)
+	f.SetSnapTime(10121, "fresh_clone_20261002034615", 2000)
 	rs, err := testPlanner(f).Reset(context.Background(), []string{"01"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
@@ -68,8 +68,8 @@ func TestResetBaselineUsesSnaptime(t *testing.T) {
 // A snapshot named explicitly is matched exactly, with no baseline fallback.
 func TestResetExplicitSnapshotIsExact(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "fresh_clone_20261002034615")
-	f.add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil, "initial")
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "fresh_clone_20261002034615")
+	f.Add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil, "initial")
 	rs, err := testPlanner(f).Reset(context.Background(), []string{"01"}, nil, "initial")
 	if err != nil {
 		t.Fatal(err)

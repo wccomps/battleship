@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -15,7 +16,7 @@ func TestPowerSkipsVMsAlreadyInTheStateTheActionLeaves(t *testing.T) {
 	for _, a := range pods.PowerActions {
 		for _, status := range []string{"running", "stopped"} {
 			f := newCluster()
-			f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: status}, map[string]string{"name": "team01-teak"})
+			f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: status}, map[string]string{"name": "team01-teak"})
 			plan, err := testPlanner(f).Power(context.Background(), []string{"01"}, []string{"teak"}, a.Value)
 			if err != nil {
 				t.Fatal(err)
@@ -29,8 +30,8 @@ func TestPowerSkipsVMsAlreadyInTheStateTheActionLeaves(t *testing.T) {
 			if want := a.Leaves == status; skipped != want {
 				t.Errorf("%s on a %s VM: skipped = %t, want %t", a.Value, status, skipped, want)
 			}
-			if a.Leaves != "" && f.vms[10121].Status != a.Leaves {
-				t.Errorf("%s on a %s VM left it %s, want %s", a.Value, status, f.vms[10121].Status, a.Leaves)
+			if a.Leaves != "" && f.VMs[10121].Status != a.Leaves {
+				t.Errorf("%s on a %s VM left it %s, want %s", a.Value, status, f.VMs[10121].Status, a.Leaves)
 			}
 		}
 	}
@@ -43,15 +44,15 @@ func TestPowerSkipsVMsAlreadyInTheStateTheActionLeaves(t *testing.T) {
 // first, finds it already stopped.
 func TestTaskThatCantBeFollowedIsCheckedNotAssumed(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
-	stopTask := upid("cedar", "qmstop", 10121)
-	f.waitHook = func(_ context.Context, id string) error { // runs with f.mu held
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
+	stopTask := podstest.UPID("cedar", "qmstop", 10121)
+	f.WaitHook = func(_ context.Context, id string) error { // runs with f.Mu held
 		if id != stopTask {
 			return nil
 		}
-		f.waitHook = nil
+		f.WaitHook = nil
 		// The task is still running: the VM stays locked for two more reads.
-		f.lockConfig, f.lockName = map[int]int{10121: 2}, "stop"
+		f.LockConfig, f.LockName = map[int]int{10121: 2}, "stop"
 		return &proxmox.APIError{Status: 403, Message: "Permission check failed (/nodes/cedar, Sys.Audit)"}
 	}
 	plan, err := testPlanner(f).Power(context.Background(), []string{"01"}, []string{"teak"}, "stop")

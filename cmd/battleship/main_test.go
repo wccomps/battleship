@@ -11,97 +11,67 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
+	"strconv"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// fakeAPI overrides only what the CLI tests exercise; any other call panics
-// on the nil embedded interface.
+// fakeAPI is the shared fake cluster on n1, each VM with one disk, and
+// deletes that fail as the CLI tests set. Its fields are guarded by the
+// fake's Mu.
 type fakeAPI struct {
-	pods.API
-	mu        sync.Mutex
-	vms       []proxmox.VM
-	snapshots map[int][]string // by VMID
-	deleteErr map[int]error
-	deleted   []int
-	rolled    []int
-	snapReqs  []proxmox.SnapshotRequest
+	*podstest.Fake
+	deleteErr map[int]error // fails every DeleteVM of these VMIDs
 }
 
-func (f *fakeAPI) ClusterVMs(context.Context) ([]proxmox.VM, error) { return f.vms, nil }
-func (f *fakeAPI) OnlineNodes(context.Context) ([]string, error)    { return []string{"n1"}, nil }
-func (f *fakeAPI) Snapshots(_ context.Context, _ string, vmid int) ([]proxmox.Snapshot, error) {
-	var out []proxmox.Snapshot
-	for _, n := range f.snapshots[vmid] {
-		out = append(out, proxmox.Snapshot{Name: n})
+func newFakeAPI(vms ...proxmox.VM) *fakeAPI {
+	f := &fakeAPI{Fake: podstest.New("n1"), deleteErr: map[int]error{}}
+	for _, vm := range vms {
+		f.Add(vm, map[string]string{"scsi0": fmt.Sprintf("competitions:%d/vm-%d-disk-0.qcow2", vm.VMID, vm.VMID)})
 	}
-	return out, nil
-}
-func (f *fakeAPI) CurrentStatus(context.Context, string, int) (string, error) {
-	return "stopped", nil
-}
-func (f *fakeAPI) Power(context.Context, string, int, string) (string, error) {
-	return "UPID:x", nil
-}
-func (f *fakeAPI) WaitTask(context.Context, string, time.Duration) error { return nil }
-func (f *fakeAPI) StopTask(context.Context, string) error                { return nil }
-func (f *fakeAPI) Shutdown(context.Context, string, int, time.Duration, bool) (string, error) {
-	return "UPID:x", nil
+	f.Gate = f.hold
+	return f
 }
 
-// VMConfig reports deleted VMs as gone, as the executor checks after a delete.
-func (f *fakeAPI) VMConfig(_ context.Context, _ string, vmid int) (map[string]string, error) {
-	if f.isDeleted(vmid) {
-		return nil, notExist(vmid)
-	}
-	return map[string]string{"scsi0": "local:vm-disk-0"}, nil
-}
-
-// StorageContent reports a deleted VM's disks as freed with it.
-func (f *fakeAPI) StorageContent(_ context.Context, _, _ string, vmid int) ([]string, error) {
-	if f.isDeleted(vmid) {
+// hold is the fake's Gate: it fails deletes in deleteErr.
+func (f *fakeAPI) hold(_ context.Context, key string) (func(), error) {
+	id, ok := strings.CutPrefix(key, "delete:")
+	if !ok {
 		return nil, nil
 	}
-	return []string{"local:vm-disk-0"}, nil
+	vmid, _ := strconv.Atoi(id)
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	return nil, f.deleteErr[vmid]
 }
 
-// DeleteVolume frees a volume at once; the fake never leaves one behind.
-func (f *fakeAPI) DeleteVolume(context.Context, string, string, string) (string, error) {
-	return "", nil
+// setSnapshots replaces a VM's snapshots.
+func (f *fakeAPI) setSnapshots(vmid int, snaps ...string) {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	f.VMs[vmid].Snapshots = snaps
 }
 
-func (f *fakeAPI) isDeleted(vmid int) bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Contains(f.deleted, vmid)
-}
-
-func notExist(vmid int) error {
-	return &proxmox.APIError{Status: 500, Message: fmt.Sprintf("Configuration file 'nodes/n1/qemu-server/%d.conf' does not exist", vmid)}
-}
-func (f *fakeAPI) Rollback(_ context.Context, _ string, vmid int, _ string) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.rolled = append(f.rolled, vmid)
-	return "UPID:x", nil
-}
-func (f *fakeAPI) DeleteVM(_ context.Context, _ string, vmid int) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err := f.deleteErr[vmid]; err != nil {
-		return "", err
+// rolled lists the VMIDs rolled back, in order.
+func (f *fakeAPI) rolled() []int {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	var out []int
+	for _, c := range f.Calls {
+		if rest, ok := strings.CutPrefix(c, "rollback:"); ok {
+			id, _, _ := strings.Cut(rest, ":")
+			vmid, _ := strconv.Atoi(id)
+			out = append(out, vmid)
+		}
 	}
-	f.deleted = append(f.deleted, vmid)
-	return "UPID:x", nil
+	return out
 }
 
 type env struct {
@@ -124,7 +94,7 @@ func newEnv(t *testing.T, interactive bool, input string, vms ...proxmox.VM) *en
 	t.Setenv("BATTLESHIP_PROXMOX_TOKEN_SECRET", "secret")
 	t.Setenv("BATTLESHIP_SEAL_KEY", testSealKey)
 	t.Setenv("BATTLESHIP_DATABASE_URL", "") // direct runs stay in-process unless a test adds a store
-	e := &env{api: &fakeAPI{vms: vms, snapshots: map[int][]string{}, deleteErr: map[int]error{}},
+	e := &env{api: newFakeAPI(vms...),
 		stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, cfg: cfg}
 	e.d = deps{
 		newAPI:      func(config.Proxmox) pods.API { return e.api },
@@ -156,7 +126,7 @@ func TestRejectsStrayPositionalArgs(t *testing.T) {
 		if !strings.Contains(e.stderr.String(), "unexpected argument") {
 			t.Errorf("stderr = %q", e.stderr.String())
 		}
-		if len(e.api.deleted)+len(e.api.rolled) != 0 {
+		if len(e.api.Deleted)+len(e.api.rolled()) != 0 {
 			t.Errorf("run(%v) changed something", args)
 		}
 	}
@@ -197,8 +167,8 @@ func TestInteractiveTeardownNeedsTheRange(t *testing.T) {
 	if code := e.run("teardown", "-teams", "1-2"); code != 0 {
 		t.Fatalf("code = %d\n%s%s", code, e.stdout, e.stderr)
 	}
-	if len(e.api.deleted) != 2 {
-		t.Errorf("deleted = %v", e.api.deleted)
+	if len(e.api.Deleted) != 2 {
+		t.Errorf("deleted = %v", e.api.Deleted)
 	}
 	if !strings.Contains(e.stdout.String(), "Type the team range (1-2) to delete these VMs: ") {
 		t.Errorf("no range prompt:\n%s", e.stdout)
@@ -208,36 +178,36 @@ func TestInteractiveTeardownNeedsTheRange(t *testing.T) {
 	if code := e.run("teardown", "-teams", "1-2"); code != 1 {
 		t.Fatalf("code = %d, want 1", code)
 	}
-	if len(e.api.deleted) != 0 {
-		t.Errorf("deleted = %v", e.api.deleted)
+	if len(e.api.Deleted) != 0 {
+		t.Errorf("deleted = %v", e.api.Deleted)
 	}
 	if !strings.Contains(e.stdout.String(), "Cancelled; nothing changed.") {
 		t.Errorf("missing cancel message:\n%s", e.stdout)
 	}
 
 	e = newEnv(t, true, "", vms...) // EOF
-	if code := e.run("teardown", "-teams", "1-2"); code != 1 || len(e.api.deleted) != 0 {
-		t.Errorf("EOF: code = %d, deleted = %v", code, e.api.deleted)
+	if code := e.run("teardown", "-teams", "1-2"); code != 1 || len(e.api.Deleted) != 0 {
+		t.Errorf("EOF: code = %d, deleted = %v", code, e.api.Deleted)
 	}
 }
 
 func TestInteractiveResetAcceptsYes(t *testing.T) {
 	e := newEnv(t, true, "yes\n", vm(10701, "team07-dc"))
-	e.api.snapshots[10701] = []string{"initial"}
+	e.api.setSnapshots(10701, "initial")
 	if code := e.run("reset", "-teams", "7"); code != 0 {
 		t.Fatalf("code = %d\n%s%s", code, e.stdout, e.stderr)
 	}
-	if len(e.api.rolled) != 1 {
-		t.Errorf("rolled = %v", e.api.rolled)
+	if len(e.api.rolled()) != 1 {
+		t.Errorf("rolled = %v", e.api.rolled())
 	}
 	if !strings.Contains(e.stdout.String(), "Apply this plan? Type yes: ") {
 		t.Errorf("no prompt:\n%s", e.stdout)
 	}
 
 	e = newEnv(t, true, "y\n", vm(10701, "team07-dc"))
-	e.api.snapshots[10701] = []string{"initial"}
-	if code := e.run("reset", "-teams", "7"); code != 1 || len(e.api.rolled) != 0 {
-		t.Errorf("code = %d, rolled = %v", code, e.api.rolled)
+	e.api.setSnapshots(10701, "initial")
+	if code := e.run("reset", "-teams", "7"); code != 1 || len(e.api.rolled()) != 0 {
+		t.Errorf("code = %d, rolled = %v", code, e.api.rolled())
 	}
 }
 
@@ -246,8 +216,8 @@ func TestNonInteractiveWithoutYesChangesNothing(t *testing.T) {
 	if code := e.run("teardown", "-teams", "1"); code != 0 {
 		t.Fatalf("code = %d", code)
 	}
-	if len(e.api.deleted) != 0 {
-		t.Errorf("deleted = %v", e.api.deleted)
+	if len(e.api.Deleted) != 0 {
+		t.Errorf("deleted = %v", e.api.Deleted)
 	}
 	if !strings.Contains(e.stdout.String(), "Nothing changed. Re-run with -yes to re-plan and apply.") {
 		t.Errorf("stdout:\n%s", e.stdout)
@@ -256,8 +226,8 @@ func TestNonInteractiveWithoutYesChangesNothing(t *testing.T) {
 
 func TestYesExecutes(t *testing.T) {
 	e := newEnv(t, false, "", vm(10101, "team01-dc"))
-	if code := e.run("teardown", "-teams", "1", "-yes"); code != 0 || len(e.api.deleted) != 1 {
-		t.Errorf("code = %d, deleted = %v", code, e.api.deleted)
+	if code := e.run("teardown", "-teams", "1", "-yes"); code != 0 || len(e.api.Deleted) != 1 {
+		t.Errorf("code = %d, deleted = %v", code, e.api.Deleted)
 	}
 }
 
@@ -276,12 +246,12 @@ func TestAllBlockedExitsOne(t *testing.T) {
 
 func TestPartlyBlockedYesExitsOne(t *testing.T) {
 	e := newEnv(t, false, "", vm(10701, "team07-dc"), vm(10702, "team07-web"))
-	e.api.snapshots[10701] = []string{"initial"}
+	e.api.setSnapshots(10701, "initial")
 	if code := e.run("reset", "-teams", "7", "-yes"); code != 1 {
 		t.Fatalf("code = %d, want 1\n%s", code, e.stdout)
 	}
-	if len(e.api.rolled) != 1 {
-		t.Errorf("rolled = %v", e.api.rolled)
+	if len(e.api.rolled()) != 1 {
+		t.Errorf("rolled = %v", e.api.rolled())
 	}
 }
 
@@ -365,8 +335,8 @@ func TestRunRejectsBadArgs(t *testing.T) {
 
 func TestTeardownConfirmTrimsRange(t *testing.T) {
 	e := newEnv(t, true, "1-2\n", vm(10101, "team01-dc"), vm(10201, "team02-dc"))
-	if code := e.run("teardown", "-teams", " 1-2 "); code != 0 || len(e.api.deleted) != 2 {
-		t.Fatalf("code = %d, deleted = %v\n%s%s", code, e.api.deleted, e.stdout, e.stderr)
+	if code := e.run("teardown", "-teams", " 1-2 "); code != 0 || len(e.api.Deleted) != 2 {
+		t.Fatalf("code = %d, deleted = %v\n%s%s", code, e.api.Deleted, e.stdout, e.stderr)
 	}
 	if !strings.Contains(e.stdout.String(), "Type the team range (1-2) to delete") {
 		t.Errorf("prompt should show the trimmed range:\n%s", e.stdout)
@@ -375,12 +345,12 @@ func TestTeardownConfirmTrimsRange(t *testing.T) {
 
 func TestCtrlCAtPromptCancels(t *testing.T) {
 	e := newEnv(t, true, "yes\n", vm(10701, "team07-dc"))
-	e.api.snapshots[10701] = []string{"initial"}
+	e.api.setSnapshots(10701, "initial")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	code := run(ctx, []string{"reset", "-teams", "7", "-config", e.cfg}, e.d)
-	if code != 1 || len(e.api.rolled) != 0 {
-		t.Errorf("code = %d, rolled = %v", code, e.api.rolled)
+	if code != 1 || len(e.api.rolled()) != 0 {
+		t.Errorf("code = %d, rolled = %v", code, e.api.rolled())
 	}
 	if !strings.Contains(e.stdout.String(), "Cancelled; nothing changed.") {
 		t.Errorf("stdout:\n%s", e.stdout)
@@ -438,12 +408,12 @@ func TestPrintCleanupSummary(t *testing.T) {
 func TestVMsFlagTargetsExactVMs(t *testing.T) {
 	e := newEnv(t, false, "", vm(10101, "team01-dc"), vm(10102, "team01-web"), vm(10201, "team02-dc"), vm(10202, "team02-web"))
 	for _, id := range []int{10101, 10102, 10201, 10202} {
-		e.api.snapshots[id] = []string{"initial"}
+		e.api.setSnapshots(id, "initial")
 	}
 	if code := e.run("reset", "-teams", "1-2", "-vms", "team01-dc, team02-web", "-yes"); code != 0 {
 		t.Fatalf("code = %d\n%s%s", code, e.stdout, e.stderr)
 	}
-	if got := fmt.Sprint(e.api.rolled); got != "[10101 10202]" && got != "[10202 10101]" {
+	if got := fmt.Sprint(e.api.rolled()); got != "[10101 10202]" && got != "[10202 10101]" {
 		t.Errorf("rolled back %v, want exactly 10101 and 10202", got)
 	}
 	if strings.Contains(e.stdout.String(), "team01-web") || strings.Contains(e.stdout.String(), "team02-dc") {
@@ -459,8 +429,8 @@ func TestVMsFlagChecksNames(t *testing.T) {
 	if !strings.Contains(e.stderr.String(), "team02-dc is not in teams 1") {
 		t.Errorf("stderr:\n%s", e.stderr)
 	}
-	if len(e.api.deleted) != 0 {
-		t.Errorf("deleted %v", e.api.deleted)
+	if len(e.api.Deleted) != 0 {
+		t.Errorf("deleted %v", e.api.Deleted)
 	}
 	e = newEnv(t, false, "", vm(10101, "team01-dc"))
 	if code := e.run("teardown", "-teams", "1", "-vms", " , ", "-yes"); code != 2 {

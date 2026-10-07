@@ -21,6 +21,7 @@ import (
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/proxmox/pvetest"
 	"github.com/wccomps/battleship/internal/status"
@@ -28,14 +29,11 @@ import (
 	"github.com/wccomps/battleship/internal/store/storetest"
 )
 
-// fakeAPI is an in-memory cluster with the calls the status poller and
-// the planner make. Other methods panic through the nil embedded API.
+// fakeAPI is the shared fake cluster on n1 and n2, with the failures the
+// web tests set and a gate that holds and counts its config reads. Its
+// fields are guarded by the fake's Mu.
 type fakeAPI struct {
-	pods.API
-	mu      sync.Mutex
-	vms     []proxmox.VM
-	configs map[int]map[string]string
-	snaps   map[int][]string
+	*podstest.Fake
 	listErr error
 	readErr map[int]error
 	// gate, if set, holds each VMConfig call until it receives; entered,
@@ -48,28 +46,28 @@ type fakeAPI struct {
 }
 
 func (f *fakeAPI) readCounts() (reads, inFlight, maxInFlight int) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
 	return f.configReads, f.inFlight, f.maxInFlight
 }
 
 func newFakeAPI() *fakeAPI {
-	return &fakeAPI{configs: map[int]map[string]string{}, snaps: map[int][]string{}, readErr: map[int]error{}}
+	f := &fakeAPI{Fake: podstest.New("n1", "n2"), readErr: map[int]error{}}
+	f.Gate = f.hold
+	return f
 }
 
 func (f *fakeAPI) add(vm proxmox.VM, cfg map[string]string, snaps ...string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.vms = append(f.vms, vm)
-	f.configs[vm.VMID] = cfg
-	f.snaps[vm.VMID] = snaps
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	f.Add(vm, cfg, snaps...)
 }
 
 // remove deletes the VMs with these names, as a teardown would.
 func (f *fakeAPI) remove(names ...string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.vms = slices.DeleteFunc(f.vms, func(vm proxmox.VM) bool { return slices.Contains(names, vm.Name) })
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	maps.DeleteFunc(f.VMs, func(_ int, vm *podstest.VM) bool { return slices.Contains(names, vm.Name) })
 }
 
 // noTeamVMs removes the team VMs the harness starts with: those of teams
@@ -85,64 +83,57 @@ func (h *harness) noTeamVMs() {
 }
 
 func (f *fakeAPI) setStatus(vmid int, s string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for i := range f.vms {
-		if f.vms[i].VMID == vmid {
-			f.vms[i].Status = s
-		}
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	if vm, ok := f.VMs[vmid]; ok {
+		vm.Status = s
 	}
 }
 
 func (f *fakeAPI) setListErr(err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
 	f.listErr = err
 }
 
 func (f *fakeAPI) setReadErr(vmid int, err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
 	f.readErr[vmid] = err
-}
-
-func (f *fakeAPI) ClusterVMs(context.Context) ([]proxmox.VM, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.listErr != nil {
-		return nil, f.listErr
-	}
-	return slices.Clone(f.vms), nil
-}
-
-// StorageContent reports no volumes: the fake's VMs have no disks.
-func (f *fakeAPI) StorageContent(context.Context, string, string, int) ([]string, error) {
-	return nil, nil
-}
-
-func (f *fakeAPI) OnlineNodes(context.Context) ([]string, error) {
-	return []string{"n1", "n2"}, nil
 }
 
 // setSnapshots replaces a VM's snapshots.
 func (f *fakeAPI) setSnapshots(vmid int, snaps ...string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.snaps[vmid] = snaps
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	f.VMs[vmid].Snapshots = snaps
 }
 
-func (f *fakeAPI) VMConfig(ctx context.Context, _ string, vmid int) (map[string]string, error) {
-	f.mu.Lock()
+// hold is the fake's Gate. It fails listings with listErr. It counts each
+// config read, reports it on entered, waits for the gate, and fails it
+// with readErr.
+func (f *fakeAPI) hold(ctx context.Context, key string) (func(), error) {
+	if key == "cluster" {
+		f.Mu.Lock()
+		defer f.Mu.Unlock()
+		return nil, f.listErr
+	}
+	id, ok := strings.CutPrefix(key, "config:")
+	if !ok {
+		return nil, nil
+	}
+	vmid, _ := strconv.Atoi(id)
+	f.Mu.Lock()
 	f.configReads++
 	f.inFlight++
 	f.maxInFlight = max(f.maxInFlight, f.inFlight)
 	gate, entered := f.gate, f.entered
-	f.mu.Unlock()
-	defer func() {
-		f.mu.Lock()
+	f.Mu.Unlock()
+	done := func() {
+		f.Mu.Lock()
 		f.inFlight--
-		f.mu.Unlock()
-	}()
+		f.Mu.Unlock()
+	}
 	if entered != nil {
 		entered <- vmid
 	}
@@ -150,29 +141,12 @@ func (f *fakeAPI) VMConfig(ctx context.Context, _ string, vmid int) (map[string]
 		select {
 		case <-gate:
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return done, ctx.Err()
 		}
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err := f.readErr[vmid]; err != nil {
-		return nil, err
-	}
-	cfg, ok := f.configs[vmid]
-	if !ok {
-		return nil, &proxmox.APIError{Status: 500, Message: fmt.Sprintf("Configuration file 'qemu-server/%d.conf' does not exist", vmid)}
-	}
-	return maps.Clone(cfg), nil
-}
-
-func (f *fakeAPI) Snapshots(_ context.Context, _ string, vmid int) ([]proxmox.Snapshot, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var out []proxmox.Snapshot
-	for _, n := range f.snaps[vmid] {
-		out = append(out, proxmox.Snapshot{Name: n})
-	}
-	return out, nil
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	return done, f.readErr[vmid]
 }
 
 // fakeHistory answers LastItemResults from a map. Its database clock is the

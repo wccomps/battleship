@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -15,7 +16,7 @@ import (
 // from its pool and ACLs, as seen in production for VM 11904.
 func userCfgTimeout(node string, vmid int) error {
 	return &proxmox.TaskError{
-		UPID:       upid(node, "qmdestroy", vmid),
+		UPID:       podstest.UPID(node, "qmdestroy", vmid),
 		ExitStatus: "access permissions cleanup for VM 10121 failed: cfs-lock 'file-user_cfg' error: got lock request timeout",
 		LogTail: []string{
 			"trying to acquire cfs lock 'storage-competitions' ...",
@@ -27,7 +28,7 @@ func userCfgTimeout(node string, vmid int) error {
 	}
 }
 
-func teardownTeam01(t *testing.T, f *fakeAPI) *pods.Plan {
+func teardownTeam01(t *testing.T, f *podstest.Fake) *pods.Plan {
 	t.Helper()
 	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
 	if err != nil {
@@ -50,10 +51,10 @@ func wantHalfDeletedAdvice(t *testing.T, msg string) {
 // refused. The VM must end failed with advice, never done.
 func TestHalfDeletedVMFailsWithAdvice(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
 	plan := teardownTeam01(t, f)
-	f.halfDestroy = map[int]bool{10121: true}
-	f.failOn("wait:"+upid("cedar", "qmdestroy", 10121), userCfgTimeout("cedar", 10121))
+	f.HalfDestroy = map[int]bool{10121: true}
+	f.FailOn("wait:"+podstest.UPID("cedar", "qmdestroy", 10121), userCfgTimeout("cedar", 10121))
 	rec := &recorder{}
 
 	res := testExecutor(f, rec).Run(context.Background(), plan)
@@ -69,10 +70,10 @@ func TestHalfDeletedVMFailsWithAdvice(t *testing.T) {
 		t.Errorf("skipped events = %+v, want none (not \"already deleted\")", ev)
 	}
 	// The re-POST can only fail on the destroyed lock.
-	if n := f.called("delete:10121"); n != 1 {
+	if n := f.Called("delete:10121"); n != 1 {
 		t.Errorf("delete POSTed %d times, want 1", n)
 	}
-	if vm := f.vms[10121]; vm == nil || vm.Config["lock"] != "destroyed" {
+	if vm := f.VMs[10121]; vm == nil || vm.Config["lock"] != "destroyed" {
 		t.Errorf("fake VM = %+v, want the half-deleted VM left alone", vm)
 	}
 }
@@ -81,7 +82,7 @@ func TestHalfDeletedVMFailsWithAdvice(t *testing.T) {
 // delete, so none is sent.
 func TestDestroyedLockIsNotRetried(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"},
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"},
 		map[string]string{"name": "team01-teak", "lock": "destroyed"})
 	plan := teardownTeam01(t, f)
 	ex := testExecutor(f, &recorder{})
@@ -93,7 +94,7 @@ func TestDestroyedLockIsNotRetried(t *testing.T) {
 		t.Fatalf("result = %+v, want team01-teak failed", res)
 	}
 	wantHalfDeletedAdvice(t, proxmox.Describe(err))
-	if n := f.called("delete:10121"); n != 0 {
+	if n := f.Called("delete:10121"); n != 0 {
 		t.Errorf("delete POSTed %d times, want 0", n)
 	}
 }
@@ -118,9 +119,9 @@ func TestDestroyedLockIsNotRetryable(t *testing.T) {
 // A delete task that reports OK while the VM is still there is not done.
 func TestDeleteIsVerified(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
 	plan := teardownTeam01(t, f)
-	f.deleteLeaves = map[int]bool{10121: true}
+	f.DeleteLeaves = map[int]bool{10121: true}
 	ex := testExecutor(f, &recorder{})
 	ex.Cfg.Retry.Rounds = 0
 
@@ -134,10 +135,10 @@ func TestDeleteIsVerified(t *testing.T) {
 // half-deleted VM is not "already deleted".
 func TestHalfDeletedVMIsNotAlreadyDeleted(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
 	plan := teardownTeam01(t, f)
-	f.vms[10121].Name = "VM 10121"
-	f.vms[10121].Config = map[string]string{"lock": "destroyed"}
+	f.VMs[10121].Name = "VM 10121"
+	f.VMs[10121].Config = map[string]string{"lock": "destroyed"}
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	err := res.Failed["team01-teak"]
@@ -145,7 +146,7 @@ func TestHalfDeletedVMIsNotAlreadyDeleted(t *testing.T) {
 		t.Fatalf("result = %+v, want team01-teak failed", res)
 	}
 	wantHalfDeletedAdvice(t, proxmox.Describe(err))
-	if n := f.called("delete:10121"); n != 0 {
+	if n := f.Called("delete:10121"); n != 0 {
 		t.Errorf("delete POSTed %d times, want 0", n)
 	}
 }
@@ -168,7 +169,7 @@ func TestDeletesAreCapped(t *testing.T) {
 	for i := 1; i <= 8; i++ {
 		team := pods.FormatTeam(i)
 		teams = append(teams, team)
-		f.add(proxmox.VM{VMID: 10021 + 100*i, Name: "team" + team + "-teak", Node: "cedar"}, nil)
+		f.Add(proxmox.VM{VMID: 10021 + 100*i, Name: "team" + team + "-teak", Node: "cedar"}, nil)
 	}
 	plan, err := testPlanner(f).Teardown(context.Background(), teams, nil)
 	if err != nil {
@@ -201,31 +202,31 @@ func TestDeletesShareLimitsAcrossExecutors(t *testing.T) {
 // Proxmox hard-stopping them after the timeout.
 func TestTeardownShutsDownGracefully(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
 	plan := teardownTeam01(t, f)
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	if len(res.Failed) != 0 || len(res.Succeeded) != 1 {
 		t.Fatalf("result = %+v", res)
 	}
-	if n := f.called("shutdown:10121:1m0s:true"); n != 1 {
-		t.Errorf("graceful shutdown with 60s timeout and forceStop sent %d times, want 1; calls=%v", n, f.calls)
+	if n := f.Called("shutdown:10121:1m0s:true"); n != 1 {
+		t.Errorf("graceful shutdown with 60s timeout and forceStop sent %d times, want 1; calls=%v", n, f.Calls)
 	}
-	if n := f.called("power:10121:stop"); n != 0 {
+	if n := f.Called("power:10121:stop"); n != 0 {
 		t.Errorf("hard stop sent %d times, want 0", n)
 	}
-	if _, ok := f.vms[10121]; ok {
+	if _, ok := f.VMs[10121]; ok {
 		t.Error("VM not deleted")
 	}
 }
 
 func TestTeardownHardStopsWhenShutdownFails(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
 	plan := teardownTeam01(t, f)
-	f.stuckShutdown = map[int]bool{10121: true}
-	f.failOn("wait:"+upid("cedar", "qmshutdown", 10121),
-		&proxmox.TaskError{UPID: upid("cedar", "qmshutdown", 10121), ExitStatus: "VM quit/powerdown failed - got timeout"})
+	f.StuckShutdown = map[int]bool{10121: true}
+	f.FailOn("wait:"+podstest.UPID("cedar", "qmshutdown", 10121),
+		&proxmox.TaskError{UPID: podstest.UPID("cedar", "qmshutdown", 10121), ExitStatus: "VM quit/powerdown failed - got timeout"})
 	ex := testExecutor(f, &recorder{})
 	ex.Cfg.Teardown.ShutdownTimeout = 5 * time.Second
 
@@ -233,28 +234,28 @@ func TestTeardownHardStopsWhenShutdownFails(t *testing.T) {
 	if len(res.Failed) != 0 || len(res.Succeeded) != 1 {
 		t.Fatalf("result = %+v", res)
 	}
-	if n := f.called("shutdown:10121:5s:true"); n != 1 {
-		t.Errorf("shutdown sent %d times, want 1; calls=%v", n, f.calls)
+	if n := f.Called("shutdown:10121:5s:true"); n != 1 {
+		t.Errorf("shutdown sent %d times, want 1; calls=%v", n, f.Calls)
 	}
-	if n := f.called("power:10121:stop"); n != 1 {
+	if n := f.Called("power:10121:stop"); n != 1 {
 		t.Errorf("hard stop sent %d times, want 1 after the failed shutdown", n)
 	}
-	if _, ok := f.vms[10121]; ok {
+	if _, ok := f.VMs[10121]; ok {
 		t.Error("VM not deleted")
 	}
 }
 
 func TestTeardownOfStoppedVMSendsNoStop(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
 	plan := teardownTeam01(t, f)
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	if len(res.Succeeded) != 1 {
 		t.Fatalf("result = %+v", res)
 	}
-	if f.called("shutdown:") != 0 || f.called("power:") != 0 {
-		t.Errorf("calls = %v, want no shutdown or stop for a stopped VM", f.calls)
+	if f.Called("shutdown:") != 0 || f.Called("power:") != 0 {
+		t.Errorf("calls = %v, want no shutdown or stop for a stopped VM", f.Calls)
 	}
 }
 
@@ -263,18 +264,18 @@ func TestTeardownOfStoppedVMSendsNoStop(t *testing.T) {
 // lives on another node.
 func TestDeleteOfVMThatMovedIsNotCalledDone(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
 	plan := teardownTeam01(t, f)
-	f.onRecord = func(key string) {
+	f.OnRecord = func(key string) {
 		if key == "delete:10121" {
-			f.vms[10121].Node = "birch" // migrated
+			f.VMs[10121].Node = "birch" // migrated
 		}
 	}
 	ex := testExecutor(f, &recorder{})
 	ex.Cfg.Retry.Rounds = 0
 
 	res := ex.Run(context.Background(), plan)
-	if f.vms[10121] == nil {
+	if f.VMs[10121] == nil {
 		t.Fatal("test setup: VM deleted")
 	}
 	err := res.Failed["team01-teak"]
@@ -286,19 +287,19 @@ func TestDeleteOfVMThatMovedIsNotCalledDone(t *testing.T) {
 // The next round deletes it on its new node.
 func TestDeleteOfVMThatMovedIsRetriedThere(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
 	plan := teardownTeam01(t, f)
 	moved := false
-	f.onRecord = func(key string) {
+	f.OnRecord = func(key string) {
 		if key == "delete:10121" && !moved {
 			moved = true
-			f.vms[10121].Node = "birch"
+			f.VMs[10121].Node = "birch"
 		}
 	}
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
-	if f.vms[10121] != nil || len(res.Succeeded) != 1 {
-		t.Errorf("result = %+v, VM = %+v; want it deleted on its new node", res, f.vms[10121])
+	if f.VMs[10121] != nil || len(res.Succeeded) != 1 {
+		t.Errorf("result = %+v, VM = %+v; want it deleted on its new node", res, f.VMs[10121])
 	}
 }
 
@@ -307,16 +308,16 @@ func TestDeleteOfVMThatMovedIsRetriedThere(t *testing.T) {
 // still running, not a half-deleted VM.
 func TestResentDeleteWaitsForItsOwnDestroy(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
 	plan := teardownTeam01(t, f)
-	f.deleteThenFail = map[int]error{10121: &proxmox.APIError{Status: 596, Message: "Connection timed out"}}
-	f.destroyReads = 3
+	f.DeleteThenFail = map[int]error{10121: &proxmox.APIError{Status: 596, Message: "Connection timed out"}}
+	f.DestroyReads = 3
 	ex := testExecutor(f, &recorder{})
 	ex.Cfg.Retry.Rounds = 0
 
 	res := ex.Run(context.Background(), plan)
-	if len(res.Succeeded) != 1 || f.vms[10121] != nil {
-		t.Errorf("result = %+v, VM = %+v; want team01-teak deleted", res, f.vms[10121])
+	if len(res.Succeeded) != 1 || f.VMs[10121] != nil {
+		t.Errorf("result = %+v, VM = %+v; want team01-teak deleted", res, f.VMs[10121])
 	}
 }
 
@@ -326,9 +327,9 @@ func TestResentDeleteWaitsForItsOwnDestroy(t *testing.T) {
 // once, by name.
 func TestTeardownPlansHalfDeletedVMs(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
-	f.halfDestroy = map[int]bool{10121: true}
-	f.failOn("wait:"+upid("cedar", "qmdestroy", 10121), userCfgTimeout("cedar", 10121))
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
+	f.HalfDestroy = map[int]bool{10121: true}
+	f.FailOn("wait:"+podstest.UPID("cedar", "qmdestroy", 10121), userCfgTimeout("cedar", 10121))
 	testExecutor(f, &recorder{}).Run(context.Background(), teardownTeam01(t, f))
 
 	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
@@ -344,7 +345,7 @@ func TestTeardownPlansHalfDeletedVMs(t *testing.T) {
 	}
 
 	named := newCluster()
-	named.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "stopped"}, map[string]string{"name": "team01-teak", "lock": "destroyed"})
+	named.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "stopped"}, map[string]string{"name": "team01-teak", "lock": "destroyed"})
 	plan, err = testPlanner(named).Teardown(context.Background(), []string{"01"}, nil)
 	if err != nil || len(plan.Items) != 1 || plan.Items[0].Name != "team01-teak" {
 		t.Fatalf("named half-deleted VM: items %+v, err %v; want it once, by name", plan, err)

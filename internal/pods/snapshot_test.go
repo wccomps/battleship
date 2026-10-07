@@ -81,11 +81,11 @@ func TestPropSnapshotNameIsProxmoxGrammar(t *testing.T) {
 
 func TestSnapshotPlan(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "initial")
-	f.add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil, "initial", "before-scoring")
-	f.add(proxmox.VM{VMID: 10221, Name: "team02-teak", Node: "cedar"}, nil)
-	f.add(proxmox.VM{VMID: 10225, Name: "team02-oak", Node: "birch"}, nil)
-	f.failOn("snapshots:10225", errors.New("boom"))
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "initial")
+	f.Add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil, "initial", "before-scoring")
+	f.Add(proxmox.VM{VMID: 10221, Name: "team02-teak", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 10225, Name: "team02-oak", Node: "birch"}, nil)
+	f.FailOn("snapshots:10225", errors.New("boom"))
 	plan, err := testPlanner(f).Snapshot(context.Background(), SnapshotRequest{
 		Teams: []string{"1", "2"}, Name: "before-scoring", Description: "round 2", VMState: true,
 	})
@@ -119,7 +119,7 @@ func TestSnapshotPlan(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	f.failOn("snapshots:10121", context.Canceled)
+	f.FailOn("snapshots:10121", context.Canceled)
 	if _, err := testPlanner(f).Snapshot(ctx, SnapshotRequest{Teams: []string{"01"}, Name: "x1"}); err == nil {
 		t.Error("cancelled context should return an error")
 	}
@@ -127,7 +127,7 @@ func TestSnapshotPlan(t *testing.T) {
 
 func TestSnapshotPlanRefusesBadAndBaselineNames(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
 	for name, why := range map[string]string{
 		"initial":            `"initial" is the baseline snapshot a deploy takes (deploy.snapshot_name)`,
 		"fresh_clone_202610": `"fresh_clone_202610" matches fresh_clone_*, so a reset to the baseline could pick it (deploy.baseline_patterns)`,
@@ -139,8 +139,8 @@ func TestSnapshotPlanRefusesBadAndBaselineNames(t *testing.T) {
 			t.Errorf("Snapshot(%q) = %v, want an error saying %q", name, err, why)
 		}
 	}
-	if f.called("snapshots:") != 0 || f.called("snapshot:") != 0 {
-		t.Errorf("calls = %v, want none for a refused name", f.calls)
+	if f.Called("snapshots:") != 0 || f.Called("snapshot:") != 0 {
+		t.Errorf("calls = %v, want none for a refused name", f.Calls)
 	}
 }
 
@@ -155,7 +155,7 @@ func TestPropSnapshotPlanNeverOverwrites(t *testing.T) {
 			for i, host := range []string{"teak", "oak"} {
 				name := fmt.Sprintf("team%02d-%s", team, host)
 				snaps := rapid.SliceOfDistinct(rapid.SampledFrom(pool), rapid.ID[string]).Draw(t, name)
-				f.add(proxmox.VM{VMID: 10000 + team*100 + 21 + 4*i, Name: name, Node: "cedar"}, nil, snaps...)
+				f.Add(proxmox.VM{VMID: 10000 + team*100 + 21 + 4*i, Name: name, Node: "cedar"}, nil, snaps...)
 				has[name] = snaps
 			}
 		}

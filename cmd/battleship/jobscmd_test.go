@@ -40,8 +40,8 @@ func TestQueueStoresConfirmedPlan(t *testing.T) {
 	if !strings.Contains(e.stdout.String(), "Queued job 1.") {
 		t.Errorf("stdout = %s", e.stdout.String())
 	}
-	if len(e.api.deleted) != 0 {
-		t.Errorf("queueing deleted %v; only the worker should", e.api.deleted)
+	if len(e.api.Deleted) != 0 {
+		t.Errorf("queueing deleted %v; only the worker should", e.api.Deleted)
 	}
 	list, err := st.Jobs(context.Background(), 10)
 	if err != nil || len(list) != 1 || list[0].Status != store.StatusPending || list[0].CreatedBy != "cli:tester" {
@@ -149,10 +149,10 @@ func TestWorkerCommandRunsQueuedJob(t *testing.T) {
 	if !isWorkerID(j.ClaimedBy, "worker") || !strings.Contains(e.stdout.String(), "worker "+j.ClaimedBy+" waiting for jobs") {
 		t.Errorf("claimed by %q, stdout:\n%s", j.ClaimedBy, e.stdout.String())
 	}
-	e.api.mu.Lock()
-	defer e.api.mu.Unlock()
-	if len(e.api.deleted) != 1 || e.api.deleted[0] != 10701 {
-		t.Errorf("deleted = %v", e.api.deleted)
+	e.api.Mu.Lock()
+	defer e.api.Mu.Unlock()
+	if len(e.api.Deleted) != 1 || e.api.Deleted[0] != 10701 {
+		t.Errorf("deleted = %v", e.api.Deleted)
 	}
 }
 
@@ -202,12 +202,6 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-func (f *fakeAPI) deletedIDs() []int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]int(nil), f.deleted...)
-}
-
 func TestDirectRunGoesThroughJobs(t *testing.T) {
 	e := newEnv(t, false, "", vm(10701, "team07-dc"))
 	st := withStore(t, e)
@@ -219,7 +213,7 @@ func TestDirectRunGoesThroughJobs(t *testing.T) {
 	if err != nil || j.Status != store.StatusSucceeded || !isWorkerID(j.ClaimedBy, "cli") || j.CreatedBy != "cli:tester" {
 		t.Fatalf("job = %s, claimed by %q, created by %q, %v", j.Status, j.ClaimedBy, j.CreatedBy, err)
 	}
-	if got := e.api.deletedIDs(); len(got) != 1 || got[0] != 10701 {
+	if got := e.api.DeletedIDs(); len(got) != 1 || got[0] != 10701 {
 		t.Errorf("deleted = %v", got)
 	}
 	out := e.stdout.String()
@@ -277,7 +271,7 @@ func TestDirectRunWaitsForOverlappingJob(t *testing.T) {
 	}
 	// Several polls go by; it must still not touch the team.
 	time.Sleep(300 * time.Millisecond)
-	if got := e.api.deletedIDs(); len(got) != 0 {
+	if got := e.api.DeletedIDs(); len(got) != 0 {
 		t.Fatalf("deleted %v while job %d was active on the team", got, blocker)
 	}
 	if j, _ := st.Job(context.Background(), 2); j.Status != store.StatusPending {
@@ -294,7 +288,7 @@ func TestDirectRunWaitsForOverlappingJob(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("direct run didn't proceed after the blocker was cancelled")
 	}
-	if got := e.api.deletedIDs(); len(got) != 1 || got[0] != 10101 {
+	if got := e.api.DeletedIDs(); len(got) != 1 || got[0] != 10101 {
 		t.Errorf("deleted = %v", got)
 	}
 	if strings.Count(out.String(), "waiting for job(s)") != 1 {
@@ -326,7 +320,7 @@ func TestCtrlCWhileWaitingCancelsJob(t *testing.T) {
 	if j, _ := st.Job(context.Background(), 2); j.Status != store.StatusCancelled {
 		t.Errorf("direct job = %s, want cancelled", j.Status)
 	}
-	if got := e.api.deletedIDs(); len(got) != 0 {
+	if got := e.api.DeletedIDs(); len(got) != 0 {
 		t.Errorf("deleted %v", got)
 	}
 }
@@ -365,7 +359,7 @@ func TestDirectRunReapsDeadJobWithoutWorker(t *testing.T) {
 	if j, _ := st.Job(context.Background(), dead+1); j.Status != store.StatusSucceeded {
 		t.Errorf("direct job = %s, want succeeded", j.Status)
 	}
-	if got := e.api.deletedIDs(); len(got) != 1 || got[0] != 10101 {
+	if got := e.api.DeletedIDs(); len(got) != 1 || got[0] != 10101 {
 		t.Errorf("deleted = %v", got)
 	}
 }

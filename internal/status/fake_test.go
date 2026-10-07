@@ -2,27 +2,24 @@ package status
 
 import (
 	"context"
-	"fmt"
-	"maps"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/wccomps/battleship/internal/config"
-	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// fakeAPI is an in-memory cluster with the three calls the status package
-// makes. Other methods panic through the nil embedded API.
+// fakeAPI is the shared fake cluster on n1, with the failures the status
+// tests set and a gate that holds and counts its VM reads. Its fields are
+// guarded by the fake's Mu.
 type fakeAPI struct {
-	pods.API
-	mu      sync.Mutex
-	vms     []proxmox.VM
-	configs map[int]map[string]string
-	snaps   map[int][]string
+	*podstest.Fake
 	listErr error         // ClusterVMs fails with it
 	readErr map[int]error // VMConfig fails with it for that VMID
 	// gate, if set, holds every VMConfig and Snapshots call until it receives.
@@ -36,88 +33,88 @@ type fakeAPI struct {
 }
 
 func newFakeAPI() *fakeAPI {
-	return &fakeAPI{configs: map[int]map[string]string{}, snaps: map[int][]string{}, readErr: map[int]error{}}
+	f := &fakeAPI{Fake: podstest.New("n1"), readErr: map[int]error{}}
+	f.Gate = f.hold
+	return f
 }
 
 // add puts a VM in the cluster with a config and snapshots.
 func (f *fakeAPI) add(vm proxmox.VM, cfg map[string]string, snaps ...string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.vms = append(f.vms, vm)
-	f.configs[vm.VMID] = cfg
-	f.snaps[vm.VMID] = snaps
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	f.Add(vm, cfg, snaps...)
 }
 
 func (f *fakeAPI) remove(vmid int) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.vms = slices.DeleteFunc(f.vms, func(vm proxmox.VM) bool { return vm.VMID == vmid })
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	delete(f.VMs, vmid)
 }
 
 func (f *fakeAPI) setStatus(vmid int, status string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for i := range f.vms {
-		if f.vms[i].VMID == vmid {
-			f.vms[i].Status = status
-		}
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	if vm, ok := f.VMs[vmid]; ok {
+		vm.Status = status
 	}
 }
 
 func (f *fakeAPI) setConfig(vmid int, key, value string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.configs[vmid][key] = value
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	f.VMs[vmid].Config[key] = value
 }
 
 func (f *fakeAPI) setSnaps(vmid int, snaps ...string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.snaps[vmid] = snaps
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	f.VMs[vmid].Snapshots = snaps
 }
 
 func (f *fakeAPI) setListErr(err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
 	f.listErr = err
 }
 
 func (f *fakeAPI) setReadErr(vmid int, err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
 	f.readErr[vmid] = err
 }
 
 func (f *fakeAPI) counts() (reads, lists, max int) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
 	return f.reads, f.lists, f.max
 }
 
-func (f *fakeAPI) ClusterVMs(context.Context) ([]proxmox.VM, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.lists++
-	if f.listErr != nil {
+// hold is the fake's Gate. It counts listings and fails them with listErr.
+// It counts each VM read, reports it on entered, waits for the gate, and
+// fails a config read with readErr.
+func (f *fakeAPI) hold(ctx context.Context, key string) (func(), error) {
+	if key == "cluster" {
+		f.Mu.Lock()
+		defer f.Mu.Unlock()
+		f.lists++
 		return nil, f.listErr
 	}
-	return slices.Clone(f.vms), nil
-}
-
-// read wraps one VM read: it counts it, reports it on entered, and waits for
-// the gate.
-func (f *fakeAPI) read(ctx context.Context, vmid int, get func() error) error {
-	f.mu.Lock()
+	kind, id, _ := strings.Cut(key, ":")
+	if kind != "config" && kind != "snapshots" {
+		return nil, nil
+	}
+	vmid, _ := strconv.Atoi(id)
+	f.Mu.Lock()
 	f.reads++
 	f.inFlight++
 	f.max = max(f.max, f.inFlight)
 	gate, entered := f.gate, f.entered
-	f.mu.Unlock()
-	defer func() {
-		f.mu.Lock()
+	f.Mu.Unlock()
+	done := func() {
+		f.Mu.Lock()
 		f.inFlight--
-		f.mu.Unlock()
-	}()
+		f.Mu.Unlock()
+	}
 	if entered != nil {
 		entered <- vmid
 	}
@@ -125,39 +122,15 @@ func (f *fakeAPI) read(ctx context.Context, vmid int, get func() error) error {
 		select {
 		case <-gate:
 		case <-ctx.Done():
-			return ctx.Err()
+			return done, ctx.Err()
 		}
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return get()
-}
-
-func (f *fakeAPI) VMConfig(ctx context.Context, _ string, vmid int) (map[string]string, error) {
-	var out map[string]string
-	err := f.read(ctx, vmid, func() error {
-		if err := f.readErr[vmid]; err != nil {
-			return err
-		}
-		cfg, ok := f.configs[vmid]
-		if !ok {
-			return &proxmox.APIError{Status: 500, Message: fmt.Sprintf("Configuration file 'qemu-server/%d.conf' does not exist", vmid)}
-		}
-		out = maps.Clone(cfg)
-		return nil
-	})
-	return out, err
-}
-
-func (f *fakeAPI) Snapshots(ctx context.Context, _ string, vmid int) ([]proxmox.Snapshot, error) {
-	var out []proxmox.Snapshot
-	err := f.read(ctx, vmid, func() error {
-		for _, n := range f.snaps[vmid] {
-			out = append(out, proxmox.Snapshot{Name: n})
-		}
-		return nil
-	})
-	return out, err
+	if kind == "snapshots" {
+		return done, nil
+	}
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	return done, f.readErr[vmid]
 }
 
 // fakeHistory answers LastItemResults from a map.

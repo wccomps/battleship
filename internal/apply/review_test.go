@@ -6,14 +6,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-func countCalls(f *fakeAPI, key string) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+func countCalls(f *podstest.Fake, key string) int {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
 	n := 0
-	for _, c := range f.calls {
+	for _, c := range f.Calls {
 		if c == key {
 			n++
 		}
@@ -25,8 +26,8 @@ func countCalls(f *fakeAPI, key string) int {
 // again, not even in a retry round.
 func TestForbiddenItemIsNotRetried(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
-	f.failOn("power:10121:stop", &proxmox.APIError{Status: 403, Message: "Permission check failed (/vms/10121, VM.PowerMgmt)"})
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
+	f.FailOn("power:10121:stop", &proxmox.APIError{Status: 403, Message: "Permission check failed (/vms/10121, VM.PowerMgmt)"})
 	plan, err := testPlanner(f).Power(context.Background(), []string{"01"}, []string{"teak"}, "stop")
 	if err != nil {
 		t.Fatal(err)
@@ -46,9 +47,9 @@ var forbidden = &proxmox.APIError{Status: 403, Message: "Permission check failed
 
 // newRunningMaster is the cluster with the teak master running, so a
 // template build stops it for the copy.
-func newRunningMaster() *fakeAPI {
+func newRunningMaster() *podstest.Fake {
 	f := newCluster()
-	f.vms[121].Status = "running"
+	f.VMs[121].Status = "running"
 	return f
 }
 
@@ -57,8 +58,8 @@ func newRunningMaster() *fakeAPI {
 // the deferred restart doesn't trip over the same 403 again.
 func TestMasterRestartedAfterUnfollowableStop(t *testing.T) {
 	f := newRunningMaster()
-	stop := upid("cedar", "qmstop", 121)
-	f.waitHook = func(_ context.Context, id string) error {
+	stop := podstest.UPID("cedar", "qmstop", 121)
+	f.WaitHook = func(_ context.Context, id string) error {
 		if id == stop {
 			return forbidden
 		}
@@ -68,7 +69,7 @@ func TestMasterRestartedAfterUnfollowableStop(t *testing.T) {
 	ex := testExecutor(f, rec)
 	ex.Cfg.Retry.Rounds = 0
 	ex.Run(context.Background(), deployTeak(t, f, "01"))
-	if n := f.called("power:121:start"); n != 1 || f.vms[121].Status != "running" {
+	if n := f.Called("power:121:start"); n != 1 || f.VMs[121].Status != "running" {
 		t.Fatalf("master started %d times, want 1; events %+v", n, rec.find("teak.tango.delta.tpl", EventFailed))
 	}
 }
@@ -79,11 +80,11 @@ func TestMasterRestartedAfterUnfollowableStop(t *testing.T) {
 func TestUnfollowableCloneWaitsOnItsTarget(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
-	cloneTask := upid("cedar", "qmclone", 9021)
-	f.waitHook = func(_ context.Context, id string) error {
+	cloneTask := podstest.UPID("cedar", "qmclone", 9021)
+	f.WaitHook = func(_ context.Context, id string) error {
 		if id == cloneTask {
-			f.waitHook = nil
-			f.lockConfig = map[int]int{10121: 3} // the clone is still writing the target
+			f.WaitHook = nil
+			f.LockConfig = map[int]int{10121: 3} // the clone is still writing the target
 			return forbidden
 		}
 		return nil
@@ -99,9 +100,9 @@ func TestUnfollowableCloneWaitsOnItsTarget(t *testing.T) {
 	if !strings.Contains(msg, "VM 10121 is no longer locked") {
 		t.Fatalf("unfollowable clone judged by %q, want its target 10121", msg)
 	}
-	f.mu.Lock()
-	left := f.lockConfig[10121]
-	f.mu.Unlock()
+	f.Mu.Lock()
+	left := f.LockConfig[10121]
+	f.Mu.Unlock()
 	if left != 0 {
 		t.Fatalf("stopped waiting with the target still locked (%d reads left)", left)
 	}
@@ -113,17 +114,17 @@ func TestUnfollowableCloneWaitsOnItsTarget(t *testing.T) {
 func TestUnfollowableStopsOnRefusedReads(t *testing.T) {
 	for _, status := range []int{401, 403} {
 		f := newCluster()
-		f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
+		f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
 		plan, err := testPlanner(f).Power(context.Background(), []string{"01"}, []string{"teak"}, "stop")
 		if err != nil {
 			t.Fatal(err)
 		}
-		stop := upid("cedar", "qmstop", 10121)
-		f.waitHook = func(_ context.Context, id string) error {
+		stop := podstest.UPID("cedar", "qmstop", 10121)
+		f.WaitHook = func(_ context.Context, id string) error {
 			if id == stop {
-				f.waitHook = nil
+				f.WaitHook = nil
 				for range 100000 {
-					f.failOn("config:10121", &proxmox.APIError{Status: status, Message: "refused"})
+					f.FailOn("config:10121", &proxmox.APIError{Status: status, Message: "refused"})
 				}
 				return forbidden
 			}
@@ -136,7 +137,7 @@ func TestUnfollowableStopsOnRefusedReads(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatalf("%d: still polling the VM after Proxmox refused its reads", status)
 		}
-		if n := f.called("config:10121"); n > 5 {
+		if n := f.Called("config:10121"); n > 5 {
 			t.Errorf("%d: read the config %d times after refusals", status, n)
 		}
 	}
@@ -148,8 +149,8 @@ func TestUnfollowableStopsOnRefusedReads(t *testing.T) {
 // started may still be running.
 func TestLapseDuringBuildReportsStoppedMaster(t *testing.T) {
 	f := newRunningMaster()
-	stop := upid("cedar", "qmstop", 121)
-	f.waitHook = func(_ context.Context, id string) error {
+	stop := podstest.UPID("cedar", "qmstop", 121)
+	f.WaitHook = func(_ context.Context, id string) error {
 		if id == stop {
 			return &proxmox.APIError{Status: 401, Message: "authentication failure"}
 		}
@@ -164,7 +165,7 @@ func TestLapseDuringBuildReportsStoppedMaster(t *testing.T) {
 	if advice := CleanupAdvice("teak.tango.delta", err); strings.Contains(advice, "remove it in Proxmox") {
 		t.Errorf("advice %q tells to remove the master", advice)
 	}
-	if n := f.called("wait:" + stop); n != 1 {
+	if n := f.Called("wait:" + stop); n != 1 {
 		t.Errorf("waited on the stop task %d times after the lapse, want 1", n)
 	}
 	for _, ev := range rec.events {

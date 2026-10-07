@@ -24,9 +24,9 @@ func TestLapseInTheLastRoundIsInterrupted(t *testing.T) {
 	// Proxmox stops accepting the ticket right after the power call: the
 	// task wait, the item's last call, gets the 401.
 	f.accept = func(proxmox.Credential) bool {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		return f.vms[10105].Status != "stopped"
+		f.Mu.Lock()
+		defer f.Mu.Unlock()
+		return f.VMs[10105].Status != "stopped"
 	}
 	w := newWorker(st, f)
 	w.Cfg.Retry.Rounds = 0

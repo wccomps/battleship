@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,7 +17,7 @@ import (
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
-	"github.com/wccomps/battleship/internal/proxmox"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/status"
 	"github.com/wccomps/battleship/internal/store"
 )
@@ -242,22 +243,23 @@ func endJob(t *rapid.T, h *harness, j store.Job) {
 func TestPropGridAndVMPagesFollowPrivileges(t *testing.T) {
 	h := newHarness(t, func(c *config.Config) { c.Web.Templates = "*.kilo.alpha" })
 	addMasters(h)
-	h.api.mu.Lock()
-	all := slices.Clone(h.api.vms)
-	h.api.mu.Unlock()
+	h.api.Mu.Lock()
+	all := maps.Clone(h.api.VMs)
+	h.api.Mu.Unlock()
 	op := h.login(asOperator)
 	lead := h.login(asLead)
 	rapid.Check(t, func(t *rapid.T) {
-		var kept []proxmox.VM
-		for _, vm := range all {
+		kept := map[int]*podstest.VM{}
+		for _, id := range slices.Sorted(maps.Keys(all)) {
+			vm := all[id]
 			if strings.HasPrefix(vm.Name, "team") && !rapid.Bool().Draw(t, "keep "+vm.Name) {
 				continue
 			}
-			kept = append(kept, vm)
+			kept[id] = vm
 		}
-		h.api.mu.Lock()
-		h.api.vms = kept
-		h.api.mu.Unlock()
+		h.api.Mu.Lock()
+		h.api.VMs = kept
+		h.api.Mu.Unlock()
 		h.poll()
 		g := h.poller.Grid()
 		nothing := true

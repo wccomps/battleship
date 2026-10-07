@@ -132,7 +132,7 @@ func TestWorkerRunsSnapshotJobOnce(t *testing.T) {
 		t.Errorf("second job = %s (%s), want stale", j.Status, j.Error)
 	}
 	for _, vmid := range []int{10105, 10121} {
-		if got := f.taken[vmid]; !slices.Equal(got, []string{"before-scoring"}) {
+		if got := f.taken(vmid); !slices.Equal(got, []string{"before-scoring"}) {
 			t.Errorf("VM %d snapshots taken = %v, want one", vmid, got)
 		}
 	}

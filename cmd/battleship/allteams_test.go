@@ -30,7 +30,7 @@ func TestTeardownAllTeams(t *testing.T) {
 	if !strings.Contains(out, "Plan: teardown, teams 00,01,32,40\n") {
 		t.Errorf("plan line:\n%s", out)
 	}
-	deleted := slices.Sorted(slices.Values(e.api.deleted))
+	deleted := slices.Sorted(slices.Values(e.api.Deleted))
 	if want := []int{10001, 10002, 10101, 13201, 14001}; !slices.Equal(deleted, want) {
 		t.Errorf("deleted %v, want every team VM %v", deleted, want)
 	}
@@ -40,15 +40,15 @@ func TestTeardownAllTeams(t *testing.T) {
 // so whoever confirms has read it.
 func TestInteractiveTeardownAllTeamsNeedsTheResolvedRange(t *testing.T) {
 	e := newEnv(t, true, "all\n", leftovers()...)
-	if code := e.run("teardown", "-teams", "all"); code != 1 || len(e.api.deleted) != 0 {
-		t.Fatalf("typing all: code = %d, deleted %v\n%s", code, e.api.deleted, e.stdout)
+	if code := e.run("teardown", "-teams", "all"); code != 1 || len(e.api.Deleted) != 0 {
+		t.Fatalf("typing all: code = %d, deleted %v\n%s", code, e.api.Deleted, e.stdout)
 	}
 	if !strings.Contains(e.stdout.String(), "Type the team range (0-1,32,40) to delete these VMs: ") {
 		t.Errorf("prompt:\n%s", e.stdout)
 	}
 	e = newEnv(t, true, "0-1,32,40\n", leftovers()...)
-	if code := e.run("teardown", "-teams", "ALL"); code != 0 || len(e.api.deleted) != 5 {
-		t.Fatalf("typing the range: code = %d, deleted %v\n%s%s", code, e.api.deleted, e.stdout, e.stderr)
+	if code := e.run("teardown", "-teams", "ALL"); code != 0 || len(e.api.Deleted) != 5 {
+		t.Fatalf("typing the range: code = %d, deleted %v\n%s%s", code, e.api.Deleted, e.stdout, e.stderr)
 	}
 }
 
@@ -63,7 +63,7 @@ func TestOtherOperationsTakeAllTeams(t *testing.T) {
 	}
 
 	e = newEnv(t, false, "", leftovers()...)
-	e.api.snapshots[10002] = []string{"initial"}
+	e.api.setSnapshots(10002, "initial")
 	if code := e.run("reset", "-teams", "all", "-hosts", "web"); code != 0 {
 		t.Fatalf("reset: code = %d\n%s%s", code, e.stdout, e.stderr)
 	}

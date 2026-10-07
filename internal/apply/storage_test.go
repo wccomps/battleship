@@ -14,6 +14,7 @@ import (
 
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -22,7 +23,7 @@ import (
 // being built at once.
 func storageLockTimeout(node, kind string, vmid int) error {
 	return &proxmox.TaskError{
-		UPID:       upid(node, kind, vmid),
+		UPID:       podstest.UPID(node, kind, vmid),
 		ExitStatus: "cfs-lock 'storage-competitions' error: got lock request timeout",
 		LogTail:    []string{"TASK ERROR: cfs-lock 'storage-competitions' error: got lock request timeout"},
 	}
@@ -48,8 +49,8 @@ func wantUnconvertedError(t *testing.T, err error, extra ...string) {
 func TestHalfConvertedTemplateFailsTheBuild(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
-	f.convertLeavesDisk = map[int]bool{9021: true}
-	f.failOn("wait:"+upid("cedar", "qmtemplate", 9021), storageLockTimeout("cedar", "qmtemplate", 9021))
+	f.ConvertLeavesDisk = map[int]bool{9021: true}
+	f.FailOn("wait:"+podstest.UPID("cedar", "qmtemplate", 9021), storageLockTimeout("cedar", "qmtemplate", 9021))
 
 	rec := &recorder{}
 	res := testExecutor(f, rec).Run(context.Background(), plan)
@@ -60,10 +61,10 @@ func TestHalfConvertedTemplateFailsTheBuild(t *testing.T) {
 		t.Fatal("no failed event for the template build")
 	}
 	wantUnconvertedError(t, errors.New(failed[0].Message), "lock request timeout")
-	if n := f.called("template:9021"); n != 1 {
+	if n := f.Called("template:9021"); n != 1 {
 		t.Errorf("convert started %d times, want 1 (a restart hides the half-conversion)", n)
 	}
-	if n := f.called("clone:10121"); n != 0 {
+	if n := f.Called("clone:10121"); n != 0 {
 		t.Errorf("team VM cloned %d times from a half-converted template, want 0", n)
 	}
 }
@@ -74,7 +75,7 @@ func TestHalfConvertedTemplateFailsTheBuild(t *testing.T) {
 func TestCleanupRemovesHalfConvertedTemplate(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
-	f.convertLeavesDisk = map[int]bool{9021: true}
+	f.ConvertLeavesDisk = map[int]bool{9021: true}
 
 	rec := &recorder{}
 	res := testExecutor(f, rec).Run(context.Background(), plan)
@@ -83,7 +84,7 @@ func TestCleanupRemovesHalfConvertedTemplate(t *testing.T) {
 			t.Errorf("cleanup called the half-converted template complete: %q", e.Message)
 		}
 	}
-	if _, ok := f.vms[9021]; ok {
+	if _, ok := f.VMs[9021]; ok {
 		t.Error("half-converted template 9021 was kept, want it removed")
 	}
 	if !slices.Contains(res.Removed, "teak.tango.delta.tpl") {
@@ -102,11 +103,11 @@ func TestCleanupRemovesHalfConvertedTemplate(t *testing.T) {
 func TestConvertIsVerifiedEvenWhenTheTaskSucceeds(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
-	f.convertLeavesDisk = map[int]bool{9021: true}
+	f.ConvertLeavesDisk = map[int]bool{9021: true}
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	wantUnconvertedError(t, res.Failed["team01-teak"])
-	if n := f.called("clone:10121"); n != 0 {
+	if n := f.Called("clone:10121"); n != 0 {
 		t.Errorf("team VM cloned %d times from a half-converted template, want 0", n)
 	}
 }
@@ -116,9 +117,9 @@ func TestConvertIsVerifiedEvenWhenTheTaskSucceeds(t *testing.T) {
 func TestFailedConvertIsNotRestarted(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
-	f.waitHook = func(_ context.Context, u string) error {
+	f.WaitHook = func(_ context.Context, u string) error {
 		if strings.Contains(u, ":qmtemplate:") {
-			f.vms[9021].Template = false // the task failed before doing anything
+			f.VMs[9021].Template = false // the task failed before doing anything
 			return storageLockTimeout("cedar", "qmtemplate", 9021)
 		}
 		return nil
@@ -132,7 +133,7 @@ func TestFailedConvertIsNotRestarted(t *testing.T) {
 	}
 	// Once in the build, and once more by cleanup completing the copy it
 	// left (safe: nothing was converted); never a restart of the task.
-	if n := f.called("template:9021"); n != 2 {
+	if n := f.Called("template:9021"); n != 2 {
 		t.Errorf("convert started %d times, want 2", n)
 	}
 }
@@ -141,7 +142,7 @@ func TestFailedConvertIsNotRestarted(t *testing.T) {
 // reused: every linked clone from it would fail.
 func TestHalfConvertedExistingTemplateIsNotReused(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
 		"name":  "teak.tango.delta.tpl",
 		"scsi0": "competitions:9021/vm-9021-disk-0.qcow2,size=32G",
 	})
@@ -149,7 +150,7 @@ func TestHalfConvertedExistingTemplateIsNotReused(t *testing.T) {
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	wantUnconvertedError(t, res.Failed["team01-teak"], "deploy with rebuild")
-	if n := f.called("clone:10121"); n != 0 {
+	if n := f.Called("clone:10121"); n != 0 {
 		t.Errorf("team VM cloned %d times from a half-converted template, want 0", n)
 	}
 }
@@ -157,7 +158,7 @@ func TestHalfConvertedExistingTemplateIsNotReused(t *testing.T) {
 // A good existing template is still reused.
 func TestConvertedExistingTemplateIsReused(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
 		"name":  "teak.tango.delta.tpl",
 		"scsi0": "competitions:9021/base-9021-disk-0.qcow2,size=32G",
 		"ide2":  "competitions:vm-9021-cloudinit,media=cdrom",
@@ -168,18 +169,18 @@ func TestConvertedExistingTemplateIsReused(t *testing.T) {
 	if len(res.Failed) != 0 {
 		t.Fatalf("failed: %v", res.Failed)
 	}
-	if n := f.called("clone:9021"); n != 0 {
+	if n := f.Called("clone:9021"); n != 0 {
 		t.Errorf("template rebuilt %d times, want reused", n)
 	}
 }
 
 // teakTeamVM adds team01-teak, a linked clone of template 9021 with an EFI
 // disk, and returns its volumes.
-func teakTeamVM(f *fakeAPI) []string {
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
+func teakTeamVM(f *podstest.Fake) []string {
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
 		"name": "teak.tango.delta.tpl", "scsi0": "competitions:9021/base-9021-disk-0.qcow2,size=32G",
 	})
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{
 		"name":     "team01-teak",
 		"scsi0":    "competitions:9021/base-9021-disk-0.qcow2/10121/vm-10121-disk-0.qcow2,size=32G",
 		"efidisk0": "competitions:10121/vm-10121-disk-1.qcow2,efitype=4m",
@@ -199,20 +200,20 @@ func TestDeleteFreesDisksTheDestroyLeft(t *testing.T) {
 	f := newCluster()
 	left := teakTeamVM(f)
 	plan := teardownTeam01(t, f)
-	f.deleteKeepsDisks = map[int]bool{10121: true}
+	f.DeleteKeepsDisks = map[int]bool{10121: true}
 	rec := &recorder{}
 
 	res := testExecutor(f, rec).Run(context.Background(), plan)
 	if len(res.Failed) != 0 {
 		t.Fatalf("failed: %v", res.Failed)
 	}
-	if vols := f.volumesOf(10121); len(vols) != 0 {
+	if vols := f.VolumesOf(10121); len(vols) != 0 {
 		t.Errorf("volumes left = %q, want none", vols)
 	}
-	if n := f.called("volume:"); n != 2 {
+	if n := f.Called("volume:"); n != 2 {
 		t.Errorf("%d volume frees, want 2", n)
 	}
-	if n := f.called("volume:local:"); n != 0 {
+	if n := f.Called("volume:local:"); n != 0 {
 		t.Errorf("the ISO was freed %d times; CD-ROMs are never the VM's disks", n)
 	}
 	found := false
@@ -234,10 +235,10 @@ func TestCleanDeleteFreesNothing(t *testing.T) {
 	if len(res.Failed) != 0 {
 		t.Fatalf("failed: %v", res.Failed)
 	}
-	if n := f.called("volume:"); n != 0 {
+	if n := f.Called("volume:"); n != 0 {
 		t.Errorf("%d volume frees, want 0", n)
 	}
-	if n := f.called("content:competitions:10121"); n != 1 {
+	if n := f.Called("content:competitions:10121"); n != 1 {
 		t.Errorf("storage listed %d times, want 1", n)
 	}
 }
@@ -246,20 +247,20 @@ func TestCleanDeleteFreesNothing(t *testing.T) {
 // its base disk behind. It is freed before the new template is built.
 func TestRebuildFreesOldTemplateDisk(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
 		"name": "teak.tango.delta.tpl", "scsi0": "competitions:9021/base-9021-disk-0.qcow2,size=32G",
 	})
 	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.deleteKeepsDisks = map[int]bool{9021: true}
+	f.DeleteKeepsDisks = map[int]bool{9021: true}
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	if len(res.Failed) != 0 {
 		t.Fatalf("failed: %v", res.Failed)
 	}
-	if n := f.called("volume:competitions:9021/base-9021-disk-0.qcow2"); n != 1 {
+	if n := f.Called("volume:competitions:9021/base-9021-disk-0.qcow2"); n != 1 {
 		t.Errorf("old base disk freed %d times, want 1", n)
 	}
 }
@@ -290,10 +291,10 @@ func TestLeftoverDisksThatCannotBeFreedFailWithAdvice(t *testing.T) {
 	f := newCluster()
 	left := teakTeamVM(f)
 	plan := teardownTeam01(t, f)
-	f.deleteKeepsDisks = map[int]bool{10121: true}
+	f.DeleteKeepsDisks = map[int]bool{10121: true}
 	denied := &proxmox.APIError{Status: 403, Message: "Permission check failed (/storage/competitions, Datastore.Allocate)"}
 	for _, v := range left {
-		f.failOn("volume:"+v, denied, denied, denied, denied)
+		f.FailOn("volume:"+v, denied, denied, denied, denied)
 	}
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
@@ -308,14 +309,14 @@ func TestLeftoverDisksAreRetriedNextRound(t *testing.T) {
 	f := newCluster()
 	left := teakTeamVM(f)
 	plan := teardownTeam01(t, f)
-	f.deleteKeepsDisks = map[int]bool{10121: true}
-	f.failOn("volume:"+left[0], &proxmox.APIError{Status: 403, Message: "Permission check failed"})
+	f.DeleteKeepsDisks = map[int]bool{10121: true}
+	f.FailOn("volume:"+left[0], &proxmox.APIError{Status: 403, Message: "Permission check failed"})
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	if len(res.Failed) != 0 {
 		t.Fatalf("failed: %v", res.Failed)
 	}
-	if vols := f.volumesOf(10121); len(vols) != 0 {
+	if vols := f.VolumesOf(10121); len(vols) != 0 {
 		t.Errorf("volumes left = %q, want none", vols)
 	}
 }
@@ -325,7 +326,7 @@ func TestLeftoverDisksAreRetriedNextRound(t *testing.T) {
 func TestLeftoverBaseVolumeInUseIsSurfaced(t *testing.T) {
 	f := newCluster()
 	teakTeamVM(f)
-	f.deleteKeepsDisks = map[int]bool{9021: true}
+	f.DeleteKeepsDisks = map[int]bool{9021: true}
 	ex := testExecutor(f, &recorder{})
 	ex.init()
 	ex.present = map[int]proxmox.VM{}
@@ -335,7 +336,7 @@ func TestLeftoverBaseVolumeInUseIsSurfaced(t *testing.T) {
 	if err != nil && !strings.Contains(err.Error(), "still in use by linked clone") {
 		t.Errorf("error %q lacks Proxmox's refusal", err)
 	}
-	if vols := f.volumesOf(10121); len(vols) != 2 {
+	if vols := f.VolumesOf(10121); len(vols) != 2 {
 		t.Errorf("team VM volumes = %q, want both kept", vols)
 	}
 }
@@ -349,12 +350,12 @@ type storageTaskWatch struct {
 	inflight, max int
 }
 
-func watchStorageTasks(f *fakeAPI, templates ...int) *storageTaskWatch {
+func watchStorageTasks(f *podstest.Fake, templates ...int) *storageTaskWatch {
 	w := &storageTaskWatch{}
-	f.waitGate = func(ctx context.Context, u string) error {
+	f.WaitGate = func(ctx context.Context, u string) error {
 		held := strings.Contains(u, ":qmtemplate:")
 		for _, vmid := range templates {
-			held = held || u == upid("cedar", "qmdestroy", vmid) || u == upid("birch", "qmdestroy", vmid)
+			held = held || u == podstest.UPID("cedar", "qmdestroy", vmid) || u == podstest.UPID("birch", "qmdestroy", vmid)
 		}
 		if !held {
 			return nil
@@ -391,7 +392,7 @@ func (w *storageTaskWatch) peak() int {
 // run in parallel.
 func TestConvertAndTemplateDeleteNeverOverlap(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
 		"name": "teak.tango.delta.tpl", "scsi0": "competitions:9021/base-9021-disk-0.qcow2,size=32G",
 	})
 	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01"}, Rebuild: true})
@@ -404,10 +405,10 @@ func TestConvertAndTemplateDeleteNeverOverlap(t *testing.T) {
 	if len(res.Failed) != 0 {
 		t.Fatalf("failed: %v", res.Failed)
 	}
-	if n := f.called("delete:9021"); n != 1 {
+	if n := f.Called("delete:9021"); n != 1 {
 		t.Fatalf("old template deleted %d times, want 1", n)
 	}
-	if n := f.called("template:"); n != 2 {
+	if n := f.Called("template:"); n != 2 {
 		t.Fatalf("%d conversions, want 2", n)
 	}
 	if p := w.peak(); p != 1 {
@@ -420,7 +421,7 @@ func TestConvertAndTemplateDeleteNeverOverlap(t *testing.T) {
 // run beside a conversion.
 func TestTemplateDeleteAfterAFailedReadIsSerialized(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
 		"name": "teak.tango.delta.tpl", "template": "1", "scsi0": "competitions:9021/base-9021-disk-0.qcow2,size=32G",
 	})
 	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01"}, Rebuild: true})
@@ -428,13 +429,13 @@ func TestTemplateDeleteAfterAFailedReadIsSerialized(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := watchStorageTasks(f, 9021, 9025)
-	f.failOn("config:9021", &proxmox.APIError{Status: 400, Message: "bad request"})
+	f.FailOn("config:9021", &proxmox.APIError{Status: 400, Message: "bad request"})
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	if len(res.Failed) != 0 {
 		t.Fatalf("failed: %v", res.Failed)
 	}
-	if n := f.called("delete:9021"); n != 1 {
+	if n := f.Called("delete:9021"); n != 1 {
 		t.Fatalf("old template deleted %d times, want 1", n)
 	}
 	if p := w.peak(); p != 1 {
@@ -447,7 +448,7 @@ func TestTemplateDeleteAfterAFailedReadIsSerialized(t *testing.T) {
 func TestTeamVMDeletesAreNotSerialized(t *testing.T) {
 	f := newCluster()
 	for _, team := range []string{"01", "02"} {
-		f.add(proxmox.VM{VMID: 10021 + 100*atoi(team), Name: "team" + team + "-teak", Node: "cedar"},
+		f.Add(proxmox.VM{VMID: 10021 + 100*atoi(team), Name: "team" + team + "-teak", Node: "cedar"},
 			map[string]string{"name": "team" + team + "-teak"})
 	}
 	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01", "02"}, nil)
@@ -476,20 +477,20 @@ func TestLeftoversAreNotFreedOnceTheVMIDIsReused(t *testing.T) {
 	f := newCluster()
 	left := teakTeamVM(f)
 	plan := teardownTeam01(t, f)
-	f.deleteKeepsDisks = map[int]bool{10121: true}
+	f.DeleteKeepsDisks = map[int]bool{10121: true}
 	denied := &proxmox.APIError{Status: 403, Message: "Permission check failed (/storage/competitions, Datastore.Allocate)"}
-	f.failOn("volume:"+left[0], denied)
-	f.onRecord = func(key string) {
-		if key == "volume:"+left[0] && f.vms[10121] == nil {
-			f.add(proxmox.VM{VMID: 10121, Name: "team01-other", Node: "cedar"}, map[string]string{
+	f.FailOn("volume:"+left[0], denied)
+	f.OnRecord = func(key string) {
+		if key == "volume:"+left[0] && f.VMs[10121] == nil {
+			f.Add(proxmox.VM{VMID: 10121, Name: "team01-other", Node: "cedar"}, map[string]string{
 				"name": "team01-other", "efidisk0": left[0] + ",efitype=4m",
 			})
 		}
 	}
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
-	if f.called("volume:"+left[0]) != 1 {
-		t.Errorf("freed %s %d times, want only the first, denied, attempt", left[0], f.called("volume:"+left[0]))
+	if f.Called("volume:"+left[0]) != 1 {
+		t.Errorf("freed %s %d times, want only the first, denied, attempt", left[0], f.Called("volume:"+left[0]))
 	}
 	err := res.Failed["team01-teak"]
 	if err == nil || !strings.Contains(err.Error(), "team01-other") {
@@ -511,7 +512,7 @@ func TestLeftoverAdviceWarnsAboutVMIDReuse(t *testing.T) {
 func TestConvertWhoseAnswerWasLostIsNotResent(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
-	f.convertThenFail = map[int]error{9021: &url.Error{Op: "Post", URL: "https://pve", Err: errors.New("read: connection reset by peer")}}
+	f.ConvertThenFail = map[int]error{9021: &url.Error{Op: "Post", URL: "https://pve", Err: errors.New("read: connection reset by peer")}}
 	ex := testExecutor(f, &recorder{})
 	ex.Cfg.Retry.Rounds = 0
 
@@ -519,7 +520,7 @@ func TestConvertWhoseAnswerWasLostIsNotResent(t *testing.T) {
 	if len(res.Failed) != 0 || len(res.Succeeded) != 1 {
 		t.Errorf("result = %+v, want the deploy to succeed", res)
 	}
-	if n := f.called("template:9021"); n != 1 {
+	if n := f.Called("template:9021"); n != 1 {
 		t.Errorf("convert sent %d times, want 1", n)
 	}
 }
@@ -527,12 +528,12 @@ func TestConvertWhoseAnswerWasLostIsNotResent(t *testing.T) {
 // cancelDuringDestroy runs a teardown of team01-teak whose destroy task
 // leaves the disks behind, and cancels the job while the run waits for
 // that task, which then ends inside the grace.
-func cancelDuringDestroy(t *testing.T, f *fakeAPI, plan *pods.Plan) (*recorder, Result) {
+func cancelDuringDestroy(t *testing.T, f *podstest.Fake, plan *pods.Plan) (*recorder, Result) {
 	t.Helper()
-	f.deleteKeepsDisks = map[int]bool{10121: true}
+	f.DeleteKeepsDisks = map[int]bool{10121: true}
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
-	f.waitGate = func(_ context.Context, u string) error {
+	f.WaitGate = func(_ context.Context, u string) error {
 		if strings.Contains(u, ":qmdestroy:") {
 			cancel(ErrCancelRequested)
 		}
@@ -559,10 +560,10 @@ func TestCancelDuringDestroyLeavesDisksAsAnInterruption(t *testing.T) {
 	if strings.Contains(proxmox.Describe(err), "pvesm") {
 		t.Errorf("interruption %q gives hand-fix advice", proxmox.Describe(err))
 	}
-	if n := f.called("volume:"); n != 0 {
+	if n := f.Called("volume:"); n != 0 {
 		t.Errorf("%d volume frees sent after the cancel, want 0", n)
 	}
-	if vols := f.volumesOf(10121); !slices.Equal(vols, left) {
+	if vols := f.VolumesOf(10121); !slices.Equal(vols, left) {
 		t.Errorf("volumes = %q, want %q left", vols, left)
 	}
 	found := false
@@ -581,14 +582,14 @@ func TestLaterRunFreesLeftoversFromStorage(t *testing.T) {
 	teakTeamVM(f)
 	plan := teardownTeam01(t, f)
 	cancelDuringDestroy(t, f, plan)
-	f.waitGate = nil
+	f.WaitGate = nil
 
 	rec := &recorder{}
 	res := testExecutor(f, rec).Run(context.Background(), plan)
 	if len(res.Failed) != 0 || !slices.Equal(res.Succeeded, []string{"team01-teak"}) {
 		t.Fatalf("result = %+v", res)
 	}
-	if vols := f.volumesOf(10121); len(vols) != 0 {
+	if vols := f.VolumesOf(10121); len(vols) != 0 {
 		t.Errorf("volumes left = %q, want none", vols)
 	}
 	if ev := rec.find("team01-teak", EventSkipped); len(ev) != 1 || ev[0].Message != "already deleted" {
@@ -603,18 +604,18 @@ func TestLaterRunLeavesAReusedVMIDsDisks(t *testing.T) {
 	teakTeamVM(f)
 	plan := teardownTeam01(t, f)
 	cancelDuringDestroy(t, f, plan)
-	f.waitGate = nil
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-other", Node: "cedar"}, map[string]string{"name": "team01-other"})
-	before := f.volumesOf(10121)
+	f.WaitGate = nil
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-other", Node: "cedar"}, map[string]string{"name": "team01-other"})
+	before := f.VolumesOf(10121)
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	if len(res.Failed) != 0 {
 		t.Fatalf("result = %+v", res)
 	}
-	if n := f.called("volume:"); n != 0 {
+	if n := f.Called("volume:"); n != 0 {
 		t.Errorf("%d volume frees, want 0", n)
 	}
-	if vols := f.volumesOf(10121); !slices.Equal(vols, before) {
+	if vols := f.VolumesOf(10121); !slices.Equal(vols, before) {
 		t.Errorf("volumes = %q, want %q kept", vols, before)
 	}
 }
@@ -628,10 +629,10 @@ func TestTeardownPlansOrphanedDisks(t *testing.T) {
 	teakTeamVM(f)
 	plan := teardownTeam01(t, f)
 	cancelDuringDestroy(t, f, plan) // the VM is gone, its disks aren't
-	f.waitGate = nil
-	f.mu.Lock()
-	f.vols["competitions:10221/vm-10221-disk-0.qcow2"] = 10221 // team 02's: not asked
-	f.mu.Unlock()
+	f.WaitGate = nil
+	f.Mu.Lock()
+	f.Vols["competitions:10221/vm-10221-disk-0.qcow2"] = 10221 // team 02's: not asked
+	f.Mu.Unlock()
 
 	again, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
 	if err != nil {
@@ -648,22 +649,22 @@ func TestTeardownPlansOrphanedDisks(t *testing.T) {
 	if len(res.Failed) != 0 || len(res.Succeeded) != 1 {
 		t.Fatalf("result = %+v", res)
 	}
-	if vols := f.volumesOf(10121); len(vols) != 0 {
+	if vols := f.VolumesOf(10121); len(vols) != 0 {
 		t.Errorf("volumes left = %q, want none", vols)
 	}
-	if vols := f.volumesOf(10221); len(vols) != 1 {
+	if vols := f.VolumesOf(10221); len(vols) != 1 {
 		t.Errorf("team 02's volumes = %q, want them kept", vols)
 	}
 }
 
 // orphanedSetup leaves VMID 10121's disks on the storage with no VM, as a
 // cut-off teardown does.
-func orphanedSetup(t *testing.T) *fakeAPI {
+func orphanedSetup(t *testing.T) *podstest.Fake {
 	t.Helper()
 	f := newCluster()
 	teakTeamVM(f)
 	cancelDuringDestroy(t, f, teardownTeam01(t, f))
-	f.waitGate = nil
+	f.WaitGate = nil
 	return f
 }
 
@@ -672,12 +673,12 @@ func orphanedSetup(t *testing.T) *fakeAPI {
 // the plan rather than leave the disks out unsaid.
 func TestOrphanedDisksListingErrors(t *testing.T) {
 	f := orphanedSetup(t)
-	f.failOn("content:competitions:10121", &proxmox.APIError{Status: 403, Message: "Permission check failed"})
+	f.FailOn("content:competitions:10121", &proxmox.APIError{Status: 403, Message: "Permission check failed"})
 	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
 	if err != nil || len(plan.Items) != 1 {
 		t.Fatalf("after a 403 on one node: plan %+v, err %v; want the item from another node", plan, err)
 	}
-	f.failOn("content:competitions:10121", &proxmox.APIError{Status: 500, Message: "storage timeout"})
+	f.FailOn("content:competitions:10121", &proxmox.APIError{Status: 500, Message: "storage timeout"})
 	if _, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil); err == nil {
 		t.Error("a 500 listing the storage planned anyway")
 	}
@@ -691,10 +692,10 @@ func TestOrphanedDisksOfAnUnseenVMAreKept(t *testing.T) {
 	if err != nil || len(plan.Items) != 1 {
 		t.Fatalf("plan %+v, err %v", plan, err)
 	}
-	before := f.volumesOf(10121)
-	f.mu.Lock()
-	f.unseen = map[int]bool{10121: true}
-	f.mu.Unlock()
+	before := f.VolumesOf(10121)
+	f.Mu.Lock()
+	f.Unseen = map[int]bool{10121: true}
+	f.Mu.Unlock()
 	if again, _ := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil); len(again.Items) != 0 {
 		t.Errorf("planned %+v for a held VMID", again.Items)
 	}
@@ -702,7 +703,7 @@ func TestOrphanedDisksOfAnUnseenVMAreKept(t *testing.T) {
 	if err := res.Failed["team01-disks-10121"]; err == nil || !strings.Contains(err.Error(), "a VM you can't see") {
 		t.Fatalf("result = %+v, want the item failed naming the unseen holder", res)
 	}
-	if vols := f.volumesOf(10121); !slices.Equal(vols, before) {
+	if vols := f.VolumesOf(10121); !slices.Equal(vols, before) {
 		t.Errorf("volumes = %q, want %q kept", vols, before)
 	}
 }
@@ -716,19 +717,19 @@ func TestOrphanedDisksListSharedStorageOnce(t *testing.T) {
 		on     []string
 		want   int
 	}{
-		{true, f.nodes, 1},
-		{false, f.nodes[:2], 2},
+		{true, f.Nodes, 1},
+		{false, f.Nodes[:2], 2},
 	} {
 		var res proxmox.Resources
 		for _, n := range c.on {
 			res.Storage = append(res.Storage, proxmox.StorageResource{Storage: "competitions", Node: n, Shared: c.shared})
 		}
-		before := f.called("content:competitions:10121")
-		plan, err := pods.NewPlanner(&resourceAPI{fakeAPI: f, res: res}, config.Default()).Teardown(context.Background(), []string{"01"}, nil)
+		before := f.Called("content:competitions:10121")
+		plan, err := pods.NewPlanner(&resourceAPI{Fake: f, res: res}, config.Default()).Teardown(context.Background(), []string{"01"}, nil)
 		if err != nil || len(plan.Items) != 1 {
 			t.Fatalf("shared %v: plan %+v, err %v", c.shared, plan, err)
 		}
-		if n := f.called("content:competitions:10121") - before; n != c.want {
+		if n := f.Called("content:competitions:10121") - before; n != c.want {
 			t.Errorf("shared %v: listed %d times, want %d", c.shared, n, c.want)
 		}
 	}
@@ -739,14 +740,14 @@ func TestOrphanedDisksListSharedStorageOnce(t *testing.T) {
 // the storage whole, which also finds disks of VMs whose template is gone.
 func TestOrphanedDisksAskFewVMIDsOrListWhole(t *testing.T) {
 	f := orphanedSetup(t)
-	few := f.called("content:competitions:")
+	few := f.Called("content:competitions:")
 	if _, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if n := f.called("content:competitions:0"); n != 0 {
+	if n := f.Called("content:competitions:0"); n != 0 {
 		t.Errorf("one team listed the whole storage %d times", n)
 	}
-	if n := f.called("content:competitions:") - few; n == 0 {
+	if n := f.Called("content:competitions:") - few; n == 0 {
 		t.Error("one team asked the storage about no VMID")
 	}
 
@@ -758,7 +759,7 @@ func TestOrphanedDisksAskFewVMIDsOrListWhole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := f.called("content:competitions:0"); n == 0 {
+	if n := f.Called("content:competitions:0"); n == 0 {
 		t.Error("50 teams didn't list the storage whole")
 	}
 	if len(plan.Items) != 1 || plan.Items[0].VMID != 10121 {

@@ -124,9 +124,9 @@ func (m *selModel) apply(a selAction) {
 // only if a ticked VM allows it, the bar saying when one isn't.
 func TestBrowserPropSelection(t *testing.T) {
 	h := browserHarness(t)
-	h.api.mu.Lock()
-	h.api.vms = nil
-	h.api.mu.Unlock()
+	h.api.Mu.Lock()
+	clear(h.api.VMs)
+	h.api.Mu.Unlock()
 	hosts := []string{"db", "dc", "web"}
 	for i := 1; i <= 9; i++ {
 		team := pods.FormatTeam(i)
@@ -155,12 +155,12 @@ func TestBrowserPropSelection(t *testing.T) {
 		}
 		return privs
 	}
-	h.api.mu.Lock()
-	for _, vm := range h.api.vms {
+	h.api.Mu.Lock()
+	for _, vm := range h.api.VMs {
 		team, _ := strconv.Atoi(strings.TrimPrefix(vm.Name[:6], "team"))
 		h.pve.Grant(cred.User, "/vms/"+strconv.Itoa(vm.VMID), privsOf(team)...)
 	}
-	h.api.mu.Unlock()
+	h.api.Mu.Unlock()
 	op := authtest.Login(t, h.st, h.cfg, authtest.User{Subject: "test-limited", At: h.clock.Now(), Proxmox: cred})
 	h.openView(cred)
 
