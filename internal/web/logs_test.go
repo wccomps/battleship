@@ -9,9 +9,8 @@ import (
 	"github.com/wccomps/battleship/internal/pods"
 )
 
-// The record of what ran is the Logs, so nobody looks there for a way to
-// start something: the nav, the list, a job's page and its panel say Logs
-// and Log, at /logs.
+// The job record is called Logs everywhere (/logs), so nobody looks there
+// for a way to start something.
 func TestLogsAreCalledLogs(t *testing.T) {
 	h := newHarness(t)
 	h.poll()

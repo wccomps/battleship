@@ -26,19 +26,16 @@ type User struct {
 	Subject string // default "test-user"
 	Name    string // default "Test user"
 	Email   string // default "<subject>@example.org"
-	// Username is the preferred_username, whose Proxmox user is
-	// <username>@auth.example.org; default the subject without "sub-", or
-	// the Proxmox ticket's user's name.
+	// Username is the preferred_username; default the subject without
+	// "sub-", or the Proxmox ticket's user's name.
 	Username string
 	Groups   []string
-	// At is the login time on the clock the auth.Service uses; default
-	// time.Now(). The session won't be refreshed for web.session_refresh
-	// after At (the fake refresh token isn't sealed, so that refresh is
-	// rejected, ending it).
+	// At is the login time on the auth.Service clock; default time.Now().
+	// The fake refresh token isn't sealed, so the session ends at its first
+	// refresh, web.session_refresh after At.
 	At time.Time
-	// Proxmox is the session's Proxmox ticket; default a made-up ticket of
-	// PVEUser issued at At, which a Proxmox fake won't renew. Pass one from
-	// pvetest for sessions that must renew theirs.
+	// Proxmox is the session's ticket; default a made-up one for PVEUser
+	// that a Proxmox fake won't renew (use pvetest's for renewal).
 	Proxmox proxmox.Credential
 	// PVEUser names the default ticket's Proxmox user; default
 	// <subject>@auth.example.org.
@@ -54,9 +51,8 @@ type Session struct {
 	CSRF   string       // the session's CSRF token
 }
 
-// Apply adds the session cookie to r and, for anything but GET and HEAD,
-// the CSRF token in the auth.CSRFField field of its form body, as a
-// browser's form post would. r's body, if any, must be form-encoded.
+// Apply adds the session cookie to r and, unless GET or HEAD, the CSRF
+// token to its form body, which must be form-encoded.
 func (s Session) Apply(r *http.Request) {
 	r.AddCookie(s.Cookie)
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {

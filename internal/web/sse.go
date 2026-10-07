@@ -12,14 +12,12 @@ import (
 	"github.com/wccomps/battleship/internal/status"
 )
 
-// sseWriteTimeout bounds each write to an event stream. battleship serve's HTTP
-// server sets no write timeout (one would cut every long-lived stream), so
-// this is what keeps a client that stops reading from holding its stream
-// (and a hub subscription) for ever.
+// sseWriteTimeout bounds each event-stream write. battleship serve sets no
+// HTTP write timeout (it would cut long-lived streams), so this stops a client
+// that stops reading from holding its stream and hub subscription for ever.
 const sseWriteTimeout = 30 * time.Second
 
-// retryMillis is how long a browser waits before reconnecting an event
-// stream that ended.
+// retryMillis is how long a browser waits before reconnecting an ended stream.
 const retryMillis = 2000
 
 // sseWriter writes server-sent events and flushes each one.
@@ -28,9 +26,8 @@ type sseWriter struct {
 	rc *http.ResponseController
 }
 
-// startSSE sends the headers of an event stream and the reconnect delay.
-// It sets a deadline for each write, which also replaces any write timeout
-// the HTTP server has (battleship serve sets none) for this stream.
+// startSSE sends the event-stream headers and reconnect delay, and sets a
+// per-write deadline replacing any server write timeout for this stream.
 func startSSE(w http.ResponseWriter) (*sseWriter, error) {
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
@@ -47,8 +44,8 @@ func startSSE(w http.ResponseWriter) (*sseWriter, error) {
 	return sw, sw.flush()
 }
 
-// deadline gives the next write sseWriteTimeout to finish. It uses the real
-// clock: it is a network deadline.
+// deadline gives the next write sseWriteTimeout. It uses the real clock: it is
+// a network deadline.
 func (sw *sseWriter) deadline() error {
 	if err := sw.rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
 		return err
@@ -63,9 +60,8 @@ func (sw *sseWriter) flush() error {
 	return nil
 }
 
-// event sends one event. data may span lines; each becomes a data line, and
-// the browser joins them with "\n". id, if set, is what the browser sends
-// back as Last-Event-ID when it reconnects.
+// event sends one event. Each line of data becomes a data line (the browser
+// joins them with "\n"). id, if set, comes back as Last-Event-ID on reconnect.
 func (sw *sseWriter) event(name, id, data string) error {
 	if strings.ContainsAny(name+id, "\r\n") {
 		return fmt.Errorf("event name %q or id %q has a line break", name, id)
@@ -77,9 +73,8 @@ func (sw *sseWriter) event(name, id, data string) error {
 	if id != "" {
 		b.WriteString("id: " + id + "\n")
 	}
-	// The browser ends a line at CRLF, LF or a lone CR, and html/template
-	// leaves CRs in text (a job's error, a log line): send each as LF, or
-	// the browser would drop the rest of its line.
+	// Browsers end a line at CRLF, LF or a lone CR, and html/template keeps CRs
+	// (a job's error, a log line): send LF, or the rest of the line is dropped.
 	data = strings.ReplaceAll(strings.ReplaceAll(data, "\r\n", "\n"), "\r", "\n")
 	for line := range strings.SplitSeq(data, "\n") {
 		b.WriteString("data: " + line + "\n")
@@ -94,15 +89,15 @@ func (sw *sseWriter) event(name, id, data string) error {
 	return sw.flush()
 }
 
-// piece wraps one piece of markup an event carries in its own <template>,
-// whose content the browser parses in the context of its first tag. Pieces
-// parsed together break each other: a <td> after a <div> loses its tag.
+// piece wraps one piece of markup in its own <template>, which the browser
+// parses in the context of its first tag. Pieces parsed together break each
+// other: a <td> after a <div> loses its tag.
 func piece(html string) string {
 	return "<template>" + html + "</template>"
 }
 
-// pieceSet is a page's swappable pieces, so a stream can send just the
-// ones that changed: each element's markup by its id, in page order.
+// pieceSet is a page's swappable pieces, markup by element id in page order,
+// so a stream can send just the changed ones.
 type pieceSet struct {
 	ids  []string
 	html map[string]string
@@ -117,8 +112,8 @@ func (p *pieceSet) add(id, html string) {
 	p.html[id] = html
 }
 
-// changedSince returns the markup of the pieces that differ from before,
-// or that before lacks, in page order, each in its own <template>.
+// changedSince returns the pieces new or different since before, in page
+// order, each in its own <template>.
 func (p pieceSet) changedSince(before pieceSet) string {
 	var b strings.Builder
 	for _, id := range p.ids {
@@ -142,32 +137,25 @@ func (sw *sseWriter) comment(text string) error {
 	return sw.flush()
 }
 
-// stream serves hub topics as an event stream; they share one subscription,
-// so a message on any of them makes a send. send writes the current state:
-// once at the start with resync true, then after each message, with
-// resync true if it was a Resync. A send comes at least gap after the last
-// one; messages that arrive meanwhile join it (the hub merges them).
-// send's seq is the hub sequence number its state must be read at or after
-// (see seqFlight).
+// stream serves hub topics as an event stream over one subscription. send
+// writes the current state: first with resync true, then after each message
+// (resync true for a Resync). Sends are at least gap apart; messages meanwhile
+// are merged by the hub. seq is the hub sequence the state must be read at or
+// after (see seqFlight).
 //
-// The stream subscribes before the first send, so nothing that happens
-// between the two is missed. It sends a heartbeat comment every 15s, and
-// ends when:
+// It subscribes before the first send so nothing is missed, heartbeats every
+// 15s, and ends when:
 //
-//   - the client goes away, or send fails;
-//   - CloseStreams is called (server shutdown);
-//   - the hub stops, closing the subscription, so the browser reconnects
-//     and starts from the current state (the hub never drops a stream
-//     for falling behind: it coalesces what the stream hasn't read);
-//   - the session's next group check falls due (web.session_refresh after
-//     the last one, at most session_refresh after the stream opened, plus
-//     up to a tenth more at random; see streamLifetime), so the browser
-//     reconnects through the login check, which ends the updates of
-//     someone who lost access;
-//   - a write takes longer than sseWriteTimeout.
+//   - the client goes away or send fails;
+//   - CloseStreams is called (shutdown);
+//   - the hub stops; the browser reconnects from current state (the hub never
+//     drops a slow stream, it coalesces);
+//   - the session's next group check falls due (see streamLifetime), so the
+//     browser reconnects through the login check and someone who lost access
+//     stops getting updates;
+//   - a write exceeds sseWriteTimeout.
 //
-// After CloseStreams it refuses new streams with 503. A HEAD request gets
-// the headers only.
+// After CloseStreams it answers 503. HEAD gets headers only.
 func (s *Server) stream(w http.ResponseWriter, r *http.Request, topics []string, gap time.Duration, send func(sw *sseWriter, resync bool, seq uint64) error) {
 	select {
 	case <-s.closed:
@@ -196,9 +184,8 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, topics []string,
 	end := s.clock.After(s.streamLifetime(auth.SessionRefreshedAt(r.Context())))
 	beat := s.clock.After(heartbeatEvery)
 	ctx := r.Context()
-	// After a send, in is nil until open fires gap later: what comes
-	// meanwhile waits in the hub's one slot for this stream, merged into
-	// one message, which makes the next send.
+	// After a send, in is nil until open fires gap later; messages meanwhile merge
+	// in the hub's single slot for this stream and make the next send.
 	var in <-chan status.Msg
 	open := s.clock.After(gap)
 	for {

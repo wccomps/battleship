@@ -67,10 +67,8 @@ func cellHTML(t *testing.T, body, id string) string {
 	return m
 }
 
-// The grid is a form: each VM that exists has a box to tick, missing ones
-// have none, and the action bar's buttons post the ticked VMs to the
-// operations' previews. Rows, columns and the whole grid can be selected
-// without the script, by links that tick the boxes server-side.
+// The grid is a form posting ticked VMs to the previews; row, column and
+// whole-grid selection also work without the script, via server-side links.
 func TestGridIsASelectionForm(t *testing.T) {
 	h := newHarness(t)
 	h.api.add(proxmox.VM{VMID: 10303, Name: "team03-ftp", Node: "n2", Status: "running", Pool: "pool-03"}, cleanConfig("03"), "initial")
@@ -183,10 +181,9 @@ func TestGridSelectionNeedsAVM(t *testing.T) {
 	h.noJobs("with nothing ticked")
 }
 
-// What each user is offered is decided on the server from their Proxmox
-// privileges: each action button names the privilege it needs, and each VM
-// box the grid's privileges the viewer lacks on it. Over every team, power
-// asks to type the range (a safety catch), whoever previews it.
+// Offered actions come from the viewer's Proxmox privileges, decided on the
+// server; each VM box lists what the viewer lacks on it. Power over every
+// team is flagged as such, for anyone.
 func TestGridSelectionPrivilegeGating(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -226,9 +223,8 @@ func TestGridSelectionPrivilegeGating(t *testing.T) {
 	h.noJobs("after previews")
 }
 
-// A selection edited by hand to reach VMs it shouldn't is refused by the
-// same checks as any preview: exact VMs must be team VMs of the teams
-// asked for, and the grid only works out teams that have VMs.
+// A hand-edited selection is refused by the usual preview checks: exact VMs
+// must be team VMs of the requested teams.
 func TestGridSelectionTamper(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -273,9 +269,8 @@ func TestGridSelectionTamper(t *testing.T) {
 	h.noJobs("after tampered selections")
 }
 
-// The side panel asks for the same pages without the layout: the preview
-// is the same plan, its confirm makes one job, and the job's page follows
-// it live with a link to the full page.
+// The side panel serves the same pages without the layout: same plan, one
+// job, and a live job page linking to the full page.
 func TestPanelFragments(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -377,8 +372,7 @@ func TestGridBusyIndicator(t *testing.T) {
 	lacks(t, "patch", ev.Data, `class="cell is-busy"`)
 }
 
-// The help page is gone: its old address leads to the grid, and nothing
-// links to it.
+// /help redirects to the grid, and nothing links to it.
 func TestHelpRedirectsToGrid(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -393,13 +387,12 @@ func TestHelpRedirectsToGrid(t *testing.T) {
 	for _, path := range []string{"/", "/vm/01/dc", "/logs", "/power", "/deploy"} {
 		lacks(t, path, h.get(&lead, path).Body.String(), `href="/help`)
 	}
-	// Power and reset are on the grid now, not in the menu.
+	// Power and reset live on the grid, not in the menu.
 	lacks(t, "nav", h.get(&lead, "/").Body.String(), `<a href="/power">`, `<a href="/reset">`)
 }
 
-// What the help page said is where it is needed, in few words: the grid's
-// legend, the preview's one consequence line, and each job status's "what
-// now" as a control.
+// In-context help: the grid's legend, the preview's consequence line, and
+// each job status's next step as a control.
 func TestGuidanceInPlace(t *testing.T) {
 	h := newHarness(t)
 	h.poll()

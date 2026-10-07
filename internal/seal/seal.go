@@ -1,7 +1,5 @@
-// Package seal encrypts secrets kept at rest (Proxmox tickets and tokens)
-// with AES-256-GCM, bound to the record that holds them, so a database leak
-// (a backup, a replica, a stray dump) doesn't hand them out, and a sealed
-// value copied into another record doesn't open.
+// Package seal encrypts secrets at rest with AES-256-GCM, bound to their
+// record, so a database leak doesn't expose them and a copied value won't open.
 //
 // Stored format: "v1:" followed by the unpadded base64url of nonce ||
 // ciphertext. Values without the prefix are never accepted.
@@ -31,8 +29,7 @@ type Key struct {
 	purpose string
 }
 
-// NewKey derives a 32-byte key for purpose from secret, so each use of one
-// secret has its own key.
+// NewKey derives a 32-byte key for purpose from secret.
 func NewKey(secret, purpose string) Key {
 	m := hmac.New(sha256.New, []byte(secret))
 	m.Write([]byte(purpose))

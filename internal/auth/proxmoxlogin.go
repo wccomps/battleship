@@ -14,22 +14,14 @@ import (
 )
 
 // The Proxmox step of signing in. After the battleship login, the service
-// signs the user in to Proxmox through its own OpenID realm (Proxmox talks
-// to Authentik, which already knows the user, so nothing is asked):
+// signs the user in to Proxmox through its OpenID realm (Authentik already
+// knows the user, so nothing is asked):
 //
-//  1. GET /auth/proxmox asks Proxmox for the identity provider URL
-//     (/access/openid/auth-url), stores the hash of its state, where to go
-//     afterwards and the Proxmox endpoint that answered with the session,
-//     and sends the browser there.
-//  2. Authentik sends the browser back to GET /auth/proxmox/callback with a
-//     code and the state. The state must be the session's; the code is
-//     sent to /access/openid/login at the same endpoint (Proxmox keeps the
-//     login's private state on that node's disk only), which returns the
-//     user's ticket. The ticket is sealed into the session.
-//
-// Every request then uses the ticket (RequireUser), renewing it once it is
-// proxmox.ticket_renew_after old, and sends the user through the Proxmox
-// step again when it lapses or its login is proxmox.ticket_max_age old.
+//  1. GET /auth/proxmox gets the auth URL from Proxmox, stores the state's
+//     hash and the endpoint that answered, and redirects there.
+//  2. GET /auth/proxmox/callback checks the state and sends the code to
+//     the same endpoint (Proxmox keeps login state on that node's disk
+//     only); the returned ticket is sealed into the session.
 
 // proxmoxCallbackPath is where the identity provider sends the browser
 // back; the Authentik provider behind the Proxmox realm must list it.
@@ -47,10 +39,8 @@ func (s *Service) proxmoxStart(w http.ResponseWriter, r *http.Request) {
 	}
 	noteSubject(r.Context(), sess.Subject)
 	if sess.Username == "" {
-		// A login records the identity provider's preferred_username, so a
-		// session has none if it predates that or Authentik sent none.
-		// Without it the callback can't tell whose Proxmox sign-in it is. A
-		// page, not a redirect, so it can't loop.
+		// Without preferred_username the callback can't tell whose Proxmox
+		// sign-in it is. A page, not a redirect, so it can't loop.
 		s.logf("auth: proxmox login not started: subject=%q: the session has no username", sess.Subject)
 		s.render(w, r, Page{Status: http.StatusForbidden, Title: "Log in again",
 			Message: "Battleship doesn't know your Authentik username, so it can't check the Proxmox sign-in is yours. Log in again; if this page comes back, Authentik isn't sending preferred_username.",
@@ -126,9 +116,9 @@ func (s *Service) proxmoxCallback(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, proxmoxFailedPage(next))
 		return
 	}
-	// The Proxmox realm makes a user <preferred_username>@<realm>: the
-	// browser's Authentik session for Proxmox must be this session's user,
-	// or this session would act as someone else.
+	// The realm names users <preferred_username>@<realm>; the browser's
+	// Authentik session must be this session's user, or it would act as
+	// someone else.
 	if want := sess.Username + "@" + s.cfg.Proxmox.Realm; sess.Username == "" || !strings.EqualFold(cred.User, want) {
 		s.logf("auth: proxmox login refused: subject=%q username=%q: Proxmox signed in %q", sess.Subject, sess.Username, cred.User)
 		s.render(w, r, Page{Status: http.StatusForbidden, Title: "Proxmox sign-in refused",
@@ -151,9 +141,8 @@ func (s *Service) proxmoxCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
-// liveSession finds the request's unexpired session for the Proxmox step,
-// or sends the browser to log in (back to next afterwards) and reports
-// false.
+// liveSession finds the request's unexpired session, or sends the browser
+// to log in (back to next) and reports false.
 func (s *Service) liveSession(w http.ResponseWriter, r *http.Request, next string) (store.Session, bool) {
 	sess, err := s.lookup(r)
 	if err == nil && expired(s.cfg.Web, sess, s.now()) {
@@ -185,9 +174,8 @@ func proxmoxFailedPage(next string) Page {
 }
 
 // sessionTicket returns the session's usable Proxmox ticket, renewing it
-// once it is proxmox.ticket_renew_after old. ok is false once it has
-// responded: the ticket is missing, lapsed, refused or past
-// proxmox.ticket_max_age, so the user is sent through the Proxmox step.
+// once it is ticket_renew_after old. ok is false once it has responded by
+// sending the user through the Proxmox step.
 func (s *Service) sessionTicket(ctx context.Context, w http.ResponseWriter, r *http.Request, sess store.Session, now time.Time) (proxmox.Credential, bool) {
 	cred, ok := s.usableTicket(sess, now)
 	if !ok {
@@ -227,10 +215,8 @@ func (s *Service) usableTicket(sess store.Session, now time.Time) (proxmox.Crede
 	return cred, ok && !cred.Lapsed(now, s.cfg.Proxmox.TicketMaxAge)
 }
 
-// needProxmox sends a browser whose session has no usable Proxmox ticket
-// through the Proxmox step: GET and HEAD redirect, back to the same URL
-// afterwards; event streams and other methods get 401, as without a
-// session (see unauthenticated).
+// needProxmox sends a session without a usable ticket through the Proxmox
+// step, answering like unauthenticated.
 func (s *Service) needProxmox(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	if (r.Method == http.MethodGet || r.Method == http.MethodHead) && !wantsEventStream(r) {

@@ -13,11 +13,8 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// A session without a Proxmox ticket goes through the Proxmox OpenID
-// sign-in in the browser: the grid sends it to /auth/proxmox, Proxmox's
-// auth-url to the identity provider (the fake Proxmox's, which signs the
-// user in without a form), and that back to /auth/proxmox/callback, which
-// stores the ticket and returns to the grid.
+// A session without a Proxmox ticket goes through Proxmox's OpenID sign-in
+// (/auth/proxmox → fake IdP → /auth/proxmox/callback) and lands on the grid.
 func TestBrowserProxmoxSignIn(t *testing.T) {
 	h, _ := bigHarness(t)
 	user := "test-signin@auth.example.org"
@@ -45,9 +42,8 @@ func TestBrowserProxmoxSignIn(t *testing.T) {
 	b.clean()
 }
 
-// A preview shows what the user's privileges don't allow as blocked rows,
-// in the blocked style, naming the privilege and path; a job whose
-// submitter's authorization lapsed says so on its page.
+// A preview shows disallowed VMs as blocked rows naming the privilege and
+// path; a job whose submitter's authorization lapsed says so on its page.
 func TestBrowserBlockedByPrivilegesAndLapsed(t *testing.T) {
 	h, _ := bigHarness(t)
 	cred := h.ticketWith("test-powerer", []string{"VM.Audit"})

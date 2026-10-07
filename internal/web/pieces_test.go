@@ -10,10 +10,8 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// pieces splits an event's data into the pieces the script swaps in. Every
-// piece must come in its own <template>, so the browser parses each in its
-// own context: parsed together, a <td> after a <ul> is dropped, and the
-// cell never changes on the page. Anything outside a <template> fails.
+// pieces splits an event's data into the pieces the script swaps in. Each
+// needs its own <template>: parsed together, a <td> after a <ul> is dropped.
 func pieces(t testing.TB, data string) []string {
 	t.Helper()
 	var out []string
@@ -52,9 +50,8 @@ func pieceID(t testing.TB, piece string) string {
 }
 
 func TestGridPatchPiecesWrapped(t *testing.T) {
-	// The browser case that dropped cells: the totals, then cells, then the
-	// scan note, in one patch. Each comes in its own <template>, in page
-	// order, exactly as rendered.
+	// Totals, cells, then scan note in one patch: the mix that made the
+	// browser drop cells.
 	h := newHarness(t)
 	h.poll()
 	before, err := renderParts(h.srv.newGridView(h.poller.Grid(), h.clock.Now(), nil))

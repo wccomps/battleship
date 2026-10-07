@@ -60,10 +60,8 @@ func drawForm(t *rapid.T, teams []string) url.Values {
 	return form
 }
 
-// Whatever an operator's form says, deploy and teardown, which need
-// VM.Clone or VM.Allocate they don't hold, never get a confirm form or a
-// job: every VM is blocked with the privilege missing. Nothing answers
-// 403 for a role any more; a lead's same forms are never refused.
+// An operator's deploy or teardown form, whatever it says, blocks every VM
+// for the missing privilege and makes no job; a lead's is never refused.
 func TestPropOperatorCannotRunWhatProxmoxWouldRefuse(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -159,10 +157,8 @@ func drawJob(t *rapid.T, h *harness) store.Job {
 	return j
 }
 
-// On any job's page, a user gets cancel, retry and "preview again" for a
-// job they could run (they hold its privilege somewhere in Proxmox), or
-// started, and a lock in their place otherwise. An operator holds power
-// and snapshot privileges, not deploy's or teardown's; a lead holds all.
+// A job's page offers cancel, retry and "preview again" to a user who
+// started it or holds its privilege anywhere, and a lock otherwise.
 func TestPropJobActionsFollowPrivileges(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -235,11 +231,8 @@ func endJob(t *rapid.T, h *harness, j store.Job) {
 	}
 }
 
-// Whatever is deployed, the grid and VM pages give an operator, who holds
-// neither VM.Clone nor VM.Allocate, no way to deploy or tear down (no
-// Deploy and Teardown header buttons, no Deploy buttons on the template sets or a missing VM); a
-// lead gets those. Neither is told they lack a power or snapshot
-// privilege on any VM.
+// The grid and VM pages offer deploy and teardown to a lead but never an
+// operator; neither is told they lack a power or snapshot privilege.
 func TestPropGridAndVMPagesFollowPrivileges(t *testing.T) {
 	h := newHarness(t, func(c *config.Config) { c.Web.Templates = "*.kilo.alpha" })
 	addMasters(h)

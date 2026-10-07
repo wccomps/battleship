@@ -17,9 +17,8 @@ type nodeLister interface {
 	ClusterNodes(ctx context.Context) ([]proxmox.ClusterNode, error)
 }
 
-// runNodes is "battleship nodes": it lists the cluster's nodes from
-// /cluster/status and prints a proxmox.urls line to paste into the config.
-// It only reads.
+// runNodes is "battleship nodes": it prints a proxmox.urls line for the
+// cluster's nodes from /cluster/status. It only reads.
 func runNodes(ctx context.Context, args []string, d deps) int {
 	fs := flag.NewFlagSet("battleship nodes", flag.ContinueOnError)
 	fs.SetOutput(d.stderr)

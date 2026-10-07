@@ -14,9 +14,8 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// login starts the authorization-code flow: it seals a fresh state, nonce
-// and PKCE verifier, with where to go afterwards, into the login cookie and
-// sends the browser to the identity provider.
+// login starts the authorization-code flow with PKCE, keeping its state in
+// the sealed login cookie.
 func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 	st := loginState{
 		State:    randomToken(),
@@ -38,14 +37,12 @@ func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, s.oauth.AuthCodeURL(st.State, oidc.Nonce(st.Nonce), oauth2.S256ChallengeOption(st.Verifier)), http.StatusFound)
 }
 
-// errorCode matches an OAuth error code, which is all of the provider's
-// error the pages repeat.
+// errorCode matches an OAuth error code, the only part of a provider error
+// the pages repeat.
 var errorCode = regexp.MustCompile(`^[a-z_]{1,64}$`)
 
-// callback finishes the flow: it checks state against the login cookie,
-// exchanges the code with the PKCE verifier, verifies the ID token and its
-// nonce, reads the user's groups, and creates the session. Who may sign
-// in at all is Authentik's decision (the application's policy bindings).
+// callback finishes the flow and creates the session. Who may sign in at
+// all is Authentik's decision.
 func (s *Service) callback(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	w.Header().Set("Referrer-Policy", "no-referrer")
@@ -146,9 +143,9 @@ func (s *Service) callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/auth/proxmox?next="+url.QueryEscape(st.Next), http.StatusSeeOther)
 }
 
-// logout ends the session and sends the browser to the provider's logout
-// page, if discovery named one, so the next login asks for credentials. It
-// needs the CSRF token, so another site can't log users out.
+// logout ends the session and goes to the provider's logout page, if any,
+// so the next login asks for credentials. It needs the CSRF token so
+// another site can't log users out.
 func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	sess, err := s.lookup(r)
@@ -186,9 +183,8 @@ func (s *Service) clearLoginCookie(w http.ResponseWriter) {
 	})
 }
 
-// Pages the login flow shows. Failures caused by Authentik use 500, not 502:
-// Cloudflare replaces an origin 502 with its own "Bad gateway" page, which
-// would hide the explanation volunteers and admins need.
+// Pages the login flow shows. Authentik failures use 500, not 502, since
+// Cloudflare replaces an origin 502 with its own page.
 var (
 	retryPage = Page{
 		Status:  http.StatusBadRequest,

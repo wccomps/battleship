@@ -1,8 +1,6 @@
-// battleship's one script. Every page works without it; it adds live
-// updates (data-events) and the header's live dot, selecting rows, columns
-// and ranges on the grid with its action bar, and the side panel, where
-// previews, forms, VMs and jobs show (the server renders those pages
-// without the layout for X-Battleship-Panel).
+// battleship's one script; every page works without it. It adds live
+// updates (data-events), grid selection with the action bar, and the side
+// panel (pages fetched with X-Battleship-Panel, rendered without layout).
 (function () {
   "use strict";
   if (!window.fetch || !window.URLSearchParams) return;
@@ -12,9 +10,8 @@
 
   var app = $("app");
 
-  // parse turns server markup into nodes: events (grid, job) and panel
-  // pages. Each event piece comes in its own <template> (piece, sse.go),
-  // whose content is parsed in the context of its first tag. Markup
+  // parse turns server markup into nodes. Each event piece comes in its own
+  // <template> (piece, sse.go), parsed in its first tag's context; markup
   // outside a <template> (a panel page) is one piece.
   function parse(html) {
     var tpl = document.createElement("template");
@@ -105,9 +102,8 @@
       return table.className + "|" + table.querySelector(".hr").textContent + "|" + ids.join(",");
     }
 
-    // "grid" is the whole live grid, then the header's pieces; for a grid
-    // of the same shape, only cells that differ are swapped, so focus,
-    // scrolling and ticks stay.
+    // "grid" is the whole live grid plus header pieces. If the shape is
+    // unchanged, only differing cells are swapped, keeping focus, scroll and ticks.
     function grid(html) {
       var next = parse(html);
       Array.prototype.slice.call(next.children).forEach(function (el) {
@@ -238,9 +234,8 @@
       var n = on.length;
       var state = app ? app.getAttribute("data-live") : "live";
       var locked = state === "stale" || state === "off";
-      // A button marked data-needs is offered only if some ticked VM
-      // allows one of its privileges: its box doesn't list them all in
-      // data-lacks. Proxmox decides; the preview says exactly.
+      // A data-needs button is enabled only if some ticked VM holds one of its
+      // privileges (not all in data-lacks). A hint: Proxmox and the preview decide.
       var allows = function (b, needs) {
         var lacks = (b.getAttribute("data-lacks") || "").split(" ");
         return needs.some(function (p) { return lacks.indexOf(p) < 0; });
@@ -305,9 +300,8 @@
 
   // -- Forms
 
-  // A deploy builds all of its set's hosts unless told otherwise: when
-  // every host is ticked, none is sent. Choosing another set shows its
-  // hosts.
+  // A deploy with every host ticked sends none, meaning all of the set's hosts.
+  // Choosing another set shows its hosts.
   function deployHosts(f) {
     var hosts = f.querySelectorAll('input[name="hosts"]');
     var all = hosts.length > 0 && Array.prototype.every.call(hosts, function (b) { return b.checked; });
@@ -380,10 +374,9 @@
     if (panel && panel.open) panel.close();
   }
 
-  // native submits the form as if there were no script, when the panel
-  // couldn't show the answer. Safe even if the fetch got through: a
-  // confirm's preview nonce is single-use, so a second post lands on the
-  // job the first made; previews and pickers change nothing.
+  // native submits the form without the script when the panel can't show the
+  // answer. Safe even if the fetch got through: a confirm's nonce is
+  // single-use, and previews and pickers change nothing.
   function native(f, action, sub) {
     if (sub && sub.name) {
       var h = document.createElement("input");

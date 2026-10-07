@@ -33,9 +33,8 @@ func capacityResources(free int64) *proxmox.Resources {
 	}
 }
 
-// Over capacity, the preview warns with the numbers and shows a bar per
-// node, but can still be confirmed; the capacity never changes the
-// fingerprint, so a preview isn't made stale by memory moving.
+// Over capacity, the preview warns but can still be confirmed. Capacity is
+// not in the fingerprint, so memory moving doesn't make a preview stale.
 func TestPreviewWarnsAboutCapacity(t *testing.T) {
 	h := newHarness(t)
 	h.poll()

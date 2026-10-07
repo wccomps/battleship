@@ -51,10 +51,8 @@ type authCode struct {
 	sub, nonce, challenge, redirectURI, scope string
 }
 
-// fakeIDP is an OpenID Connect provider on httptest: discovery, JWKS, the
-// authorization endpoint (which logs in whoever is set as current), the
-// token endpoint (authorization code with PKCE, and refresh with rotation),
-// userinfo and end_session.
+// fakeIDP is an OpenID Connect provider on httptest whose authorization
+// endpoint logs in whoever is set as current.
 type fakeIDP struct {
 	t        *testing.T
 	srv      *httptest.Server
@@ -446,9 +444,8 @@ func randHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-// signUnsafe makes the ID tokens an attacker would try: unsigned
-// (alg none), or HS256 keyed with the client secret or with the provider's
-// public key (algorithm confusion). The caller holds f.mu.
+// signUnsafe makes the ID tokens an attacker would try: alg none, or HS256
+// keyed with the client secret or public key. The caller holds f.mu.
 func (f *fakeIDP) signUnsafe(claims map[string]any) string {
 	payload, err := json.Marshal(claims)
 	if err != nil {

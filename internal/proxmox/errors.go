@@ -37,15 +37,13 @@ func (e *TaskError) Error() string {
 	return msg
 }
 
-// Classifier says what Proxmox API and task errors mean, so that callers act
-// on a Meaning rather than on message text.
+// Classifier maps Proxmox errors to a Meaning so callers don't match text.
 type Classifier struct {
 	patterns []string
 }
 
 // NewClassifier makes a Classifier that calls an error Transient if it
-// contains one of patterns (case-insensitive substrings) and no other Meaning
-// applies: the patterns are tried last.
+// contains a pattern (case-insensitive) and no other Meaning applies.
 func NewClassifier(patterns []string) Classifier {
 	var lower []string
 	for _, p := range patterns {
@@ -78,39 +76,32 @@ func matchText(err error) string {
 type Meaning int
 
 const (
-	// Permanent: trying again cannot help (a bad request, a cancel, or
-	// anything not recognized).
+	// Permanent: trying again cannot help; also anything unrecognized.
 	Permanent Meaning = iota
-	// Transient: the call may succeed if tried again: a 5xx, a connection
-	// error, or a configured pattern.
+	// Transient: a 5xx, connection error or configured pattern.
 	Transient
 	// Locked: another task holds the VM's lock (ErrLocked, or "is
 	// locked"); it may succeed once that task ends.
 	Locked
-	// Destroyed: the VM is locked as destroyed: a destroy task died part
-	// way, and Proxmox refuses everything else on it until an admin
-	// finishes it with qm destroy --skiplock.
+	// Destroyed: a destroy died part way; Proxmox refuses everything on the
+	// VM until an admin runs qm destroy --skiplock.
 	Destroyed
-	// NotFound: the VM's config "does not exist" on the node asked. The VM
-	// may be gone, on another node, or, right after a clone to another
-	// node, not yet visible there (pmxcfs propagation).
+	// NotFound: the VM's config "does not exist" on the node asked; it may be
+	// gone, elsewhere, or a fresh clone pmxcfs hasn't propagated yet.
 	NotFound
 	// Exists: the VMID "already exists".
 	Exists
-	// PartialDestroy: a destroy task failed on the cluster-wide user.cfg
-	// lock, in the pool and ACL cleanup that comes after deleting the disks.
-	// Part of the VM is gone, so starting the destroy again cannot help.
+	// PartialDestroy: a destroy failed on the user.cfg lock after deleting
+	// the disks, so retrying the destroy cannot help.
 	PartialDestroy
 	// InUse: a template's base volume cannot be removed while linked clones
 	// still use it.
 	InUse
-	// Forbidden: Proxmox refused the call (403) because the caller lacks a
-	// privilege. Permanent: it is never tried again, and never with
+	// Forbidden: 403, a missing privilege. Never retried, and never with
 	// another identity.
 	Forbidden
-	// Lapsed: Proxmox no longer accepts the caller's credential (401): the
-	// ticket expired, or the user's access was revoked. Nothing more can be
-	// done as them until they log in again.
+	// Lapsed: 401, the credential expired or was revoked; nothing more can
+	// be done as the user until they log in again.
 	Lapsed
 )
 
@@ -184,8 +175,7 @@ func IsNotFound(err error) bool { return Classifier{}.Classify(err) == NotFound 
 
 var permissionRE = regexp.MustCompile(`Permission check failed \(([^,]+), ([^)]+)\)`)
 
-// Describe turns known Proxmox errors into an actionable sentence and returns
-// other errors unchanged.
+// Describe turns known Proxmox errors into an actionable sentence.
 func Describe(err error) string {
 	if err == nil {
 		return ""

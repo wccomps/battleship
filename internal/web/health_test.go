@@ -27,10 +27,8 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
-// Readiness depends on the database only, and never calls Proxmox:
-// battleship has no credential of its own to call it with, and Proxmox is
-// shared by every replica, so its outage must not take them all out of the
-// load balancer.
+// Readiness checks only the database, never Proxmox: there's no credential
+// to call it with, and a shared Proxmox outage must not unready every replica.
 func TestReadyz(t *testing.T) {
 	h := newHarness(t)
 	h.api.setListErr(&proxmox.APIError{Status: 503, Message: "proxy down at 10.0.0.5"})

@@ -5,20 +5,18 @@ import (
 	"sync"
 )
 
-// seqFlight shares reads of the store among this replica's event streams,
-// so a crowd watching the same thing costs a read per change, not one per
-// browser.
+// seqFlight shares store reads among this replica's event streams, so a crowd
+// watching one thing costs a read per change, not per browser.
 //
-// Reads are ordered by the hub's sequence numbers (status.Hub.Seq). An
-// entry records the sequence number when its read started. A stream that
-// must show at least the change the hub numbered N may use any entry that
-// started at N or later: every change committed before N was notified has
-// its notice numbered at most N, so such a read sees it; and a change the
-// read missed was committed after the read started, so its notice comes
-// later with a higher number and makes the stream read again.
+// Reads are ordered by hub sequence numbers (status.Hub.Seq); an entry records
+// the number when its read started. A stream needing change N may use any
+// entry started at N or later: changes committed before N's notice have
+// notices numbered at most N, so the read sees them; a change it missed
+// commits after the read started and its higher-numbered notice triggers a
+// new read.
 //
-// A held key's entry is dropped when its last holder lets go; entries of
-// keys nobody holds are kept.
+// A held key's entry is dropped when its last holder releases it; unheld
+// entries are kept.
 type seqFlight[K comparable, V any] struct {
 	mu    sync.Mutex
 	m     map[K]*seqEntry[V]
@@ -32,10 +30,9 @@ type seqEntry[V any] struct {
 	err  error
 }
 
-// get returns key's value as read at or after sequence number need,
-// joining a read already made or under way if it is recent enough, or else
-// calling read, after taking seq() as the new read's sequence number. A
-// failed read isn't kept. read should not depend on ctx, the caller's, as
+// get returns key's value as read at or after sequence need, joining a recent
+// enough read already made or under way, or else calling read with seq() as
+// its number. Failed reads aren't kept. read should not depend on ctx, since
 // others may wait for it.
 func (c *seqFlight[K, V]) get(ctx context.Context, key K, need uint64, seq func() uint64, read func() (V, error)) (V, error) {
 	c.mu.Lock()
@@ -68,8 +65,7 @@ func (c *seqFlight[K, V]) get(ctx context.Context, key K, need uint64, seq func(
 	return e.v, e.err
 }
 
-// hold keeps key's entry until the returned release is called, and every
-// other holder's too.
+// hold keeps key's entry until this and every other holder releases it.
 func (c *seqFlight[K, V]) hold(key K) (release func()) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

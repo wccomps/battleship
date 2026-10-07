@@ -20,12 +20,10 @@ import (
 	"github.com/wccomps/battleship/internal/config"
 )
 
-// Provider is an OpenID provider on httptest that signs people in without a
-// login form: its authorization endpoint logs in whoever SignIn named last.
-// Unlike StubProvider, it runs the whole flow a browser goes through:
-// discovery, the authorization redirect, the code exchange with PKCE, signed
-// ID tokens, userinfo, refresh with rotating refresh tokens, and logout.
-// End-to-end tests use it to log in through battleship's real login pages.
+// Provider is an OpenID provider on httptest whose authorization endpoint
+// logs in whoever SignIn named last, with no form. Unlike StubProvider it
+// runs the whole flow, including PKCE, userinfo and rotating refresh
+// tokens, for end-to-end tests of the real login pages.
 type Provider struct {
 	// Now is the provider's clock for ID token times. Default time.Now; set
 	// it to the app's clock when the test moves time.
@@ -88,10 +86,9 @@ func NewProvider(t testing.TB, cfg *config.Config) *Provider {
 // Issuer is the provider's issuer URL.
 func (p *Provider) Issuer() string { return p.srv.URL + "/" }
 
-// SignIn makes u the person the next login signs in, with the same
-// defaults as Login (subject "test-user" and so on). Signing in an
-// existing subject again replaces their details, as editing the user in
-// Authentik would: sessions see new groups at their next refresh.
+// SignIn makes u the person the next login signs in, with Login's
+// defaults. Signing in an existing subject replaces their details, which
+// sessions see at their next refresh.
 func (p *Provider) SignIn(u User) {
 	p.t.Helper()
 	u.defaults()
@@ -102,8 +99,7 @@ func (p *Provider) SignIn(u User) {
 	p.current = u.Subject
 }
 
-// Logins is how many authorization codes the provider has exchanged, that
-// is, completed logins.
+// Logins is how many authorization codes the provider has exchanged.
 func (p *Provider) Logins() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()

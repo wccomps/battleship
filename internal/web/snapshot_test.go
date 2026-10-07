@@ -129,9 +129,8 @@ func TestSnapshotPreviewRefusesBadNames(t *testing.T) {
 	h.noJobs("after refused snapshots")
 }
 
-// Taking a snapshot of every team at once is for whoever holds
-// VM.Snapshot, like any snapshot; the preview says it covers every team.
-// A user without VM.Snapshot isn't offered the button.
+// Snapshotting every team needs only VM.Snapshot, like any snapshot; the
+// preview flags it, and users without VM.Snapshot get no button.
 func TestSnapshotOfAllTeamsSaysSo(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -156,9 +155,7 @@ func TestSnapshotOfAllTeamsSaysSo(t *testing.T) {
 	h.noJobs("after previews")
 }
 
-// The VM page offers Take snapshot… for that VM, to whoever holds
-// VM.Snapshot on it, whatever the number of teams (snapshotting every team
-// at once is guarded by the typed confirmation, not by who you are).
+// The VM page offers Take snapshot… to whoever holds VM.Snapshot on it.
 func TestCellPageOffersSnapshot(t *testing.T) {
 	h := newHarness(t)
 	h.poll()

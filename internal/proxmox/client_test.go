@@ -489,8 +489,7 @@ func TestClientVerifiesWithRootCAs(t *testing.T) {
 	if _, err := c.ClusterVMs(context.Background()); err != nil {
 		t.Errorf("with the server's CA: %v", err)
 	}
-	// Without it (and without skipping verification), the certificate is
-	// refused.
+	// Without it, the certificate is refused.
 	c = New(Options{URLs: []string{srv.URL}}).As(TokenCredential("battleship@pve!app", "secret"))
 	var unknown x509.UnknownAuthorityError
 	if _, err := c.ClusterVMs(context.Background()); !errors.As(err, &unknown) {
@@ -566,8 +565,7 @@ func TestClusterVMsNamesVMsTooNewForTheListing(t *testing.T) {
 	}
 }
 
-// A nameless VM on a node listed as not online isn't asked about: the read
-// would be sent through to a node that can't answer, on every listing.
+// A nameless VM on an offline node isn't asked about: it can't answer.
 func TestClusterVMsDoesntAskOfflineNodes(t *testing.T) {
 	f, c := newFake(t)
 	f.routes["GET /cluster/resources"] = jsonData(`[
@@ -618,8 +616,7 @@ func pveStatus(t *testing.T, code int, reason string) func(http.ResponseWriter, 
 	}
 }
 
-// A proxy's error page becomes one line of the error, so it can't split a
-// log line, cut to 200 bytes.
+// A proxy's error page becomes one cut line so it can't split a log line.
 func TestNonProxmoxErrorBodyIsOneLine(t *testing.T) {
 	f, c := newFake(t)
 	f.routes["GET /cluster/resources"] = func(w http.ResponseWriter, _ *http.Request) {

@@ -21,11 +21,9 @@ func newLogger(w io.Writer, format string) (*slog.Logger, error) {
 	return nil, fmt.Errorf("-log-format must be text or json, not %q", format)
 }
 
-// routine lists, per component, the starts of the lines that record normal
-// use. Every other auth, web and proxmox line is a refusal (a rejected CSRF
-// token, login or confirm, a Proxmox sign-in that failed) or an outage (a
-// database or identity provider error), and logs at Warn. Other components
-// log at Info.
+// routine lists, per component, the line prefixes of normal use. Other auth,
+// web and proxmox lines are refusals or outages and log at Warn; other
+// components log at Info.
 var routine = map[string][]string{
 	"auth": {"login: ", "logout: ", "session expired: ", "proxmox login: "},
 	"web":  {"ready", "job ", "cancel requested: "},
@@ -33,10 +31,8 @@ var routine = map[string][]string{
 	"proxmox": {},
 }
 
-// logfFor adapts l to the printf-style Logf the packages take, with a
-// component attribute. The packages start their lines with "<component>: ";
-// that prefix is dropped, since the attribute says it. The packages never
-// pass secrets to Logf.
+// logfFor adapts l to the packages' printf-style Logf, moving their
+// "<component>: " prefix into an attribute. The packages never pass secrets.
 func logfFor(l *slog.Logger, component string) func(format string, args ...any) {
 	l = l.With("component", component)
 	prefix := component + ": "

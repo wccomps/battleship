@@ -23,9 +23,9 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
-// Page templates. Each page file defines "content"; it is parsed on top of
-// layout.html and the shared partials (partials.html), and executed as
-// "layout". A page is looked up by its file name without ".html".
+// Page templates: each page file defines "content", is parsed over
+// layout.html and partials.html, executed as "layout", and looked up by file
+// name without ".html".
 var pages = parsePages()
 
 func parsePages() map[string]*template.Template {
@@ -46,20 +46,17 @@ func parsePages() map[string]*template.Template {
 	return out
 }
 
-// funcs are the helpers templates may call. Times are formatted in Go
-// (clockTime, minuteTime, shortTime), against the server's clock, before
-// they reach a template.
+// funcs are the template helpers. Times are formatted in Go against the
+// server's clock before they reach a template.
 var funcs = template.FuncMap{"asset": assetURL, "names": keepNames, "icon": icon, "opIcon": opIcon, "needs": needs}
 
-// nameRE matches what reads as a name in prose: a run of letters, digits,
-// '_' and '*' joined by '-' or '.', as VM, pool, snapshot, template and
-// set names are (team03-web, pool-03, dc.kilo.alpha.tpl,
-// *.kilo.alpha). keepNames skips the ones without a letter or '*'.
+// nameRE matches a name in prose: letter/digit/_/* runs joined by '-' or '.'
+// (team03-web, dc.kilo.alpha.tpl, *.kilo.alpha). keepNames skips matches
+// without a letter or '*'.
 var nameRE = regexp.MustCompile(`[A-Za-z0-9_*]+(?:[-.][A-Za-z0-9_*]+)+`)
 
-// keepNames escapes s for HTML with each name in it in a span of class
-// "name", which the stylesheet never breaks across lines: a browser may
-// otherwise break a name at a hyphen.
+// keepNames HTML-escapes s, wrapping each name in a span.name the stylesheet
+// never breaks, since browsers break names at hyphens.
 func keepNames(s string) template.HTML {
 	var b strings.Builder
 	last := 0
@@ -77,15 +74,14 @@ func keepNames(s string) template.HTML {
 	return template.HTML(b.String())
 }
 
-// clockTime formats t for people: the time of day in UTC, e.g.
-// "14:03:05 UTC", or with the date when t isn't on the same day as now.
+// clockTime formats t as UTC time of day ("14:03:05 UTC"), with the date when
+// t isn't on now's day.
 func clockTime(now, t time.Time) string {
 	return dayTime(now, t, "15:04:05 UTC", "Jan 2 15:04:05 UTC")
 }
 
-// shortTime formats t compactly: "14:03:05", or "Jan 2 14:03" on
-// another day than now. Times are UTC, as clockTime says in full; pages
-// put that in a title.
+// shortTime formats t compactly: "14:03:05", or "Jan 2 14:03" on another day.
+// Times are UTC; pages say so in a title.
 func shortTime(now, t time.Time) string { return dayTime(now, t, "15:04:05", "Jan 2 15:04") }
 
 // minuteTime is shortTime to the minute: "14:03", or "Jan 2 14:03".
@@ -119,12 +115,12 @@ type view struct {
 	PVEUser string
 	Flash   *flash
 	Data    any // the page's own data
-	// Panel is set when the page is rendered for the grid's side panel:
-	// its content only, without the layout (see render).
+	// Panel renders only the page content, without the layout, for the grid's
+	// side panel (see render).
 	Panel bool
-	// Live, if set, shows the header's live dot in this state ("live",
-	// "stale"): for pages that follow an event stream. The script turns
-	// it "off" while the stream is down.
+	// Live, if set, shows the header's live dot in this state ("live", "stale")
+	// for pages that follow an event stream; the script turns it "off" while the
+	// stream is down.
 	Live string
 	// Initial is the user's initial, for the account button.
 	Initial string
@@ -135,10 +131,9 @@ type navItem struct {
 	Key, Label, Href string
 }
 
-// nav is the main navigation: the grid, where VMs are powered and reset,
-// and the logs of what ran. Pages call newView, which fills it in. The
-// power and reset forms stay at their addresses, for links that fill them
-// in (a job's "start again"), but aren't in the menu.
+// nav is the main navigation: the grid and the logs. The power and reset forms
+// keep their addresses for prefilled links (a job's "start again") but aren't
+// in the menu.
 func nav(u *auth.User) []navItem {
 	if u == nil {
 		return nil
@@ -146,8 +141,8 @@ func nav(u *auth.User) []navItem {
 	return []navItem{{"grid", "Grid", "/"}, {"logs", "Logs", logsPath}}
 }
 
-// leadOps is the operations that work on whole teams, deploy and
-// teardown, those of them the user holds a privilege for somewhere.
+// leadOps is deploy and teardown, those the user holds a privilege for
+// somewhere.
 func (s *Server) leadOps(ctx context.Context) []navItem {
 	var items []navItem
 	for _, op := range operations {
@@ -158,16 +153,15 @@ func (s *Server) leadOps(ctx context.Context) []navItem {
 	return items
 }
 
-// newView starts the view of a page for the request's user. It takes the
-// flash message waiting for this browser, if any, and clears it.
+// newView starts a page view for the request's user, taking and clearing any
+// waiting flash message.
 func (s *Server) newView(w http.ResponseWriter, r *http.Request, title, active string, data any) view {
 	ctx := r.Context()
 	v := view{Title: title, Active: active, Data: data, CSRF: auth.CSRFToken(ctx), Panel: wantsPanel(r)}
 	if u, ok := auth.UserFrom(ctx); ok {
 		v.User = &u
 		v.Initial = initial(u.Name + u.Email)
-		// Only the layout shows these, and only a Proxmox ticket can read
-		// the user's privileges.
+		// Only the layout shows these, and only a Proxmox ticket can read privileges.
 		if cred, ok := auth.ProxmoxCredential(ctx); ok && !v.Panel {
 			v.PVEUser, v.Lead = cred.User, s.leadOps(ctx)
 		}
@@ -177,20 +171,17 @@ func (s *Server) newView(w http.ResponseWriter, r *http.Request, title, active s
 	return v
 }
 
-// panelHeader asks for a page's content without the layout, for the side
-// panel; fetch keeps it across redirects. Panel responses carry it back, so
-// the script can tell them from anything else (the login page).
+// panelHeader asks for a page's content without the layout; fetch keeps it
+// across redirects. Panel responses echo it so the script can tell them from
+// anything else (e.g. the login page).
 const panelHeader = "X-Battleship-Panel"
 
 // wantsPanel reports whether r asks for the panel's rendering.
 func wantsPanel(r *http.Request) bool { return r.Header.Get(panelHeader) == "1" }
 
-// render writes page with v and status. The page is rendered in full before
-// anything is written, so a template error becomes a plain 500, and is
-// logged through Deps.Logf. For the side panel (v.Panel) it renders the
-// same page's content without the layout: the same handler, data and
-// template, so a preview or a job looks the same in the panel as on its
-// own page.
+// render writes page with v and status, fully rendered first so a template
+// error becomes a plain 500 (logged via Deps.Logf). For the side panel it
+// renders the same page without the layout, so it looks the same in both.
 func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page string, v view) {
 	t, ok := pages[page]
 	if !ok {
@@ -221,8 +212,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page
 	}
 }
 
-// fragment renders one named template of a page, e.g. a piece an event
-// stream sends.
+// fragment renders one named template of a page, e.g. an event-stream piece.
 func fragment(page, name string, data any) (string, error) {
 	t, ok := pages[page]
 	if !ok {
@@ -235,8 +225,7 @@ func fragment(page, name string, data any) (string, error) {
 	return buf.String(), nil
 }
 
-// message is the data of the message page: a short explanation and a
-// link onwards.
+// message is the message page's data: a short explanation and a link onwards.
 type message struct {
 	Status   int
 	Message  string
@@ -244,16 +233,15 @@ type message struct {
 	LinkText string
 }
 
-// AuthPage renders the pages auth shows itself (login and Proxmox sign-in
-// errors, and 401/403 refusals) in this app's layout. New makes it the
-// auth service's.
+// AuthPage renders auth's own pages (login and sign-in errors, 401/403) in
+// this app's layout. New makes it the auth service's.
 func (s *Server) AuthPage(w http.ResponseWriter, r *http.Request, p auth.Page) {
 	v := s.newView(w, r, p.Title, "", message{Status: p.Status, Message: sentence(p.Message), Link: p.Link, LinkText: p.LinkText})
 	s.render(w, r, p.Status, "message", v)
 }
 
-// sentence makes a message that may start in lower case, like auth's
-// refusals, read as a sentence: capitalised, with a full stop.
+// sentence capitalises msg and adds a full stop, for lower-case messages like
+// auth's refusals.
 func sentence(msg string) string {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
@@ -290,12 +278,10 @@ func opIcon(kind string) template.HTML {
 	return icon("reboot")
 }
 
-// Flash messages carry a one-line result across a redirect, e.g. "job 7
-// submitted", in a short-lived cookie that the next page shows and clears.
-// They hold nothing secret: a browser can only forge one for itself, and
-// the text is escaped like any other. On https (web.base_url) the cookie is
-// Secure and named with the __Host- prefix, like the session's, so nothing
-// on plain http can set or read it.
+// Flash messages carry a one-line result across a redirect in a short-lived
+// cookie the next page shows and clears. They hold nothing secret (a browser
+// can only forge its own; the text is escaped). On https the cookie is Secure
+// with the __Host- prefix, so plain http can't set or read it.
 const (
 	flashCookie = "battleship_flash"
 	flashMaxLen = 500 // bytes of message, cut at a rune boundary
@@ -313,8 +299,7 @@ type flash struct {
 	Message string
 }
 
-// flashCookieName is the flash cookie's name: __Host-battleship_flash on
-// https.
+// flashCookieName is the flash cookie's name: __Host-battleship_flash on https.
 func (s *Server) flashCookieName() string {
 	if s.secureCookies {
 		return "__Host-" + flashCookie
@@ -333,8 +318,8 @@ func truncateRunes(s string, n int) string {
 	return s[:n]
 }
 
-// setFlash leaves a message for the next page this browser loads. Call it
-// before writing the response, typically before a redirect.
+// setFlash leaves a message for this browser's next page. Call it before
+// writing the response, typically before a redirect.
 func (s *Server) setFlash(w http.ResponseWriter, kind, msg string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     s.flashCookieName(),
@@ -347,8 +332,8 @@ func (s *Server) setFlash(w http.ResponseWriter, kind, msg string) {
 	})
 }
 
-// takeFlash returns the waiting message, if any, and clears it. A cookie
-// that isn't a flash message is cleared and ignored.
+// takeFlash returns and clears the waiting message. A cookie that isn't a
+// flash message is cleared and ignored.
 func (s *Server) takeFlash(w http.ResponseWriter, r *http.Request) *flash {
 	name := s.flashCookieName()
 	c, err := r.Cookie(name)

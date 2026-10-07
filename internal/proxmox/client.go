@@ -19,24 +19,18 @@ import (
 	"time"
 )
 
-// Client talks to one Proxmox cluster through one or more of its nodes'
-// API endpoints. It uses one active endpoint, sticky across calls, and
-// fails over to the next when a call can safely be sent again elsewhere
-// (see failover.go).
+// Client talks to one Proxmox cluster through a sticky active endpoint,
+// failing over when safe (see failover.go).
 //
-// A Client holds no credential of its own: New's client can only start
-// and finish logins (OpenIDAuthURL, OpenIDLogin, RenewTicket), and every
-// other call is made through a view, As(cred) or AsSource(src), that sends
-// a person's credential. Views share the endpoints, the active endpoint and
-// the connections.
+// A Client holds no credential: New's client only does logins, and every
+// other call goes through a view (As, AsSource) carrying a person's
+// credential. Views share endpoints and connections.
 type Client struct {
 	*conn
-	// cred is the view's credential, read for each request; nil for the
-	// client New returns, whose calls fail with ErrNoCredential.
+	// cred is read per request; nil makes calls fail with ErrNoCredential.
 	cred func() Credential
 	anon bool // the call needs no credential (logins and renewals)
-	// refused, if set, is called each time Proxmox refuses the view's
-	// credential (401); see WhenRefused.
+	// refused is called on each 401; see WhenRefused.
 	refused func()
 }
 
@@ -53,15 +47,14 @@ func (c *Client) As(cred Credential) *Client {
 	return &Client{conn: c.conn, cred: func() Credential { return cred }}
 }
 
-// AsSource is a view of c that makes each call with the credential src
-// returns at the time, so a renewed ticket is used as soon as src has it.
+// AsSource is a view of c that calls src per request, so a renewed ticket
+// is used at once.
 func (c *Client) AsSource(src func() Credential) *Client {
 	return &Client{conn: c.conn, cred: src}
 }
 
-// WhenRefused is a view of c that also calls refused each time Proxmox
-// refuses its credential (401: the ticket expired or the user's access was
-// revoked), so its owner can stop at once.
+// WhenRefused is a view of c that calls refused on each 401, so its owner
+// can stop at once.
 func (c *Client) WhenRefused(refused func()) *Client {
 	v := *c
 	v.refused = refused
@@ -71,21 +64,18 @@ func (c *Client) WhenRefused(refused func()) *Client {
 // anonymous is a view that sends no credential, for logins.
 func (c *Client) anonymous() *Client { return &Client{conn: c.conn, anon: true} }
 
-// endpoint is one node's API: base is https://host:8006/api2/json and host
-// is host:8006, which is what logs and errors show.
+// endpoint is one node's API; host (host:8006) is what logs and errors show.
 type endpoint struct {
 	base string
 	host string
 }
 
 type Options struct {
-	// URLs are the cluster's nodes, e.g. https://192.0.2.123:8006, tried in
-	// order (see failover.go).
+	// URLs are the cluster's nodes, tried in order (see failover.go).
 	URLs               []string
 	InsecureSkipVerify bool
-	// RootCAs, if set, are the CAs Proxmox's certificate is checked
-	// against (e.g. the cluster's CA) instead of the system's. Each node's
-	// certificate names that node, so one pool verifies them all.
+	// RootCAs, if set, replace the system CAs, e.g. with the cluster CA,
+	// which verifies every node.
 	RootCAs *x509.CertPool
 }
 
@@ -123,10 +113,8 @@ func (c *Client) Endpoints() []string {
 	return out
 }
 
-// doAt calls the API at one endpoint's base. GET and DELETE send params as
-// a query string; POST and PUT send them form-encoded. The response's
-// "data" field is decoded into out when out is non-nil. transport reports
-// that err came from the connection rather than from an answer.
+// doAt calls one endpoint, decoding "data" into out if non-nil. transport
+// reports that err came from the connection rather than an answer.
 func (c *Client) doAt(ctx context.Context, cred Credential, base, method, path string, params url.Values, out any) (transport bool, err error) {
 	u := base + path
 	var body io.Reader
@@ -167,8 +155,7 @@ func (c *Client) doAt(ctx context.Context, cred Credential, base, method, path s
 		// Go's net/http server (httptest, or a proxy written in Go) writes
 		// "status code NNN" for codes it has no text for; treat as empty.
 		if msg == "" || msg == "status code "+strconv.Itoa(resp.StatusCode) {
-			// A body that isn't Proxmox's JSON (a proxy's error page) is
-			// shown, on one line and cut to 200 bytes of valid UTF-8.
+			// Show a non-Proxmox body (a proxy's error page) on one line, cut.
 			if unmarshalErr != nil {
 				msg = strings.Join(strings.Fields(string(raw)), " ")
 				if len(msg) > 200 {

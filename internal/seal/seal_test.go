@@ -44,7 +44,7 @@ func TestSealIsRandomized(t *testing.T) {
 	}
 }
 
-// Item 15: a key never prints its bytes, however it is formatted.
+// A key never prints its bytes, however it is formatted.
 func TestKeyIsRedacted(t *testing.T) {
 	k := NewKey("a long enough secret for tests", "job credential v1")
 	raw := string(k.key)

@@ -21,9 +21,8 @@ func withTeam00(t *testing.T) *harness {
 	return h
 }
 
-// The grid's rows are the teams with VMs: team 00 gets a row like any
-// other, whose cells can be ticked and opened; the live grid adds and drops
-// it as its VMs come and go.
+// Team 00 gets a grid row like any other team with VMs, added and dropped
+// live as its VMs come and go.
 func TestGridRowsAreTeamsWithVMs(t *testing.T) {
 	h := withTeam00(t)
 	op := h.login(asOperator)
@@ -67,9 +66,8 @@ func TestGridRowsAreTeamsWithVMs(t *testing.T) {
 	lacks(t, "grid after team 00 went", h.get(&op, "/").Body.String(), `data-select="team:00"`)
 }
 
-// "All teams" is every team with VMs: the forms' hint and the preview's
-// note name team 00 while it has VMs, and a teardown that leaves it out is
-// not of every team.
+// "All teams" means every team with VMs, team 00 included: a teardown that
+// leaves it out is not of every team.
 func TestAllTeamsIsTeamsWithVMs(t *testing.T) {
 	h := withTeam00(t)
 	lead := h.login(asLead)
@@ -90,9 +88,8 @@ func TestAllTeamsIsTeamsWithVMs(t *testing.T) {
 	_, _, body = h.preview(&lead, "/teardown", url.Values{"teams": {"1-3"}})
 	contains(t, "teardown of 1-3", body, "This covers every team (01-03).")
 
-	// With no team VMs on the grid, the hint has no teams to name, and any
-	// range counts as every team, so the catch asks: here a VM made since
-	// the grid's last read.
+	// With no team VMs on the grid, any range counts as every team, so the
+	// catch asks (here a VM was made since the grid's last read).
 	h.noTeamVMs()
 	h.poll()
 	contains(t, "teardown form", h.get(&lead, "/teardown").Body.String(), `<span class="hint" id="teams-hint">3,7 · 12-14</span>`)
@@ -107,9 +104,8 @@ func TestAllTeamsIsTeamsWithVMs(t *testing.T) {
 	h.noJobs("after previews")
 }
 
-// A power or snapshot over every team with VMs is flagged as such; one that
-// leaves out any of them, team 00 included, isn't. Neither is typed: only a
-// teardown is (pods.Kind.TypedConfirm).
+// Power or snapshot over every team with VMs is flagged; leaving out any
+// team (00 included) isn't. Only a teardown is typed (pods.Kind.TypedConfirm).
 func TestAllTeamsRuleCoversEveryTeamWithVMs(t *testing.T) {
 	h := withTeam00(t)
 	op := h.login(asOperator)

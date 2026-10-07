@@ -13,27 +13,23 @@ import (
 // A ticket can be renewed (RenewTicket) only while it is still valid.
 const TicketLifetime = 2 * time.Hour
 
-// ErrNoCredential is returned, without contacting Proxmox, by a call made
-// through a client that has no credential: battleship holds none of its own,
-// so every call must name whose it is (Client.As).
+// ErrNoCredential is returned, without contacting Proxmox, by a call through
+// a client with no credential.
 var ErrNoCredential = errors.New("no Proxmox credential: every call must be made as a person (Client.As)")
 
-// Credential is a person's authority to call Proxmox: a ticket from a
-// login (with its CSRF token), or a user's own API token. Its String and
-// GoString never show the ticket, the CSRF token or the token secret.
+// Credential is a person's login ticket (with CSRF token) or API token.
+// Its String and GoString never show secrets.
 type Credential struct {
 	// User is the Proxmox user, e.g. jdoe@auth.example.org; for a token,
 	// the token ID, e.g. jdoe@auth.example.org!cli.
 	User   string
 	Ticket string
 	CSRF   string
-	// Issued is when battleship asked for the ticket (a login or a renewal),
-	// by its own clock: its age then never depends on how Proxmox's clock
-	// differs, and it can only read older than it is.
+	// Issued is when battleship asked for the ticket, by its own clock, so
+	// Proxmox clock skew can't make it look younger than it is.
 	Issued time.Time
-	// LoginAt is when the login that produced the ticket ran; renewals
-	// keep it. Renewal never asks the identity provider, so battleship caps
-	// how long after LoginAt it renews (proxmox.ticket_max_age).
+	// LoginAt is when the login ran; renewals keep it. Renewal skips the IdP,
+	// so proxmox.ticket_max_age caps renewals after it.
 	LoginAt     time.Time
 	TokenSecret string
 }
@@ -54,15 +50,14 @@ func (c Credential) IsToken() bool { return c.TokenSecret != "" }
 // Usable reports whether c holds a ticket or a token secret, and a user.
 func (c Credential) Usable() bool { return c.User != "" && (c.Ticket != "" || c.TokenSecret != "") }
 
-// Expired reports whether a ticket is past TicketLifetime at now. Tokens
-// don't expire here; Proxmox enforces their own expiry.
+// Expired reports whether a ticket is past TicketLifetime. Proxmox enforces
+// token expiry.
 func (c Credential) Expired(now time.Time) bool {
 	return !c.IsToken() && !now.Before(c.Issued.Add(TicketLifetime))
 }
 
-// Lapsed reports whether a ticket can no longer be used or renewed at
-// now: it expired, or its login (LoginAt) is maxAge old
-// (proxmox.ticket_max_age). Tokens never lapse here.
+// Lapsed reports whether a ticket expired or its login is maxAge old.
+// Tokens never lapse here.
 func (c Credential) Lapsed(now time.Time, maxAge time.Duration) bool {
 	return !c.IsToken() && (c.Expired(now) || !now.Before(c.LoginAt.Add(maxAge)))
 }
@@ -113,9 +108,8 @@ func (a ticketAnswer) credential(what string, asked time.Time) (Credential, erro
 	return TicketCredential(a.Username, a.Ticket, a.CSRF, asked), nil
 }
 
-// RenewTicket exchanges a still-valid ticket for a fresh one, issued at now
-// (see Credential.Issued) with the same LoginAt: Proxmox accepts the
-// current ticket as the password. RenewalRefused reports a refusal.
+// RenewTicket exchanges a valid ticket for a fresh one with the same LoginAt;
+// Proxmox accepts the current ticket as the password.
 func (c *Client) RenewTicket(ctx context.Context, cred Credential, now time.Time) (Credential, error) {
 	if cred.IsToken() {
 		return Credential{}, errors.New("an API token is not renewed")
@@ -133,16 +127,13 @@ func (c *Client) RenewTicket(ctx context.Context, cred Credential, now time.Time
 	return renewed, err
 }
 
-// RenewalRefused reports whether a RenewTicket error is Proxmox refusing
-// the ticket (401: it expired; 403: the user lost access), so it is done,
-// rather than a failure to ask.
+// RenewalRefused reports whether a RenewTicket error is Proxmox refusing the
+// ticket (401 or 403) rather than a failure to ask.
 func RenewalRefused(err error) bool { return IsLapsed(err) || IsForbidden(err) }
 
-// OpenIDAuthURL starts a Proxmox OpenID login in realm: it returns the
-// identity provider URL to send the browser to, which comes back to
-// redirectURL with a code and state, and the endpoint (host:port) that
-// started the login. Proxmox keeps the login's private state on that
-// node's disk, so OpenIDLogin must go to the same endpoint.
+// OpenIDAuthURL starts a Proxmox OpenID login, returning the IdP URL and the
+// endpoint that started it. Proxmox keeps login state on that node's disk,
+// so OpenIDLogin must go to the same endpoint.
 func (c *Client) OpenIDAuthURL(ctx context.Context, realm, redirectURL string) (authURL, endpoint string, err error) {
 	endpoint, err = c.anonymous().doServed(ctx, http.MethodPost, "/access/openid/auth-url",
 		url.Values{"realm": {realm}, "redirect-url": {redirectURL}}, &authURL)
@@ -155,10 +146,7 @@ func (c *Client) OpenIDAuthURL(ctx context.Context, realm, redirectURL string) (
 	return authURL, endpoint, nil
 }
 
-// OpenIDLogin finishes a Proxmox OpenID login, at the endpoint that
-// started it (OpenIDAuthURL) and nowhere else, with the code and state the
-// identity provider sent back to redirectURL. It returns the user's
-// ticket, issued and logged in at now (see Credential.Issued). Proxmox
+// OpenIDLogin finishes a login at the endpoint that started it. Proxmox
 // answers any failure with a bare 401.
 func (c *Client) OpenIDLogin(ctx context.Context, endpoint, code, state, redirectURL string, now time.Time) (Credential, error) {
 	var a ticketAnswer
@@ -171,9 +159,7 @@ func (c *Client) OpenIDLogin(ctx context.Context, endpoint, code, state, redirec
 	return cred, err
 }
 
-// Permissions are a user's effective privileges by ACL path, from
-// /access/permissions: path -> privilege -> whether it propagates to the
-// paths below.
+// Permissions maps ACL path -> privilege -> whether it propagates.
 type Permissions map[string]map[string]bool
 
 // Permissions reads the caller's effective privileges.
@@ -197,11 +183,10 @@ func (c *Client) permissions(ctx context.Context, q url.Values) (Permissions, er
 	return out, nil
 }
 
-// PermissionsAt reads the caller's effective privileges at one path,
-// exactly as Proxmox resolves them there (inheritance replaces rather
-// than merges, and pool-derived privileges don't propagate, so a path
-// /access/permissions doesn't list can't be inferred from its parents).
-// It maps each privilege to whether it propagates.
+// PermissionsAt reads the caller's privileges at one path as Proxmox
+// resolves them; they can't be inferred from parents, since inheritance
+// replaces rather than merges and pool privileges don't propagate. The map
+// value is whether the privilege propagates.
 func (c *Client) PermissionsAt(ctx context.Context, path string) (map[string]bool, error) {
 	perms, err := c.permissions(ctx, url.Values{"path": {path}})
 	if err != nil {

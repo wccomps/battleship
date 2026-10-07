@@ -45,9 +45,8 @@ func deployLinks(t *testing.T, body string) []*url.URL {
 	return out
 }
 
-// checkDeployLink fails unless u opens the deploy form for pattern, with
-// the baseline snapshot on, as the form has it by default, and no teams:
-// those are typed.
+// checkDeployLink fails unless u opens the deploy form for pattern with the
+// default baseline snapshot on and no teams.
 func checkDeployLink(t *testing.T, u *url.URL, pattern string) {
 	t.Helper()
 	q := u.Query()
@@ -57,9 +56,8 @@ func checkDeployLink(t *testing.T, u *url.URL, pattern string) {
 	}
 }
 
-// The empty grid lists the cluster's template sets as cards, by name, with
-// their hosts and how many masters run, and gives a lead a button per set
-// that opens the deploy form filled in for it.
+// The empty grid lists template sets as cards, with a Deploy button per set
+// for leads.
 func TestGridEmptyOffersTemplateSets(t *testing.T) {
 	h := emptyWithMasters(t)
 	lead := h.login(asLead)
@@ -106,10 +104,8 @@ func TestGridEmptyWithoutMasters(t *testing.T) {
 	lacks(t, "operator's empty grid", body, `href="/deploy`)
 }
 
-// One viewer's live grid is rendered once for all their event streams.
-// The empty grid's template sets are part of it, with Deploy links for a
-// viewer who may deploy, and follow the cluster: a master starting
-// patches them in by id.
+// One viewer's live grid, template sets included, is rendered once for all
+// their streams; a master starting patches its set in by id.
 func TestGridEmptySetsAreLive(t *testing.T) {
 	h := emptyWithMasters(t)
 	lead, op := h.login(asLead), h.login(asOperator)
@@ -172,9 +168,8 @@ func submitted(t *testing.T, body string) (string, url.Values) {
 	return m[1], form
 }
 
-// A set's button opens the deploy form filled in but for the teams, which
-// it asks for; with them typed, it previews a deploy of exactly that set
-// to exactly those teams, through the usual preview and confirm.
+// A set's button opens the deploy form filled in except teams; once typed,
+// it deploys exactly that set to exactly those teams.
 func TestGridEmptyDeployClickThrough(t *testing.T) {
 	h := emptyWithMasters(t)
 	lead := h.login(asLead)
@@ -217,9 +212,8 @@ func TestGridEmptyDeployClickThrough(t *testing.T) {
 	h.noJobs("after the preview")
 }
 
-// With web.templates set and nothing deployed, the grid is empty like any
-// other with no team VMs, with the template sets; once a team has a VM,
-// its row has a column per host of the set, missing where not deployed.
+// With web.templates set the grid starts empty; once a team has a VM, every
+// host of the set gets a column, missing where not deployed.
 func TestGridTemplatesNothingDeployed(t *testing.T) {
 	h := emptyWithMasters(t, func(c *config.Config) { c.Web.Templates = "*.kilo.alpha" })
 	lead := h.login(asLead)

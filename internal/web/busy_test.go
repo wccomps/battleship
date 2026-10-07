@@ -9,10 +9,8 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// A running job's log lines change nothing the grid shows, so a flood of
-// them, notified through Postgres as across replicas, reads no busy VMs and
-// sends grid streams nothing; a job's start and end still update the busy
-// marks.
+// A flood of job log notices (via Postgres, as across replicas) reads no
+// busy VMs and sends grid streams nothing; job start and end still do.
 func TestLogLinesDontWakeGridStreams(t *testing.T) {
 	h := newListeningHarness(t)
 	h.poll()

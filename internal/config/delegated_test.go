@@ -106,9 +106,7 @@ func TestDeployConfigsLoad(t *testing.T) {
 	}
 }
 
-// Item 22: Proxmox's certificate is checked by default; serve and worker
-// (RequireTLSVerify) need the cluster CA (ca_file), or an explicit
-// insecure_skip_verify = true.
+// Serve and worker need ca_file or an explicit insecure_skip_verify.
 func TestTLSVerifiedByDefault(t *testing.T) {
 	if Default().Proxmox.InsecureSkipVerify {
 		t.Fatal("insecure_skip_verify defaults to true")
@@ -140,8 +138,7 @@ func TestTLSVerifiedByDefault(t *testing.T) {
 	}
 }
 
-// web.teams is gone: the teams are those with VMs. An old config that sets
-// it says so, not just "unknown key".
+// A config setting the removed web.teams gets a reason, not "unknown key".
 func TestLoadRefusesWebTeams(t *testing.T) {
 	path := writeFile(t, "[proxmox]\nurl = \"https://pve.example:8006\"\n\n[web]\nteams = \"1-32\"\n")
 	_, err := Load(path)

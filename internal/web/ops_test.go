@@ -26,8 +26,7 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// post submits form as sess, with the session's CSRF token in the header
-// (as sess.Apply does for every non-GET request).
+// post submits form as sess, with its CSRF token (via sess.Apply).
 func (h *harness) post(sess *authtest.Session, target string, form url.Values) *httptest.ResponseRecorder {
 	h.t.Helper()
 	return h.do(sess, http.MethodPost, target, strings.NewReader(form.Encode()))
@@ -55,8 +54,7 @@ func confirmOf(t *testing.T, body string) (string, url.Values) {
 	return m[1], form
 }
 
-// preview posts a preview and returns its confirm form, failing unless
-// the preview is a 200 with a form.
+// preview posts a preview and returns its confirm form, failing without one.
 func (h *harness) preview(sess *authtest.Session, path string, form url.Values) (string, url.Values, string) {
 	h.t.Helper()
 	rec := h.post(sess, path+"/preview", form)
@@ -133,9 +131,8 @@ func TestOperationForms(t *testing.T) {
 		contains(t, "lead's "+tc.path, rec.Body.String(), tc.wants...)
 	}
 
-	// Operators hold power and snapshot privileges, not VM.Clone or
-	// VM.Allocate: the Deploy and Teardown buttons aren't offered them. (The forms still
-	// open; their previews block every VM, saying why.)
+	// Operators lack VM.Clone and VM.Allocate, so no Deploy or Teardown
+	// buttons (the forms open, but previews block every VM).
 	body := h.get(&op, "/power").Body.String()
 	contains(t, "operator's power form", body, `<form class="sheet" method="post" action="/power/preview"`)
 	lacks(t, "operator's power form", body, `href="/deploy"`, `href="/teardown"`)
@@ -419,8 +416,7 @@ func TestConfirmAfterTheClusterChanged(t *testing.T) {
 		"Reset 1 VM</button>")
 	h.noJobs("after a confirm of a changed cluster")
 
-	// The page is a fresh preview, with its own nonce, that can be
-	// confirmed.
+	// A fresh, confirmable preview with its own nonce.
 	action2, form2 := confirmOf(t, body)
 	if form2.Get("nonce") == form.Get("nonce") || form2.Get("fingerprint") == form.Get("fingerprint") {
 		t.Errorf("the new preview reuses the old nonce or fingerprint")
@@ -451,9 +447,8 @@ func TestConfirmOfAnExpiredPreview(t *testing.T) {
 	h.noJobs("after an expired preview")
 }
 
-// A confirm repeated long after it was submitted (the back button, after
-// another preview cleared the session's expired ones) still lands on its
-// job.
+// A confirm repeated long after (back button, expired previews cleared)
+// still lands on its job.
 func TestLateRepeatedConfirmFindsItsJob(t *testing.T) {
 	h := newHarness(t, longSessions)
 	h.poll()
@@ -475,9 +470,8 @@ func TestLateRepeatedConfirmFindsItsJob(t *testing.T) {
 	}
 }
 
-// A preview that expires after the confirm checked it, but before the job
-// is stored, makes no job: the store checks again, and the page is the
-// expired one.
+// A preview expiring between the confirm's check and the store makes no
+// job: the store checks again.
 func TestConfirmOfAPreviewExpiringDuringSubmit(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -492,9 +486,8 @@ func TestConfirmOfAPreviewExpiringDuringSubmit(t *testing.T) {
 	h.noJobs("after a preview expired during its submit")
 }
 
-// The confirm form's hidden fields are only a copy of what the server
-// stored with the preview: a confirm whose fields were edited is refused,
-// whatever the edit.
+// The confirm's hidden fields only copy the stored preview; any edit is
+// refused.
 func TestConfirmRefusesEditedForms(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -573,9 +566,8 @@ func TestOperatorCannotRunWhatTheyLackPrivilegesFor(t *testing.T) {
 	op := h.login(asOperator)
 	lead := h.login(asLead)
 
-	// Hand-made forms, with a valid CSRF token, get nowhere: the previews
-	// block every VM for the privilege the operator lacks, and the confirms
-	// match no preview.
+	// Hand-made forms with a valid CSRF token get nowhere: previews block
+	// every VM and confirms match no preview.
 	for _, target := range []string{"/deploy/preview", "/deploy/confirm", "/teardown/preview", "/teardown/confirm"} {
 		form := url.Values{"teams": {"1"}, "pattern": {"*.kilo.alpha"}, "typed": {"1"}, "nonce": {"x"}, "fingerprint": {"y"}}
 		rec := h.post(&op, target, form)
@@ -757,8 +749,7 @@ func addMasters(h *harness) {
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
-// Every input of the power, deploy and snapshot confirms is bound to the preview,
-// like the reset's teams, hosts and snapshot: an edit is refused.
+// Every confirm input is bound to the preview: an edit is refused.
 func TestConfirmRefusesEditedPowerAndDeployForms(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -796,12 +787,8 @@ func TestConfirmRefusesEditedPowerAndDeployForms(t *testing.T) {
 	h.noJobs("after edited confirms")
 }
 
-// Users without the operator role get nothing from the operation, job and
-// event-stream routes, and submit nothing.
-// A user with no Proxmox privileges (a competitor in a team group, or
-// anyone else Authentik let in) can't change anything through any route:
-// they see no VMs, so nothing can be planned for them, and they can't
-// cancel someone else's job.
+// A user with no Proxmox privileges (a competitor, or anyone else Authentik
+// let in) sees no VMs and can't change anything or cancel others' jobs.
 func TestOperationAndJobRoutesDoNothingWithoutPrivileges(t *testing.T) {
 	h := newHarness(t)
 	h.poll()

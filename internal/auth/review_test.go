@@ -24,9 +24,8 @@ func (b *browser) proxmoxCallback(next string) *url.URL {
 	return cb
 }
 
-// Item 10: two tabs sign in to Proxmox at once. The session keeps the
-// newer tab's state, so the older tab's callback doesn't match it; once
-// the newer one has stored a usable ticket, the older one just goes on.
+// Two tabs sign in to Proxmox at once: once the newer one has a ticket,
+// the older tab's stale callback just goes on.
 func TestProxmoxSignInFromTwoTabs(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
@@ -46,10 +45,8 @@ func TestProxmoxSignInFromTwoTabs(t *testing.T) {
 	}
 }
 
-// Item 12: the Proxmox login must be the same person as the battleship
-// session (the realm maps preferred_username to <username>@<realm>); a
-// browser whose Authentik session for Proxmox is someone else's must not
-// get that person's ticket in this session.
+// A browser whose Authentik session is someone else's must not get that
+// person's Proxmox ticket in this session.
 func TestProxmoxSignInAsSomeoneElseIsRefused(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
@@ -67,9 +64,8 @@ func TestProxmoxSignInAsSomeoneElseIsRefused(t *testing.T) {
 	}
 }
 
-// Item 14: with Proxmox's clock hours off battleship's, the sign-in still
-// works: a ticket's age counts from when battleship got it, so a fresh one
-// is never out of date the moment it arrives.
+// With Proxmox's clock hours off, sign-in still works: a ticket's age
+// counts from when battleship got it.
 func TestProxmoxSignInWithSkewedClocksWorks(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()

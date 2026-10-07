@@ -10,11 +10,8 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// A session's Proxmox ticket and CSRF token are sealed at rest like its
-// refresh token (see refreshtoken.go and package seal): the key is derived
-// from oidc.client_secret, and each box is bound to the session's store ID
-// and to which of the two it is, so neither opens in another session's row
-// or in the other's column.
+// A session's Proxmox ticket and CSRF token are sealed like its refresh
+// token (see refreshtoken.go), each bound to the session and its column.
 const ticketPurpose = "proxmox ticket v1"
 
 func ticketKey(cfg config.Config) seal.Key { return seal.NewKey(cfg.OIDC.ClientSecret, ticketPurpose) }
@@ -27,9 +24,8 @@ type ProxmoxLogin interface {
 	RenewTicket(ctx context.Context, cred proxmox.Credential, now time.Time) (proxmox.Credential, error)
 }
 
-// SealSessionTicket is cred as session sessionID stores it, sealed with
-// the key the service for cfg derives. authtest uses it to log test users
-// in with a ticket.
+// SealSessionTicket seals cred as session sessionID stores it. authtest
+// uses it to log test users in with a ticket.
 func SealSessionTicket(cfg config.Config, sessionID string, cred proxmox.Credential) store.SessionTicket {
 	k := ticketKey(cfg)
 	return store.SessionTicket{
@@ -41,9 +37,8 @@ func SealSessionTicket(cfg config.Config, sessionID string, cred proxmox.Credent
 	}
 }
 
-// openTicket opens sess's ticket; ok is false if it has none, or it
-// doesn't open (the client secret changed, or it was copied from
-// another session).
+// openTicket opens sess's ticket; ok is false if it has none or it doesn't
+// open.
 func (s *Service) openTicket(sess store.Session) (proxmox.Credential, bool) {
 	t := sess.PVE
 	if t.User == "" || t.Ticket == "" || t.IssuedAt.IsZero() {
@@ -64,8 +59,8 @@ func (s *Service) openTicket(sess store.Session) (proxmox.Credential, bool) {
 
 type credKey struct{}
 
-// ProxmoxCredential returns the signed-in user's Proxmox ticket, which
-// RequireUser put in ctx: every Proxmox call made for the request uses it.
+// ProxmoxCredential returns the user's Proxmox ticket from RequireUser;
+// every Proxmox call for the request uses it.
 func ProxmoxCredential(ctx context.Context) (proxmox.Credential, bool) {
 	c, ok := ctx.Value(credKey{}).(proxmox.Credential)
 	return c, ok

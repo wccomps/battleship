@@ -15,21 +15,17 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// opConfirm submits a previewed plan as a job. It trusts nothing the form
-// says about the plan: it plans the posted inputs again, as the user (with
-// their privileges), and submits it only if all of these hold:
+// opConfirm submits a previewed plan as a job. It trusts nothing the form says
+// about the plan: it re-plans the posted inputs as the user and submits only if:
 //
-//   - the form names a preview of this session (by its nonce) that no job
-//     has submitted yet;
-//   - the posted inputs and fingerprint are the ones that preview stored,
-//     so a form edited after the preview is refused;
-//   - the new plan has the preview's fingerprint, so the cluster hasn't
-//     changed since; otherwise, or once the preview is older than
-//     previewTTL, the new plan is shown to be checked again;
-//   - the team range was typed, where that is required.
+//   - the nonce names an unsubmitted preview of this session;
+//   - the posted inputs and fingerprint match that preview's (no edited forms);
+//   - the new plan's fingerprint matches, so the cluster hasn't changed; else,
+//     or past previewTTL, the new plan is shown for re-checking;
+//   - the team range was typed, where required.
 //
-// The job consumes the preview in the same transaction that stores it, so
-// a double-clicked confirm makes one job; the second click lands on it.
+// The job consumes the preview in the transaction that stores it, so a
+// double-clicked confirm makes one job.
 func (s *Server) opConfirm(op operation) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -49,8 +45,7 @@ func (s *Server) opConfirm(op operation) http.Handler {
 		}
 		allTeams := s.coversAllTeams(ctx, plan.Teams)
 
-		// A retry's preview shown again still names the job it retries.
-		// The number is only shown; nothing depends on it.
+		// A re-shown retry preview still names the job it retries (display only).
 		var retryOf int64
 		if n, err := strconv.ParseInt(form.Get(fieldRetryOf), 10, 64); err == nil && n > 0 {
 			retryOf = n
@@ -80,8 +75,8 @@ func (s *Server) opConfirm(op operation) http.Handler {
 			return
 		}
 
-		// expired shows the plan again, as a new preview, when the preview
-		// had expired: here, or in the store as the job was stored.
+		// expired re-shows the plan as a new preview when the preview expired, here
+		// or in the store.
 		expired := func() {
 			s.showPreview(w, r, http.StatusConflict, op, in, plan, allTeams, previewOptions{retryOf: retryOf, fromGrid: grid, problem: &banner{
 				Level: "warn", Title: "This preview had expired",
@@ -117,8 +112,7 @@ func (s *Server) opConfirm(op operation) http.Handler {
 		if s.beforeSubmit != nil {
 			s.beforeSubmit()
 		}
-		// The store checks the preview's expiry again as it stores the job,
-		// in case it expired since the check above.
+		// The store re-checks expiry as it stores the job, in case it expired since.
 		// The job runs as the user: it carries their Proxmox ticket.
 		cred, _ := auth.ProxmoxCredential(ctx)
 		id, err := jobs.Submit(ctx, s.st, in, plan, jobs.Submitter{
@@ -152,8 +146,8 @@ func (s *Server) opConfirm(op operation) http.Handler {
 	})
 }
 
-// differsFromPreview says how a confirm differs from the preview it names,
-// or "" if it doesn't: same operation, same inputs, same fingerprint.
+// differsFromPreview says how a confirm differs from its preview (operation,
+// inputs, fingerprint), or "".
 func (s *Server) differsFromPreview(prev store.Preview, op operation, in jobs.Inputs, fingerprint string) string {
 	if prev.Kind != string(op.Kind) {
 		return fmt.Sprintf("the preview was of a %s, not a %s", prev.Kind, op.Kind)
@@ -173,8 +167,8 @@ func (s *Server) differsFromPreview(prev store.Preview, op operation, in jobs.In
 	return ""
 }
 
-// refuseConfirm answers a confirm that doesn't match its preview: someone
-// edited the form, or it is broken. Nothing is submitted.
+// refuseConfirm answers a confirm that doesn't match its preview (edited or
+// broken form). Nothing is submitted.
 func (s *Server) refuseConfirm(w http.ResponseWriter, r *http.Request, op operation, why string) {
 	u, _ := auth.UserFrom(r.Context())
 	s.logf("web: confirm refused: subject=%q kind=%s: %s", u.Subject, op.Kind, why)
@@ -196,8 +190,8 @@ func (s *Server) serverError(w http.ResponseWriter, r *http.Request, what string
 		"Battleship had a problem "+what+". Nothing more was done. Try again in a moment, and tell a lead if it keeps happening.", "/", "Back to the grid")
 }
 
-// summaryOf describes a submitted job in a few words, e.g. "reset of team
-// 01 to initial (2 VMs)".
+// summaryOf describes a submitted job briefly, e.g. "reset of team 01 to
+// initial (2 VMs)".
 func summaryOf(op operation, in jobs.Inputs, plan *pods.Plan) string {
 	teams := "team " + strings.Join(plan.Teams, ", ")
 	if len(plan.Teams) != 1 {

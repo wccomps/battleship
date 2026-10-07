@@ -17,7 +17,7 @@ func leftovers() []proxmox.VM {
 		vm(501, "dc.kilo.alpha")}
 }
 
-// -teams all is every team with VMs, resolved when planning and shown: a teardown of all teams leaves no team VM behind.
+// -teams all is every team with VMs, resolved at planning; a teardown of all leaves no team VM.
 func TestTeardownAllTeams(t *testing.T) {
 	e := newEnv(t, false, "", leftovers()...)
 	if code := e.run("teardown", "-teams", "all", "-yes"); code != 0 {

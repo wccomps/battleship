@@ -1,35 +1,26 @@
-# battleship production configuration (non-secret values only).
-#
-# Mounted at /config/battleship.toml via the battleship-config ConfigMap, which kustomize
-# generates from this file. Unknown keys are rejected at startup, so a typo
-# fails loudly. Reference with every default: battleship.example.toml in the repo.
+# battleship production configuration (non-secret values only), mounted at
+# /config/battleship.toml. Unknown keys fail startup. Full reference: battleship.example.toml.
 #
 # Secrets come from the environment (see deployment.yaml), never this file:
 #   BATTLESHIP_OIDC_CLIENT_SECRET    oidc.client_secret
 #   BATTLESHIP_SEAL_KEY              database.seal_key
 #   BATTLESHIP_DATABASE_URL          database.url
 #
-# Values marked CHANGE ME are placeholders; overlays replace this whole file
-# (configMapGenerator behavior: replace) with the competition's real config.
+# CHANGE ME values are placeholders; overlays replace this whole file.
 # Patterns use {team} (two digits, e.g. 07) and {host} (e.g. teak).
 
 [proxmox]
-# CHANGE ME: a Proxmox node reachable from the cluster (allow it in
-# networkpolicy.yaml, TCP 8006). With ca_file set, use a name the node's
-# certificate holds (its host name or IP); a VIP fails verification unless
-# each node's certificate also covers it (pvenode cert set).
+# CHANGE ME: a Proxmox node reachable from the cluster (allow TCP 8006 in
+# networkpolicy.yaml), by a name its certificate holds; a VIP fails
+# verification unless every node's certificate covers it.
 url = "https://proxmox.example.invalid:8006"
-# Better: list several nodes instead of url (not both). battleship uses one
-# at a time and fails over to the next when it is down, never resending a
-# change that may have reached the first. "battleship nodes" prints the line.
+# Better: list several nodes instead (not both) to fail over between them.
+# "battleship nodes" prints the line.
 # urls = ["https://pve1.example.invalid:8006", "https://pve2.example.invalid:8006"]
-# No token: battleship acts as each signed-in person, with the ticket of
-# their Proxmox OpenID login (realm auth.example.org, the default), and
-# the roles Proxmox's synced groups already hold decide what they
-# may do.
-# Proxmox's certificate is checked against the cluster CA
-# (/etc/pve/pve-root-ca.pem), which the overlay adds to the ConfigMap; without
-# it battleship refuses to start. Don't also set insecure_skip_verify.
+# No token: battleship acts as each signed-in person via their Proxmox OpenID
+# ticket, so Proxmox's roles decide what they may do.
+# The cluster CA comes from the overlay's ConfigMap; without it battleship
+# refuses to start. Don't also set insecure_skip_verify.
 ca_file = "/config/pve-root-ca.pem"
 
 [naming]
@@ -56,11 +47,9 @@ snapshot_name = "initial"          # the baseline a deploy takes
 baseline_patterns = ["fresh_clone_*"]  # old-tool baselines; reset uses the newest if no snapshot_name
 gpu_vga = "virtio-gl"
 
-# clones_per_node, config_calls and template_builds are PER REPLICA: with 2
-# replicas the cluster-wide cap is double these, so they are half of the
-# single-process defaults (10 / 5 / 4). workers applies to each job. deletes is
-# shared through the database by every replica, worker and CLI run, capped at
-# the largest value any of them has: give them all the same.
+# clones_per_node, config_calls and template_builds are PER REPLICA, so roughly
+# half the single-process defaults. deletes is shared through the database by
+# every process: give them all the same value.
 [concurrency]
 workers = 10                       # VMs processed at once, per job
 clones_per_node = 5                # clone tasks at once per source node, per replica
@@ -82,12 +71,9 @@ task_poll = "2s"
 
 [database]
 # url comes from BATTLESHIP_DATABASE_URL (the Postgres operator's secret).
-# Main pool per replica. Each replica also opens up to 2 connections for job
-# heartbeats and /readyz, 1 for its delete and storage slots and 1 that
-# listens for job changes, so it uses up to max_conns + 4 = 20. Budget
-# (replicas + 1 surging during a rollout) x 20 = 60, plus any `battleship worker`
-# or CLI processes, under Postgres's max_connections (CNPG default 100, minus
-# its reserved slots). See deploy/README.md section 4.
+# Main pool per replica; each replica uses up to max_conns + 4 = 20. Budget
+# (replicas + 1 surging) x 20 = 60, plus workers and CLI runs, under Postgres's
+# max_connections. See deploy/README.md section 4.
 max_conns = 16
 
 [jobs]
@@ -96,14 +82,13 @@ stale_after = "60s"                # >= 5 x heartbeat; a silent job is marked in
 poll = "2s"
 
 [web]
-# CHANGE ME: the public URL; must match the Ingress host and the Authentik
-# redirect URI (<base_url>/auth/callback). https => __Host- Secure cookies.
+# CHANGE ME: must match the Ingress host and the Authentik redirect URI
+# (<base_url>/auth/callback). https => __Host- Secure cookies.
 base_url = "https://battleship.example.invalid"
 listen = ":8080"                   # containerPort in deployment.yaml
 workers = 2                        # job workers per replica
-# The competition's template set, as in the deploy form: its hosts are grid
-# columns even before a team has them, shown missing there. Unset, the columns
-# are only the hosts the teams have VMs of.
+# Deploy pattern whose hosts are grid columns even before a team has them.
+# Unset: only hosts teams have VMs of.
 # templates = "*.kilo.alpha"
 session_idle = "90m"                # longer than proxmox.ticket_renew_after
 session_max = "12h"                # Authentik refresh token validity must be >= this
@@ -112,10 +97,8 @@ status_poll = "5s"
 drift_scan = "2m"
 # Keep: a stopped job's worst case (14m) < this < terminationGracePeriodSeconds (960s).
 shutdown_timeout = "15m"
-# CHANGE ME: the ingress controller pods' CIDR (usually the cluster pod CIDR,
-# e.g. 10.42.0.0/16 on k3s/RKE2, 10.244.0.0/16 on kubeadm+flannel), so the
-# logs show real client addresses. Only proxies in here are believed for
-# X-Forwarded-For / X-Forwarded-Proto.
+# CHANGE ME: the ingress controller pods' CIDR (usually the pod CIDR); only
+# these are believed for X-Forwarded-For / -Proto.
 trusted_proxies = ["10.42.0.0/16"]
 
 [oidc]
@@ -124,6 +107,5 @@ client_id = "battleship"            # the Authentik provider's client ID
 scopes = ["openid", "profile", "email", "groups", "offline_access"]
 groups_claim = "groups"
 
-# No [roles]: who may open battleship is decided in Authentik (the
-# application's policy bindings exclude students), what each user may do by
-# Proxmox.
+# No [roles]: Authentik policy bindings (which exclude students) decide who may
+# open battleship, Proxmox what each user may do.

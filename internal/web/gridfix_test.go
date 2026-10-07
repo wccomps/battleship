@@ -12,9 +12,8 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// Power on every team says so, a safety catch, but is confirmed with the
-// button like the CLI's yes (only a teardown is typed); who may do it is
-// Proxmox's business.
+// Power on every team is flagged but confirmed with the button (only a
+// teardown is typed); who may do it is up to Proxmox.
 func TestAllTeamsPowerSaysSo(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -33,9 +32,8 @@ func TestAllTeamsPowerSaysSo(t *testing.T) {
 	contains(t, "app.js", string(js), "data-needs", "data-lacks")
 }
 
-// A reset from the grid stays a grid reset: the snapshot picker, the
-// preview and every preview shown again by the confirm keep from=grid, so
-// changing it goes back to the grid (or the picker), not to the reset form.
+// A reset from the grid keeps from=grid through picker, preview and
+// re-shown previews, so "change" returns to the grid, not the reset form.
 func TestGridResetKeepsFromGrid(t *testing.T) {
 	h := newHarness(t, longSessions)
 	h.poll()

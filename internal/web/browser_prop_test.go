@@ -117,11 +117,9 @@ func (m *selModel) apply(a selAction) {
 	}
 }
 
-// Random clicks, shift-clicks, row, column and corner selections, clears
-// and Escapes on a grid with missing and busy VMs, as a user whose
-// privileges vary by VM: after each, the boxes, count, action bar, pressed
-// headers and corner show the model's selection, and an action is offered
-// only if a ticked VM allows it, the bar saying when one isn't.
+// Random selection gestures on a grid with missing and busy VMs, by a user
+// whose privileges vary by VM: after each, the page matches the model's
+// selection and offers an action only if a ticked VM allows it.
 func TestBrowserPropSelection(t *testing.T) {
 	h := browserHarness(t)
 	h.api.Mu.Lock()

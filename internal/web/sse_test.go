@@ -130,9 +130,8 @@ func TestStreamHeartbeat(t *testing.T) {
 }
 
 func TestStreamEndsAtSessionRefresh(t *testing.T) {
-	// A stream ends every web.session_refresh, so the browser reconnects
-	// through the login check: someone who lost access stops getting
-	// updates, and the session's refresh happens as usual.
+	// A stream ends every web.session_refresh so the reconnect passes the
+	// login check: someone who lost access stops getting updates.
 	h := newHarness(t)
 	h.poll()
 	op := h.login(asOperator)
@@ -210,9 +209,7 @@ func TestStreamHead(t *testing.T) {
 	}
 }
 
-// TestStreamCoalesces drives the stream helper directly: messages that
-// arrive while a send is held back by the gap become one send, and a Resync
-// among them is passed on.
+// Messages arriving during the gap become one send, passing on any Resync.
 func TestStreamCoalesces(t *testing.T) {
 	h := newHarness(t)
 	var mu sync.Mutex
@@ -385,9 +382,8 @@ func TestGridEventsCheapWhenNothingChanged(t *testing.T) {
 	}
 }
 
-// Streams end a little after web.session_refresh, by up to a tenth more, so
-// the browsers of a crowd that loaded the page together don't all
-// reconnect at once.
+// Streams end up to a tenth after web.session_refresh, so a crowd that
+// loaded together doesn't reconnect at once.
 func TestStreamEndJitter(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -413,10 +409,8 @@ func TestStreamEndJitter(t *testing.T) {
 	}
 }
 
-// A burst bigger than any per-subscriber queue, published while one send is
-// held back by the gap, becomes a single send: the hub coalesces rather
-// than drops, and the stream drains its messages while it waits. The
-// stream stays open afterwards, and nothing is logged as dropped.
+// A burst bigger than any subscriber queue, during the gap, becomes one send:
+// the hub coalesces rather than drops.
 func TestStreamBurstDuringGapIsOneSend(t *testing.T) {
 	h := newHarness(t)
 	var mu sync.Mutex
@@ -476,10 +470,9 @@ func TestStreamBurstDuringGapIsOneSend(t *testing.T) {
 	}
 }
 
-// A stream ends when its session's next group check falls due, not a whole
-// web.session_refresh after it opened: a page opened just before the check
-// would otherwise keep a user who lost access updated for nearly two
-// periods.
+// A stream ends at its session's next group check, not a full
+// web.session_refresh after opening, or a lost user could stay updated for
+// nearly two periods.
 func TestStreamEndsAtSessionsNextRefresh(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -507,9 +500,8 @@ func TestStreamEnd(t *testing.T) {
 		{"no session", time.Time{}, 10 * time.Second, refresh + 10*time.Second},
 		{"just refreshed", start, 10 * time.Second, refresh + 10*time.Second},
 		{"refresh due in 1m", start.Add(-4 * time.Minute), 10 * time.Second, time.Minute + 10*time.Second},
-		// The refresh is overdue: it is being retried, or the identity
-		// provider is unreachable and it backs off. Don't end the stream at
-		// once, or the browser would reconnect every 2s until it's done.
+		// Refresh overdue (retrying or backing off): ending the stream now
+		// would make the browser reconnect every 2s.
 		{"refresh overdue", start.Add(-20 * time.Minute), 10 * time.Second, minStreamLifetime},
 		{"refresh due in 10s", start.Add(-refresh + 10*time.Second), 0, minStreamLifetime},
 		// A refresh time in the future (clock skew) never extends a stream.

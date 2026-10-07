@@ -1,15 +1,11 @@
 # Postgres for battleship, as a CloudNativePG (CNPG) Cluster.
 #
-# ASSUMPTION: the cluster's Postgres operator is CNPG (not confirmed; for
-# another, see deploy/README.md section 4). battleship needs a database its
-# user owns (migrations run at startup) and plain Postgres LISTEN/NOTIFY and
+# For another operator see deploy/README.md section 4. battleship needs a
+# database its user owns (migrations run at startup), LISTEN/NOTIFY and
 # advisory locks (no PgBouncer in transaction mode).
 #
-# bootstrap.initdb makes database "battleship" owned by user "battleship"; CNPG
-# writes Secret "battleship-db-app", whose "uri" key deployment.yaml reads as
-# BATTLESHIP_DATABASE_URL. The URI's host is the "-rw" Service, which follows
-# the primary across failovers; with no sslmode, pgx uses prefer (encrypted,
-# not verified).
+# CNPG writes Secret "battleship-db-app"; its "uri" (the "-rw" Service, which
+# follows the primary) is BATTLESHIP_DATABASE_URL. No sslmode: encrypted, not verified.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -43,8 +39,7 @@ spec:
       memory: 1Gi
 
   # Backups: strongly recommended (job history is the audit trail). CNPG
-  # >= 1.26 prefers the Barman Cloud plugin over the in-tree
-  # barmanObjectStore shown here; follow whatever the cluster already uses.
+  # >= 1.26 prefers the Barman Cloud plugin; follow what the cluster uses.
   # backup:
   #   retentionPolicy: "30d"
   #   barmanObjectStore:

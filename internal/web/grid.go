@@ -16,16 +16,14 @@ import (
 	"github.com/wccomps/battleship/internal/status"
 )
 
-// stateBusy is the state a cell shows while an active job still has to
-// work on its VM: it hides the VM's own state until the job is done.
+// stateBusy hides a VM's own state while an active job still has to work on it.
 const stateBusy = "busy"
 
 // stateOrder is the order states are counted in, as the legend shows them.
 var stateOrder = []string{string(status.StateRunning), string(status.StateStopped), string(status.StateMissing), string(status.StateDrifted), stateBusy}
 
-// cellView is one grid cell as the templates show it. Its state is drawn
-// as a glyph (class is-<State>); its words are in Tip and, for screen
-// readers, in Label.
+// cellView is one grid cell: a glyph (class is-<State>), with words in Tip
+// and Label.
 type cellView struct {
 	ID   string // element id, e.g. "cell-01-dc"; the script matches cells by it
 	Team string
@@ -34,8 +32,8 @@ type cellView struct {
 	// Pick is the value of the cell's box on the grid's form: the VM's
 	// name, or "" for a missing VM, which has nothing to power or reset.
 	Pick string
-	// Checked ticks the box. Only gridPage sets it, for ?select; the shared
-	// rendering never does, so it stays the same for every viewer.
+	// Checked ticks the box. Only gridPage sets it (for ?select), so the shared
+	// rendering stays the same for every viewer.
 	Checked bool
 	// Busy is the active job that still has to work on this VM, if any.
 	// A busy cell is a link to that job instead of a box.
@@ -45,9 +43,8 @@ type cellView struct {
 	Power string // the Proxmox status of a drifted or stopped VM
 	// Reasons say why a drifted VM is drifted, e.g. "network differs".
 	Reasons string
-	// Lacks lists, space-separated, the grid actions' privileges the
-	// viewer doesn't hold on this VM (data-lacks), so the action bar offers
-	// an action only when a ticked VM allows it.
+	// Lacks lists the grid actions' privileges the viewer lacks on this VM
+	// (data-lacks), so the action bar offers only allowed actions.
 	Lacks string
 }
 
@@ -59,8 +56,7 @@ func (c cellView) Shown() string {
 	return c.State
 }
 
-// Tip is the cell's hover text, e.g. "team09-web · drifted — network
-// differs".
+// Tip is the hover text, e.g. "team09-web · drifted — network differs".
 func (c cellView) Tip() string {
 	switch {
 	case c.Busy != 0:
@@ -73,8 +69,7 @@ func (c cellView) Tip() string {
 	return c.Name + " · " + c.State
 }
 
-// Label is the cell's name for screen readers, e.g. "team09-web, drifted,
-// network differs".
+// Label is the screen-reader name, e.g. "team09-web, drifted, network differs".
 func (c cellView) Label() string {
 	switch {
 	case c.Busy != 0:
@@ -99,36 +94,30 @@ type stateCount struct {
 	N     int
 }
 
-// liveView is what the header's live dot says about the grid: a state for
-// the dot (live, or stale until the next good read) and a few lines for
-// its pop-over.
+// liveView is the header's live dot (live, or stale until the next good read)
+// and the lines of its pop-over.
 type liveView struct {
 	State string // "live" or "stale"
 	Title string // e.g. "No answer from Proxmox"
-	// Since is when the cells were last read, in Unix milliseconds, while
-	// stale: the script shows how long ago. 0 otherwise. LastUpdate says
-	// when in words.
+	// Since is the last read in Unix ms while stale (the script shows how long
+	// ago), else 0.
 	Since      int64
 	LastUpdate string
 	Lines      []string
 }
 
-// gridView is the live part of the grid page, which the event stream sends
-// again whenever the grid changes.
+// gridView is the live part of the grid page, resent whenever the grid changes.
 type gridView struct {
 	Live   liveView
 	Counts []stateCount
 	Hosts  []string
 	Rows   []rowView
 	Stale  bool
-	// GridClass and Tall size the grid from its counts (see app.css):
-	// narrower cells for many hosts, taller ones for few teams, and a box
-	// that scrolls by itself for many teams.
+	// GridClass and Tall size the grid from its counts (see app.css).
 	GridClass string
 	Tall      bool
-	// Empty is set when a read of the cluster found no team VMs, so no
-	// rows. The page then shows no grid, but Start. Before the first read
-	// the grid isn't empty, just unknown.
+	// Empty means a read found no team VMs: the page shows Start instead of a
+	// grid. Before the first read the grid is unknown, not empty.
 	Empty bool
 	// Start is the empty grid's template sets (liveGridView).
 	Start *startView
@@ -151,8 +140,8 @@ func gridClass(hosts, teams int) string {
 	return strings.Join(cls, " ")
 }
 
-// newGridView prepares g for the templates at time now. lacks, if set,
-// says which grid actions' privileges the viewer lacks on a VM.
+// newGridView prepares g for the templates. lacks, if set, says which grid
+// actions' privileges the viewer lacks on a VM.
 func (s *Server) newGridView(g status.Grid, now time.Time, lacks func(vmid int) []string) gridView {
 	v := gridView{Hosts: g.Hosts, Stale: g.Stale, Empty: len(g.Rows) == 0 && !g.PolledAt.IsZero(),
 		GridClass: gridClass(len(g.Hosts), len(g.Rows)), Tall: len(g.Rows) > 36}
@@ -192,8 +181,7 @@ func (s *Server) newGridView(g status.Grid, now time.Time, lacks func(vmid int) 
 	return v
 }
 
-// count tallies the cells by the state they show, for the legend: only
-// the states some cell shows, since the legend explains what is there.
+// count tallies the cells by shown state; the legend lists only those states.
 func (v *gridView) count() {
 	n := map[string]int{}
 	for _, row := range v.Rows {
@@ -209,8 +197,7 @@ func (v *gridView) count() {
 	}
 }
 
-// spoken writes a duration the way people say it: "5 seconds", "1 minute",
-// "12 hours".
+// spoken writes a duration as people say it: "5 seconds", "12 hours".
 func spoken(d time.Duration) string {
 	unit, n := "second", int(d/time.Second)
 	switch {
@@ -250,8 +237,8 @@ func cellViewOf(c status.Cell) cellView {
 	return v
 }
 
-// markBusy marks the cells of VMs that active jobs still have to work on,
-// and counts the cells again.
+// markBusy marks the cells of VMs active jobs still have to work on, and
+// recounts.
 func (v *gridView) markBusy(jobs map[string]int64) {
 	for i := range v.Rows {
 		for j := range v.Rows[i].Cells {
@@ -262,10 +249,9 @@ func (v *gridView) markBusy(jobs map[string]int64) {
 	v.count()
 }
 
-// markSelected ticks the boxes ?select asks for, so rows, columns and the
-// whole grid can be selected without the script: "all", "team:07" or
-// "host:dc". Missing and busy VMs have no box to tick. It returns how many
-// it ticked, and the last one.
+// markSelected ticks the boxes ?select asks for ("all", "team:07", "host:dc"),
+// so selection works without the script. Missing and busy VMs have no box.
+// It returns how many it ticked, and the last one.
 func (v *gridView) markSelected(sel []string) (n int, last *cellView) {
 	for i := range v.Rows {
 		for j := range v.Rows[i].Cells {
@@ -284,8 +270,8 @@ func (v *gridView) markSelected(sel []string) (n int, last *cellView) {
 	return n, last
 }
 
-// gridPageView is the grid page: the live part, the same for all of one
-// viewer's pages, and what depends on the request, rendered outside it.
+// gridPageView is the grid page: the live part, shared by one viewer's pages,
+// plus the per-request parts rendered outside it.
 type gridPageView struct {
 	Live    gridView
 	Details string // the page of the one VM ?select ticked, if just one
@@ -305,34 +291,30 @@ type setView struct {
 	Hosts   []string // e.g. dc, web
 	Masters int
 	Running int
-	// Deploy opens the deploy form for this set; "" for viewers who may
-	// not deploy.
+	// Deploy opens the deploy form for this set; "" if the viewer may not deploy.
 	Deploy  string
 	Checked bool // the deploy form's choice
 }
 
-// HostsText is the set's hosts, space-separated, for the deploy form's
-// script, which shows the chosen set's hosts.
+// HostsText is the set's hosts, space-separated, for the deploy form's script.
 func (v setView) HostsText() string { return strings.Join(v.Hosts, " ") }
 
-// RunDots and StopDots are the masters as glyphs: a running one per
-// running master, then a stopped one per other master.
+// RunDots and StopDots draw one running glyph per running master, then one
+// stopped glyph per other master.
 func (v setView) RunDots() []struct{}  { return make([]struct{}, max(v.Running, 0)) }
 func (v setView) StopDots() []struct{} { return make([]struct{}, max(v.Masters-v.Running, 0)) }
 
 // setPattern is the master pattern of a template set, e.g. "*.kilo.alpha".
 func setPattern(name string) string { return "*." + name }
 
-// deployHref opens the deploy form filled in for pattern, with the form's
-// defaults otherwise: no team has VMs yet, so the teams are left to type.
-// Its preview and confirm are the usual ones.
+// deployHref opens the deploy form filled in for pattern. Teams are left blank:
+// no team has VMs yet.
 func (s *Server) deployHref(pattern string) string {
 	op, _ := operationFor(pods.KindDeploy)
 	return formQuery(op, jobs.Inputs{Kind: pods.KindDeploy, Pattern: pattern})
 }
 
-// startOf prepares the template sets of g for a viewer, with Deploy links
-// if canDeploy.
+// startOf prepares g's template sets, with Deploy links if canDeploy.
 func (s *Server) startOf(g status.Grid, canDeploy bool) startView {
 	v := startView{MasterTag: s.cfg.Deploy.MasterTag, Others: g.OtherMasters}
 	for _, set := range g.Sets {
@@ -345,17 +327,15 @@ func (s *Server) startOf(g status.Grid, canDeploy bool) startView {
 	return v
 }
 
-// allTeamsSpec is every team that exists, as far as the viewer can see, as
-// people type ranges: the teams with team VMs in their grid's last good
-// poll.
+// allTeamsSpec is every team the viewer can see (teams with VMs in their grid's
+// last good poll), as a typed range.
 func (s *Server) allTeamsSpec(ctx context.Context) string {
 	return pods.FormatTeams(s.view(ctx).Teams())
 }
 
-// coversAllTeams reports whether teams count as every team, for the typed
-// confirmation an operation over every team needs (a safety catch, not
-// authorization): whether they cover every team with VMs on the viewer's
-// grid. With no such team it is true, so the catch errs towards asking.
+// coversAllTeams reports whether teams cover every team on the viewer's grid,
+// for the typed confirmation (a safety catch, not authorization). With no
+// teams it is true, so the catch errs towards asking.
 func (s *Server) coversAllTeams(ctx context.Context, teams []string) bool {
 	return coversTeams(s.view(ctx).Teams(), teams)
 }
@@ -370,9 +350,8 @@ func coversTeams(all, teams []string) bool {
 	return true
 }
 
-// liveGridView is newGridView for the request's user: with what they may
-// not do to each VM, and, when the grid is empty, the template sets, with
-// Deploy links if they may deploy.
+// liveGridView is newGridView for the request's user: their lacking privileges
+// and, on an empty grid, the template sets.
 func (s *Server) liveGridView(ctx context.Context, g status.Grid, now time.Time) gridView {
 	v := s.newGridView(g, now, func(vmid int) []string { return s.lacks(ctx, vmid) })
 	if v.Empty {
@@ -386,8 +365,8 @@ func (s *Server) liveGridView(ctx context.Context, g status.Grid, now time.Time)
 // poll, so it shows the cluster rather than "waiting for live data".
 const firstPollWait = 5 * time.Second
 
-// polledGrid is the viewer's grid, once its first poll is in or after
-// s.firstPoll; past that it is the grid still waiting.
+// polledGrid is the viewer's grid once its first poll is in, or after
+// s.firstPoll.
 func (s *Server) polledGrid(ctx context.Context) status.Grid {
 	view := s.view(ctx)
 	wctx, cancel := context.WithTimeout(ctx, s.firstPoll)
@@ -396,8 +375,8 @@ func (s *Server) polledGrid(ctx context.Context) status.Grid {
 	return view.Grid()
 }
 
-// gridPage is the status grid: teams × hosts, as a form whose ticked VMs
-// the action bar's buttons send to an operation's preview.
+// gridPage is the status grid: teams × hosts, as a form whose ticked VMs the
+// action bar sends to an operation's preview.
 func (s *Server) gridPage(w http.ResponseWriter, r *http.Request) {
 	g := s.polledGrid(r.Context())
 	v := s.liveGridView(r.Context(), g, s.now())
@@ -425,9 +404,8 @@ func initial(name string) string {
 	return "?"
 }
 
-// gridFragment renders the live part of the grid page, as the page has
-// it, and after it, each in its own <template> (see piece), the header's
-// pieces that live outside it: the live dot's pop-over and the legend.
+// gridFragment renders the live part of the grid page, followed by the header
+// pieces outside it (pop-over, legend), each in a <template> (see piece).
 func gridFragment(v gridView) (string, error) {
 	var b strings.Builder
 	for _, name := range []string{"grid-live", "grid-status", "grid-counts"} {
@@ -445,8 +423,8 @@ func execute(name string, data any) (string, error) {
 	return fragment("grid", name, data)
 }
 
-// gridParts is the live grid rendered piece by piece: each element the
-// script can swap by its id, in page order, and the table's shape.
+// gridParts is the live grid rendered piece by piece: each element the script
+// can swap by id, in page order, plus the table's shape.
 type gridParts struct {
 	shape string // hosts, teams, staleness and emptiness: a change needs the whole grid
 	pieceSet
@@ -488,19 +466,13 @@ func renderParts(v gridView) (gridParts, error) {
 	return p, nil
 }
 
-// gridEvents streams the grid's changes, and those of the busy marks, which
-// follow the jobs. It starts with a "grid" event carrying the whole live
-// fragment, which it sends again after a Resync or when the table's shape
-// changes (hosts, teams, staleness, or the grid emptying or filling).
-// Otherwise each change is a "patch" event with just the pieces that
-// changed (cells, the live dot's pop-over, the legend, the empty grid's
-// template sets), each in its own
-// <template> (see piece), which the script swaps in by id. A change that
-// alters nothing shown sends nothing.
+// gridEvents streams grid and busy-mark changes. A "grid" event carries the
+// whole fragment: first, after a Resync, and when the table's shape changes.
+// Otherwise a "patch" event carries only the changed pieces, each in a
+// <template> (see piece). A change that alters nothing shown sends nothing.
 func (s *Server) gridEvents(w http.ResponseWriter, r *http.Request) {
 	var last gridParts
-	// The stream holds the viewer's grid (require): while it is open,
-	// their view polls (status.Views).
+	// Holding the stream open keeps the viewer's view polling (status.Views).
 	view := s.view(r.Context())
 	s.stream(w, r, []string{status.TopicGrid, status.TopicJobs}, 0, func(sw *sseWriter, resync bool, seq uint64) error {
 		cur, frag, err := s.renderedGrid(r.Context(), view, resync || last.shape == "", seq)
@@ -527,13 +499,10 @@ func (s *Server) gridEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// gridCache holds a view's latest grid rendering for its event streams, so
-// one person's open grid pages render each change once. Each view is one
-// Proxmox user's (status.Views), so grid-live may show what depends on who
-// is viewing (the VMs they see, what they may do to each: data-lacks, and
-// whether the template sets have Deploy links); what
-// depends on the request (the CSRF token, ?select's ticks) is rendered per
-// request outside it (see gridPage).
+// gridCache holds a view's latest rendering so one person's open grid pages
+// render each change once. A view is one Proxmox user's (status.Views), so it
+// may hold per-viewer content (visible VMs, data-lacks, Deploy links);
+// per-request content (CSRF token, ?select ticks) is rendered outside it.
 type gridCache struct {
 	mu    sync.Mutex
 	key   string // the grid version, the day and the busy set
@@ -541,13 +510,11 @@ type gridCache struct {
 	frag  string // the whole live fragment; "" until a stream needs it
 }
 
-// renderedGrid returns the current grid's pieces and, if whole is set, its
-// whole live fragment, rendering them only if the cached ones are of
-// another grid version, busy set or day (clock times name the day of
-// another one). The busy marks are read as of the hub's sequence number
-// need. The cache key comes first, before the grid is copied or a view of
-// it built: every grid stream wakes for each change to a job but a log
-// line, and most of those change nothing the grid shows.
+// renderedGrid returns the grid's pieces and, if whole, the whole fragment,
+// re-rendering only when grid version, busy set or day changed (clock times
+// name the day). Busy marks are read as of hub sequence need. The cache key
+// is checked first because every job change but a log line wakes each grid
+// stream, and most change nothing shown.
 func (s *Server) renderedGrid(ctx context.Context, view *status.View, whole bool, need uint64) (gridParts, string, error) {
 	busy := s.sharedBusy(ctx, need)
 	now := s.now()

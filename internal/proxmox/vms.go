@@ -37,8 +37,8 @@ type NodeResource struct {
 	MaxMem int64  // total memory, bytes
 }
 
-// StorageResource is a storage entry from /cluster/resources: one per node
-// the storage is on, shared or not.
+// StorageResource is a storage entry from /cluster/resources, one per node
+// even when shared.
 type StorageResource struct {
 	Storage string
 	Node    string
@@ -86,8 +86,7 @@ func (r resource) vm() (VM, error) {
 	}, nil
 }
 
-// int64Of reads a number (a size or a time) Proxmox sent as an integer or a
-// float; missing or malformed is 0.
+// int64Of reads a number Proxmox sent as an integer or float; bad is 0.
 func int64Of(n json.Number) int64 {
 	if i, err := n.Int64(); err == nil {
 		return i
@@ -114,14 +113,10 @@ func (c *Client) ClusterVMs(ctx context.Context) ([]VM, error) {
 	return c.nameNewVMs(ctx, res.VMs, down)
 }
 
-// nameNewVMs fills in the name and template flag of VMs /cluster/resources
-// listed without them. Proxmox takes both from pvestatd's reports, every
-// 10s, so a new VM is nameless until the next one; without this, an
-// operation planned right after a deploy would skip the VMs it just made.
-// A VM deleted since the listing is dropped. One on a node listed as not
-// online (down) isn't asked about, and one whose read fails transiently,
-// keeps no name; any other failure fails the listing rather than leave a
-// VM out of a plan.
+// nameNewVMs fills in name and template flag for VMs listed without them:
+// pvestatd reports them only every 10s, and a plan made right after a
+// deploy would skip new VMs. Other read failures fail the listing rather
+// than leave a VM out of a plan.
 func (c *Client) nameNewVMs(ctx context.Context, vms []VM, down map[string]bool) ([]VM, error) {
 	out := vms[:0]
 	for _, vm := range vms {
@@ -285,9 +280,8 @@ func (c *Client) RegenerateCloudInit(ctx context.Context, node string, vmid int)
 type Snapshot struct {
 	Name string
 	Time int64 // snaptime, Unix seconds; 0 when Proxmox gave none
-	// State is snapstate: "" for a finished snapshot, else what Proxmox is
-	// doing to it ("prepare" while it is taken, "delete" while it is
-	// removed), or was doing when its task died.
+	// State is snapstate: "" when finished, else "prepare" or "delete" while
+	// in progress or if its task died.
 	State   string
 	VMState bool // it holds the VM's RAM
 }
@@ -349,9 +343,8 @@ func (c *Client) Power(ctx context.Context, node string, vmid int, action string
 	return requireUPID(upid, err, "power "+action)
 }
 
-// Shutdown asks the guest to shut down cleanly (ACPI, or the guest agent).
-// Proxmox waits up to timeout (whole seconds) for it; with forceStop it then
-// hard-stops the VM, so the task ends with the VM stopped either way.
+// Shutdown asks the guest to shut down, waiting up to timeout (whole
+// seconds); with forceStop Proxmox then hard-stops it.
 func (c *Client) Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration, forceStop bool) (string, error) {
 	params := url.Values{"timeout": {strconv.Itoa(int(timeout / time.Second))}}
 	if forceStop {
@@ -379,11 +372,8 @@ func (c *Client) DeleteVM(ctx context.Context, node string, vmid int) (string, e
 	return requireUPID(upid, err, "delete")
 }
 
-// StorageContent lists the volids on storage that Proxmox reports for vmid
-// (every volume when vmid is 0), as node sees it, e.g.
-// "competitions:9008/base-9008-disk-0.qcow2".
-// Proxmox doesn't filter import/ files by vmid, so those come back for any
-// vmid; callers match the names they expect.
+// StorageContent lists volids on storage for vmid (all when 0), as node
+// sees it. Proxmox doesn't filter import/ files by vmid; callers match names.
 func (c *Client) StorageContent(ctx context.Context, node, storage string, vmid int) ([]string, error) {
 	var raw []struct {
 		VolID string `json:"volid"`
@@ -403,9 +393,8 @@ func (c *Client) StorageContent(ctx context.Context, node, storage string, vmid 
 	return out, nil
 }
 
-// VMIDHeld reports whether some VM or container in the cluster has vmid,
-// whether or not the user may see it: Proxmox answers this for any user,
-// from the cluster's own list.
+// VMIDHeld reports whether any VM or container has vmid, even one the user
+// can't see.
 func (c *Client) VMIDHeld(ctx context.Context, vmid int) (bool, error) {
 	params := url.Values{"vmid": {strconv.Itoa(vmid)}}
 	err := c.do(ctx, http.MethodGet, "/cluster/nextid", params, nil)
@@ -416,10 +405,8 @@ func (c *Client) VMIDHeld(ctx context.Context, vmid int) (bool, error) {
 	return false, err
 }
 
-// DeleteVolume frees a storage volume such as
-// "competitions:10105/vm-10105-disk-0.qcow2". It returns the task's UPID, or
-// "" if Proxmox freed it synchronously. Proxmox refuses to free a base volume
-// that linked clones still use.
+// DeleteVolume frees a storage volume, returning its UPID or "" if done
+// synchronously. Proxmox refuses a base volume linked clones still use.
 func (c *Client) DeleteVolume(ctx context.Context, node, storage, volid string) (string, error) {
 	path := fmt.Sprintf("/nodes/%s/storage/%s/content/%s", url.PathEscape(node), url.PathEscape(storage), url.PathEscape(volid))
 	var upid string

@@ -1,4 +1,3 @@
-# Operator-supplied Proxmox root CA (public cert, copied from /etc/pve/pve-root-ca.pem).
-# Deliberately absent from this example so `kustomize build` fails loudly until
-# it is provided. In a real overlay, remove this line and commit the file.
+# Proxmox root CA (/etc/pve/pve-root-ca.pem), absent so `kustomize build` fails
+# until provided. In a real overlay, remove this line and commit the file.
 pve-root-ca.pem

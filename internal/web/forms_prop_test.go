@@ -52,9 +52,8 @@ func drawTeamSpec(t *rapid.T) (string, []string) {
 	return strings.Join(parts, ","), teams
 }
 
-// A typed team range means the teams it names, and both ways battleship
-// writes ranges back (the pages' "01-03, 07" and a retry's "1-3,7") mean
-// exactly the same teams again.
+// A team range round-trips through both written forms ("01-03, 07" on
+// pages, "1-3,7" in retries).
 func TestPropTeamRangeRoundTrip(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		spec, want := drawTeamSpec(t)
@@ -79,9 +78,8 @@ func TestPropTeamRangeRoundTrip(t *testing.T) {
 	})
 }
 
-// Any text in the teams field either fails to parse, with an error, or
-// means sorted, distinct teams 00-99; the pages show text that doesn't
-// parse as it is.
+// Any teams text either fails with an error (shown back as typed) or means
+// sorted, distinct teams 00-99.
 func TestPropTeamRangeGarbage(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		spec := rapid.OneOf(rapid.String(), rapid.StringMatching(`[0-9 ,-]{0,12}`), rapid.StringMatching(`[0-9+x. ,-]{0,12}`)).Draw(t, "spec")
@@ -107,9 +105,8 @@ func TestPropTeamRangeGarbage(t *testing.T) {
 	})
 }
 
-// The hosts field comes as one value per ticked box, as a typed list, or
-// both. However the boxes are ordered, repeated or split, the plan is the
-// same: the same VMs, the same steps, the same fingerprint.
+// Hosts may come as ticked boxes, a typed list, or both; however ordered,
+// repeated or split, the plan and fingerprint are the same.
 func TestPropHostsFieldOrderDoesNotChangeThePlan(t *testing.T) {
 	cfg := testConfig()
 	api := newFakeAPI()
@@ -176,9 +173,8 @@ func TestPropHostsFieldOrderDoesNotChangeThePlan(t *testing.T) {
 	})
 }
 
-// A teardown is confirmed by typing the team range: the confirm takes
-// exactly the range as the form had it (spaces around it aside), and
-// anything else submits nothing.
+// A teardown confirm needs exactly the form's team range (surrounding
+// spaces aside); anything else submits nothing.
 func TestPropTypedConfirm(t *testing.T) {
 	h := newHarness(t)
 	h.poll()

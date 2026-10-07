@@ -9,11 +9,9 @@ import (
 	"github.com/wccomps/battleship/internal/config"
 )
 
-// StubProvider starts an OpenID provider that answers only discovery, which
-// is enough for auth.NewService to start, and points cfg's [oidc] section at
-// it with a test client ID and secret. Nobody can log in through it: its
-// other endpoints refuse everything. Tests log users in with Login. The
-// provider stops when the test ends.
+// StubProvider starts an OpenID provider that answers only discovery,
+// enough for auth.NewService, and points cfg's [oidc] at it. Nobody can
+// log in through it; tests use Login. It stops when the test ends.
 func StubProvider(t testing.TB, cfg *config.Config) {
 	t.Helper()
 	mux := http.NewServeMux()

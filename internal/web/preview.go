@@ -19,23 +19,23 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// previewTTL is how long a preview may be confirmed. A confirm after that
-// shows the plan again, freshly read, to be checked and confirmed again.
+// previewTTL is how long a preview may be confirmed; a later confirm re-reads
+// and shows the plan again.
 const previewTTL = 30 * time.Minute
 
-// previewPage is the data of a preview: what the operation would do, and
-// the form that confirms it.
+// previewPage is a preview's data: what the operation would do, and the
+// confirm form.
 type previewPage struct {
 	Op      operation
 	Heading string  // the page's title, e.g. "Force stop"
 	Title   opLabel // the sheet's title: the verb, e.g. Deploy kilo.alpha
-	// Consequence says in one sentence what confirming does to the VMs
-	// that run. Calm shows it as a note, not a warning: it changes nothing
-	// on the VMs (a snapshot).
+	// Consequence says in one sentence what confirming does to running VMs. Calm
+	// shows it as a note, not a warning, when nothing on the VMs changes (a
+	// snapshot).
 	Consequence string
 	Calm        bool
-	// AlreadyN VMs are already as the power action leaves them, e.g. 2
-	// already running: the job checks each VM first and leaves those alone.
+	// AlreadyN VMs are already as the power action leaves them (e.g. 2 already
+	// running); the job checks each VM first and skips those.
 	AlreadyN    int
 	AlreadyWord string // "running" or "stopped"
 	Asked       []fact // the inputs worth a last look
@@ -44,34 +44,32 @@ type previewPage struct {
 	Runnable    int
 	Blocked     int
 	Warnings    []string
-	// Capacity compares what the plan starts with what the cluster has
-	// free; nil when it starts nothing or the cluster couldn't be read.
+	// Capacity compares what the plan starts with the cluster's free resources;
+	// nil if it starts nothing or the cluster couldn't be read.
 	Capacity *capacityView
 	Problem  *banner // why the preview is shown again, if it is
 	Nothing  string  // why nothing can run; the page then has no confirm form
 	Confirm  *confirmForm
 	EditHref string // the form, filled in with these inputs; the grid for a grid selection
 	FromGrid bool   // the VMs were ticked on the grid: Back closes the panel
-	// Fields are the inputs, as the form's hidden fields: what the confirm
-	// submits, and what Reselect posts back to the operation's form.
+	// Fields are the inputs as hidden fields: submitted by the confirm, and posted
+	// back by Reselect.
 	Fields []field
-	// Reselect, for a reset or snapshot of VMs ticked on the grid, is the
-	// text of a button that posts them back to the operation's form (the
-	// snapshot picker, or the name), to choose again.
+	// Reselect, for a reset or snapshot of grid-ticked VMs, labels a button that
+	// posts them back to the operation's form to choose again.
 	Reselect string
 }
 
-// capacityView is the preview's resource summary: a row per node memory
-// or clone storage the plan uses, near-full notices and notes. Warnings
-// about going over are in the page's Warnings.
+// capacityView is the preview's resource summary: a row per node memory or
+// clone storage used, plus notices. Over-capacity warnings go in Warnings.
 type capacityView struct {
 	Rows    []capacityRow
 	Notices []string // more than 90% used afterwards
 	Notes   []string // e.g. linked clones grow
 }
 
-// capacityRow is one usage with a bar: Used and Need are widths in steps
-// of 5% (classes w0-w100, since the CSP allows no inline styles).
+// capacityRow is one usage bar: Used and Need are widths in 5% steps (classes
+// w0-w100, since the CSP forbids inline styles).
 type capacityRow struct {
 	Label string // "n1 memory", "competitions on n1"
 	Level string // ok, near or over
@@ -97,9 +95,8 @@ type itemRow struct {
 	Blocked    string
 }
 
-// confirmForm is what the preview's form sends with the inputs to confirm
-// the plan shown: its nonce and fingerprint, checked against the stored
-// preview.
+// confirmForm is what the preview form sends to confirm the plan shown: its
+// nonce and fingerprint, checked against the stored preview.
 type confirmForm struct {
 	Nonce       string
 	Fingerprint string
@@ -109,7 +106,7 @@ type confirmForm struct {
 	Danger      bool
 }
 
-// destructive reports whether in destroys or discards something: the
+// destructive reports whether in destroys or discards something, so the
 // confirm button says so.
 func destructive(in jobs.Inputs) bool {
 	return in.Kind == pods.KindTeardown || in.Kind == pods.KindReset || (in.Kind == pods.KindPower && in.Action == "stop")
@@ -150,15 +147,13 @@ func (s *Server) opPreview(op operation) http.Handler {
 	})
 }
 
-// showPreview renders the preview of plan. If anything can run, the page
-// gets a confirm form backed by a stored preview: a new one, or the one
-// named by opts.nonce when the same preview is shown again.
+// showPreview renders plan's preview. If anything can run, it adds a confirm
+// form backed by a stored preview: new, or opts.nonce's when re-shown.
 func (s *Server) showPreview(w http.ResponseWriter, r *http.Request, code int, op operation, in jobs.Inputs,
 	plan *pods.Plan, allTeams bool, opts previewOptions) {
 	if len(plan.Runnable()) > 0 {
-		// Advice only, read fresh each time and never part of the
-		// fingerprint: capacity changes constantly and mustn't make a
-		// preview stale.
+		// Advice only, read fresh and never fingerprinted: capacity changes constantly
+		// and mustn't make a preview stale.
 		c, err := pods.ReadCapacity(r.Context(), s.apiFor(r.Context()), plan, s.cfg)
 		if err != nil {
 			s.logf("web: reading capacity for a preview: %v", err)
@@ -223,8 +218,7 @@ func newNonce() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// confirmLabel is the confirm button's text, e.g. "Reset 3 VMs" or "Force
-// stop 2 VMs".
+// confirmLabel is the confirm button's text, e.g. "Force stop 2 VMs".
 func confirmLabel(op operation, in jobs.Inputs, n int) string {
 	vms := "1 VM"
 	if n != 1 {
@@ -242,8 +236,7 @@ func confirmLabel(op operation, in jobs.Inputs, n int) string {
 	}
 }
 
-// previewTitle is a preview's title: the verb it confirms, e.g. Force
-// stop, Deploy kilo.alpha.
+// previewTitle is a preview's title, e.g. Force stop, Deploy kilo.alpha.
 func previewTitle(op operation, in jobs.Inputs) opLabel {
 	return opLabelOf(string(op.Kind), in)
 }
@@ -349,8 +342,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 	return p
 }
 
-// previewFacts are the inputs a preview recaps: what the title and the
-// table don't already say.
+// previewFacts are the inputs a preview recaps that the title and table don't.
 func previewFacts(in jobs.Inputs, fromGrid bool, retryOf int64) []fact {
 	var fs []fact
 	if !fromGrid {
@@ -369,8 +361,8 @@ func previewFacts(in jobs.Inputs, fromGrid bool, retryOf int64) []fact {
 	return fs
 }
 
-// askedFacts are the inputs beyond the teams and hosts that the title
-// (opLabelOf: the action, the snapshot's or set's name) doesn't say.
+// askedFacts are the inputs beyond teams and hosts that the title (opLabelOf)
+// doesn't say.
 func askedFacts(in jobs.Inputs) []fact {
 	var fs []fact
 	switch in.Kind {
@@ -396,8 +388,8 @@ func onOff(b bool) string {
 	return "off"
 }
 
-// capacityOf describes c for the page, adding a warning for each usage
-// that would go over to warnings. It is nil if c lists nothing.
+// capacityOf describes c for the page, appending a warning per usage that
+// would go over. It is nil if c lists nothing.
 func capacityOf(c *pods.Capacity, warnings *[]string) *capacityView {
 	if c == nil || len(c.Usage)+len(c.Notes) == 0 {
 		return nil
@@ -437,8 +429,7 @@ func capacityOf(c *pods.Capacity, warnings *[]string) *capacityView {
 	return v
 }
 
-// step5 is part as a percentage of total, rounded to a step of 5 and
-// capped at 100.
+// step5 is part/total as a percentage, rounded to a step of 5, capped at 100.
 func step5(part, total int64) int {
 	if total <= 0 || part <= 0 {
 		return 0
@@ -447,10 +438,9 @@ func step5(part, total int64) int {
 	return min(pct, 100)
 }
 
-// alreadyDone says how many of items the grid shows already as the power
-// action leaves them, and how: started VMs that already run, or stopped
-// ones that are already stopped. The job checks each VM first and skips
-// those, so the preview says so.
+// alreadyDone counts the items the grid shows already in the power action's
+// end state (and says which: running or stopped). The job skips those, so the
+// preview says so.
 func (s *Server) alreadyDone(ctx context.Context, action string, items []pods.Item) (int, string) {
 	want := ""
 	if a, ok := pods.PowerActionOf(action); ok {
@@ -474,8 +464,8 @@ func (s *Server) alreadyDone(ctx context.Context, action string, items []pods.It
 	return n, want
 }
 
-// consequence says in one sentence what confirming does to the VMs that
-// run, e.g. "2 VMs lose power at once. Unsaved work is lost."
+// consequence says in one sentence what confirming does to running VMs, e.g.
+// "2 VMs lose power at once. Unsaved work is lost."
 func consequence(kind pods.Kind, in jobs.Inputs, items []pods.Item) string {
 	n := len(items)
 	vms := countVMs(n)
@@ -576,8 +566,8 @@ func stepsText(it pods.Item) string {
 	return strings.Join(parts, " · ")
 }
 
-// everyTeamNote says that a plan over every team is one: which teams have
-// VMs, or that none does yet.
+// everyTeamNote notes that a plan covers every team: which teams have VMs, or
+// that none does yet.
 func (s *Server) everyTeamNote(ctx context.Context) string {
 	all := s.view(ctx).Teams()
 	if len(all) == 0 {
@@ -586,8 +576,8 @@ func (s *Server) everyTeamNote(ctx context.Context) string {
 	return fmt.Sprintf("This covers every team (%s).", teamsText(pods.FormatTeams(all)))
 }
 
-// teamsText shows a team range as the grid shows teams, two digits each:
-// "1-3,7" reads "01-03, 07". A range that doesn't parse is shown as it is.
+// teamsText shows a team range with two-digit teams: "1-3,7" reads "01-03, 07".
+// An unparsable range is shown as is.
 func teamsText(spec string) string {
 	teams, err := pods.ParseTeams(spec)
 	if err != nil || len(teams) == 0 {

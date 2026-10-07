@@ -390,9 +390,8 @@ func TestLoginCookieFromAnotherLoginIsRejected(t *testing.T) {
 	}
 }
 
-// Who may use battleship is Authentik's decision: anyone it signs in gets a
-// session, whatever their groups (here, a competitor's team group), and
-// Proxmox decides what they may do.
+// Anyone Authentik signs in gets a session, whatever their groups; Proxmox
+// decides what they may do.
 func TestAnyGroupSignsIn(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
@@ -538,9 +537,7 @@ func TestNewServiceChecksConfig(t *testing.T) {
 	}
 }
 
-// With an https base URL, every part of the flow uses the __Host- names:
-// RequireUser reads the prefixed session cookie (and ignores the plain
-// name), and logout clears it.
+// With an https base URL, the whole flow uses only the __Host- names.
 func TestHostPrefixedCookiesWorkThroughTheFlow(t *testing.T) {
 	h := newHarness(t, func(c *config.Config) { c.Web.BaseURL = "https://battleship.example.org" })
 	b := h.browser()

@@ -1,8 +1,7 @@
 // Package config loads the battleship TOML configuration.
 //
-// Competition-specific values live here so a new season is a config change,
-// not a code change. Patterns use {team} (two-digit team number) and {host}
-// (template hostname) placeholders.
+// Patterns use {team} (two-digit team number) and {host} (template hostname)
+// placeholders.
 package config
 
 import (
@@ -34,31 +33,24 @@ type Config struct {
 
 type Proxmox struct {
 	URL string `toml:"url"` // e.g. https://192.0.2.123:8006
-	// URLs are several nodes of the cluster, instead of URL: battleship
-	// uses one at a time and fails over to the next when it is down.
+	// URLs are several cluster nodes, used one at a time with failover.
 	// Exactly one of URL and URLs is set.
 	URLs               []string `toml:"urls"`
 	InsecureSkipVerify bool     `toml:"insecure_skip_verify"` // default false; serve and worker need ca_file or this set to true
-	// CAFile is a PEM bundle of the CAs Proxmox's certificate is checked
-	// against, e.g. the cluster's CA (/etc/pve/pve-root-ca.pem). Setting
-	// it turns verification on; it can't be combined with
-	// insecure_skip_verify = true.
+	// CAFile is a PEM bundle to verify Proxmox against, e.g.
+	// /etc/pve/pve-root-ca.pem. Not allowed with insecure_skip_verify.
 	CAFile string `toml:"ca_file"`
 	// RootCAs is CAFile's certificates, read by Load.
 	RootCAs *x509.CertPool `toml:"-"`
 	// Realm is the Proxmox OpenID realm users sign in to Proxmox through.
 	Realm string `toml:"realm"`
-	// TicketRenewAfter is how old a Proxmox ticket (a session's or a
-	// job's) gets before battleship renews it. Tickets last 2h and can only
-	// be renewed while valid.
+	// TicketRenewAfter is the ticket age at which battleship renews it.
+	// Tickets last 2h and can only be renewed while valid.
 	TicketRenewAfter time.Duration `toml:"ticket_renew_after"`
-	// SDNZone is the SDN zone of the team bridges (network.ext_bridge and
-	// int_bridge), whose vnets a deploy needs SDN.Use on.
+	// SDNZone holds the team bridges' vnets; a deploy needs SDN.Use on them.
 	SDNZone string `toml:"sdn_zone"`
 	// TicketMaxAge is how long a Proxmox login lasts through renewals.
-	// Renewal never asks the identity provider, so group changes in
-	// Authentik apply only at the next login: after this, a session signs
-	// in to Proxmox again, and a job's credential lapses.
+	// Renewal skips the IdP, so group changes apply only at the next login.
 	TicketMaxAge time.Duration `toml:"ticket_max_age"`
 }
 
@@ -85,40 +77,31 @@ type Deploy struct {
 	DiskMBpsRead  int    `toml:"disk_mbps_rd"`
 	DiskMBpsWrite int    `toml:"disk_mbps_wr"`
 	SnapshotName  string `toml:"snapshot_name"` // the baseline a deploy takes
-	// BaselinePatterns are globs (path.Match) naming other snapshots that
-	// count as a VM's baseline when it lacks SnapshotName, e.g. the
-	// fresh_clone_<timestamp> snapshots of the old deploy tool. A reset that
-	// names no snapshot rolls back to SnapshotName, else the newest match.
+	// BaselinePatterns are path.Match globs for snapshots that count as the
+	// baseline when a VM lacks SnapshotName; a reset uses the newest match.
 	BaselinePatterns []string `toml:"baseline_patterns"`
 	GPUVGA           string   `toml:"gpu_vga"` // templates with this vga value are pinned to their node
 }
 
-// Concurrency limits Proxmox work. Workers applies to each job on its own.
-// ClonesPerNode, ConfigCalls and TemplateBuilds are shared by every job in
-// one process, and each process has its own. With a database, Deletes and
-// the storage operations that run one at a time are capped across every
-// process that uses it; processes whose Deletes differ are capped at the
-// largest of them.
+// Concurrency limits Proxmox work. Workers is per job; ClonesPerNode,
+// ConfigCalls and TemplateBuilds are per process. With a database, Deletes
+// and serialized storage operations are capped across processes.
 type Concurrency struct {
 	Workers       int `toml:"workers"`         // VMs processed at once
 	ClonesPerNode int `toml:"clones_per_node"` // concurrent clone tasks per source node
 	ConfigCalls   int `toml:"config_calls"`    // concurrent API calls from jobs and the drift scan, clone POSTs included
-	// TemplateBuilds caps the templates built at once. Each build also takes
-	// one of its master node's clone slots for its copy.
+	// TemplateBuilds caps concurrent template builds; each also takes a clone
+	// slot on its master's node.
 	TemplateBuilds int `toml:"template_builds"`
-	// Deletes caps the VM destroy tasks running at once. Each destroy
-	// removes the VM from its pool and ACLs under Proxmox's cluster-wide
-	// lock on user.cfg; too many at once time out on that lock and leave
-	// VMs half-deleted (locked as destroyed).
+	// Deletes caps concurrent VM destroys. Each takes Proxmox's cluster-wide
+	// user.cfg lock; too many time out on it and leave VMs half-deleted.
 	Deletes int `toml:"deletes"`
 }
 
 // Teardown configures how team VMs are taken down before they are deleted.
 type Teardown struct {
-	// ShutdownTimeout is how long a running VM gets to shut down cleanly
-	// before Proxmox hard-stops it. A clean shutdown lets a router
-	// release its DHCP lease (udhcpc -R), so the next deploy gets the
-	// address at once.
+	// ShutdownTimeout is how long a VM gets to shut down before a hard stop.
+	// A clean shutdown lets a router release its DHCP lease for the next deploy.
 	ShutdownTimeout time.Duration `toml:"shutdown_timeout"`
 }
 
@@ -132,19 +115,15 @@ type Retry struct {
 	TaskPoll          time.Duration `toml:"task_poll"`   // Proxmox task status poll interval
 }
 
-// Database is where jobs are stored. The worker, the web app and -queue need
-// it; when it is set, direct CLI runs go through it too.
+// Database stores jobs. The worker, web app and -queue need it; when set,
+// direct CLI runs use it too.
 type Database struct {
 	URL string `toml:"url"` // postgres://...; overridden by BATTLESHIP_DATABASE_URL
-	// MaxConns caps the process's main connection pool (at least 4,
-	// default 16). Each process also opens up to 2 more for job
-	// heartbeats and readiness checks, 1 for its delete and storage slots
-	// and 1 that LISTENs for job changes, so it uses up to MaxConns+4;
-	// budget that times the processes against Postgres's max_connections.
+	// MaxConns caps the main connection pool (min 4, default 16). A process
+	// uses up to MaxConns+4 connections; budget that against max_connections.
 	MaxConns int `toml:"max_conns"`
-	// SealKey encrypts the Proxmox credentials jobs keep in the database
-	// (their submitters' tickets or tokens). Every process that submits or
-	// runs jobs needs the same key. Overridden by BATTLESHIP_SEAL_KEY.
+	// SealKey encrypts job credentials in the database; every process that
+	// submits or runs jobs needs the same key. Overridden by BATTLESHIP_SEAL_KEY.
 	SealKey string `toml:"seal_key"`
 }
 
@@ -161,8 +140,7 @@ func (d Database) String() string {
 // MinSealKey is the shortest database.seal_key accepted.
 const MinSealKey = 32
 
-// RequireSealKey reports an error if no seal key is configured. Commands
-// that submit or run jobs call it.
+// RequireSealKey reports an error if no seal key is configured.
 func (c Config) RequireSealKey() error {
 	if c.Database.SealKey == "" {
 		return fmt.Errorf("database.seal_key (or BATTLESHIP_SEAL_KEY) is required to keep jobs' Proxmox credentials: %d or more random characters, the same in every process", MinSealKey)
@@ -191,9 +169,8 @@ type Jobs struct {
 	Heartbeat  time.Duration `toml:"heartbeat"`   // how often a running job proves it's alive
 	StaleAfter time.Duration `toml:"stale_after"` // a running job silent this long is marked interrupted
 	Poll       time.Duration `toml:"poll"`        // how often an idle worker looks for jobs
-	// CancelGrace is how long, after a cancel, a step that already sent
-	// Proxmox a change may wait for that change's task to end, so the job
-	// records what it did (apply.ErrCancelRequested).
+	// CancelGrace is how long a canceled step waits for a Proxmox task it
+	// already started, so the job records what it did.
 	CancelGrace time.Duration `toml:"cancel_grace"`
 }
 
@@ -263,8 +240,7 @@ func (p Proxmox) String() string {
 	return s + "}"
 }
 
-// Endpoints is the Proxmox API URLs in the order to try them: URLs, or
-// URL alone.
+// Endpoints is the Proxmox API URLs in the order to try them.
 func (p Proxmox) Endpoints() []string {
 	if len(p.URLs) > 0 {
 		return p.URLs
@@ -275,8 +251,7 @@ func (p Proxmox) Endpoints() []string {
 	return nil
 }
 
-// ReadCAFile reads a PEM bundle into a pool, failing unless it holds at
-// least one certificate.
+// ReadCAFile reads a PEM bundle, failing if it holds no certificate.
 func ReadCAFile(path string) (*x509.CertPool, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -292,9 +267,8 @@ func ReadCAFile(path string) (*x509.CertPool, error) {
 // GoString is String for %#v.
 func (p Proxmox) GoString() string { return "config.Proxmox" + p.String() }
 
-// removedKeys are settings battleship no longer has, with why. A config that
-// still sets them fails to load, naming them, so an old config can't
-// silently keep a service token, or a team list nothing reads.
+// removedKeys are retired settings, with why. A config that sets one fails
+// to load, so an old config can't silently keep e.g. a service token.
 var removedKeys = map[string]string{
 	"proxmox.token_id":     removedToken,
 	"proxmox.token_secret": removedToken,
@@ -416,7 +390,7 @@ func (c Config) Validate() error {
 		errs = append(errs, fmt.Errorf("database.seal_key must be at least %d characters", MinSealKey))
 	}
 
-	// Naming: {team} patterns (in fixed order for deterministic errors)
+	// Fixed order for deterministic errors.
 	teamPatterns := []struct {
 		name string
 		val  string
@@ -441,7 +415,6 @@ func (c Config) Validate() error {
 		errs = append(errs, errors.New("naming.template_suffix is required"))
 	}
 
-	// Naming: stride must be at least 100
 	if c.Naming.CloneVMIDTeamStride < 100 {
 		errs = append(errs, errors.New("naming.clone_vmid_team_stride must be at least 100 (clone VMIDs use template VMID % 100)"))
 	}
@@ -513,8 +486,8 @@ func (c Config) Validate() error {
 		errs = append(errs, errors.New("retry.attempts must be at least 1"))
 	}
 
-	// A worker stops its job after StaleAfter/2 without a heartbeat: 5
-	// beats per StaleAfter survive one failed beat, 4 would not.
+	// A worker stops its job after StaleAfter/2 without a heartbeat; 5 beats
+	// per StaleAfter survive one failed beat, 4 would not.
 	if c.Jobs.Heartbeat < time.Second {
 		errs = append(errs, errors.New("jobs.heartbeat must be at least 1s"))
 	}
@@ -537,20 +510,17 @@ func (c Config) Validate() error {
 	return errors.Join(errs...)
 }
 
-// httpURL reports whether raw is an http or https URL with a host and no
-// path beyond "/": the client adds /api2/json itself.
+// httpURL reports whether raw is an http(s) URL with a host and no path;
+// the client adds /api2/json itself.
 func httpURL(raw string) bool {
 	u, err := url.Parse(raw)
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" &&
 		(u.Path == "" || u.Path == "/") && u.RawQuery == "" && u.Fragment == ""
 }
 
-// RequireTLSVerify reports an error unless Proxmox's certificate will be
-// checked against the cluster CA (proxmox.ca_file), or checking was turned
-// off on purpose (insecure_skip_verify = true). People's tickets and tokens
-// go to whatever answers at proxmox.url, so battleship serve and battleship
-// worker need one of the two; Proxmox's self-signed certificate never
-// passes the system's CAs.
+// RequireTLSVerify reports an error unless proxmox.ca_file is set or
+// insecure_skip_verify is explicitly on. Serve and worker send people's
+// credentials to proxmox.url, and Proxmox's self-signed cert fails system CAs.
 func (c Config) RequireTLSVerify() error {
 	if c.Proxmox.CAFile == "" && !c.Proxmox.InsecureSkipVerify {
 		return errors.New("proxmox.ca_file is required: the cluster CA that Proxmox's certificate is checked against " +
@@ -560,8 +530,7 @@ func (c Config) RequireTLSVerify() error {
 	return nil
 }
 
-// RequireDatabase reports an error if no database is configured. Commands
-// that store jobs call it; the plain CLI doesn't need a database.
+// RequireDatabase reports an error if no database is configured.
 func (c Config) RequireDatabase() error {
 	if strings.TrimSpace(c.Database.URL) == "" {
 		return errors.New("database.url (or BATTLESHIP_DATABASE_URL) is required")

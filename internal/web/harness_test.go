@@ -29,9 +29,8 @@ import (
 	"github.com/wccomps/battleship/internal/store/storetest"
 )
 
-// fakeAPI is the shared fake cluster on n1 and n2, with the failures the
-// web tests set and a gate that holds and counts its config reads. Its
-// fields are guarded by the fake's Mu.
+// fakeAPI is the fake cluster on n1 and n2, plus settable failures and a
+// gate on config reads. Fields are guarded by the fake's Mu.
 type fakeAPI struct {
 	*podstest.Fake
 	listErr error
@@ -70,8 +69,7 @@ func (f *fakeAPI) remove(names ...string) {
 	maps.DeleteFunc(f.VMs, func(_ int, vm *podstest.VM) bool { return slices.Contains(names, vm.Name) })
 }
 
-// noTeamVMs removes the team VMs the harness starts with: those of teams
-// 01-03.
+// noTeamVMs removes the harness's starting team VMs (teams 01-03).
 func (h *harness) noTeamVMs() {
 	var names []string
 	for _, team := range []string{"01", "02", "03"} {
@@ -109,9 +107,8 @@ func (f *fakeAPI) setSnapshots(vmid int, snaps ...string) {
 	f.VMs[vmid].Snapshots = snaps
 }
 
-// hold is the fake's Gate. It fails listings with listErr. It counts each
-// config read, reports it on entered, waits for the gate, and fails it
-// with readErr.
+// hold is the fake's Gate: listings fail with listErr; config reads are
+// counted, reported on entered, held by gate, then fail with readErr.
 func (f *fakeAPI) hold(ctx context.Context, key string) (func(), error) {
 	if key == "cluster" {
 		f.Mu.Lock()
@@ -149,8 +146,7 @@ func (f *fakeAPI) hold(ctx context.Context, key string) (func(), error) {
 	return done, f.readErr[vmid]
 }
 
-// fakeHistory answers LastItemResults from a map. Its database clock is the
-// fake one, with no skew.
+// fakeHistory answers LastItemResults from a map, with no clock skew.
 type fakeHistory struct {
 	mu      sync.Mutex
 	results map[string]store.ItemResult
@@ -247,8 +243,7 @@ func (c *fakeClock) Advance(d time.Duration) {
 	c.waiters = kept
 }
 
-// BlockUntil waits until n waiters are pending. The 10s limit only guards
-// against a hang.
+// BlockUntil waits until n waiters are pending (10s hang guard).
 func (c *fakeClock) BlockUntil(t testing.TB, n int) {
 	t.Helper()
 	deadline := time.After(10 * time.Second)
@@ -318,7 +313,7 @@ type harness struct {
 	h      http.Handler
 	logs   *logBuffer
 	stop   context.CancelFunc // stops the hub
-	// dbURL is the test database's own URL, for tests that break it.
+	// dbURL is for tests that break the database.
 	dbURL string
 	// pve is Proxmox's access layer: users, their tickets and privileges.
 	// The cluster itself is api.
@@ -328,13 +323,11 @@ type harness struct {
 
 	credMu sync.Mutex
 	used   []proxmox.Credential // the credential of every API the app asked for
-	// polled and scanned say the test has polled or scanned the grid, which
-	// views opened later then do too (catchUp).
+	// polled and scanned let views opened later catch up (catchUp).
 	polled, scanned bool
 }
 
-// openView opens cred's view, as the user's first page would, and has it
-// catch up with the polls and scans the test made before.
+// openView opens cred's view, as a first page would, and catches it up.
 func (h *harness) openView(cred proxmox.Credential) {
 	v, release := h.views.Open(cred.User, cred)
 	h.t.Cleanup(release)
@@ -392,9 +385,8 @@ func (p permAPI) PermissionsAt(ctx context.Context, path string) (map[string]boo
 	return p.pve.Client().As(p.cred()).PermissionsAt(ctx, path)
 }
 
-// allViews stands for every viewer's grid: the views the test's sessions
-// opened. A view opened later catches up (see catchUp), so a test can poll
-// before it logs anyone in, as with one shared grid.
+// allViews is every view the test's sessions opened. Later views catch up,
+// so a test can poll before anyone logs in.
 type allViews struct{ h *harness }
 
 // Poll polls every view, returning the first error.
@@ -425,8 +417,7 @@ func (a allViews) Scan(ctx context.Context) error {
 	return first
 }
 
-// Grid is the grid of the first view by user name: the lead's when a lead
-// is signed in (test-lead sorts first).
+// Grid is the first view's grid by user name (the lead's, if signed in).
 func (a allViews) Grid() status.Grid {
 	var first *status.View
 	a.h.views.Each(func(v *status.View) {
@@ -464,9 +455,8 @@ func newHarness(t *testing.T, mut ...func(*config.Config)) *harness {
 	return buildHarness(t, false, mut...)
 }
 
-// newListeningHarness is newHarness with a hub that listens to the test
-// database, as battleship serve's does, rather than one carrying only the
-// test's own messages. It returns once the hub listens.
+// newListeningHarness is newHarness with a hub listening on the test
+// database, as serve's does. It returns once the hub listens.
 func newListeningHarness(t *testing.T, mut ...func(*config.Config)) *harness {
 	t.Helper()
 	h := buildHarness(t, true, mut...)
@@ -526,8 +516,8 @@ func buildHarness(t *testing.T, listen bool, mut ...func(*config.Config)) *harne
 	}
 	t.Cleanup(h.views.Close)
 	h.poller = allViews{h}
-	// The lead's and the operator's grids exist from the start, so a test
-	// can poll before it signs anyone in; they see the same VMs.
+	// The lead's and operator's grids exist up front so a test can poll
+	// before signing anyone in.
 	for _, p := range []persona{asLead, asOperator} {
 		h.openView(h.ticketWith("test-"+string(p), personaPrivileges[p]))
 	}
@@ -544,10 +534,8 @@ func buildHarness(t *testing.T, listen bool, mut ...func(*config.Config)) *harne
 	return h
 }
 
-// longSessions makes sessions outlive a test that moves the clock on by
-// up to an hour: the harness's auth runs on the fake clock, and a session
-// refresh (due every web.session_refresh) is rejected by the stub
-// provider, ending the session.
+// longSessions lets sessions survive an hour of fake-clock moves: the stub
+// provider rejects session refreshes, which would end the session.
 func longSessions(c *config.Config) {
 	c.Web.SessionIdle = 2 * time.Hour
 	c.Web.SessionRefresh = time.Hour
@@ -571,8 +559,7 @@ func (h *harness) login(p persona) authtest.Session {
 	return sess
 }
 
-// persona is a kind of user: what they may do is the Proxmox privileges
-// their user holds on /.
+// persona is a kind of user, defined by their Proxmox privileges on /.
 type persona string
 
 const (
@@ -586,9 +573,8 @@ var personaPrivileges = map[persona][]string{
 	asOperator: {"VM.Audit", "VM.PowerMgmt", "VM.Snapshot", "VM.Snapshot.Rollback", "Pool.Audit", "Sys.Audit", "Datastore.Audit"},
 }
 
-// ticket is a fresh Proxmox ticket of subject's Proxmox user
-// (<subject>@auth.example.org), which it creates the first time with
-// every privilege on /.
+// ticket is a fresh ticket for <subject>@auth.example.org, created on first
+// use with every privilege on /.
 func (h *harness) ticket(subject string) proxmox.Credential {
 	h.t.Helper()
 	return h.ticketWith(subject, allPrivileges)
@@ -612,8 +598,7 @@ var allPrivileges = []string{"VM.Audit", "VM.PowerMgmt", "VM.Snapshot", "VM.Snap
 	"VM.Config.Network", "VM.Config.Disk", "VM.Config.Cloudinit", "VM.Config.CDROM", "VM.Config.Options", "Datastore.AllocateSpace",
 	"Datastore.Allocate", "Datastore.Audit", "Pool.Audit", "Pool.Allocate", "Sys.Audit", "Sys.Modify", "SDN.Use", "Mapping.Use"}
 
-// loginStudent stores a session for a member of team 01's group, which
-// grants no role.
+// loginStudent stores a session for a team 01 member (no role).
 func (h *harness) loginStudent() authtest.Session {
 	h.t.Helper()
 	cred := h.ticketWith("test-student", nil)
@@ -622,8 +607,7 @@ func (h *harness) loginStudent() authtest.Session {
 	return sess
 }
 
-// do serves one request, with sess's cookie and CSRF token unless sess is
-// nil.
+// do serves one request as sess (nil: no cookie or CSRF token).
 func (h *harness) do(sess *authtest.Session, method, target string, body io.Reader) *httptest.ResponseRecorder {
 	h.t.Helper()
 	req := httptest.NewRequest(method, target, body)
@@ -659,8 +643,7 @@ type sseClient struct {
 	done chan struct{} // closed at the end of the stream
 }
 
-// openSSE starts a stream from the app on a real HTTP server, so events
-// arrive as they are flushed.
+// openSSE streams from a real HTTP server, so events arrive as flushed.
 func (h *harness) openSSE(sess *authtest.Session, path string) *sseClient {
 	h.t.Helper()
 	return h.openSSEWith(sess, path, nil)
@@ -726,8 +709,7 @@ func (c *sseClient) read() {
 	}
 }
 
-// next returns the next event or comment. The 10s limit only guards
-// against a hang.
+// next returns the next event or comment (10s hang guard).
 func (c *sseClient) next() sseEvent {
 	c.t.Helper()
 	select {
@@ -746,8 +728,7 @@ func (c *sseClient) next() sseEvent {
 	return sseEvent{}
 }
 
-// ended waits for the server to end the stream, failing if an event comes
-// first. The 10s limit only guards against a hang.
+// ended waits for the stream to end, failing on any event (10s hang guard).
 func (c *sseClient) ended() {
 	c.t.Helper()
 	select {
@@ -784,8 +765,8 @@ func lacks(t testing.TB, what, body string, unwanted ...string) {
 	}
 }
 
-// ctxAs is a request context of a p user signed in to Proxmox, for calling
-// handlers' helpers directly.
+// ctxAs is a signed-in p user's request context, for calling handler
+// helpers directly.
 func (h *harness) ctxAs(p persona) context.Context {
 	ctx := auth.WithProxmoxCredential(context.Background(), h.ticketWith("test-"+string(p), personaPrivileges[p]))
 	rv := &requestView{} // as require gives a request

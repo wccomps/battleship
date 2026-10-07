@@ -123,8 +123,7 @@ func TestWorkerCommandRunsQueuedJob(t *testing.T) {
 		t.Fatalf("queue: exit %d", code)
 	}
 
-	// The worker acts only as each job's submitter, never with a token of
-	// its own.
+	// The worker acts only as each job's submitter, never with its own token.
 	t.Setenv("BATTLESHIP_PROXMOX_TOKEN_ID", "")
 	t.Setenv("BATTLESHIP_PROXMOX_TOKEN_SECRET", "")
 	ctx, cancel := context.WithCancel(context.Background())
