@@ -15,8 +15,7 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// slowStatus wraps the fake so CurrentStatus takes a moment and records the
-// most calls in flight at once.
+// slowStatus makes CurrentStatus slow and records peak concurrent calls.
 type slowStatus struct {
 	*podstest.Fake
 	mu       sync.Mutex
@@ -38,8 +37,8 @@ func (s *slowStatus) CurrentStatus(ctx context.Context, node string, vmid int) (
 	return s.Fake.CurrentStatus(ctx, node, vmid)
 }
 
-// runTwoPowerJobs runs power plans for teams 01 and 02 at the same time and
-// returns the most CurrentStatus calls that were in flight together.
+// runTwoPowerJobs runs power plans for teams 01 and 02 concurrently and
+// returns peak concurrent CurrentStatus calls.
 func runTwoPowerJobs(t *testing.T, shared bool) int {
 	t.Helper()
 	f := newCluster()
@@ -80,8 +79,7 @@ func TestSharedLimitsCapCallsAcrossExecutors(t *testing.T) {
 }
 
 func TestSeparateLimitsDoNotCapEachOther(t *testing.T) {
-	// Control for the test above: without sharing, each executor has its own
-	// budget of one call, so both run at once.
+	// Control: unshared, each executor has its own one-call budget.
 	if got := runTwoPowerJobs(t, false); got != 2 {
 		t.Errorf("separate limits: %d calls in flight at once, want 2", got)
 	}
@@ -152,8 +150,8 @@ func TestLimitsCallWaitsForASlot(t *testing.T) {
 	}
 }
 
-// slotWins is a done context whose Done select doesn't pick: the free
-// slot won the select, as it may when both are ready.
+// slotWins is a done context whose Done case loses the select to a free
+// slot, as can happen when both are ready.
 type slotWins struct{ context.Context }
 
 func (slotWins) Done() <-chan struct{} { return nil }
@@ -171,8 +169,8 @@ func TestSemDoesNotRunWhenAFreeSlotWinsOverADoneCtx(t *testing.T) {
 	}
 }
 
-// memSlots is Slots in memory, standing in for the database's advisory locks
-// that every process shares.
+// memSlots is an in-memory Slots, standing in for the database's advisory
+// locks.
 type memSlots struct {
 	mu   sync.Mutex
 	sems map[string]chan struct{}
@@ -197,9 +195,9 @@ func (m *memSlots) AcquireSlot(ctx context.Context, name string, n int) (func(),
 	}
 }
 
-// runTwoProcesses builds teak's and oak's templates at once from two
-// executors with their own Limits, as two replicas would, and returns the
-// most conversions that ran together.
+// runTwoProcesses builds teak's and oak's templates from two executors with
+// separate Limits, like two replicas, and returns peak concurrent
+// conversions.
 func runTwoProcesses(t *testing.T, slots Slots) int {
 	t.Helper()
 	f := newCluster()
@@ -231,8 +229,7 @@ func TestStorageOpsAreSerializedAcrossProcesses(t *testing.T) {
 }
 
 func TestStorageOpsWithoutSharedSlotsArePerProcess(t *testing.T) {
-	// Control for the test above: without shared slots each process has its
-	// own storage-ops slot, so both conversions run at once.
+	// Control: without shared slots, each process has its own storage-ops slot.
 	if p := runTwoProcesses(t, nil); p != 2 {
 		t.Errorf("%d conversions ran at once, want 2", p)
 	}

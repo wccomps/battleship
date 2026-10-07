@@ -8,10 +8,9 @@ import (
 	"github.com/wccomps/battleship/internal/config"
 )
 
-// hashedFor says, for every field of the config sections that decide what a
-// run does to VMs, which kinds' ConfigHash covers it;
-// TestEveryRunConfigFieldIsClassified fails on a field not listed. A field no
-// kind lists only shapes planning, and the plan carries its effect.
+// hashedFor lists, for each run-affecting config field, which kinds'
+// ConfigHash covers it (TestEveryRunConfigFieldIsClassified requires every
+// field). A field no kind lists only shapes planning, which the plan records.
 var hashedFor = map[string]map[string][]Kind{
 	"Naming": {
 		"Pool":   {KindDeploy}, // clones join it

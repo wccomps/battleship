@@ -22,8 +22,8 @@ func countCalls(f *podstest.Fake, key string) int {
 	return n
 }
 
-// A step Proxmox refuses for a missing privilege (403) is never tried
-// again, not even in a retry round.
+// A step refused for a missing privilege (403) is never retried, not even
+// in a retry round.
 func TestForbiddenItemIsNotRetried(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
@@ -45,17 +45,15 @@ func TestForbiddenItemIsNotRetried(t *testing.T) {
 
 var forbidden = &proxmox.APIError{Status: 403, Message: "Permission check failed (/nodes/cedar, Sys.Audit)"}
 
-// newRunningMaster is the cluster with the teak master running, so a
-// template build stops it for the copy.
+// newRunningMaster has the teak master running, so a build stops it.
 func newRunningMaster() *podstest.Fake {
 	f := newCluster()
 	f.VMs[121].Status = "running"
 	return f
 }
 
-// Item 2: a stop the build couldn't follow (403), and which was then seen
-// to have ended (the master unlocked), doesn't leave the master stopped:
-// the deferred restart doesn't trip over the same 403 again.
+// A stop the build couldn't follow (403) but that has ended doesn't leave
+// the master stopped: the restart doesn't trip over the same 403.
 func TestMasterRestartedAfterUnfollowableStop(t *testing.T) {
 	f := newRunningMaster()
 	stop := podstest.UPID("cedar", "qmstop", 121)
@@ -74,9 +72,8 @@ func TestMasterRestartedAfterUnfollowableStop(t *testing.T) {
 	}
 }
 
-// Item 3: a clone task the job can't follow is judged by its TARGET's lock
-// (Proxmox doesn't lock the source), so a clone still running isn't
-// declared over.
+// An unfollowable clone is judged by its target's lock (Proxmox doesn't
+// lock the source), so a running clone isn't declared over.
 func TestUnfollowableCloneWaitsOnItsTarget(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
@@ -108,9 +105,8 @@ func TestUnfollowableCloneWaitsOnItsTarget(t *testing.T) {
 	}
 }
 
-// Item 4: waiting for an unfollowable task's VM to unlock stops when Proxmox
-// refuses the reads too (403 or 401), instead of polling forever while the
-// job holds its locks.
+// Waiting for an unfollowable task's VM to unlock stops when reads are
+// refused too (403/401), rather than polling forever holding locks.
 func TestUnfollowableStopsOnRefusedReads(t *testing.T) {
 	for _, status := range []int{401, 403} {
 		f := newCluster()
@@ -143,10 +139,9 @@ func TestUnfollowableStopsOnRefusedReads(t *testing.T) {
 	}
 }
 
-// Item 5: when the job's authorization lapses during a template build, the
-// stopped master is reported in the result (not only an event), the waits
-// that can only fail are skipped, and nothing claims a clone that never
-// started may still be running.
+// If authorization lapses mid-build, the stopped master is reported in the
+// result, doomed waits are skipped, and a never-started clone isn't called
+// possibly running.
 func TestLapseDuringBuildReportsStoppedMaster(t *testing.T) {
 	f := newRunningMaster()
 	stop := podstest.UPID("cedar", "qmstop", 121)

@@ -14,11 +14,10 @@ import (
 // MaxSnapshotName is the longest snapshot name Proxmox takes.
 const MaxSnapshotName = 40
 
-// CheckSnapshotName reports whether Proxmox would take name for a new
-// snapshot: its pve-configid format (a letter, then letters, digits, _ or
-// -, at least 2 characters in all), at most MaxSnapshotName characters,
-// and not "current" (exactly) or "pending" (in any case), the names its API
-// reserves.
+// CheckSnapshotName reports whether Proxmox would accept name for a new
+// snapshot: pve-configid format (a letter, then letters, digits, _ or -; 2+
+// characters), at most MaxSnapshotName long, and not the reserved "current"
+// (exact) or "pending" (any case).
 func CheckSnapshotName(name string) error {
 	if name == "" {
 		return errors.New("a snapshot needs a name")
@@ -52,11 +51,10 @@ type SnapshotRequest struct {
 	VMState     bool // also save the RAM of running VMs
 }
 
-// Snapshot takes a new snapshot of team VMs. It refuses a name Proxmox
-// wouldn't take, and one that is, or could pass for, the deploy baseline,
-// which a reset that names no snapshot would then roll back to. A VM that
-// already has a snapshot of the name is blocked: a snapshot is never
-// replaced.
+// Snapshot takes a new snapshot of team VMs. It refuses names Proxmox would
+// reject or that could pass for the deploy baseline (which a bare reset
+// would roll back to). VMs already holding the name are blocked: snapshots
+// are never replaced.
 func (p Planner) Snapshot(ctx context.Context, req SnapshotRequest) (*Plan, error) {
 	if err := CheckSnapshotName(req.Name); err != nil {
 		return nil, err
@@ -86,8 +84,8 @@ func (p Planner) Snapshot(ctx context.Context, req SnapshotRequest) (*Plan, erro
 	return plan, nil
 }
 
-// notBaseline refuses a new snapshot's name that is the deploy baseline's,
-// or matches baseline_patterns.
+// notBaseline refuses a name that is the deploy baseline's or matches
+// baseline_patterns.
 func (p Planner) notBaseline(name string) error {
 	d := p.Cfg.Deploy
 	if name == d.SnapshotName {

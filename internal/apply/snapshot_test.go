@@ -48,9 +48,8 @@ func TestTakeSnapshot(t *testing.T) {
 	}
 }
 
-// A snapshot of the name that appeared after the plan was made (someone
-// took one in Proxmox) is never replaced: the item fails and nothing is
-// sent.
+// A snapshot of the name that appeared after planning is never replaced:
+// the item fails and nothing is sent.
 func TestTakeSnapshotNeverReplacesOne(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "initial")
@@ -67,8 +66,8 @@ func TestTakeSnapshotNeverReplacesOne(t *testing.T) {
 	}
 }
 
-// A request whose answer was lost took the snapshot: the retry finds it
-// and doesn't send it again, and the item succeeds.
+// A request whose answer was lost took the snapshot: the retry finds it,
+// doesn't resend, and succeeds.
 func TestTakeSnapshotLostAnswerIsNotResent(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
@@ -88,9 +87,8 @@ func TestTakeSnapshotLostAnswerIsNotResent(t *testing.T) {
 	}
 }
 
-// The same holds across retry rounds: a round whose request's answer was
-// lost for good fails the item, and the next round finds the snapshot
-// this run took and accepts it rather than calling it someone else's.
+// Across rounds too: after a round loses the answer for good, the next
+// finds the snapshot this run took and accepts it.
 func TestTakeSnapshotRetryRoundAcceptsItsOwnSnapshot(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
@@ -126,9 +124,8 @@ func TestTakeSnapshotIsVerified(t *testing.T) {
 	}
 }
 
-// Deploy's baseline follows the same rule: a request whose answer was lost
-// took the baseline, so the retry finds it rather than POSTing again and
-// failing "already used".
+// Deploy's baseline too: a lost-answer request isn't re-POSTed (which
+// would fail "already used").
 func TestBaselineLostAnswerIsNotResent(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")

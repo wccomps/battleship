@@ -37,11 +37,9 @@ func TestPowerSkipsVMsAlreadyInTheStateTheActionLeaves(t *testing.T) {
 	}
 }
 
-// A task the job can't follow (Proxmox answers 403 for its status, as for
-// another user's task without Sys.Audit on the node) isn't taken for done:
-// the step waits until the VM is no longer locked, fails saying the
-// outcome is unknown, and the retry round, which checks the VM's state
-// first, finds it already stopped.
+// An unfollowable task (403 on its status) isn't assumed done: the step
+// waits for the VM to unlock, fails as outcome unknown, and the retry round
+// finds the VM already stopped.
 func TestTaskThatCantBeFollowedIsCheckedNotAssumed(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})

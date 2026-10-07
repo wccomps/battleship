@@ -44,8 +44,8 @@ func (n Naming) VMName(team, host string) string { return Expand(n.cfg.VMName, t
 func (n Naming) Pool(team string) string { return Expand(n.cfg.Pool, team, "") }
 
 // CloneVMID is base + team*stride + templateVMID%100, e.g. team 01 from
-// template 9005 -> 10105. Teams come from ParseTeams or FormatTeam. It assumes
-// the templates in a plan have distinct VMID%100 values; the planner enforces that.
+// template 9005 -> 10105. The planner ensures a plan's templates have
+// distinct VMID%100.
 func (n Naming) CloneVMID(team string, templateVMID int) int {
 	t, err := strconv.Atoi(team)
 	if err != nil {
@@ -57,8 +57,8 @@ func (n Naming) CloneVMID(team string, templateVMID int) int {
 	return n.cfg.CloneVMIDBase + t*n.cfg.CloneVMIDTeamStride + templateVMID%100
 }
 
-// TeamOfCloneVMID is the team whose clone VMIDs include vmid (see
-// CloneVMID: the first 100 of its stride), as a two-digit team.
+// TeamOfCloneVMID is the two-digit team whose clone VMIDs (the first 100 of
+// its stride) include vmid.
 func (n Naming) TeamOfCloneVMID(vmid int) (string, bool) {
 	off := vmid - n.cfg.CloneVMIDBase
 	stride := n.cfg.CloneVMIDTeamStride
@@ -77,9 +77,8 @@ func (n Naming) IsTemplateName(name string) bool {
 // TemplateVMID is the preferred template VMID for a master, before collisions.
 func (n Naming) TemplateVMID(masterVMID int) int { return n.cfg.TemplateVMIDBase + masterVMID%100 }
 
-// ParseVMName extracts the team and host from a team VM name. It accepts only
-// names VMName would produce for that team, so hand-made names like "team7-x"
-// are never treated as team 07.
+// ParseVMName extracts team and host from a team VM name, accepting only
+// names VMName would produce, so "team7-x" is never team 07.
 func (n Naming) ParseVMName(name string) (team, host string, ok bool) {
 	m := n.nameRE.FindStringSubmatch(name)
 	if m == nil {

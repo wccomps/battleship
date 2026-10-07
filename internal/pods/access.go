@@ -13,13 +13,11 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// Battleship enforces nothing about who may do what: Proxmox does, on every
-// call, with the caller's own credential. A plan only says, before anything
-// runs, which of its VMs the user lacks a privilege for, so the preview can
-// show them blocked ("you don't have VM.PowerMgmt on /vms/10101") and the
-// job won't try them. The job plans again with the same check, so the
-// preview and the run agree; if a privilege is removed in between, Proxmox
-// refuses the step (403) and the item fails as not permitted.
+// Battleship enforces nothing: Proxmox checks every call with the caller's
+// credential. A plan only marks in advance the VMs the user lacks a
+// privilege for, so the preview shows them blocked and the job skips them.
+// If a privilege is revoked after planning, Proxmox refuses with 403 and the
+// item fails as not permitted.
 
 // Access is what the planning user may do: their effective privileges at
 // an ACL path, as Proxmox resolves them (inheritance, groups, pools).
@@ -34,12 +32,10 @@ type PermissionReader interface {
 	PermissionsAt(ctx context.Context, path string) (map[string]bool, error)
 }
 
-// UserAccess is an Access read from Proxmox: one /access/permissions for
-// every path it lists (fixed top-level paths, paths with ACLs, and pool
-// members), and /access/permissions?path= for any other, once each. A path
-// that isn't listed is never guessed from its parents: in Proxmox a deeper
-// ACL replaces the inherited one, so only Proxmox can say. Safe for
-// concurrent use; it caches what it read for its whole life.
+// UserAccess is an Access read from Proxmox: one /access/permissions for all
+// listed paths, and /access/permissions?path= once for any other. Unlisted
+// paths are never guessed from parents, since a deeper ACL replaces the
+// inherited one. Safe for concurrent use; caches for its whole life.
 type UserAccess struct {
 	r       PermissionReader
 	mu      sync.Mutex
@@ -62,11 +58,8 @@ func (a *UserAccess) list(ctx context.Context) (proxmox.Permissions, error) {
 	p, err := a.r.Permissions(ctx)
 	if err != nil {
 		err = fmt.Errorf("reading your Proxmox privileges: %w", err)
-		// A failed answer is remembered for the access's life (a web
-		// session keeps one for a minute): pages then show no actions
-		// without asking again for every cell. A cancelled or timed-out
-		// read is the caller's, not Proxmox's answer, so the next caller
-		// asks again.
+		// Failures are cached for the access's life so pages don't re-ask per
+		// cell; a cancelled or timed-out read is the caller's, so it isn't.
 		if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			a.listErr = err
 		}
@@ -105,9 +98,8 @@ func (a *UserAccess) Privileges(ctx context.Context, path string) (map[string]bo
 	return p, nil
 }
 
-// Anywhere reports whether any listed path grants priv: whether the user
-// can do that kind of thing at all, which decides whether a page offers
-// it.
+// Anywhere reports whether any listed path grants priv, which decides
+// whether a page offers that kind of action.
 func (a *UserAccess) Anywhere(ctx context.Context, priv string) (bool, error) {
 	listed, err := a.list(ctx)
 	if err != nil {
@@ -148,8 +140,8 @@ func VMPath(vmid int) string      { return "/vms/" + strconv.Itoa(vmid) }
 func PoolPath(pool string) string { return "/pool/" + pool }
 
 // offerPrivileges are, per operation, the privileges any of which makes it
-// worth offering: what its steps need on the VMs it acts on (itemNeeds), or,
-// for deploy and teardown, anywhere. Previews check exactly.
+// worth offering: what its steps need (itemNeeds), or for deploy and
+// teardown, anywhere. Previews check exactly.
 var offerPrivileges = map[Kind][]string{
 	KindPower:    {"VM.PowerMgmt"},
 	KindReset:    {"VM.Snapshot", "VM.Snapshot.Rollback"},
@@ -161,9 +153,9 @@ var offerPrivileges = map[Kind][]string{
 // OfferPrivileges is offerPrivileges[k].
 func OfferPrivileges(k Kind) []string { return slices.Clone(offerPrivileges[k]) }
 
-// HoldsOffered reports whether acc grants any of k's offerPrivileges on the
-// VM vmid, or on pool, which a VM a deploy is still to create will be in
-// (see on). A path whose privileges can't be read grants nothing.
+// HoldsOffered reports whether acc grants any of k's offerPrivileges on VM
+// vmid or on pool (for a VM a deploy will create; see on). Unreadable paths
+// grant nothing.
 func HoldsOffered(ctx context.Context, acc Access, k Kind, vmid int, pool string) bool {
 	for _, path := range []string{VMPath(vmid), PoolPath(pool)} {
 		held, err := acc.Privileges(ctx, path)
@@ -174,9 +166,8 @@ func HoldsOffered(ctx context.Context, acc Access, k Kind, vmid int, pool string
 	return false
 }
 
-// on is a need for priv on a VM: at its own path if it exists; for a VM a
-// clone will create in pool, the pool's privileges, which it gets as a
-// member, or what its future path inherits.
+// on is a need for priv on a VM: its own path if it exists; for a VM a clone
+// will create in pool, the pool's privileges or what its path inherits.
 func on(vmid int, pool, priv string) need {
 	if pool == "" {
 		return one(VMPath(vmid), priv)
@@ -235,9 +226,8 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config) []need {
 			if tpl != nil && tpl.CloudInit {
 				ns = append(ns, on(it.VMID, pool, "VM.Config.Cloudinit")) // regenerating the drive
 			}
-			// Every NIC's bridge is an SDN vnet the user must be allowed
-			// to use. Bridges outside the zone (the template's) aren't
-			// checked here; Proxmox does.
+			// Each NIC's bridge is an SDN vnet needing SDN.Use; bridges outside the
+			// zone are left to Proxmox.
 			bridges := []string{cfg.Network.IntBridge}
 			if tpl != nil && tpl.Interfaces >= 2 {
 				bridges = []string{cfg.Network.ExtBridge, cfg.Network.IntBridge}
@@ -247,9 +237,8 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config) []need {
 				joins = append(joins, Expand(b, it.Team, ""))
 				ns = append(ns, one("/sdn/zones/"+cfg.Proxmox.SDNZone+"/"+Expand(b, it.Team, ""), "SDN.Use"))
 			}
-			// A new clone's NICs start on its template's bridges, which
-			// the rewiring leaves: SDN.Use is checked on those too, when
-			// they are team vnets of the zone.
+			// A new clone's NICs start on its template's bridges, so SDN.Use is checked
+			// on those too when they are team vnets.
 			if pool != "" && tpl != nil {
 				for _, b := range tpl.Bridges {
 					if isTeamBridge(cfg.Network, b) && !slices.Contains(joins, b) {
@@ -276,9 +265,8 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config) []need {
 	return ns
 }
 
-// isTeamBridge reports whether bridge is some team's ext or int bridge
-// (network.ext_bridge or int_bridge for a two-digit team): a vnet of
-// proxmox.sdn_zone.
+// isTeamBridge reports whether bridge is some team's ext or int bridge (a
+// vnet of proxmox.sdn_zone).
 func isTeamBridge(net config.Network, bridge string) bool {
 	return patternRE(net.ExtBridge).MatchString(bridge) || patternRE(net.IntBridge).MatchString(bridge)
 }
@@ -306,9 +294,9 @@ func missing(ctx context.Context, acc Access, ns []need) (string, error) {
 	return strings.Join(out, "; "), nil
 }
 
-// BlockUnpermitted blocks each template and item of plan the user (acc)
-// lacks a privilege for, saying which, and the items that clone from a
-// template it blocked. Things already blocked keep their reason.
+// BlockUnpermitted blocks each template and item the user lacks a privilege
+// for, saying which, plus items cloning from a blocked template. Already
+// blocked things keep their reason.
 func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Config) error {
 	templates := map[string]*TemplateSpec{}
 	unpermitted := map[string]bool{} // templates blocked here
@@ -346,10 +334,9 @@ func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Co
 	return nil
 }
 
-// Approx is the privileges at path as far as the listed paths tell, with no
-// further call: the path's own entry, else what the nearest listed parent
-// propagates. A page uses it to decide which actions to offer; plans use
-// Privileges, which asks Proxmox when a path isn't listed.
+// Approx is the privileges at path from listed paths alone: its own entry,
+// else what the nearest listed parent propagates. Pages use it to decide
+// what to offer; plans use Privileges, which asks Proxmox.
 func (a *UserAccess) Approx(ctx context.Context, path string) (map[string]bool, error) {
 	listed, err := a.list(ctx)
 	if err != nil {

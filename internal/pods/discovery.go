@@ -12,7 +12,7 @@ import (
 )
 
 // WildcardRegexp turns "*.kilo.alpha" into a case-insensitive, fully
-// anchored regexp. (The Python tool only anchored the start.)
+// anchored regexp.
 func WildcardRegexp(pattern string) *regexp.Regexp {
 	quoted := strings.ReplaceAll(regexp.QuoteMeta(pattern), `\*`, `.*`)
 	return regexp.MustCompile("(?i)^" + quoted + "$")
@@ -30,11 +30,10 @@ func hasTag(tags, tag string) bool {
 	return false
 }
 
-// FindMasters returns non-template VMs matching pattern that carry tag, sorted
-// by name, plus pattern matches that lack the tag (to explain empty results).
-// Names that parse as team VMs are skipped, since team clones inherit the
-// master tag; with a custom naming.vm_name, make sure master names can't
-// match it.
+// FindMasters returns non-template VMs matching pattern that carry tag,
+// sorted by name, plus untagged matches (to explain empty results). Team VM
+// names are skipped since clones inherit the tag; a custom naming.vm_name
+// must not match master names.
 func FindMasters(vms []proxmox.VM, n Naming, pattern, tag string) (masters, untagged []proxmox.VM) {
 	re := WildcardRegexp(pattern)
 	for _, vm := range vms {
@@ -52,10 +51,8 @@ func FindMasters(vms []proxmox.VM, n Naming, pattern, tag string) (masters, unta
 	return masters, untagged
 }
 
-// FindTeamVMs returns non-template team VMs for the given teams. hosts, if
-// non-empty, keeps only VMs whose host contains one of the filters
-// (case-insensitive substring match). Blank filters are ignored; if all
-// filters are blank, no VMs match. Matching the Python tool's --hostname-filter.
+// FindTeamVMs returns non-template team VMs for teams, filtered by hosts
+// (see MatchesHost; all-blank filters match nothing).
 func FindTeamVMs(vms []proxmox.VM, n Naming, teams, hosts []string) []proxmox.VM {
 	want := map[string]bool{}
 	for _, t := range teams {
@@ -83,9 +80,8 @@ func (n Naming) teamVM(vm proxmox.VM) (team, host string, ok bool) {
 	return team, host, true
 }
 
-// MatchesHost is the host filter of every operation: with no filters every
-// host matches; otherwise a host matches if it contains one of the non-blank
-// filters, ignoring case.
+// MatchesHost is every operation's host filter: no filters match all;
+// otherwise a host matches if it contains a non-blank filter, ignoring case.
 func MatchesHost(host string, filters []string) bool {
 	if len(filters) == 0 {
 		return true
@@ -99,9 +95,8 @@ func MatchesHost(host string, filters []string) bool {
 	return false
 }
 
-// AssignNodes spreads teams across nodes: each team goes to the node with the
-// fewest VMs, which then counts 10 more. Ties go to the alphabetically first
-// node (Python used API order). No nodes gives an empty map.
+// AssignNodes gives each team the node with the fewest VMs, which then
+// counts 10 more. Ties go to the alphabetically first node.
 func AssignNodes(teams, nodes []string, vms []proxmox.VM) map[string]string {
 	if len(nodes) == 0 {
 		return map[string]string{}
@@ -131,9 +126,8 @@ func AssignNodes(teams, nodes []string, vms []proxmox.VM) map[string]string {
 	return out
 }
 
-// MasterSet is a template set: the masters whose names share the part after
-// the host, e.g. dc.kilo.alpha and web.kilo.alpha form set "kilo.alpha",
-// which a deploy builds from with the pattern "*.kilo.alpha".
+// MasterSet is the masters sharing the part after the host, e.g.
+// dc.kilo.alpha and web.kilo.alpha form "kilo.alpha" (pattern "*.kilo.alpha").
 type MasterSet struct {
 	Name    string   // e.g. "kilo.alpha"
 	Hosts   []string // sorted, each once
@@ -141,10 +135,9 @@ type MasterSet struct {
 	Running int      // of them, those running; a template build stops them
 }
 
-// MasterSets groups the masters tagged tag (as FindMasters finds them) into
-// template sets, sorted by name. Masters whose names have no part after the
-// host, like "y" or "tern.", are in no set: others has their names, sorted
-// and each once.
+// MasterSets groups masters tagged tag into sets, sorted by name. Masters
+// with nothing after the host (like "y" or "tern.") go in others, sorted
+// and unique.
 func MasterSets(vms []proxmox.VM, n Naming, tag string) (sets []MasterSet, others []string) {
 	masters, _ := FindMasters(vms, n, "*", tag)
 	index := map[string]int{}
@@ -191,10 +184,9 @@ func AllTeamVMs(vms []proxmox.VM, n Naming) []proxmox.VM {
 	return out
 }
 
-// TeamsWithVMs is the teams that have team VMs, as FindTeamVMs finds them
-// (templates aside), sorted and each once. These are every team that
-// exists as far as the caller can see VMs: "all teams" means them, so
-// acting on them leaves none of the caller's team VMs behind.
+// TeamsWithVMs is the teams with non-template team VMs, sorted and unique.
+// "All teams" means these, so acting on them leaves none of the caller's
+// team VMs behind.
 func TeamsWithVMs(vms []proxmox.VM, n Naming) []string {
 	seen := map[string]bool{}
 	for _, vm := range vms {

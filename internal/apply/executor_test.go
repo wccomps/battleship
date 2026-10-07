@@ -46,9 +46,8 @@ func testExecutor(f *podstest.Fake, rec *recorder) *Executor {
 	}
 }
 
-// testSleep is a Sleep that returns at once, except that a stopped
-// template build's wait for its copy (copyStopWait) takes stopWait, or
-// outlasts the wait if 0.
+// testSleep returns at once, except copyStopWait waits take stopWait (or
+// outlast the wait if 0).
 func testSleep(stopWait time.Duration) func(context.Context, time.Duration) error {
 	return func(ctx context.Context, d time.Duration) error {
 		if d != copyStopWait {
@@ -152,8 +151,8 @@ func TestTransientErrorsAreRetried(t *testing.T) {
 
 func TestPermanentFailureIsIsolatedAndRetriedOnce(t *testing.T) {
 	f := newCluster()
-	// A permanent error other than a missing privilege, which is never
-	// retried (TestForbiddenItemIsNotRetried).
+	// A permanent error other than a missing privilege (for that, see
+	// TestForbiddenItemIsNotRetried).
 	denied := &proxmox.APIError{Method: "PUT", Path: "/x", Status: 400, Message: "Parameter verification failed."}
 	f.FailOn("setconfig:10121", denied, denied)
 	rec := &recorder{}
@@ -232,9 +231,8 @@ func TestReset(t *testing.T) {
 	}
 }
 
-// cancelTeardownDuringShutdown tears down team01-teak and stops the run
-// with cause while its shutdown task is under way. finish says how the
-// task ends, given the step's context; it may block on it.
+// cancelTeardownDuringShutdown tears down team01-teak and stops the run with
+// cause mid-shutdown; finish says how the task ends and may block.
 func cancelTeardownDuringShutdown(t *testing.T, grace time.Duration, cause error, finish func(ctx context.Context) error, halt ...chan struct{}) (*podstest.Fake, *recorder, Result) {
 	t.Helper()
 	f := newCluster()
@@ -261,8 +259,8 @@ func cancelTeardownDuringShutdown(t *testing.T, grace time.Duration, cause error
 	return f, rec, ex.Run(ctx, plan)
 }
 
-// A step under way when the job is cancelled finishes, and the job records
-// it; the next step doesn't start, and nothing reads as failed.
+// A step under way at cancel finishes and is recorded; the next doesn't
+// start and nothing reads as failed.
 func TestCancelLetsTheStepUnderWayFinish(t *testing.T) {
 	f, rec, res := cancelTeardownDuringShutdown(t, time.Hour, ErrCancelRequested, func(ctx context.Context) error {
 		select {
@@ -297,8 +295,8 @@ func TestCancelLetsTheStepUnderWayFinish(t *testing.T) {
 	}
 }
 
-// A step still under way when the grace runs out is cut off, and says its
-// task may still be running.
+// A step still running when the grace ends is cut off and says its task
+// may still be running.
 func TestCancelCutsAStepOffAfterTheGrace(t *testing.T) {
 	_, rec, res := cancelTeardownDuringShutdown(t, 20*time.Millisecond, ErrCancelRequested, func(ctx context.Context) error {
 		<-ctx.Done()
@@ -316,9 +314,8 @@ func TestCancelCutsAStepOffAfterTheGrace(t *testing.T) {
 	}
 }
 
-// After a cancel, no step sends Proxmox anything new: a VM waiting for a
-// delete slot isn't deleted once the slot frees, while the delete already
-// under way finishes and is recorded.
+// After a cancel nothing new is sent: a VM waiting for a delete slot isn't
+// deleted, while the delete under way finishes.
 func TestCancelSendsNothingNew(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "stopped"}, nil)
@@ -334,8 +331,8 @@ func TestCancelSendsNothingNew(t *testing.T) {
 		if !strings.Contains(upid, ":qmdestroy:") {
 			return nil
 		}
-		// The first delete holds the only slot while the job is cancelled,
-		// and ends well within the grace.
+		// The first delete holds the only slot across the cancel and ends within
+		// the grace.
 		once.Do(func() {
 			cancel(ErrCancelRequested)
 			time.Sleep(50 * time.Millisecond)
@@ -368,9 +365,8 @@ func TestCancelSendsNothingNew(t *testing.T) {
 	}
 }
 
-// A reset cut off while a task is under way says how it left the VM's
-// config: changed part way during the rollback, converged once only the
-// start was left.
+// A reset cut off mid-task says how it left the config: changed during the
+// rollback, converged when only the start was left.
 func TestCancelSaysHowItLeftTheConfig(t *testing.T) {
 	for _, tc := range []struct {
 		task string
@@ -412,8 +408,7 @@ func TestCancelSaysHowItLeftTheConfig(t *testing.T) {
 	}
 }
 
-// A shutdown during a cancel's grace (Halt) ends it at once, so a
-// cancelled run still returns within StopBudget.
+// Halt ends a cancel's grace at once, so the run returns within StopBudget.
 func TestHaltEndsTheGrace(t *testing.T) {
 	halt := make(chan struct{})
 	start := time.Now()
@@ -430,9 +425,8 @@ func TestHaltEndsTheGrace(t *testing.T) {
 	}
 }
 
-// A retry round cancelled before it sends anything leaves the config as an
-// earlier round converged it: every config step finished in round one,
-// which failed only at start.
+// A retry round cancelled before sending anything reports the config
+// converged: round one finished every config step and failed only at start.
 func TestCancelSeesAnEarlierRoundConverged(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
@@ -630,8 +624,8 @@ func TestSnapshotOfRunningVMIsRefused(t *testing.T) {
 	}
 }
 
-// cancelDuringMasterClone makes the master clone's first wait cancel the run
-// and fail, and answers later waits for that task with detachedWait.
+// cancelDuringMasterClone cancels the run and fails on the master clone's
+// first wait, answering later waits with detachedWait.
 func cancelDuringMasterClone(f *podstest.Fake, cancel func(), detachedWait func(ctx context.Context) error) {
 	first := true
 	f.WaitHook = func(ctx context.Context, upid string) error {
@@ -837,7 +831,7 @@ func TestMasterNotRestartedWhileCloneTargetIsLocked(t *testing.T) {
 	f.VMs[121].Status = "running"
 	plan := deployTeak(t, f, "01")
 	// The clone POST times out after Proxmox accepted it, and the target stays
-	// locked by the in-flight clone through every pre-check retry.
+	// locked through every pre-check retry.
 	f.CloneThenFail = map[int]error{9021: &proxmox.APIError{Status: 500, Message: "Connection timed out"}}
 	f.LockConfig = map[int]int{9021: 7}
 	f.PowerHook = func(vmid int, action string) {
@@ -1190,9 +1184,8 @@ func TestSuccessfulDeployCleansUpNothing(t *testing.T) {
 	}
 }
 
-// appearAfterListing makes a foreign team01-teak show up at 10121 right after
-// the executor lists the cluster, so it is missing from the executor's view
-// when the clone step runs.
+// appearAfterListing adds a foreign team01-teak at 10121 right after the
+// executor lists the cluster, so the clone step doesn't know it.
 func appearAfterListing(f *podstest.Fake, node string, cfg map[string]string, status string) {
 	armed := true
 	f.OnRecord = func(key string) {
@@ -1250,8 +1243,8 @@ func TestPrecheckFindingSameNameVMNeverClaimsIt(t *testing.T) {
 
 func TestCleanupVerifiesByConfigWhenListingFails(t *testing.T) {
 	f, plan := newlyBuiltTeamVMFails(t)
-	// The POST fails after the VM was created, and the only listing this run
-	// took was before that, so a stale listing does not know the VM.
+	// The POST fails after creating the VM, and the run's only listing predates
+	// it.
 	f.CloneThenFail = map[int]error{10121: errors.New("clone failed")}
 	f.OnRecord = func(key string) {
 		if key == "clone:10121" {
@@ -1421,8 +1414,8 @@ func notExist(vmid int) error {
 
 func TestLateFirstPostKeepsTeamVMOwned(t *testing.T) {
 	f, plan := newlyBuiltTeamVMFails(t)
-	// The first POST lands but the client times out; the retry's probe then
-	// sees "does not exist" once, and its POST is told the VM already exists.
+	// The first POST lands but the client times out; the retry's probe sees
+	// "does not exist" once, then its POST is told the VM exists.
 	f.CloneThenFail = map[int]error{10121: &proxmox.APIError{Status: 500, Message: "Connection timed out"}}
 	armed := true
 	f.OnRecord = func(key string) {
@@ -1595,8 +1588,7 @@ func TestAlreadyConvertedTemplateIsReported(t *testing.T) {
 	}
 }
 
-// A stop during the pause before a retry round leaves the failed item
-// without its retry, so the run reports its rounds as skipped.
+// A stop during the pause before a retry round reports the rounds skipped.
 func TestStopDuringRetryPauseSkipsRounds(t *testing.T) {
 	f := newCluster()
 	denied := &proxmox.APIError{Status: 400, Message: "Parameter verification failed."}
@@ -1653,8 +1645,7 @@ func TestRoundsNotSkippedWhenRunCompletes(t *testing.T) {
 	}
 }
 
-// A VM that is gone when cleanup reads it is reported gone at once, not
-// after a round of retries: "does not exist" there means gone.
+// A VM gone when cleanup reads it is reported gone without retries.
 func TestCleanupDoesNotRetryGoneVM(t *testing.T) {
 	f, plan := newlyBuiltTeamVMFails(t)
 	denied := &proxmox.APIError{Status: 400, Message: "Parameter verification failed."}
@@ -1684,9 +1675,8 @@ func TestCleanupDoesNotRetryGoneVM(t *testing.T) {
 	}
 }
 
-// A stopped job doesn't wait out a template copy that keeps its master down:
-// it stops the copy task, restarts the master once the task has ended, and
-// removes the unfinished copy rather than converting it.
+// A stopped job stops a copy that keeps its master down, restarts the master
+// once the task ends, and removes the unfinished copy.
 func TestCancelledBuildStopsItsCopy(t *testing.T) {
 	f := newCluster()
 	f.VMs[121].Status = "running"
@@ -1725,8 +1715,8 @@ func TestCancelledBuildStopsItsCopy(t *testing.T) {
 	}
 }
 
-// A copy that can't be stopped holds a stopped run up for copyStopWait at
-// most; the master is then left stopped, with an event saying so.
+// An unstoppable copy holds a stopped run up for at most copyStopWait; the
+// master is then left stopped, with an event saying so.
 func TestCancelledBuildWaitsForItsCopyOnlySoLong(t *testing.T) {
 	f := newCluster()
 	f.VMs[121].Status = "running"
@@ -1760,8 +1750,8 @@ func TestCancelledBuildWaitsForItsCopyOnlySoLong(t *testing.T) {
 	}
 }
 
-// A copy from a master that was already stopped is stopped too when the job
-// is: nothing waits for it, and it is removed rather than converted.
+// A copy from an already-stopped master is also stopped with the job, not
+// waited for, and removed.
 func TestCancelledBuildStopsItsCopyFromStoppedMaster(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
@@ -1780,11 +1770,9 @@ func TestCancelledBuildStopsItsCopyFromStoppedMaster(t *testing.T) {
 	}
 }
 
-// A cancel that lands while a retry round is under way keeps the items
-// still waiting for a worker from running. They read interrupted, not
-// failed with an earlier round's error, as their config was left (here
-// converged: every config step finished in round one, which failed only
-// at start), and the rounds read as skipped.
+// A cancel mid retry round keeps waiting items from running. They read
+// interrupted (here converged, as round one failed only at start), not
+// failed with an earlier error, and the rounds read as skipped.
 func TestCancelDuringARetryRoundInterruptsTheItemsNotRun(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01", "02")
@@ -1828,9 +1816,8 @@ func TestCancelDuringARetryRoundInterruptsTheItemsNotRun(t *testing.T) {
 	}
 }
 
-// A rebuild deletes the old template once: a retry round after the new
-// copy failed to convert resumes the copy rather than deleting it as the
-// old template.
+// A rebuild deletes the old template once: a retry after the new copy failed
+// to convert resumes the copy instead of deleting it.
 func TestRebuildRetryRoundResumesTheNewCopy(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)

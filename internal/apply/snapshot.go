@@ -9,10 +9,9 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// takeSnapshot takes the item's snapshot. It never replaces one: a VM
-// that has a snapshot of the name fails, unless this run asked for it
-// before (a request whose answer was lost, or an earlier round's; see
-// createSnapshot). The snapshot is then checked: present and finished.
+// takeSnapshot takes the item's snapshot, never replacing one: an existing
+// snapshot of the name fails unless this run asked for it (see
+// createSnapshot). The result is checked to be present and finished.
 func (e *Executor) takeSnapshot(ctx context.Context, it *pods.Item) (bool, error) {
 	find := func() (snap proxmox.Snapshot, found bool, err error) {
 		var snaps []proxmox.Snapshot
@@ -52,10 +51,9 @@ func (e *Executor) takeSnapshot(ctx context.Context, it *pods.Item) (bool, error
 	return true, nil
 }
 
-// createSnapshot takes a snapshot through task. Each request after this
-// run's first for the name checks first whether an earlier one took it, so
-// a request whose answer was lost isn't sent again (and refused as "already
-// used").
+// createSnapshot takes a snapshot through task. After this run's first
+// request for the name, each one first checks whether an earlier request
+// took it, so a lost answer doesn't cause an "already used" resend.
 func (e *Executor) createSnapshot(ctx context.Context, node string, vmid int, req proxmox.SnapshotRequest) error {
 	return e.task(ctx, func() (string, error) {
 		if e.askedFor(vmid, req.Name) {

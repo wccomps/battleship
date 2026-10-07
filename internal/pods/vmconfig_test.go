@@ -182,7 +182,7 @@ func TestHasCloudInitNeedsCDROM(t *testing.T) {
 }
 
 func TestDiskLimitChangesUnequalValues(t *testing.T) {
-	// Verify that unequal rd/wr values are set correctly and in alphabetical order.
+	// Unequal rd/wr values are set, in alphabetical order.
 	config := map[string]string{
 		"scsi0": "competitions:vm-1-disk-0.qcow2,size=8G",
 	}
@@ -226,7 +226,7 @@ func TestUnconvertedDisk(t *testing.T) {
 		{map[string]string{"template": "1", "scsi0": "competitions:9008/base-9008-disk-0.qcow2,size=32G",
 			"ide2": "competitions:vm-9008-cloudinit,media=cdrom"}, "", ""},
 		{map[string]string{"template": "1", "scsi0": "competitions:base-9005-disk-0.qcow2/9010/base-9010-disk-0.qcow2"}, "", ""},
-		// The production half-conversion: template: 1 but scsi0 never renamed.
+		// Half-conversion: template: 1 but scsi0 never renamed.
 		{map[string]string{"template": "1", "scsi0": "competitions:9008/vm-9008-disk-1.qcow2,size=32G"},
 			"scsi0", "competitions:9008/vm-9008-disk-1.qcow2"},
 		{map[string]string{"template": "1", "scsi0": "competitions:9008/base-9008-disk-0.qcow2",

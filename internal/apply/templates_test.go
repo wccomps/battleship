@@ -15,9 +15,8 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// sevenMasters is a cluster whose seven running masters, h1..h7, are all on
-// spruce, like the production deploy that built its templates one by one.
-// Master 10i builds template 900i, which team 01 clones to 1010i.
+// sevenMasters has seven running masters, h1..h7, all on spruce. Master
+// 10i builds template 900i, which team 01 clones to 1010i.
 func sevenMasters() *podstest.Fake {
 	f := podstest.New("cedar", "birch", "spruce")
 	for i := 1; i <= 7; i++ {
@@ -49,9 +48,8 @@ type gateWaiter struct {
 	release chan error
 }
 
-// cloneGate holds clone task waits until the test releases them. A UPID is
-// held once: a later wait for the same task (the master restart confirming a
-// cut-off clone finished) passes at once.
+// cloneGate holds clone task waits until the test releases them. Each UPID
+// is held once; a later wait for it passes at once.
 type cloneGate struct {
 	t        *testing.T
 	kind     string // the task type held, e.g. qmclone
@@ -63,8 +61,8 @@ type cloneGate struct {
 	arrived  map[string]bool
 	released map[string]bool
 	capacity int // the most waits that may be held at once
-	// inflight counts held waits from the moment they start, including any
-	// not yet taken by the test; maxInflight is its peak.
+	// inflight counts held waits, including ones not yet taken; maxInflight is
+	// its peak.
 	inflight, maxInflight int
 }
 
@@ -159,9 +157,8 @@ func (g *cloneGate) releaseUPID(upid string, err error) {
 	g.t.Fatalf("%s is not held", upid)
 }
 
-// drive releases held clones, oldest first, whenever capacity are held or no
-// clone that has not started yet can start (startable reports how many can),
-// until total clones have finished.
+// drive releases held clones, oldest first, whenever capacity are held or
+// nothing else can start (startable), until total have finished.
 func (g *cloneGate) drive(total int, startable func() int) {
 	g.t.Helper()
 	for done := 0; done < total; {
@@ -177,8 +174,8 @@ func (g *cloneGate) drive(total int, startable func() int) {
 func masterClone(i int) string { return podstest.UPID("spruce", "qmclone", 100+i) }
 func itemClone(i int) string   { return podstest.UPID("spruce", "qmclone", 9000+i) }
 
-// runAsync runs plan in the background. Cleanup cancels it and waits, so a
-// failed test does not leave the run blocked in the gate.
+// runAsync runs plan in the background; cleanup cancels and waits so a
+// failed test doesn't leave it blocked.
 func runAsync(t *testing.T, ex *Executor, plan *pods.Plan) (context.CancelFunc, <-chan Result) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan Result, 1)
@@ -206,8 +203,8 @@ func waitResult(t *testing.T, done <-chan Result) Result {
 	}
 }
 
-// checkMasters asserts that every master that was stopped was started again
-// after its clone task, and that all are running.
+// checkMasters asserts every stopped master was restarted after its clone
+// and all are running.
 func checkMasters(t *testing.T, f *podstest.Fake) {
 	t.Helper()
 	f.Mu.Lock()
@@ -320,10 +317,9 @@ func TestItemsStartWhenTheirOwnTemplateIsReady(t *testing.T) {
 	}
 }
 
-// With several templates in flight, one copy task fails and the run is
-// cancelled while others are mid-clone: every stopped master is restarted,
-// finished copies are completed, this run's leftovers are removed, and
-// nothing else is touched.
+// One copy fails and the run is cancelled mid-clone: stopped masters are
+// restarted, finished copies completed, this run's leftovers removed, and
+// nothing else touched.
 func TestConcurrentTemplatesFailAndCancel(t *testing.T) {
 	f := sevenMasters()
 	// team01-h6 already exists, so h6's template is not needed.
@@ -342,9 +338,8 @@ func TestConcurrentTemplatesFailAndCancel(t *testing.T) {
 	ok, bad := cloneSource(ws[0].upid)-100, cloneSource(ws[1].upid)-100
 	g.releaseUPID(ws[1].upid, &proxmox.TaskError{UPID: ws[1].upid, ExitStatus: "clone failed: no space left"})
 	g.releaseUPID(ws[0].upid, nil)
-	// Six templates are needed (not h6's); with two done, the other four
-	// build at once. Wait for all of them and for ok's team VM, so nothing is
-	// left starting when the cancel comes.
+	// Six templates are needed; with two done the other four build at once.
+	// Wait for all of them and ok's team VM before cancelling.
 	cut := map[int]bool{}
 	for _, w := range ws[2:] {
 		cut[cloneSource(w.upid)-100] = true
@@ -398,9 +393,8 @@ func TestConcurrentTemplatesFailAndCancel(t *testing.T) {
 	}
 }
 
-// A team VM that already exists never uses its template: a failed build of
-// that template (needed only by teams that still need cloning) must not
-// fail it.
+// An existing team VM never uses its template, so a failed build of it
+// must not fail the VM.
 func TestExistingTeamVMIgnoresFailedTemplateBuild(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{

@@ -51,8 +51,8 @@ func TestResetDefaultsToEachVMsBaseline(t *testing.T) {
 	}
 }
 
-// A converge deploy doesn't take snapshot_name on a VM that already has an
-// old-tool baseline: that would capture a played-in VM as the baseline.
+// A converge deploy doesn't take snapshot_name on a VM with a pattern
+// baseline: that would capture a played-in VM.
 func TestDeployKeepsPatternBaseline(t *testing.T) {
 	f := newCluster()
 	testExecutor(f, &recorder{}).Run(context.Background(), deployTeak(t, f, "01"))

@@ -8,9 +8,8 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// Item 17: when Proxmox won't list the user's privileges, the access says
-// so once and is taken as holding nothing, rather than asking again for
-// every cell of every grid render.
+// When Proxmox won't list the user's privileges, the access says so once
+// and holds nothing, rather than re-asking on every grid cell.
 func TestAccessRemembersAFailedListing(t *testing.T) {
 	f := &fakePerms{err: &proxmox.APIError{Status: 500, Message: "down"}}
 	acc := NewAccess(f)
@@ -30,11 +29,9 @@ func TestAccessRemembersAFailedListing(t *testing.T) {
 	}
 }
 
-// Item 21: rewiring a NIC needs SDN.Use on the vnet it leaves as well as
-// the one it joins. A new clone's NICs start on its template's bridges;
-// when one is a team vnet of the configured zone, the preview checks it.
-// Other bridges (and an existing VM's, unknown at plan time) are left to
-// Proxmox.
+// Rewiring a NIC needs SDN.Use on the vnet it leaves as well as the one it
+// joins. A new clone's template bridges are checked when they are team
+// vnets of the zone; others (and an existing VM's) are left to Proxmox.
 func TestNetworkNeedsSDNUseOnTheBridgeLeft(t *testing.T) {
 	cfg := config.Default()
 	tpl := TemplateSpec{Name: "teak.x.tpl", VMID: 9021, Exists: true, Interfaces: 1, Bridges: []string{"int07"}}

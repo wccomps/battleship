@@ -10,12 +10,10 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// BaselineSnapshot is the snapshot a reset that names none rolls a VM back
-// to: deploy.snapshot_name if the VM has it, else the newest snapshot
-// matching one of deploy.baseline_patterns. Newest is the latest snaptime,
-// then the greatest name, so timestamped names such as
-// fresh_clone_20261002034615 sort right even without snaptimes. ok is false
-// when the VM has no baseline.
+// BaselineSnapshot is what a reset naming no snapshot rolls back to:
+// deploy.snapshot_name if present, else the newest match of
+// deploy.baseline_patterns (latest snaptime, then greatest name, so
+// timestamped names sort right without snaptimes). ok is false if none.
 func BaselineSnapshot(d config.Deploy, snaps []proxmox.Snapshot) (name string, ok bool) {
 	var best *proxmox.Snapshot
 	for i := range snaps {

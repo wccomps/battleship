@@ -43,14 +43,13 @@ const (
 	StepDelete     Step = "delete"
 	StepRollback   Step = "rollback"
 	StepPower      Step = "power"
-	// StepFreeDisks frees the disks a gone VM left on deploy.storage
-	// (Planner.orphanedDisks).
+	// StepFreeDisks frees disks a gone VM left on deploy.storage
+	// (see Planner.orphanedDisks).
 	StepFreeDisks Step = "free-disks"
 )
 
-// TypedConfirm reports whether confirming an operation of kind k needs the
-// team range typed rather than a plain yes, in the CLI and the web alike:
-// only a teardown, which deletes VMs.
+// TypedConfirm reports whether kind k needs the team range typed to
+// confirm (CLI and web): only a teardown, which deletes VMs.
 func (k Kind) TypedConfirm() bool { return k == KindTeardown }
 
 // ChangesConfig reports whether the step can change the VM's config (its
@@ -77,14 +76,12 @@ type TemplateSpec struct {
 	// WillStopMaster: building the template stops the master, which is
 	// running, until the clone finishes.
 	WillStopMaster bool `json:"will_stop_master"`
-	// CPU is the master's cpu setting (a custom-<name> model needs
-	// Mapping.Use to clone), and CloudInit whether it has a cloud-init
-	// drive (configuring its clones regenerates it). They only decide the
-	// privileges a deploy needs.
+	// CPU (a custom-<name> model needs Mapping.Use to clone) and CloudInit
+	// (clones regenerate the drive) only decide the privileges a deploy needs.
 	CPU       string `json:"cpu,omitempty"`
 	CloudInit bool   `json:"cloud_init,omitempty"`
-	// Bridges are the bridges of the template's net0 and net1, which its
-	// clones' NICs start on before the network step rewires them.
+	// Bridges are the template's net0 and net1 bridges, which clones start on
+	// until the network step rewires them.
 	Bridges []string `json:"bridges,omitempty"`
 }
 
@@ -113,25 +110,22 @@ type Item struct {
 }
 
 // Plan is what an operation will do: the templates a deploy needs and one
-// item per team VM. It is stored with each job, so its JSON keys are part of
-// the stored format.
+// item per team VM. It is stored with each job, so its JSON keys are a
+// stored format.
 type Plan struct {
 	Kind      Kind           `json:"kind"`
 	Teams     []string       `json:"teams"`
 	Templates []TemplateSpec `json:"templates"`
 	Items     []Item         `json:"items"`
-	// Config is ConfigHash of the config the plan was made under. Plans
-	// stored before it existed lack it, and their jobs are stale.
+	// Config is the ConfigHash the plan was made under; plans stored without
+	// it are stale.
 	Config string `json:"config,omitempty"`
 }
 
-// ConfigHash identifies the settings that decide what running a plan of
-// kind does to VMs beyond what the plan says: a deploy's NICs, cloud-init,
-// disk limits, baseline snapshot, clone mode, storage and pool, and a
-// teardown's shutdown timeout. A job runs under the config of the process
-// that claims it, so a plan made under other settings must not pass for
-// it. It is "" for kinds no setting changes. confighash_test.go classifies
-// every field of the naming, network, deploy and teardown sections.
+// ConfigHash identifies the settings that change what a plan of kind does
+// beyond what the plan says. A job runs under the config of the process
+// that claims it, so a plan made under other settings must not pass. It is
+// "" for kinds no setting affects (see confighash_test.go).
 func ConfigHash(kind Kind, c config.Config) string {
 	var v any
 	switch kind {
@@ -392,8 +386,8 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snap
 		Node:     assigned,
 	}
 	if tpl.Blocked != "" {
-		// The template's problem comes first: its VMID is meaningless, so
-		// the checks below would give wrong advice about healthy VMs.
+		// The template's problem comes first: its VMID is meaningless, so the
+		// checks below would give wrong advice.
 		it.Node = ""
 		if named := byName[it.Name]; len(named) > 0 {
 			vm := lowestVMID(named)
@@ -434,8 +428,7 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snap
 }
 
 // Teardown stops and deletes team VMs. A whole-team teardown also reports
-// those teams' half-deleted VMs (halfDeleted) and frees the disks gone VMs
-// left (orphanedDisks).
+// half-deleted VMs and frees disks gone VMs left.
 func (p Planner) Teardown(ctx context.Context, teams, hosts []string) (*Plan, error) {
 	plan, vms, err := p.simple(ctx, KindTeardown, teams, hosts, func(it *Item) {
 		it.Steps = []Step{StepStop, StepDelete}
@@ -450,10 +443,9 @@ func (p Planner) Teardown(ctx context.Context, teams, hosts []string) (*Plan, er
 	return plan, nil
 }
 
-// halfDeleted adds a blocked delete item for each VM in plan's teams' clone
-// VMIDs that a failed delete left half-deleted (locked as destroyed): it
-// has lost its name, so planning by name misses it. Only an admin can
-// finish it (--skiplock is root's), so the item says how rather than run.
+// halfDeleted adds a blocked delete item for each clone VMID a failed
+// delete left locked as destroyed. Such a VM has lost its name, so
+// planning by name misses it, and only root can finish it (--skiplock).
 func (p Planner) halfDeleted(plan *Plan, vms []proxmox.VM) {
 	want := map[string]bool{}
 	for _, t := range plan.Teams {
@@ -482,13 +474,11 @@ func HalfDeletedText(vmid int, node string) string {
 		vmid, vmid, node)
 }
 
-// orphanedDisks adds a free-disks item for each VMID of plan's teams that
-// has disks on deploy.storage but no VM: a teardown cut off between
-// deleting a VM and freeing its disks leaves them so. The storage is listed
-// on every online node, so a node-local one is covered. Proxmox lists a
-// gone VM's disks only to a user with Datastore.Allocate on the storage,
-// the privilege freeing them needs; to anyone else, as to a user refused
-// the listing, there are none.
+// orphanedDisks adds a free-disks item for each team VMID with disks on
+// deploy.storage but no VM (a teardown cut off before freeing them). It
+// lists every node in storageNodes, so node-local storage is covered.
+// Proxmox shows a gone VM's disks only to users with Datastore.Allocate,
+// which freeing needs; others see none.
 func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM) error {
 	nodes, err := p.API.OnlineNodes(ctx)
 	if err != nil {
@@ -506,9 +496,9 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	if err != nil {
 		return err
 	}
-	// A whole listing takes seconds per node (Proxmox reads every image on
-	// it); one VMID's takes a moment. A few teams' candidates are asked one
-	// by one, many teams' storage is listed whole; either way at once.
+	// A whole listing takes seconds per node (Proxmox reads every image); one
+	// VMID takes a moment. So few candidates are asked one by one, many list the
+	// storage whole; either way the listings run concurrently.
 	candidates := p.orphanCandidates(plan.Teams, vms, held)
 	if len(candidates) > maxOrphanCandidates {
 		candidates = []int{0} // 0: the whole storage
@@ -561,19 +551,17 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 }
 
 const (
-	// maxOrphanCandidates is the most VMIDs a teardown asks the storage
-	// about one by one before it lists the storage whole instead.
+	// maxOrphanCandidates is the most VMIDs asked about one by one before
+	// listing the whole storage instead.
 	maxOrphanCandidates = 40
-	// orphanListings is how many storage listings a teardown plan runs at
-	// once.
+	// orphanListings is how many storage listings run at once.
 	orphanListings = 8
 )
 
-// orphanCandidates are the free VMIDs teams' VMs get when cloned from the
-// templates on the cluster (CloneVMID): where a gone team VM's disks would
-// be. Disks of a VM whose template has since gone aren't among them; a
-// teardown of more teams than maxOrphanCandidates allows lists the whole
-// storage and finds those too.
+// orphanCandidates are the free VMIDs team VMs get when cloned from current
+// templates (CloneVMID), where a gone VM's disks would be. Disks of VMs
+// whose template is gone are only found by a whole-storage listing (more
+// than maxOrphanCandidates).
 func (p Planner) orphanCandidates(teams []string, vms []proxmox.VM, held map[int]bool) []int {
 	var out []int
 	for _, t := range teams {
@@ -590,10 +578,9 @@ func (p Planner) orphanCandidates(teams []string, vms []proxmox.VM, held map[int
 	return out
 }
 
-// storageNodes are the online nodes to list deploy.storage on: one, when
-// Proxmox says the storage is shared (every node sees the same volumes),
-// else those that have it. Without a resources read (an API that can't, or
-// a user who may not audit the storage) it is every online node.
+// storageNodes are the online nodes to list deploy.storage on: one if the
+// storage is shared, else those that have it. Without a resources read it
+// is every online node.
 func (p Planner) storageNodes(ctx context.Context, online []string) ([]string, error) {
 	rr, ok := p.API.(ResourceReader)
 	if !ok || len(online) == 0 {
@@ -621,9 +608,8 @@ func (p Planner) storageNodes(ctx context.Context, online []string) ([]string, e
 	return has, nil
 }
 
-// Reset rolls team VMs back to snapshot and starts them; an empty snapshot
-// means each VM's own baseline (see BaselineSnapshot). VMs without it are
-// blocked.
+// Reset rolls team VMs back to snapshot and starts them; "" means each VM's
+// own baseline (see BaselineSnapshot). VMs without it are blocked.
 func (p Planner) Reset(ctx context.Context, teams, hosts []string, snapshot string) (*Plan, error) {
 	plan, _, err := p.simple(ctx, KindReset, teams, hosts, func(it *Item) {
 		it.Steps = []Step{StepStop, StepRollback, StepStart}

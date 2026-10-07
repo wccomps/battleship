@@ -11,11 +11,10 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// stepContext is the context a step runs with. A stop reaches it at once,
-// unless it is a cancel (ErrCancelRequested) and the step already sent
-// Proxmox a change: then only after jobs.cancel_grace, or when Halt closes,
-// so the step sees how its task ended. From the stop on, the step sends no
-// further change (see guardedAPI).
+// stepContext is a step's context. A stop reaches it at once, except a
+// cancel (ErrCancelRequested) after the step sent a change: then only after
+// jobs.cancel_grace or Halt, so the step sees its task end. After the stop
+// the step sends nothing new (see guardedAPI).
 func (e *Executor) stepContext(ctx context.Context) (_ context.Context, done func(), sent func() bool) {
 	st := &stepState{run: ctx}
 	sctx, cancel := context.WithCancelCause(context.WithValue(context.WithoutCancel(ctx), stepKey{}, st))
@@ -43,8 +42,7 @@ func (e *Executor) stepContext(ctx context.Context) (_ context.Context, done fun
 
 type stepKey struct{}
 
-// stepState is what a step's context knows of it: the run it belongs to,
-// and whether it sent Proxmox a change.
+// stepState is a step's run and whether it sent a change.
 type stepState struct {
 	run  context.Context
 	mu   sync.Mutex
@@ -61,8 +59,8 @@ func (s *stepState) hasSent() bool {
 var errHeldBack = fmt.Errorf("not sent to Proxmox: the job was stopped: %w", context.Canceled)
 
 // mayChange is called before each change a step sends: it refuses once the
-// step's run has stopped, and otherwise records that the step sent one.
-// Calls outside a step (template builds, cleanup) aren't held back.
+// run has stopped, else records that a change was sent. Calls outside a
+// step (template builds, cleanup) aren't held back.
 func mayChange(ctx context.Context) error {
 	st, ok := ctx.Value(stepKey{}).(*stepState)
 	if !ok {

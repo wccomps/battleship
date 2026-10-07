@@ -14,25 +14,20 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// deleteVM destroys a VM and reports success only once the VM is confirmed
-// gone and none of its disks are left on the storage. The destroy holds a
-// concurrency.deletes slot for its whole task (see Limits).
+// deleteVM destroys a VM and succeeds only once the VM is gone and none of
+// its disks remain. It holds a concurrency.deletes slot for the whole task.
 //
-// A destroy that failed after deleting part of the VM (proxmox.PartialDestroy)
-// is not started again, and a VM left locked as destroyed fails with a
-// halfDeletedError that says how to finish it; one found so before the delete
-// gets no request. Each request is preceded by a read of the VM, so one sent
-// again after its answer was lost sees the first one's effect: the VM gone,
-// or locked as destroyed by that destroy, which gets up to destroyWait.
+// A partially failed destroy (proxmox.PartialDestroy) is not restarted; a
+// VM left locked as destroyed fails with a halfDeletedError saying how to
+// finish it. Each request is preceded by a read, so a resend after a lost
+// answer sees the first one's effect (allowed up to destroyWait).
 //
-// A destroy task can also end OK with its disks still on the storage: it
-// timed out on the storage lock while freeing them and carried on. So the
-// VM's disks are read before the delete, and any of them still there
-// afterwards are freed (see freeLeftovers).
+// A destroy can end OK yet leave disks (it timed out on the storage lock
+// while freeing them), so disks read beforehand and still present are freed
+// (see freeLeftovers).
 func (e *Executor) deleteVM(ctx context.Context, node string, vmid int, name string) error {
-	// A failed read is not fatal: the VM may already be gone. Not knowing
-	// whether it is a template, the destroy takes the storage-ops slot as
-	// one would: unneeded, that only makes it wait its turn.
+	// A failed read isn't fatal: the VM may be gone. Not knowing if it is a
+	// template, the destroy takes the storage-ops slot anyway.
 	var disks map[string]string
 	template := false
 	switch cfg, gone, err := e.readVM(ctx, node, vmid); {
@@ -51,8 +46,8 @@ func (e *Executor) deleteVM(ctx context.Context, node string, vmid int, name str
 			cfg, err := e.api.VMConfig(ctx, node, vmid)
 			switch {
 			case err != nil:
-				// "does not exist" goes to the check after the delete,
-				// which tells a VM that is gone from one on another node.
+				// "does not exist" goes to the post-delete check, which tells gone from
+				// moved to another node.
 				return "", err
 			case cfg["lock"] == "destroyed":
 				destroying = true
@@ -67,8 +62,8 @@ func (e *Executor) deleteVM(ctx context.Context, node string, vmid int, name str
 	}
 	err := e.lim.deletes.do(ctx, func() error {
 		if template {
-			// Destroying a template frees its base disks under the storage
-			// lock, like a conversion: one at a time (see Limits).
+			// Destroying a template frees base disks under the storage lock, like a
+			// conversion: one at a time (see Limits).
 			return e.lim.storageOps.do(ctx, destroy)
 		}
 		return destroy()
@@ -78,8 +73,7 @@ func (e *Executor) deleteVM(ctx context.Context, node string, vmid int, name str
 	}
 	cfg, gone, rerr := e.readVM(ctx, node, vmid)
 	if gone && err != nil {
-		// The delete failed, so "does not exist" on node may only mean the VM
-		// is on another node now.
+		// The delete failed, so "does not exist" may mean the VM moved nodes.
 		if lerr := e.refresh(ctx); lerr != nil {
 			return fmt.Errorf("the delete failed and VM %d is not on %s; could not list VMs to check where it is: %w (the delete: %s)",
 				vmid, node, lerr, proxmox.Describe(err))
@@ -106,8 +100,8 @@ func (e *Executor) deleteVM(ctx context.Context, node string, vmid int, name str
 	return fmt.Errorf("the delete task for VM %d finished OK, but the VM still exists", vmid)
 }
 
-// destroyWait bounds how long a delete waits for a destroy that an earlier
-// request of its own started.
+// destroyWait bounds how long a delete waits for a destroy its own earlier
+// request started.
 const destroyWait = 5 * time.Minute
 
 // waitGone polls the VM until it is gone, for up to limit.
@@ -117,20 +111,19 @@ func (e *Executor) waitGone(ctx context.Context, node string, vmid int, limit ti
 	e.pollVM(wctx, node, vmid, func(cfg map[string]string) bool { return cfg == nil })
 }
 
-// leftover is what a deleted VM left on the storage: its node and the disks
-// it had, for a retry round to free what this one could not.
+// leftover is a deleted VM's node and disks, for a retry round to free what
+// this one couldn't.
 type leftover struct {
 	node     string
 	disks    map[string]string
 	template bool // frees take the storage-ops slot
 }
 
-// freeLeftovers frees those of a deleted VM's disks that are still on the
-// storage. Proxmox itself refuses to free a base volume that linked clones
-// still use, so this never breaks a clone; that refusal is reported as is.
-// What can't be freed fails with a leftoverDisksError, and is remembered so
-// a retry round that finds the VM gone tries again rather than calling it
-// already deleted. A stop before they are freed is an interruption.
+// freeLeftovers frees a deleted VM's disks still on the storage. Proxmox
+// refuses to free a base volume linked clones use, so this never breaks a
+// clone; that refusal is reported as is. Unfreeable disks fail with a
+// leftoverDisksError and are remembered for the next round. A stop before
+// they are freed is an interruption.
 func (e *Executor) freeLeftovers(ctx context.Context, vmid int, name string, l leftover) error {
 	node, disks := l.node, l.disks
 	if len(disks) == 0 {
@@ -187,8 +180,8 @@ func (e *Executor) freeLeftovers(ctx context.Context, vmid int, name string, l l
 			causes = append(causes, vol+": "+proxmox.Describe(err))
 		}
 	}
-	// Check again rather than trust each free: a timed-out request may still
-	// have freed its volume.
+	// Re-check rather than trust each free: a timed-out request may still have
+	// freed its volume.
 	still, err := e.leftDisks(ctx, node, vmid, disks)
 	if err != nil {
 		still = left
@@ -205,9 +198,8 @@ func (e *Executor) freeLeftovers(ctx context.Context, vmid int, name string, l l
 	return nil
 }
 
-// leftDisks lists which of disks are still on their storage for vmid, by
-// the volids the storage reports. Volumes are matched on their file name,
-// which is unique per VMID and storage.
+// leftDisks lists which of disks are still on storage for vmid, matched by
+// file name (unique per VMID and storage).
 func (e *Executor) leftDisks(ctx context.Context, node string, vmid int, disks map[string]string) ([]string, error) {
 	files := map[string]map[string]bool{} // by storage
 	for _, vol := range disks {
@@ -256,9 +248,9 @@ func (e *Executor) forgetLeftover(vmid int) {
 	delete(e.leftovers, vmid)
 }
 
-// retryLeftovers frees what an earlier delete of vmid left on the storage,
-// if anything: this run's, as remembered, or else whatever the deploy
-// storage, asked on node, holds of vmid's while no VM holds the VMID.
+// retryLeftovers frees what an earlier delete of vmid left: this run's
+// remembered leftovers, or else what the deploy storage on node holds for
+// vmid while no VM holds it.
 func (e *Executor) retryLeftovers(ctx context.Context, vmid int, node, name string) error {
 	e.mu.Lock()
 	l, ok := e.leftovers[vmid]

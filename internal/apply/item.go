@@ -22,8 +22,7 @@ func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tp
 		if kind == pods.KindTeardown {
 			// StepDelete, or StepFreeDisks for a VM already gone at planning.
 			step := it.Steps[len(it.Steps)-1]
-			// Gone by name is not enough: a VM half-deleted by a failed
-			// destroy is listed under a placeholder name ("VM <vmid>").
+			// Gone by name isn't enough: a half-deleted VM is listed as "VM <vmid>".
 			if err := e.checkVMIDFree(ctx, it.VMID); err != nil {
 				return e.endItem(ctx, it, step, -1, false, err)
 			}
@@ -70,13 +69,11 @@ func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tp
 	return nil
 }
 
-// endItem reports how an item that didn't finish ended, and returns its
-// error: the one place that tells a stop (ctx done, err a cancellation)
-// from a failure. step is where it ended, i its index in the item's steps
-// (-1: outside them), and underWay that the step had sent Proxmox a change.
-// Only a step under way is logged as the item's step, so the step column
-// keeps the last step the item reported, and one that never reached a
-// step reads as not run.
+// endItem reports how an unfinished item ended and returns its error; it is
+// the one place that tells a stop from a failure. i is the step's index
+// (-1: outside the steps); underWay means the step had sent a change. Only
+// a step under way is logged as the item's step, so an item that never
+// reached one reads as not run.
 func (e *Executor) endItem(ctx context.Context, it pods.Item, step pods.Step, i int, underWay bool, err error) error {
 	if ctx.Err() == nil || !errors.Is(err, context.Canceled) {
 		e.emit(it.Name, step, EventFailed, proxmox.Describe(err))
@@ -97,11 +94,9 @@ func (e *Executor) endItem(ctx context.Context, it pods.Item, step pods.Step, i 
 	return stop
 }
 
-// leftAt is how an item stopped at its step i (-1: outside its steps) left
-// its VM's config: as its last change sent or config steps finished left
-// it, else untouched. An item with no step that changes the config is
-// converged once it reaches its steps, though a later round's stop before
-// them still finds it untouched.
+// leftAt is how an item stopped at step i (-1: outside its steps) left its
+// VM's config, else untouched. An item with no config step is converged
+// once it reaches its steps.
 func (e *Executor) leftAt(it pods.Item, i int) Left {
 	e.mu.Lock()
 	l, ok := e.left[it.Name]
@@ -156,8 +151,8 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		if err := e.call(ctx, func() (err error) { snaps, err = e.api.Snapshots(ctx, it.Node, it.VMID); return }); err != nil {
 			return false, err
 		}
-		// Any baseline will do, such as the old deploy tool's: a new one
-		// taken now would capture whatever the VM has been through.
+		// Any baseline will do: one taken now would capture whatever the VM has
+		// been through.
 		if pods.HasBaseline(e.Cfg.Deploy, pods.SnapshotNames(snaps)) {
 			return false, nil
 		}
@@ -193,9 +188,9 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 	return false, fmt.Errorf("unknown step %q", step)
 }
 
-// checkVMIDFree is for a delete whose VM is no longer listed under its name:
-// it fails if the VMID now holds a VM that a failed destroy left locked as
-// destroyed. Any other VM there is not this item's and is left alone.
+// checkVMIDFree, for a delete whose VM is no longer listed by name, fails
+// if the VMID holds a VM a failed destroy left locked as destroyed. Any
+// other VM there is left alone.
 func (e *Executor) checkVMIDFree(ctx context.Context, vmid int) error {
 	e.mu.Lock()
 	vm, ok := e.present[vmid]
@@ -215,12 +210,10 @@ func (e *Executor) checkVMIDFree(ctx context.Context, vmid int) error {
 	return nil
 }
 
-// shutdownForDelete takes a running VM down before teardown deletes it. It
-// asks the guest to shut down cleanly, which lets routers
-// release their DHCP lease (udhcpc -R) so the next deploy gets the address
-// at once. Proxmox hard-stops the VM if it is still running after
-// teardown.shutdown_timeout (forceStop); if the shutdown task fails anyway
-// and the VM is still running, it is hard-stopped here.
+// shutdownForDelete shuts a running VM down cleanly before deletion, so
+// routers release their DHCP lease (udhcpc -R) for the next deploy.
+// Proxmox hard-stops it after teardown.shutdown_timeout (forceStop); if the
+// task fails and it is still running, it is hard-stopped here.
 func (e *Executor) shutdownForDelete(ctx context.Context, it *pods.Item) (bool, error) {
 	status, err := e.status(ctx, it)
 	if err != nil || status == "stopped" {
@@ -247,13 +240,11 @@ func (e *Executor) status(ctx context.Context, it *pods.Item) (string, error) {
 	return status, err
 }
 
-// startClone starts a clone into req.NewVMID, on req.TargetNode, and
-// returns its UPID. A POST that timed out may still have created the VM, so
-// the target is probed first: a VM there with the expected name means an
-// earlier POST took effect, and "" is returned. For a template's copy that
-// VM must be this run's, since only a VM this run created is converted.
-// Only a VM that was definitely absent becomes this run's, and from the POST
-// on it stays so even if the request times out after Proxmox accepted it.
+// startClone starts a clone into req.NewVMID on req.TargetNode and returns
+// its UPID. A timed-out POST may still have created the VM, so the target is
+// probed first; a VM with the expected name there means "" is returned (for
+// a template copy it must be this run's). Only a VM seen absent becomes this
+// run's, and stays so from the POST on even if the request times out.
 func (e *Executor) startClone(ctx context.Context, template bool, req proxmox.CloneRequest) (string, error) {
 	p, err := e.probeClone(ctx, req.TargetNode, req.NewVMID, req.Name)
 	if err != nil {
@@ -291,11 +282,10 @@ const (
 	probeOther               // some other VM: the POST would fail with "already exists"
 )
 
-// probeClone looks at vmid before a clone. Only a "does not exist" answer
-// counts as absent; any other read error is returned so the step retries or
-// fails rather than claiming a VM it may not have created. A VM that is
-// still locked is reported as proxmox.ErrLocked so the caller backs off until the
-// clone finishes.
+// probeClone looks at vmid before a clone. Only "does not exist" counts as
+// absent; other read errors are returned rather than claim a VM it may not
+// have created. A locked VM is reported as proxmox.ErrLocked so the caller
+// backs off.
 func (e *Executor) probeClone(ctx context.Context, node string, vmid int, name string) (probe, error) {
 	cfg, err := e.api.VMConfig(ctx, node, vmid)
 	if err != nil {
@@ -319,9 +309,8 @@ func (e *Executor) probeClone(ctx context.Context, node string, vmid int, name s
 	return probeSame, nil
 }
 
-// applyConfig reads the VM config, computes changes, and applies them. When
-// cloudInit is set and the VM has a cloud-init drive, the drive is
-// regenerated every time. It reports whether config changes were applied.
+// applyConfig applies the VM's config changes and reports whether any were
+// made. With cloudInit, a cloud-init drive is regenerated every time.
 func (e *Executor) applyConfig(ctx context.Context, it *pods.Item, cloudInit bool,
 	changes func(map[string]string) map[string]string) (bool, error) {
 	var cur map[string]string
@@ -335,8 +324,7 @@ func (e *Executor) applyConfig(ctx context.Context, it *pods.Item, cloudInit boo
 			return false, err
 		}
 	}
-	// Regenerate even without changes, so a failed regeneration on an earlier
-	// attempt is repaired by the next one.
+	// Regenerate even without changes, to repair an earlier failed regeneration.
 	if cloudInit && pods.HasCloudInit(cur) {
 		if err := e.call(ctx, func() error { return e.api.RegenerateCloudInit(ctx, it.Node, it.VMID) }); err != nil {
 			return changed, fmt.Errorf("regenerating cloud-init: %w", err)
@@ -345,9 +333,8 @@ func (e *Executor) applyConfig(ctx context.Context, it *pods.Item, cloudInit boo
 	return changed, nil
 }
 
-// power applies action, skipping a VM already in the status the action
-// leaves (see PowerAction.Leaves). Rebooting a VM that is not running starts
-// it.
+// power applies action, skipping a VM already in the status it leaves (see
+// PowerAction.Leaves). Rebooting a stopped VM starts it.
 func (e *Executor) power(ctx context.Context, it *pods.Item, action string) (bool, error) {
 	status, err := e.status(ctx, it)
 	if err != nil {

@@ -10,8 +10,7 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// grants is an Access from a table: path -> privileges held there. A path
-// missing from it holds nothing.
+// grants is a table Access: path -> privileges; missing paths hold nothing.
 type grants map[string][]string
 
 func (g grants) Privileges(_ context.Context, path string) (map[string]bool, error) {
@@ -84,8 +83,8 @@ func TestRollbackAcceptsEitherSnapshotPrivilege(t *testing.T) {
 	}
 }
 
-// The deploy table: what a clone into a team's pool and its configuration
-// need, and what building a template needs.
+// What a clone into a team's pool, its configuration and a template build
+// need.
 func TestDeployNeeds(t *testing.T) {
 	cfg := config.Default()
 	tpl := TemplateSpec{Name: "teak.x.tpl", Host: "teak", VMID: 9021, MasterVMID: 121, MasterName: "teak.x", Interfaces: 2,
@@ -135,9 +134,8 @@ func TestDeployNeeds(t *testing.T) {
 	}
 }
 
-// An existing template is reused: nothing is built, so the master's
-// privileges don't matter, and a VM that exists is configured at its own
-// path.
+// A reused template needs no master privileges, and an existing VM is
+// configured at its own path.
 func TestDeployOfExistingVMs(t *testing.T) {
 	tpl := TemplateSpec{Name: "teak.x.tpl", VMID: 9021, MasterVMID: 121, Exists: true, Interfaces: 1}
 	item := Item{Team: "01", Name: "team01-teak", VMID: 10121, Template: tpl.Name, Steps: []Step{StepNetwork}}
@@ -178,9 +176,8 @@ func TestTeardownNeeds(t *testing.T) {
 	}
 }
 
-// Every privilege offered for an operation is one that some item of it, as
-// the planner builds them, needs: offerPrivileges can't drift from
-// itemNeeds unnoticed.
+// Every offered privilege is needed by some item the planner builds, so
+// offerPrivileges can't drift from itemNeeds.
 func TestOfferPrivilegesAreItemNeeds(t *testing.T) {
 	ctx := context.Background()
 	f := newCluster()
@@ -225,8 +222,8 @@ func TestOfferPrivilegesAreItemNeeds(t *testing.T) {
 	}
 }
 
-// Freeing a gone VM's disks needs Datastore.Allocate on the storage, as
-// Proxmox's volume delete does, and nothing on the VM's path.
+// Freeing a gone VM's disks needs Datastore.Allocate on the storage and
+// nothing on the VM's path.
 func TestFreeDisksNeeds(t *testing.T) {
 	cfg := config.Default()
 	plan := &Plan{Kind: KindTeardown, Items: []Item{{Team: "01", Name: "team01-disks-10121", VMID: 10121, Steps: []Step{StepFreeDisks}}}}
@@ -241,7 +238,7 @@ func TestFreeDisksNeeds(t *testing.T) {
 	}
 }
 
-// fakePerms is Proxmox's two answers: the listed paths, and one path's
+// fakePerms answers Proxmox's two reads: the listed paths, and one path's
 // effective privileges.
 type fakePerms struct {
 	err    error // Permissions fails with it
@@ -260,8 +257,8 @@ func (f *fakePerms) PermissionsAt(_ context.Context, path string) (map[string]bo
 	return f.at[path], nil
 }
 
-// Listed paths come from one read; others are asked one by one, once, not
-// guessed from their parents.
+// Listed paths come from one read; others are asked once each, not guessed
+// from parents.
 func TestAccessReadsListedPathsOnceAndAsksForOthers(t *testing.T) {
 	f := &fakePerms{
 		listed: proxmox.Permissions{"/vms/10101": {"VM.PowerMgmt": false}, "/vms": {"VM.Audit": true}},
@@ -318,8 +315,8 @@ func TestIsTeamBridge(t *testing.T) {
 	}
 }
 
-// A read cut off by its caller (a request the browser abandoned) is not
-// Proxmox's answer: the next caller asks again. A refusal is remembered.
+// A read the caller cancelled isn't remembered, so the next caller asks
+// again; a refusal is remembered.
 func TestAccessDoesNotRememberACancelledRead(t *testing.T) {
 	f := &fakePerms{err: context.Canceled}
 	acc := NewAccess(f)

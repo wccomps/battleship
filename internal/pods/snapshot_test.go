@@ -39,10 +39,9 @@ func TestSnapshotNameExamples(t *testing.T) {
 	}
 }
 
-// proxmoxAccepts is Proxmox's rule for a new snapshot's name, written out
-// independently of CheckSnapshotName: the pve-configid format (a letter,
-// then at least one letter, digit, _ or -), at most 40 characters, and not
-// one of the names its API reserves.
+// proxmoxAccepts is Proxmox's snapshot-name rule written independently of
+// CheckSnapshotName: pve-configid (a letter, then 1+ letters, digits, _ or
+// -), at most 40 characters, not reserved.
 func proxmoxAccepts(s string) bool {
 	if len(s) < 2 || len(s) > 40 || s == "current" || strings.ToLower(s) == "pending" {
 		return false
@@ -144,8 +143,7 @@ func TestSnapshotPlanRefusesBadAndBaselineNames(t *testing.T) {
 	}
 }
 
-// Whatever snapshots the VMs have, the planner never plans to take one a VM
-// already has: every runnable item's VM lacks the name.
+// The planner never plans a snapshot a VM already has.
 func TestPropSnapshotPlanNeverOverwrites(t *testing.T) {
 	pool := []string{"aa", "bb", "before-scoring", "initial"}
 	rapid.Check(t, func(t *rapid.T) {

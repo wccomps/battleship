@@ -65,8 +65,8 @@ func TestPlanJSONKeysAreStable(t *testing.T) {
 	}
 }
 
-// A snapshot item's description and RAM flag are stored too, and are left
-// out of other kinds' items, whose stored form stays as it was.
+// Snapshot items store their description and RAM flag; other kinds' items
+// omit them.
 func TestSnapshotItemJSONKeys(t *testing.T) {
 	b, err := json.Marshal(Item{Name: "team01-teak", Steps: []Step{StepSnapshot}, Snapshot: "before-scoring", Description: "round 2", VMState: true})
 	if err != nil {

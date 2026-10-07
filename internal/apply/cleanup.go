@@ -11,9 +11,8 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// CleanupBudget bounds the cleanup at the end of Run. It runs on a context
-// detached from the job's, so a cancelled job still cleans up; only killing
-// the process skips it.
+// CleanupBudget bounds Run's final cleanup. It runs detached from the job's
+// context, so a cancelled job still cleans up.
 const CleanupBudget = 10 * time.Minute
 
 // vmRef identifies a VM this run created.
@@ -24,17 +23,16 @@ type vmRef struct {
 }
 
 // cleanup leaves the cluster as Run found it, apart from finished work. It
-// only ever touches VMs this run created, and re-checks each one's name:
-//   - team VMs whose item did not finish are removed;
-//   - a template copy whose task failed, or that a stopped job cut off, is
-//     removed, unless a later wait saw its task finish OK (see stopCopy);
-//   - any other unconverted copy is completed, and removed if that fails.
-//     When the copy's task was never seen to end, the copy is completed
-//     only if it is present, unlocked and still carries the expected name.
-//     A converted template is kept.
+// touches only VMs this run created, re-checking each name:
+//   - unfinished team VMs are removed;
+//   - a copy whose task failed or was cut off is removed, unless a later
+//     wait saw it finish OK (see stopCopy);
+//   - other unconverted copies are completed (if the task's end was never
+//     seen, only when present, unlocked and correctly named), or removed if
+//     that fails.
 //
-// A VM that stays locked, changed identity, or fails to delete is not forced;
-// it is reported.
+// A VM that stays locked, changed identity, or won't delete is reported,
+// not forced.
 func (e *Executor) cleanup(ctx context.Context, specs []pods.TemplateSpec, builds map[string]*tplBuild, succeeded map[string]bool, res *Result) {
 	e.mu.Lock()
 	var teams []vmRef
@@ -105,8 +103,7 @@ func (e *Executor) cleanup(ctx context.Context, specs []pods.TemplateSpec, build
 		if exhausted(ref) {
 			continue
 		}
-		// A copy cut off by a cancel may still be running on the node:
-		// settle waits it out.
+		// A copy cut off by a cancel may still be running; settle waits it out.
 		node, cfg, isGone, err := e.settle(cctx, ref, listOK)
 		switch {
 		case err != nil:
@@ -120,8 +117,8 @@ func (e *Executor) cleanup(ctx context.Context, specs []pods.TemplateSpec, build
 		remove := func(reason string) { e.removeCreated(cctx, res, ref, false, reason, fail, gone) }
 		switch key, vol := pods.UnconvertedDisk(cfg); {
 		case cfg["template"] == "1" && key != "":
-			// A conversion that failed partway sets template: 1 without
-			// renaming the disks; such a template can never be cloned.
+			// A failed conversion can set template: 1 without renaming the disks;
+			// such a template can never be cloned.
 			remove(fmt.Sprintf("it was left half-converted: disk %s (%s) was never renamed to a base- volume", key, vol))
 		case cfg["template"] == "1":
 			e.emit(spec.Name, "", EventInfo, "template "+spec.Name+" was already complete")
@@ -141,11 +138,9 @@ func (e *Executor) cleanup(ctx context.Context, specs []pods.TemplateSpec, build
 	sort.Strings(res.AlreadyGone)
 }
 
-// settle finds out what is at a recorded VMID right before cleanup acts on
-// it: the node the VM is on (from the listing if listOK, else ref.node) and
-// its config once no task holds it locked, or that it is gone. Anything
-// that is not the recorded VM, stays locked or cannot be read is an error,
-// and is never acted on.
+// settle finds what is at a recorded VMID right before cleanup acts: its
+// node (from the listing if listOK, else ref.node) and its config once
+// unlocked, or that it is gone. Anything else is an error, never acted on.
 func (e *Executor) settle(ctx context.Context, ref vmRef, listOK bool) (node string, cfg map[string]string, gone bool, err error) {
 	node = ref.node
 	if listOK {
@@ -186,10 +181,9 @@ func unconfirmed(ref vmRef, err error) error {
 	return fmt.Errorf("%w %s (%d) is gone; check Proxmox: %s: %w", errUnconfirmed, ref.name, ref.vmid, proxmox.Describe(err), err)
 }
 
-// removeCreated deletes a VM this run created, once settle says nothing is
-// working on it and it is still the VM we created. It never forces: if the
-// VM stays locked, changed identity, or the delete fails, it is reported
-// for manual removal instead.
+// removeCreated deletes a VM this run created once settle confirms it is
+// idle and unchanged. It never forces; failures are reported for manual
+// removal.
 func (e *Executor) removeCreated(ctx context.Context, res *Result, ref vmRef, listOK bool, reason string,
 	fail func(vmRef, error), gone func(vmRef)) {
 	node, _, isGone, err := e.settle(ctx, ref, listOK)

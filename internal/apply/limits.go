@@ -8,37 +8,27 @@ import (
 	"github.com/wccomps/battleship/internal/config"
 )
 
-// Limits caps concurrent Proxmox work: the executor's config calls, clone
-// tasks per source node, template builds, VM deletes and storage operations.
-// Executors that run at the same time, such as several jobs in one process,
-// should share one Limits so the load on Proxmox doesn't grow with the
-// number of jobs.
+// Limits caps concurrent Proxmox work: config calls, clones per source
+// node, template builds, deletes and storage operations. Concurrent
+// Executors in one process should share one. With Slots (a database),
+// deletes and storage operations are capped cluster-wide across processes;
+// the rest are per process.
 //
-// Deletes and storage operations are capped cluster-wide when Limits has
-// Slots (a database): every process that shares the database, battleship
-// serve replicas and direct CLI runs alike, takes the same slots. The other
-// caps are per process.
-//
-// Lock order: a holder of more than one slot takes them in the order builds,
-// clone slots, deletes, storageOps, config calls, and never waits for an
-// earlier one while holding a later one. Clone slots are never held together
-// with deletes or storageOps. A config-call slot is held for one try of one
-// call, which for a clone, convert or delete is the read before its POST and
-// the POST, never while waiting for a task.
+// Lock order: builds, clone slots, deletes, storageOps, config calls; never
+// wait for an earlier one while holding a later one. Clone slots are never
+// held with deletes or storageOps. A config-call slot covers one try of one
+// call (e.g. a read and its POST), never a task wait.
 type Limits struct {
 	calls  sem
 	builds sem
 	// deletes caps destroy tasks: each takes Proxmox's cluster-wide user.cfg
-	// lock to remove the VM from its pool and ACLs, and too many at once time
-	// out on it, leaving VMs half-deleted.
+	// lock, and too many at once time out on it, leaving VMs half-deleted.
 	deletes shared
-	// storageOps serializes the tasks that take the clone storage's cluster
-	// lock for long: template conversions, template destroys and frees of
-	// their disks. Several at once time out on the lock ("cfs-lock
-	// 'storage-competitions' error: got lock request timeout"), and Proxmox
-	// may then leave a template half-converted or a disk behind. It is held
-	// around those tasks, including the config-call slots they take to
-	// start and check them, never across a clone.
+	// storageOps serializes tasks that hold the clone storage's cluster lock
+	// for long: template conversions, template destroys and their disk frees.
+	// Concurrent ones time out on the lock ("cfs-lock ... got lock request
+	// timeout"), which can leave a template half-converted or a disk behind.
+	// Held around those tasks and their config calls, never across a clone.
 	storageOps shared
 	perNode    int
 
@@ -54,12 +44,12 @@ type Slots interface {
 	AcquireSlot(ctx context.Context, name string, n int) (release func(), err error)
 }
 
-// NewLimits makes the limits for one process from its config, capping
-// everything in this process only, as for a direct run without a database.
+// NewLimits makes per-process limits from config, as for a direct run
+// without a database.
 func NewLimits(c config.Concurrency) *Limits { return NewClusterLimits(c, nil) }
 
 // NewClusterLimits is NewLimits, but caps deletes and storage operations
-// across every process that shares slots.
+// across every process sharing slots.
 func NewClusterLimits(c config.Concurrency, slots Slots) *Limits {
 	deletes := max(1, c.Deletes)
 	return &Limits{
@@ -72,10 +62,9 @@ func NewClusterLimits(c config.Concurrency, slots Slots) *Limits {
 	}
 }
 
-// Call runs fn while holding one config-call slot (see sem.do). The
-// executor and the status poller's drift scan take one for each try of their
-// API calls; planning, the grid's VM listing and polling a task or a VM
-// waiting on one don't.
+// Call runs fn holding one config-call slot (see sem.do). The executor and
+// the drift scan take one per API call try; planning, the grid listing and
+// task/VM polling don't.
 func (l *Limits) Call(ctx context.Context, fn func() error) error { return l.calls.do(ctx, fn) }
 
 // cloneSlot returns the semaphore for clones from node.
@@ -93,9 +82,8 @@ func (l *Limits) cloneSlot(node string) sem {
 // sem is a counting semaphore with one slot per unit of capacity.
 type sem chan struct{}
 
-// do runs fn while holding a slot, waiting for a free one first, and frees
-// the slot when fn returns. It doesn't run fn once ctx is done, even if a
-// slot is free.
+// do runs fn holding a slot, waiting for one first. It doesn't run fn once
+// ctx is done, even if a slot is free.
 func (s sem) do(ctx context.Context, fn func() error) error {
 	select {
 	case s <- struct{}{}:
@@ -109,8 +97,8 @@ func (s sem) do(ctx context.Context, fn func() error) error {
 	return fn()
 }
 
-// shared is a cap taken first in this process, then, with slots, across
-// every process.
+// shared is a cap taken in this process first, then across processes when
+// slots are set.
 type shared struct {
 	local sem
 	slots Slots

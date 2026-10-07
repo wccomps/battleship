@@ -23,28 +23,24 @@ const (
 	EventFailed  EventStatus = "failed"
 	EventInfo    EventStatus = "info"
 	EventBlocked EventStatus = "blocked" // the plan blocked this item; Message says why
-	// EventInterrupted: a stop (a cancel, a shutdown) cut the item off;
-	// Message says when.
+	// EventInterrupted: a stop (cancel, shutdown) cut the item off.
 	EventInterrupted EventStatus = "interrupted"
 )
 
-// ErrCancelRequested is the cause of a run's context when someone cancelled
-// the job. Unlike other stops, it gives a step that already sent Proxmox a
-// change up to jobs.cancel_grace to see it through (see stepContext).
+// ErrCancelRequested is the context cause when a job is cancelled. Unlike
+// other stops, a step that already sent a change gets jobs.cancel_grace to
+// finish it (see stepContext).
 var ErrCancelRequested = errors.New("cancel requested")
 
 // Left is how an interrupted item left its VM's config.
 type Left int
 
 const (
-	// LeftChanged: a step that changes the config sent something, and not
-	// every such step finished. Part of the config may have changed.
+	// LeftChanged: some config change was sent but not every one finished.
 	LeftChanged Left = iota
-	// LeftUntouched: no step that changes the config sent anything in
-	// this run, so the VM is as the job before left it.
+	// LeftUntouched: no config change was sent this run.
 	LeftUntouched
-	// LeftConverged: every step that changes the config finished; only
-	// power steps were left.
+	// LeftConverged: every config step finished; only power steps were left.
 	LeftConverged
 )
 
@@ -58,8 +54,7 @@ func (l Left) String() string {
 	return "changed"
 }
 
-// stoppedError is the error of an item a stop cut off, and how it left
-// the VM's config.
+// stoppedError is the error of an item cut off by a stop.
 type stoppedError struct {
 	msg  string
 	left Left
@@ -67,12 +62,12 @@ type stoppedError struct {
 
 func (s *stoppedError) Error() string { return s.msg }
 
-// Is makes a stoppedError a context.Canceled, which is how Run tells
+// Is makes a stoppedError match context.Canceled; Run uses that to tell
 // interrupted items from failed ones.
 func (s *stoppedError) Is(target error) bool { return target == context.Canceled }
 
-// stopped is the error of an item ctx's stop cut off, saying why and when,
-// e.g. "cancelled before delete", and how it left the VM's config.
+// stopped builds the error for an item cut off by ctx's stop, e.g.
+// "cancelled before delete".
 func stopped(ctx context.Context, when string, left Left) error {
 	why := "stopped"
 	switch cause := context.Cause(ctx); {
@@ -84,8 +79,8 @@ func stopped(ctx context.Context, when string, left Left) error {
 	return &stoppedError{msg: why + " " + when, left: left}
 }
 
-// LeftBy is how the item an interruption err ended left its VM's config;
-// LeftChanged for an error that doesn't say.
+// LeftBy is how an interrupted item left its VM's config; LeftChanged if err
+// doesn't say.
 func LeftBy(err error) Left {
 	var se *stoppedError
 	if errors.As(err, &se) {
@@ -103,56 +98,46 @@ type Event struct {
 	Message string
 }
 
-// Result is the outcome of a run. Failed maps the items that failed to their
-// last error; Interrupted maps those that a stop cut off, or that never
-// started, to theirs.
+// Result is the outcome of a run. Failed maps failed items to their last
+// error; Interrupted maps items cut off or never started to theirs.
 type Result struct {
 	Succeeded   []string
 	Failed      map[string]error
 	Interrupted map[string]error
 	Blocked     []string
-	// Completed lists templates whose finished copy was converted during
-	// cleanup. Removed lists VMs this run created and then deleted because they
-	// did not finish. CleanupFailed maps VMs that could not be removed to why;
-	// they need removing in Proxmox by hand.
+	// Completed: template copies converted during cleanup. Removed: VMs this
+	// run created and deleted because they didn't finish. CleanupFailed: VMs
+	// that couldn't be removed and need deleting in Proxmox by hand.
 	Completed     []string
 	Removed       []string
 	CleanupFailed map[string]error
 	AlreadyGone   []string
-	// RoundsSkipped reports that the run stopped (its context ended) before
-	// every round it had left was run: some items' errors may be from an
-	// earlier round, not their last chance, so the run did not finish.
+	// RoundsSkipped: the run stopped with retry rounds left, so some errors
+	// may not be from an item's last attempt.
 	RoundsSkipped bool
 }
 
-// Executor runs a plan. Its steps check the VM's current state first and
-// skip work already done, except that a reset rolls back again, a reboot
-// always acts and the network step regenerates cloud-init each time, so
-// running the same plan again resumes or converges it.
+// Executor runs a plan. Steps check current state and skip finished work
+// (except reset, reboot and the cloud-init regeneration, which always act),
+// so rerunning a plan resumes or converges it.
 //
-// A single Executor must not Run concurrently. OnEvent is called from
-// multiple goroutines, so it must be safe for concurrent use.
-//
-// Cleanup assumes one run per lock key (team or template) at a time: it
-// decides that a VM is its own from what it saw and did during the run. With
-// a database configured, the job system enforces this, including for direct
-// CLI runs; without one, don't run overlapping operations.
+// An Executor must not Run concurrently; OnEvent is called from many
+// goroutines. Cleanup assumes one run per lock key (team or template) at a
+// time, which the job system enforces when a database is configured.
 type Executor struct {
 	API     pods.API
 	Cfg     config.Config
 	OnEvent func(Event)
-	// Sleep waits out backoffs, polls and the pause before retry rounds;
-	// tests replace it to run instantly.
+	// Sleep waits out backoffs, polls and retry pauses; tests replace it.
 	Sleep func(ctx context.Context, d time.Duration) error
-	// Limits, if set, is shared with other Executors running at the same
-	// time. Nil means a private one from Cfg.Concurrency.
+	// Limits, if set, is shared with concurrent Executors; nil means a private
+	// one from Cfg.Concurrency.
 	Limits *Limits
-	// Halt, if set, ends a cancel's grace at once when it closes, e.g. on
-	// shutdown, so a cancelled run still stops within StopBudget.
+	// Halt, if set, ends a cancel's grace when closed (e.g. on shutdown), so
+	// the run still stops within StopBudget.
 	Halt <-chan struct{}
 
-	// api is API, guarded so a step makes no change after a stop (see
-	// stepContext).
+	// api wraps API so no step makes a change after a stop (see stepContext).
 	api pods.API
 
 	naming     pods.Naming
@@ -164,19 +149,16 @@ type Executor struct {
 	// owned are the VMs this run's clones created, by VMID: the only VMs
 	// cleanup touches.
 	owned map[int]*ownedVM
-	// leftovers are the disks deleted VMs left on the storage that this run
-	// could not free yet, by VMID.
+	// leftovers are disks of deleted VMs not yet freed, by VMID.
 	leftovers map[int]leftover
-	// asked are the snapshots this run sent a request for, by VMID: the
-	// only ones of their names it accepts as already taken.
+	// asked are the snapshots this run requested, by VMID: the only ones of
+	// those names it accepts as already taken.
 	asked map[int][]string
-	// mastersStopped are masters a template build left stopped, by name,
-	// with what to do: Run reports them in CleanupFailed.
+	// mastersStopped are masters a template build left stopped, by name;
+	// Run reports them in CleanupFailed.
 	mastersStopped map[string]string
-	// left is how each item, by name, left its VM's config as of the last
-	// change it sent from a step that changes the config, or the last time
-	// it finished every such step, in any round; absent, untouched (see
-	// leftAt).
+	// left is how each item, by name, last left its VM's config across rounds;
+	// absent means untouched (see leftAt).
 	left map[string]Left
 }
 
@@ -184,9 +166,8 @@ type Executor struct {
 type cloneState int
 
 const (
-	// cloneUnknown: the copy's task was never seen to end. Cleanup
-	// completes the copy only if it is present, unlocked and still named
-	// as expected.
+	// cloneUnknown: the copy's task was never seen to end. Cleanup completes
+	// the copy only if it is present, unlocked and still named as expected.
 	cloneUnknown cloneState = iota
 	cloneTaskOK
 	cloneTaskFailed // the task failed, or a stopped job cut it off; cleanup removes the copy
@@ -237,8 +218,8 @@ func (e *Executor) emit(item string, step pods.Step, status EventStatus, msg str
 	}
 }
 
-// Run executes the plan, then retries failed items for the configured number
-// of rounds.
+// Run executes the plan, then retries failed items for the configured
+// rounds.
 func (e *Executor) Run(ctx context.Context, plan *pods.Plan) Result {
 	e.init()
 	res := Result{Failed: map[string]error{}, Interrupted: map[string]error{}, CleanupFailed: map[string]error{}}
@@ -281,14 +262,13 @@ func (e *Executor) Run(ctx context.Context, plan *pods.Plan) Result {
 			e.emit("", "", EventFailed, "listing VMs: "+err.Error())
 			continue
 		}
-		// Templates build concurrently, up to concurrency.template_builds, and
-		// each template's items start as soon as it is built.
+		// Builds run up to concurrency.template_builds at once; each template's
+		// items start as soon as it is built.
 		built := e.startTemplates(ctx, plan.Templates, builds, pending)
 		pending, cut = e.runItems(ctx, plan.Kind, pending, builds, failed, succeeded)
 		built()
 	}
-	// Only a stop cuts a round short or breaks out of the loop with work and
-	// rounds left.
+	// Only a stop cuts a round short or leaves rounds unrun.
 	res.RoundsSkipped = cut || ctx.Err() != nil && len(pending) > 0 && round <= e.Cfg.Retry.Rounds
 
 	for _, it := range plan.Runnable() {
@@ -317,19 +297,16 @@ func (e *Executor) Run(ctx context.Context, plan *pods.Plan) Result {
 	}
 	msg += fmt.Sprintf("%d blocked", len(res.Blocked))
 	if n := len(res.Completed) + len(res.Removed) + len(res.CleanupFailed); n > 0 {
-		// Only when there was something to clean up: a power job's log
-		// shouldn't end with a line of zeros.
+		// Skip when empty so a power job's log doesn't end with zeros.
 		msg += fmt.Sprintf("; cleanup: %d completed, %d removed, %d failed", len(res.Completed), len(res.Removed), len(res.CleanupFailed))
 	}
 	e.emit("", "", EventInfo, msg)
 	return res
 }
 
-// runItems runs items, up to concurrency.workers at once, and returns the
-// ones to try again: those that failed, and those a stop kept from running
-// (cut). An item that clones from a template being built waits for that
-// build to end, and fails if the build did; other items start at once, so
-// no item waits for a build it doesn't use.
+// runItems runs items, up to concurrency.workers at once, and returns those
+// to retry: failures and items a stop kept from running (cut). An item
+// waits only for the template build it clones from, and fails if it failed.
 func (e *Executor) runItems(ctx context.Context, kind pods.Kind, items []pods.Item, builds map[string]*tplBuild,
 	failed map[string]error, succeeded map[string]bool) (retry []pods.Item, cut bool) {
 	workers := make(sem, e.Cfg.Concurrency.Workers)
@@ -418,9 +395,8 @@ func (e *Executor) setPresent(vm proxmox.VM, exists bool) {
 	}
 }
 
-// StopBudget is the longest a Run takes to return once its context is done:
-// copyStopWait and masterRestartBudget for a template build that stopped its
-// master, then CleanupBudget. On shutdown a cancel's grace doesn't add to
-// it: Halt ends it. A process that stops its jobs on shutdown (battleship
-// serve) should wait a little longer than this for them.
+// StopBudget is the longest Run takes to return once its context is done.
+// On shutdown Halt ends any cancel grace, so it doesn't add to this; a
+// process stopping jobs on shutdown (battleship serve) should wait a bit
+// longer.
 const StopBudget = copyStopWait + masterRestartBudget + CleanupBudget

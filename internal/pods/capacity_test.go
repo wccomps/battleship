@@ -13,11 +13,10 @@ import (
 
 const gib = int64(1) << 30
 
-// capCluster: cedar has 40 GiB of memory free, birch 224 GiB; the
-// competitions storage is local to each node, with 100 GiB free on cedar
-// and 900 GiB on birch. Master teak (121) and team VMs are 8 GiB of
-// memory and 32 GiB of disk; team03-teak is stopped on birch and
-// team04-teak runs there.
+// capCluster: cedar has 40 GiB memory free, birch 224 GiB; competitions is
+// node-local with 100 GiB free on cedar, 900 GiB on birch. Master teak (121)
+// and team VMs are 8 GiB memory, 32 GiB disk; team03-teak is stopped on
+// birch, team04-teak runs there.
 func capCluster() proxmox.Resources {
 	return proxmox.Resources{
 		VMs: []proxmox.VM{
@@ -48,9 +47,8 @@ func deployItemOn(team, node string, vmid int, clone bool) Item {
 	return it
 }
 
-// overcommitPlan builds the teak template from its master and clones 12
-// new team VMs onto cedar, and starts the stopped team03 VM; team04 runs
-// already and team05 is blocked.
+// overcommitPlan builds teak's template, clones 12 team VMs onto cedar and
+// starts team03; team04 already runs and team05 is blocked.
 func overcommitPlan() *Plan {
 	p := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{{
 		Name: "teak.x.tpl", Host: "teak", VMID: 9021, Node: "cedar", MasterName: "teak.x", MasterVMID: 121, MasterNode: "cedar",
@@ -80,9 +78,8 @@ func TestCapacityOvercommitWarns(t *testing.T) {
 	want := []Usage{
 		{Kind: UsageMemory, Node: "birch", Used: 32 * gib, Total: 256 * gib, Needed: 4 * gib},
 		{Kind: UsageMemory, Node: "cedar", Used: 216 * gib, Total: 256 * gib, Needed: 96 * gib},
-		// Full clones: the template build copies the master's 32 GiB, and
-		// each of the 12 clones copies the template (the master's size,
-		// since the template is built in this plan).
+		// Full clones: the build copies the master's 32 GiB, and each of the 12
+		// clones copies the template (master-sized, as it's built in this plan).
 		{Kind: UsageStorage, Node: "cedar", Storage: "competitions", Used: 900 * gib, Total: 1000 * gib, Needed: 13 * 32 * gib},
 	}
 	if !reflect.DeepEqual(c.Usage, want) {
@@ -107,8 +104,8 @@ func TestCapacityWithoutOvercommitIsQuiet(t *testing.T) {
 	}}}
 	p.Items = []Item{deployItemOn("01", "birch", 10121, true), deployItemOn("02", "spruce", 10221, true)}
 	c := EstimateCapacity(p, capCluster(), deployCfg(true))
-	// The existing template is reused: clones get its 6 GiB, and linked
-	// clones need no disk up front.
+	// The existing template is reused: clones get its 6 GiB; linked clones need
+	// no disk up front.
 	want := []Usage{
 		{Kind: UsageMemory, Node: "birch", Used: 32 * gib, Total: 256 * gib, Needed: 6 * gib},
 		{Kind: UsageMemory, Node: "spruce", Used: 0, Total: 256 * gib, Needed: 6 * gib},
@@ -209,8 +206,8 @@ func (r *resourceAPI) ClusterResources(context.Context) (proxmox.Resources, erro
 	return r.res, nil
 }
 
-// The capacity check reads /cluster/resources once, not per VM, and
-// works from a real deploy plan with the planner's node assignment.
+// The capacity check reads /cluster/resources once, not per VM, using a
+// real deploy plan's node assignment.
 func TestReadCapacityOneCallFromPlannerPlan(t *testing.T) {
 	f := newCluster()
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01", "02", "03"}})
@@ -244,8 +241,8 @@ func TestReadCapacityOneCallFromPlannerPlan(t *testing.T) {
 			nodes[u.Node] += u.Needed
 		}
 	}
-	// 3 teak clones (4 GiB) spread over the nodes, 3 GPU oak clones
-	// (2 GiB) pinned to birch.
+	// 3 teak clones (4 GiB) spread over nodes, 3 GPU oak clones (2 GiB) pinned
+	// to birch.
 	if total != 18*gib || nodes["birch"] < 6*gib {
 		t.Errorf("memory needs = %v (total %d GiB)", nodes, total/gib)
 	}
@@ -269,9 +266,8 @@ func TestGiBText(t *testing.T) {
 	}
 }
 
-// A token whose role lacks Sys.Audit gets nodes without mem and maxmem from
-// /cluster/resources, although they are online: one note names them all and
-// the fix. Only a node that is missing or not online gets an offline note.
+// Without Sys.Audit, online nodes lack mem and maxmem: one note names them
+// all and the fix. Only missing or offline nodes get an offline note.
 func TestCapacityOnlineNodesWithoutMemoryNeedSysAudit(t *testing.T) {
 	res := capCluster()
 	res.Nodes = []proxmox.NodeResource{

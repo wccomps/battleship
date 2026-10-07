@@ -12,17 +12,17 @@ import (
 	"github.com/wccomps/battleship/internal/config"
 )
 
-// battleship serve waits web.shutdown_timeout for running jobs to stop, so by
-// default it must outlast the longest a stopped Run takes.
+// battleship serve waits web.shutdown_timeout for jobs to stop, so the
+// default must outlast StopBudget.
 func TestDefaultShutdownOutlastsStop(t *testing.T) {
 	if got := config.Default().Web.ShutdownTimeout; got <= StopBudget {
 		t.Errorf("default web.shutdown_timeout = %s, want more than the %s stop budget", got, StopBudget)
 	}
 }
 
-// The shipped Kubernetes config keeps the chain StopBudget <
-// web.shutdown_timeout < terminationGracePeriodSeconds, so a rolling update
-// never kills a replica while its jobs stop.
+// The shipped Kubernetes config keeps StopBudget < web.shutdown_timeout <
+// terminationGracePeriodSeconds, so rolling updates never kill a stopping
+// replica.
 func TestKubernetesShutdownChain(t *testing.T) {
 	read := func(path string) string {
 		b, err := os.ReadFile(path)

@@ -9,9 +9,9 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// errExplained marks an error that says itself what to check or do, so
-// it is shown as is, with no advice to remove the VM: the VM may not be this
-// run's, or removing it may not be the fix.
+// errExplained marks an error that says what to check or do, so no advice
+// to remove the VM is added: it may not be this run's, or removal may not
+// be the fix.
 var errExplained = errors.New("explained")
 
 // explained is an error text that matches errExplained.
@@ -35,10 +35,9 @@ func (n *notOursError) Error() string {
 
 func (n *notOursError) Is(target error) bool { return target == errExplained }
 
-// CleanupAdvice is the line to show for a Result.CleanupFailed entry. It
-// advises removing the VM by hand only when the VM is known to be this run's;
-// for a VM of unknown identity or ownership the error already says what to
-// check, and suggesting deletion could destroy someone else's VM.
+// CleanupAdvice is the line for a Result.CleanupFailed entry. It advises
+// manual removal only for a VM known to be this run's; otherwise deletion
+// could destroy someone else's VM.
 func CleanupAdvice(name string, err error) string {
 	if errors.Is(err, errExplained) {
 		return err.Error()
@@ -46,9 +45,8 @@ func CleanupAdvice(name string, err error) string {
 	return fmt.Sprintf("Could not remove %s: %s; remove it in Proxmox.", name, proxmox.Describe(err))
 }
 
-// halfDeletedError is a VM a failed destroy task left half-deleted: some of
-// it (usually its disks) gone and its config holding only lock=destroyed,
-// so every later destroy is refused. The error says how to finish it.
+// halfDeletedError is a VM a failed destroy left half-deleted: usually its
+// disks gone and only lock=destroyed left, so later destroys are refused.
 type halfDeletedError struct {
 	vmid  int
 	node  string
@@ -63,15 +61,13 @@ func (h *halfDeletedError) Error() string {
 	return msg
 }
 
-// Is matches errExplained. There is no Unwrap: errors.Is and errors.As don't
-// reach the cause.
+// Is matches errExplained. No Unwrap: errors.Is/As don't reach the cause.
 func (h *halfDeletedError) Is(target error) bool { return target == errExplained }
 
-// unconvertedError is a template whose config says template: 1 but one of
-// whose disks was never renamed to a base- volume: Proxmox's convert failed
-// partway, typically on a storage lock timeout. Linked clones from it fail
-// ("Linked clone feature is not supported"), so only a rebuild helps. There
-// is no Unwrap: errors.Is and errors.As don't reach the cause.
+// unconvertedError is a template (template: 1) with a disk never renamed to
+// base-, from a convert that failed partway (often a storage lock timeout).
+// Linked clones from it fail, so only a rebuild helps. No Unwrap:
+// errors.Is/As don't reach the cause.
 type unconvertedError struct {
 	name     string
 	vmid     int
@@ -92,15 +88,15 @@ func (u *unconvertedError) Error() string {
 	return msg
 }
 
-// leftoverDisksError is a VM that is deleted but whose disks could not all
-// be freed. The error says how to free them by hand.
+// leftoverDisksError is a deleted VM whose disks couldn't all be freed; it
+// says how to free them by hand.
 type leftoverDisksError struct {
 	vmid   int
 	node   string
 	vols   []string
 	causes []string // why freeing failed, per volume
-	// holder names the VM that has the VMID now; its disks may be the
-	// ones listed, so nothing was freed.
+	// holder is the VM now at the VMID; the listed disks may be its own, so
+	// nothing was freed.
 	holder string
 }
 

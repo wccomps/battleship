@@ -11,9 +11,8 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// userCfgTimeout is the error of a qmdestroy task that deleted the VM's disks
-// and then timed out on the cluster-wide user.cfg lock while removing the VM
-// from its pool and ACLs, as seen in production for VM 11904.
+// userCfgTimeout is a qmdestroy error after the disks were deleted, timing
+// out on the cluster-wide user.cfg lock while removing pool and ACL entries.
 func userCfgTimeout(node string, vmid int) error {
 	return &proxmox.TaskError{
 		UPID:       podstest.UPID(node, "qmdestroy", vmid),
@@ -46,9 +45,8 @@ func wantHalfDeletedAdvice(t *testing.T, msg string) {
 	}
 }
 
-// The production incident: the first destroy task dies on the user.cfg lock
-// after deleting the disks, leaving lock=destroyed; every later destroy is
-// refused. The VM must end failed with advice, never done.
+// A destroy that dies on the user.cfg lock after deleting the disks leaves
+// lock=destroyed, and later destroys are refused: the VM fails with advice.
 func TestHalfDeletedVMFailsWithAdvice(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
@@ -131,8 +129,8 @@ func TestDeleteIsVerified(t *testing.T) {
 	}
 }
 
-// A VM that vanished from the listing by name but whose VMID holds a
-// half-deleted VM is not "already deleted".
+// A VM gone by name whose VMID holds a half-deleted VM is not "already
+// deleted".
 func TestHalfDeletedVMIsNotAlreadyDeleted(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
@@ -160,9 +158,8 @@ func TestCleanupAdviceForHalfDeletedVM(t *testing.T) {
 	}
 }
 
-// Deletes take a slot of concurrency.deletes, so many workers never run more
-// destroy tasks at once than the cap: Proxmox times out on its user.cfg lock
-// under too many concurrent destroys.
+// Deletes are capped by concurrency.deletes: Proxmox times out on its
+// user.cfg lock under too many concurrent destroys.
 func TestDeletesAreCapped(t *testing.T) {
 	f := newCluster()
 	var teams []string
@@ -259,9 +256,8 @@ func TestTeardownOfStoppedVMSendsNoStop(t *testing.T) {
 	}
 }
 
-// A delete sent to the node a VM just left fails with "does not exist" there.
-// That is not a deleted VM: the item must not count as done while the VM
-// lives on another node.
+// "does not exist" from the node a VM just left doesn't make the item done
+// while the VM lives on another node.
 func TestDeleteOfVMThatMovedIsNotCalledDone(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
@@ -303,9 +299,8 @@ func TestDeleteOfVMThatMovedIsRetriedThere(t *testing.T) {
 	}
 }
 
-// A delete whose answer was lost after Proxmox started the destroy is sent
-// again and refused with "locked (destroyed)": that lock is our own destroy
-// still running, not a half-deleted VM.
+// A resent delete refused with "locked (destroyed)" is waiting on its own
+// destroy, not a half-deleted VM.
 func TestResentDeleteWaitsForItsOwnDestroy(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
@@ -321,10 +316,9 @@ func TestResentDeleteWaitsForItsOwnDestroy(t *testing.T) {
 	}
 }
 
-// A later teardown sees a VM an earlier one left half-deleted, though it
-// has lost its name: the plan blocks it with the admin's command, and it
-// keeps its disks from looking orphaned. One that kept its name is planned
-// once, by name.
+// A later teardown finds a half-deleted VM despite its lost name: the plan
+// blocks it with the admin's command and its disks don't look orphaned. One
+// that kept its name is planned once, by name.
 func TestTeardownPlansHalfDeletedVMs(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})

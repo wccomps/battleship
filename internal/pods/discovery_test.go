@@ -286,9 +286,8 @@ func TestAssignNodes(t *testing.T) {
 	}
 }
 
-// Tagged masters group into template sets by the part of their name after
-// the host; masters with no such part are listed apart. Untagged VMs,
-// templates and team VMs are never masters.
+// Tagged masters group into sets by the part after the host; others are
+// listed apart. Untagged VMs, templates and team VMs are never masters.
 func TestMasterSets(t *testing.T) {
 	n := NewNaming(config.Default().Naming)
 	vms := []proxmox.VM{
@@ -319,8 +318,8 @@ func TestMasterSets(t *testing.T) {
 	}
 }
 
-// Every team with a team VM counts: team 00, the test team, and teams past
-// it. Templates, masters, unpadded and hand-made names don't make a team.
+// Every team with a team VM counts, including 00 and teams past it.
+// Templates, masters, unpadded and hand-made names don't make a team.
 func TestTeamsWithVMs(t *testing.T) {
 	n := NewNaming(config.Default().Naming)
 	vms := []proxmox.VM{
@@ -344,8 +343,7 @@ func TestTeamsWithVMs(t *testing.T) {
 	if got, want := AllTeamVMs(vms, n), FindTeamVMs(vms, n, TeamsWithVMs(vms, n), nil); !reflect.DeepEqual(got, want) || len(got) != 4 {
 		t.Errorf("AllTeamVMs = %v, want %v", got, want)
 	}
-	// Every team VM's team is one TeamsWithVMs returns, so "all" leaves no
-	// team VM behind.
+	// Every team VM's team is in TeamsWithVMs, so "all" leaves none behind.
 	all := TeamsWithVMs(vms, n)
 	for _, vm := range vms {
 		if team, _, ok := n.ParseVMName(vm.Name); ok && !vm.Template && !n.IsTemplateName(vm.Name) && len(FindTeamVMs([]proxmox.VM{vm}, n, all, nil)) != 1 {

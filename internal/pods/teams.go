@@ -13,10 +13,9 @@ import (
 // FormatTeam zero-pads a team number: 7 -> "07". n must be 0-99.
 func FormatTeam(n int) string { return fmt.Sprintf("%02d", n) }
 
-// ParseTeams parses "7", "1-32", "1,3,5" or combinations like "1-3,7" into
-// sorted, de-duplicated two-digit team numbers.
-// A single number means that team only (unlike the Python tool, where clone 32 meant teams 1-32).
-// Team 00 is the test team.
+// ParseTeams parses "7", "1-32", "1,3,5" or "1-3,7" into sorted, unique
+// two-digit teams. A single number means that team only; 00 is the test
+// team.
 func ParseTeams(spec string) ([]string, error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
@@ -64,9 +63,8 @@ func teamList(seen map[int]bool) []string {
 	return teams
 }
 
-// TeamRanges groups teams into runs of consecutive numbers, sorted and
-// de-duplicated: 01 02 03 07 -> [1 3] [7 7]. Teams that aren't numbers are
-// left out.
+// TeamRanges groups teams into consecutive runs: 01 02 03 07 -> [1 3] [7 7].
+// Non-numeric teams are left out.
 func TeamRanges(teams []string) [][2]int {
 	var nums []int
 	for _, t := range teams {
@@ -102,8 +100,7 @@ func FormatTeams(teams []string) string {
 	return strings.Join(parts, ",")
 }
 
-// parseTeamNumber parses team number s, from part, the comma-separated piece
-// of the spec that errors quote.
+// parseTeamNumber parses s; part is the spec piece that errors quote.
 func parseTeamNumber(part, s string) (int, error) {
 	if !isAllDigits(s) {
 		if s == part {

@@ -13,8 +13,7 @@ import (
 )
 
 // ResourceReader is the optional part of an API that reads the cluster's
-// VMs, nodes and storage in one call (*proxmox.Client does). Without it,
-// previews have no capacity check.
+// VMs, nodes and storage in one call. Without it, previews skip capacity.
 type ResourceReader interface {
 	ClusterResources(ctx context.Context) (proxmox.Resources, error)
 }
@@ -27,8 +26,8 @@ const (
 	UsageStorage UsageKind = "storage"
 )
 
-// Usage is one node's memory, or one storage's space, as the cluster
-// reports it now and as much more as a plan needs. Sizes are bytes.
+// Usage is one node's memory or one storage's space: now, and what a plan
+// needs on top. Sizes are bytes.
 type Usage struct {
 	Kind    UsageKind `json:"kind"`
 	Node    string    `json:"node"`              // "" for shared storage
@@ -59,26 +58,24 @@ func (u Usage) Over() bool { return u.Needed > u.Free() }
 // Near reports that the plan would leave it more than 90% used.
 func (u Usage) Near() bool { return u.Total > 0 && (u.Used+u.Needed)*10 > u.Total*9 }
 
-// Capacity is how a plan's needs compare with what the cluster has free.
-// It is advice for the preview only: it is not part of the plan, so it
-// never changes the plan's fingerprint, and it never blocks anything, since
-// overcommit may be deliberate.
+// Capacity compares a plan's needs with what the cluster has free. It is
+// preview advice only: not part of the plan or its fingerprint, and never
+// blocking, since overcommit may be deliberate.
 type Capacity struct {
-	// Usage lists the nodes' memory and the clone storage the plan uses,
-	// memory first, each sorted by node.
+	// Usage lists node memory then clone storage, each sorted by node.
 	Usage []Usage `json:"usage"`
 	// Notes are what the numbers can't say, e.g. that linked clones grow.
 	Notes []string `json:"notes"`
 }
 
-// CapacityWarning is one line of the preview's capacity warnings: Over is
-// more than is free; otherwise it would be more than 90% used.
+// CapacityWarning is one preview warning: Over means more than is free,
+// otherwise it would be over 90% used.
 type CapacityWarning struct {
 	Over bool
 	Text string
 }
 
-// Warnings lists the usages that are over, then those near full, e.g.
+// Warnings lists usages over, then near full, e.g.
 // "cedar: needs 96 GiB of memory, 40 GiB free".
 func (c *Capacity) Warnings() []CapacityWarning {
 	if c == nil {
@@ -104,8 +101,8 @@ func (c *Capacity) Warnings() []CapacityWarning {
 	return append(over, near...)
 }
 
-// GiB shows a size in GiB: whole when it is 10 or more or a whole number,
-// else to one decimal.
+// GiB formats a size in GiB: whole if 10 or more or integral, else one
+// decimal.
 func GiB(b int64) string {
 	v := float64(b) / float64(1<<30)
 	if v >= 10 || v == float64(int64(v)) {
@@ -114,8 +111,8 @@ func GiB(b int64) string {
 	return strconv.FormatFloat(v, 'f', 1, 64) + " GiB"
 }
 
-// NeedsCapacity reports whether plan's preview checks capacity: a deploy, or
-// power start. A reset also starts its VMs; it isn't checked.
+// NeedsCapacity reports whether plan's preview checks capacity: a deploy or
+// power start. Resets also start VMs but aren't checked.
 func NeedsCapacity(plan *Plan) bool {
 	switch plan.Kind {
 	case KindDeploy:
@@ -130,9 +127,8 @@ func NeedsCapacity(plan *Plan) bool {
 	return false
 }
 
-// ReadCapacity reads the cluster's resources in one call and compares them
-// with plan's needs. It returns nil when the plan starts nothing or api
-// can't read resources.
+// ReadCapacity reads cluster resources in one call and compares them with
+// plan's needs; nil when the plan starts nothing or api can't read them.
 func ReadCapacity(ctx context.Context, api API, plan *Plan, cfg config.Config) (*Capacity, error) {
 	rr, ok := api.(ResourceReader)
 	if !ok || !NeedsCapacity(plan) {
@@ -147,17 +143,11 @@ func ReadCapacity(ctx context.Context, api API, plan *Plan, cfg config.Config) (
 
 // EstimateCapacity compares what plan needs with what res has free.
 //
-// Memory, per node: a new clone needs its template's memory (the master's
-// when the plan builds the template) on the node the planner assigned it;
-// an existing VM the plan starts needs its own, unless it already runs.
-//
-// Storage, deploy.storage per node (or once, if shared): a template build
-// copies its master in full, and so does each clone when deploy.linked is
-// false. Linked clones need next to nothing at first but grow as they are
-// used, which a note says rather than a guessed number.
-//
-// Sizes come from res (maxmem and maxdisk, the boot disk). Only nodes and
-// storage the plan needs something from are listed.
+// Memory, per node: a new clone needs its template's (or master's) memory on
+// its assigned node; an existing VM the plan starts needs its own unless
+// running. Storage: template builds and full clones copy the whole disk;
+// linked clones grow with use, which a note says instead of guessing. Only
+// nodes and storage the plan uses are listed.
 func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *Capacity {
 	if !NeedsCapacity(plan) {
 		return nil
@@ -206,9 +196,8 @@ func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *
 	}
 
 	c := &Capacity{}
-	// An online node without memory figures is not offline: Proxmox leaves
-	// mem and maxmem out of /cluster/resources for a caller without
-	// Sys.Audit. One note covers every such node.
+	// A node without memory figures isn't offline: Proxmox omits mem and maxmem
+	// for callers without Sys.Audit.
 	var noAudit, offline []string
 	for _, node := range slices.Sorted(maps.Keys(mem)) {
 		if mem[node] <= 0 {
@@ -237,8 +226,8 @@ func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *
 	return c
 }
 
-// storageUsage turns the per-node disk needs into usages of storage, one
-// per node, or one in all if the storage is shared.
+// storageUsage turns per-node disk needs into storage usages: one per node,
+// or one total if the storage is shared.
 func storageUsage(c *Capacity, all []proxmox.StorageResource, storage string, disk map[string]int64) []Usage {
 	var total int64
 	for _, b := range disk {

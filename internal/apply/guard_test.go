@@ -12,9 +12,8 @@ import (
 	"github.com/wccomps/battleship/internal/pods"
 )
 
-// notChanges are the API methods a step may call after its run stopped:
-// reads, task waits and stopping a task. Every other method changes
-// something, so guardedAPI must refuse it then.
+// notChanges are the API methods allowed after a stop: reads, task waits
+// and StopTask. guardedAPI must refuse every other method then.
 var notChanges = map[string]bool{
 	"ClusterVMs": true, "OnlineNodes": true, "VMConfig": true, "Snapshots": true,
 	"CurrentStatus": true, "StorageContent": true, "VMIDHeld": true, "WaitTask": true, "StopTask": true,
@@ -26,9 +25,8 @@ type countingAPI struct {
 	calls int
 }
 
-// Every API method a step can call either is in notChanges or is held back
-// by guardedAPI once the step's run has stopped, so a method added to API
-// can't slip past the guard.
+// Every API method is either in notChanges or held back by guardedAPI, so
+// a new API method can't slip past the guard.
 func TestGuardedAPIHoldsBackEveryChange(t *testing.T) {
 	run, stop := context.WithCancel(context.Background())
 	stop()
@@ -43,8 +41,8 @@ func TestGuardedAPIHoldsBackEveryChange(t *testing.T) {
 		}
 		var out []reflect.Value
 		func() {
-			// A method guardedAPI passes through reaches the nil API
-			// countingAPI embeds, which panics: count it as a call.
+			// A passed-through method hits countingAPI's nil embedded API and panics;
+			// count that as a call.
 			defer func() {
 				if recover() != nil {
 					inner.calls++

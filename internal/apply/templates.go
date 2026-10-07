@@ -23,26 +23,26 @@ func needsTemplate(items []pods.Item, name string) bool {
 	return false
 }
 
-// tplBuild is what the run knows of a template it may build. A build
+// tplBuild is what the run knows of a template it may build. The build
 // writes it before closing ready; items read it after.
 type tplBuild struct {
 	spec *pods.TemplateSpec // as planned
 	node string             // where the template is
-	// oldGone: a rebuild deleted the old template, so later rounds create
-	// or resume the new one.
+	// oldGone: a rebuild deleted the old template, so later rounds create or
+	// resume the new one.
 	oldGone bool
 	err     error         // the last build's error
 	done    bool          // built (or found) in this run
 	ready   chan struct{} // closed when this round's build ends; nil if none
 }
 
-// startTemplates starts building, each in its own goroutine, every template
-// that pending items still need, setting its ready channel, which closes
-// when its build ends. wait blocks until every build has ended.
+// startTemplates builds, each in its own goroutine, every template pending
+// items need; each ready channel closes when that build ends, and wait
+// blocks until all have.
 //
-// Builds take a template_builds slot from the shared Limits for their whole
-// run, so the masters stopped at once stay bounded; the copy itself also
-// takes one of the master node's clone slots (see ensureTemplate).
+// A build holds a template_builds slot throughout, bounding how many
+// masters are stopped at once; the copy also takes a master-node clone
+// slot (see ensureTemplate).
 func (e *Executor) startTemplates(ctx context.Context, specs []pods.TemplateSpec, builds map[string]*tplBuild, pending []pods.Item) (wait func()) {
 	var wg sync.WaitGroup
 	for _, spec := range specs {
@@ -70,18 +70,17 @@ func (e *Executor) startTemplates(ctx context.Context, specs []pods.TemplateSpec
 // master's copy to finish before restarting the master.
 const masterWaitBudget = 30 * time.Minute
 
-// copyStopWait is how long a stopped run waits for a template copy it
-// stopped, and for its master's stop task, to end before restarting the
-// master; masterRestartBudget bounds the restart.
+// copyStopWait is how long a stopped run waits for a copy it stopped, and
+// the master's stop task, to end before restarting the master;
+// masterRestartBudget bounds the restart.
 const (
 	copyStopWait        = 2 * time.Minute
 	masterRestartBudget = 2 * time.Minute
 )
 
-// ensureTemplate creates b's template from its master, first deleting the
-// old one when rebuilding, and records where it is. A VM with the
-// template's name that was left unconverted by an earlier attempt is
-// resumed rather than cloned again. Ported from create_template_from_master.
+// ensureTemplate creates b's template from its master, deleting the old one
+// first on rebuild. An unconverted VM with the template's name from an
+// earlier attempt is resumed, not cloned again.
 func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 	spec := b.spec
 	name := spec.Name
@@ -111,8 +110,7 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 		}
 		b.oldGone = true // later rounds must create or resume, never delete the new VM
 	case found && cur.Template:
-		// A template an earlier run left half-converted would fail every
-		// linked clone; fail once here instead.
+		// A half-converted template would fail every linked clone; fail once here.
 		cfg, gone, err := e.readVM(ctx, cur.Node, spec.VMID)
 		switch {
 		case gone:
@@ -148,9 +146,8 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 		return fmt.Errorf("VMID %d is now used by %s", spec.VMID, other.Name)
 	}
 
-	// The copy counts against the master node's clone slots, like team
-	// clones from that node. The slot is taken before the master is stopped,
-	// so the master is not left down while the build waits for one.
+	// The copy takes a master-node clone slot like team clones. It is taken
+	// before stopping the master so the master isn't down while waiting.
 	if err := e.lim.cloneSlot(spec.MasterNode).do(ctx, func() error { return e.copyMaster(ctx, spec) }); err != nil {
 		return err
 	}
@@ -159,10 +156,9 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 	return e.finishTemplate(ctx, spec, spec.MasterNode)
 }
 
-// copyMaster clones spec's master to spec.VMID, stopping the master first if
-// it is running and starting it again once the copy can no longer be
-// running. A copy still running when the job is stopped is stopped too (see
-// stopCopy).
+// copyMaster clones spec's master to spec.VMID, stopping a running master
+// first and restarting it once the copy can't still be running. A stopped
+// job stops a running copy too (see stopCopy).
 func (e *Executor) copyMaster(ctx context.Context, spec *pods.TemplateSpec) error {
 	name := spec.Name
 	// Full clones on NFS are only reliable from a stopped source.
@@ -179,12 +175,12 @@ func (e *Executor) copyMaster(ctx context.Context, spec *pods.TemplateSpec) erro
 	}); err != nil {
 		return err
 	}
-	// Registered before the master's stop is sent: a cancel or wait failure
-	// during the stop leaves it possibly stopped, to restart or report.
+	// Deferred before the stop is sent: a cancel or wait failure during the
+	// stop may leave the master stopped.
 	defer func() {
 		wctx, wcancel := context.WithTimeout(context.WithoutCancel(ctx), masterWaitBudget)
 		defer wcancel()
-		// A stop stops a copy it cut off and cuts restartMaster's waits to copyStopWait.
+		// A stop stops a copy it cut off and caps restartMaster's waits at copyStopWait.
 		onStop := func() {
 			go func() {
 				if e.Sleep(wctx, copyStopWait) == nil {
@@ -231,20 +227,18 @@ func (e *Executor) copyMaster(ctx context.Context, spec *pods.TemplateSpec) erro
 	return nil
 }
 
-// startedTask is a Proxmox task a step started: its kind, UPID and how waiting
-// for it ended.
+// startedTask is a Proxmox task a step started and how waiting for it ended.
 type startedTask struct {
 	kind, upid string
 	err        error
 }
 
-// restartMaster starts the master a template build stopped, even after a
-// cancel, but only once its stop and its copy can no longer be running,
-// waiting for them within wctx: starting the master under a copy corrupts
-// it. A master it can't restart is reported left stopped.
+// restartMaster starts a master the build stopped, even after a cancel, but
+// only once its stop and copy can't still be running (starting it under a
+// copy corrupts the copy). If it can't, the master is reported left stopped.
 func (e *Executor) restartMaster(ctx, wctx context.Context, spec *pods.TemplateSpec, tasks ...startedTask) {
-	// leftStopped reports the master left stopped, in the run's result
-	// too: someone must start it.
+	// leftStopped reports the master left stopped, also in the run's result:
+	// someone must start it.
 	leftStopped := func(reason string) {
 		msg := "master " + spec.MasterName + " left stopped: " + reason + "; start it in Proxmox once nothing is working on it"
 		e.emit(spec.Name, pods.StepStart, EventFailed, msg)
@@ -268,8 +262,7 @@ func (e *Executor) restartMaster(ctx, wctx context.Context, spec *pods.TemplateS
 		}
 		switch {
 		case proxmox.IsForbidden(err):
-			// It can't be followed; the lock checks below say when it is
-			// over.
+			// Can't be followed; the lock checks below say when it is over.
 		case proxmox.IsLapsed(err):
 			lapsed(t.kind)
 			return
@@ -304,9 +297,8 @@ func (e *Executor) restartMaster(ctx, wctx context.Context, spec *pods.TemplateS
 	}
 }
 
-// stopCopy asks Proxmox to stop a template copy that a stopped job cut off,
-// and marks the copy failed: cleanup removes it, unless a later wait sees its
-// task finish OK (see settleCopy).
+// stopCopy stops a template copy a stopped job cut off and marks it failed,
+// so cleanup removes it unless a later wait sees it finish OK (settleCopy).
 func (e *Executor) stopCopy(ctx context.Context, spec *pods.TemplateSpec, upid string) {
 	e.mu.Lock()
 	if o := e.owned[spec.VMID]; o != nil && o.state == cloneUnknown {
@@ -322,8 +314,8 @@ func (e *Executor) stopCopy(ctx context.Context, spec *pods.TemplateSpec, upid s
 	e.emit(spec.Name, pods.StepClone, EventInfo, "stopped the copy of "+spec.MasterName+" (the job was stopped)")
 }
 
-// settleCopy records how a template copy's task ended, once a wait for it
-// says: nil is OK, a TaskError failed; anything else leaves it as it was.
+// settleCopy records how a copy's task ended: nil is OK, a TaskError
+// failed, anything else changes nothing.
 func (e *Executor) settleCopy(vmid int, err error) {
 	var taskErr *proxmox.TaskError
 	e.mu.Lock()
@@ -361,9 +353,9 @@ func (e *Executor) finishTemplate(ctx context.Context, spec *pods.TemplateSpec, 
 	if _, err := e.applyConfig(ctx, tplItem, false, pods.CDROMChanges); err != nil {
 		return fmt.Errorf("ejecting CD-ROM: %w", err)
 	}
-	// Converting renames disks to base-*, which linked clones require. Its
-	// result is checked below rather than trusted. Conversions take the
-	// storage lock, so they run one at a time (see Limits).
+	// Conversion renames disks to base-*, which linked clones need; the result
+	// is checked below, not trusted. Conversions take the storage lock, so run
+	// one at a time (see Limits).
 	convErr := e.lim.storageOps.do(ctx, func() error { return e.convert(ctx, node, spec.VMID) })
 	if convErr != nil && ctx.Err() != nil {
 		return fmt.Errorf("converting to template: %w", convErr)
@@ -397,12 +389,11 @@ func (e *Executor) finishTemplate(ctx context.Context, spec *pods.TemplateSpec, 
 const convertWait = 2 * time.Minute
 
 // convert converts the VM to a template and waits for the task. Proxmox sets
-// template: 1 before its task renames the disks, so each request is preceded
-// by a read and none is sent once the VM says template: 1 (it would fail, and
-// a restart can't rename what a failed task left), and a failed task is never
-// restarted. When an earlier request converted the VM or this one's outcome
-// is unknown, convert waits up to convertWait for the disks to be renamed and
-// returns nil if the VM says template: 1; the caller checks the disks.
+// template: 1 before renaming disks, so a request is never sent once the VM
+// says template: 1 (it would fail) and a failed task is never restarted.
+// If the VM was already converted or the outcome is unknown, convert waits
+// up to convertWait for the rename and returns nil if template: 1; the
+// caller checks the disks.
 func (e *Executor) convert(ctx context.Context, node string, vmid int) error {
 	upid, err := e.taskUPID(ctx, 0, func() (string, error) {
 		cfg, err := e.api.VMConfig(ctx, node, vmid)
@@ -435,7 +426,6 @@ func (e *Executor) convert(ctx context.Context, node string, vmid int) error {
 	return err
 }
 
-// errVanished is a VM that disappeared during a step. Unlike "does not
-// exist", which may mean the VM is not visible on its node yet, it is not
-// retried.
+// errVanished is a VM that disappeared mid-step. Unlike "does not exist"
+// (maybe not visible on its node yet), it is not retried.
 var errVanished = errors.New("the VM disappeared")

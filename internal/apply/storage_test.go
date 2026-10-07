@@ -18,9 +18,8 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// storageLockTimeout is the error of a task that timed out on the shared
-// storage's cluster lock, as seen in production while four templates were
-// being built at once.
+// storageLockTimeout is a task error from timing out on the shared
+// storage's cluster lock.
 func storageLockTimeout(node, kind string, vmid int) error {
 	return &proxmox.TaskError{
 		UPID:       podstest.UPID(node, kind, vmid),
@@ -41,11 +40,9 @@ func wantUnconvertedError(t *testing.T, err error, extra ...string) {
 	}
 }
 
-// The production incident: the qmtemplate task set template: 1, then timed
-// out on the storage lock before renaming the disk to base-*. Restarting it
-// "succeeded" on the already-template VM, and every linked clone then failed.
-// The convert must not be restarted, and the half-conversion must fail the
-// build.
+// qmtemplate sets template: 1, then can time out on the storage lock before
+// renaming disks to base-*. Restarting it "succeeds" and every linked clone
+// then fails, so the convert is not restarted and the build fails.
 func TestHalfConvertedTemplateFailsTheBuild(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
@@ -69,9 +66,8 @@ func TestHalfConvertedTemplateFailsTheBuild(t *testing.T) {
 	}
 }
 
-// Cleanup must not call a half-converted template complete: it is a VM this
-// run created that can never be cloned, so it is removed like any other
-// unfinished one, and the next run rebuilds it cleanly.
+// A half-converted template can never be cloned, so cleanup removes it like
+// any unfinished VM rather than calling it complete.
 func TestCleanupRemovesHalfConvertedTemplate(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
@@ -112,8 +108,8 @@ func TestConvertIsVerifiedEvenWhenTheTaskSucceeds(t *testing.T) {
 	}
 }
 
-// A failed convert task that left the VM unconverted is not restarted
-// either; its error is reported as is.
+// A failed convert that left the VM unconverted is not restarted; its
+// error is reported as is.
 func TestFailedConvertIsNotRestarted(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
@@ -131,8 +127,8 @@ func TestFailedConvertIsNotRestarted(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "converting to template") || !strings.Contains(err.Error(), "lock request timeout") {
 		t.Errorf("error = %v", err)
 	}
-	// Once in the build, and once more by cleanup completing the copy it
-	// left (safe: nothing was converted); never a restart of the task.
+	// Once in the build, once by cleanup completing the copy (nothing was
+	// converted); never a restart.
 	if n := f.Called("template:9021"); n != 2 {
 		t.Errorf("convert started %d times, want 2", n)
 	}
@@ -193,9 +189,8 @@ func teakTeamVM(f *podstest.Fake) []string {
 	}
 }
 
-// A destroy task that ends OK but timed out on the storage lock while
-// freeing the disks leaves them on the storage. They are freed, and the
-// info event says which.
+// A destroy that ends OK but timed out on the storage lock leaves its disks;
+// they are freed and the info event names them.
 func TestDeleteFreesDisksTheDestroyLeft(t *testing.T) {
 	f := newCluster()
 	left := teakTeamVM(f)
@@ -243,8 +238,8 @@ func TestCleanDeleteFreesNothing(t *testing.T) {
 	}
 }
 
-// The production incident: deleting the old template for a rebuild left
-// its base disk behind. It is freed before the new template is built.
+// Deleting the old template for a rebuild can leave its base disk; it is
+// freed before the new template is built.
 func TestRebuildFreesOldTemplateDisk(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
@@ -284,9 +279,8 @@ func wantLeftoverAdvice(t *testing.T, err error, vols ...string) {
 	}
 }
 
-// Leftovers that cannot be freed fail the delete with the commands to free
-// them by hand, and a retry round that finds the VM gone does not hide that
-// as "already deleted".
+// Unfreeable leftovers fail the delete with commands to free them by hand,
+// and a retry that finds the VM gone doesn't report "already deleted".
 func TestLeftoverDisksThatCannotBeFreedFailWithAdvice(t *testing.T) {
 	f := newCluster()
 	left := teakTeamVM(f)
@@ -341,10 +335,9 @@ func TestLeftoverBaseVolumeInUseIsSurfaced(t *testing.T) {
 	}
 }
 
-// storageTaskWatch holds every task that takes the storage lock (template
-// conversions and template destroys) for 300ms, and records the most in
-// flight at once. The hold is long enough that tasks which are not
-// serialized are sure to be seen together.
+// storageTaskWatch holds each storage-lock task (conversions, template
+// destroys) for 300ms, long enough to catch unserialized tasks overlapping,
+// and records the most in flight.
 type storageTaskWatch struct {
 	mu            sync.Mutex
 	inflight, max int
@@ -385,11 +378,9 @@ func (w *storageTaskWatch) peak() int {
 	return w.max
 }
 
-// Conversions and template destroys each take the shared storage's cluster
-// lock; run together, they time out on it. Rebuilding teak (destroying its
-// old template, then converting the new one) while oak's template is
-// built must never run two of them at once, though the builds themselves
-// run in parallel.
+// Conversions and template destroys each take the storage cluster lock and
+// time out if run together. Rebuilding teak while oak builds must never
+// overlap two of them, though the builds run in parallel.
 func TestConvertAndTemplateDeleteNeverOverlap(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
@@ -417,8 +408,7 @@ func TestConvertAndTemplateDeleteNeverOverlap(t *testing.T) {
 }
 
 // A template delete whose first config read fails still takes the
-// storage-ops slot: not knowing it is a template must not let its destroy
-// run beside a conversion.
+// storage-ops slot.
 func TestTemplateDeleteAfterAFailedReadIsSerialized(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
@@ -470,9 +460,8 @@ func atoi(s string) int {
 	return n
 }
 
-// A VMID can be reused while its old disks wait for a retry: a new VM's
-// disks get the same names. Leftovers are never freed while a VM holds the
-// VMID, since they may be that VM's now.
+// A reused VMID's new VM gets the same disk names, so leftovers are never
+// freed while a VM holds the VMID.
 func TestLeftoversAreNotFreedOnceTheVMIDIsReused(t *testing.T) {
 	f := newCluster()
 	left := teakTeamVM(f)
@@ -506,9 +495,8 @@ func TestLeftoverAdviceWarnsAboutVMIDReuse(t *testing.T) {
 	}
 }
 
-// A convert request whose answer was lost may have converted the VM. It is
-// not sent again: Proxmox would refuse to convert a template, failing a
-// good build.
+// A convert whose answer was lost may have succeeded; resending would fail
+// a good build, since Proxmox refuses to convert a template.
 func TestConvertWhoseAnswerWasLostIsNotResent(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
@@ -525,9 +513,9 @@ func TestConvertWhoseAnswerWasLostIsNotResent(t *testing.T) {
 	}
 }
 
-// cancelDuringDestroy runs a teardown of team01-teak whose destroy task
-// leaves the disks behind, and cancels the job while the run waits for
-// that task, which then ends inside the grace.
+// cancelDuringDestroy runs a teardown of team01-teak whose destroy leaves
+// its disks, cancelling while the run waits on the task, which ends within
+// the grace.
 func cancelDuringDestroy(t *testing.T, f *podstest.Fake, plan *pods.Plan) (*recorder, Result) {
 	t.Helper()
 	f.DeleteKeepsDisks = map[int]bool{10121: true}
@@ -545,9 +533,8 @@ func cancelDuringDestroy(t *testing.T, f *podstest.Fake, plan *pods.Plan) (*reco
 	return rec, ex.Run(ctx, plan)
 }
 
-// A cancel during the destroy's wait holds back freeing the disks it left:
-// the item reads interrupted, not failed with advice to free them by hand,
-// and the log names the disks left.
+// A cancel during the destroy wait holds back freeing its disks: the item
+// is interrupted (not failed with advice) and the log names the disks.
 func TestCancelDuringDestroyLeavesDisksAsAnInterruption(t *testing.T) {
 	f := newCluster()
 	left := teakTeamVM(f)
@@ -575,8 +562,8 @@ func TestCancelDuringDestroyLeavesDisksAsAnInterruption(t *testing.T) {
 	}
 }
 
-// A later run of the plan that finds the VM gone frees what the earlier
-// one left, read from the storage: it remembers nothing of that run.
+// A later run that finds the VM gone frees leftovers read from storage,
+// remembering nothing of the earlier run.
 func TestLaterRunFreesLeftoversFromStorage(t *testing.T) {
 	f := newCluster()
 	teakTeamVM(f)
@@ -620,10 +607,9 @@ func TestLaterRunLeavesAReusedVMIDsDisks(t *testing.T) {
 	}
 }
 
-// A later teardown job plans from what it lists, so a team VM deleted by a
-// cut-off teardown has no item; its disks still on the storage do, and the
-// job frees them. A host-filtered teardown, and another team's or a held
-// VMID's disks, are left alone.
+// A cut-off teardown's deleted VM has no item in a later plan, but its disks
+// do and are freed. Host-filtered teardowns, other teams' disks and held
+// VMIDs' disks are left alone.
 func TestTeardownPlansOrphanedDisks(t *testing.T) {
 	f := newCluster()
 	teakTeamVM(f)
@@ -668,9 +654,8 @@ func orphanedSetup(t *testing.T) *podstest.Fake {
 	return f
 }
 
-// A node refusing the listing (no Datastore.Allocate there) shows no
-// disks, and the others are still asked; any other listing failure fails
-// the plan rather than leave the disks out unsaid.
+// A node refusing the listing (no Datastore.Allocate) shows no disks and
+// the others are still asked; any other listing error fails the plan.
 func TestOrphanedDisksListingErrors(t *testing.T) {
 	f := orphanedSetup(t)
 	f.FailOn("content:competitions:10121", &proxmox.APIError{Status: 403, Message: "Permission check failed"})
@@ -708,8 +693,8 @@ func TestOrphanedDisksOfAnUnseenVMAreKept(t *testing.T) {
 	}
 }
 
-// Listing the storage takes seconds per node: a shared one is listed on
-// one node only, and a local one on each node that has it.
+// A shared storage is listed on one node only; a local one on each node
+// that has it.
 func TestOrphanedDisksListSharedStorageOnce(t *testing.T) {
 	f := orphanedSetup(t)
 	for _, c := range []struct {
@@ -735,8 +720,7 @@ func TestOrphanedDisksListSharedStorageOnce(t *testing.T) {
 	}
 }
 
-// A teardown of a few teams asks the storage about each VMID their VMs
-// would have from the templates on the cluster; one of many teams lists
+// A few teams' teardown asks about each candidate VMID; many teams list
 // the storage whole, which also finds disks of VMs whose template is gone.
 func TestOrphanedDisksAskFewVMIDsOrListWhole(t *testing.T) {
 	f := orphanedSetup(t)
