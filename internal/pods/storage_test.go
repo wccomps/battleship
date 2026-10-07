@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -671,8 +672,8 @@ func TestOrphanedDisksListingErrors(t *testing.T) {
 	f := orphanedSetup(t)
 	f.failOn("content:competitions:0", &proxmox.APIError{Status: 403, Message: "Permission check failed"})
 	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
-	if err != nil || len(plan.Items) != 1 || plan.Items[0].Node == f.nodes[0] {
-		t.Fatalf("after a 403 on %s: plan %+v, err %v; want the item from another node", f.nodes[0], plan, err)
+	if err != nil || len(plan.Items) != 1 {
+		t.Fatalf("after a 403 on one node: plan %+v, err %v; want the item from another node", plan, err)
 	}
 	f.failOn("content:competitions:0", &proxmox.APIError{Status: 500, Message: "storage timeout"})
 	if _, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil); err == nil {
@@ -701,5 +702,32 @@ func TestOrphanedDisksOfAnUnseenVMAreKept(t *testing.T) {
 	}
 	if vols := f.volumesOf(10121); !slices.Equal(vols, before) {
 		t.Errorf("volumes = %q, want %q kept", vols, before)
+	}
+}
+
+// Listing the storage takes seconds per node: a shared one is listed on
+// one node only, and a local one on each node that has it.
+func TestOrphanedDisksListSharedStorageOnce(t *testing.T) {
+	f := orphanedSetup(t)
+	for _, c := range []struct {
+		shared bool
+		on     []string
+		want   int
+	}{
+		{true, f.nodes, 1},
+		{false, f.nodes[:2], 2},
+	} {
+		var res proxmox.Resources
+		for _, n := range c.on {
+			res.Storage = append(res.Storage, proxmox.StorageResource{Storage: "competitions", Node: n, Shared: c.shared})
+		}
+		before := f.called("content:competitions:0")
+		plan, err := NewPlanner(&resourceAPI{fakeAPI: f, res: res}, config.Default()).Teardown(context.Background(), []string{"01"}, nil)
+		if err != nil || len(plan.Items) != 1 {
+			t.Fatalf("shared %v: plan %+v, err %v", c.shared, plan, err)
+		}
+		if n := f.called("content:competitions:0") - before; n != c.want {
+			t.Errorf("shared %v: listed %d times, want %d", c.shared, n, c.want)
+		}
 	}
 }

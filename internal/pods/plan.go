@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
@@ -492,15 +494,32 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	for _, t := range plan.Teams {
 		want[t] = true
 	}
-	for _, node := range nodes {
-		vols, err := p.API.StorageContent(ctx, node, p.Cfg.Deploy.Storage, 0)
-		if proxmox.IsForbidden(err) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("listing %s on %s for disks gone VMs left: %w", p.Cfg.Deploy.Storage, node, err)
-		}
-		for _, v := range vols {
+	nodes, err = p.storageNodes(ctx, nodes)
+	if err != nil {
+		return err
+	}
+	// A listing takes seconds per node (Proxmox reads every image on it):
+	// the nodes are listed at once.
+	listed := make([][]string, len(nodes))
+	var g errgroup.Group
+	for i, node := range nodes {
+		g.Go(func() error {
+			vols, err := p.API.StorageContent(ctx, node, p.Cfg.Deploy.Storage, 0)
+			switch {
+			case proxmox.IsForbidden(err):
+				return nil
+			case err != nil:
+				return fmt.Errorf("listing %s on %s for disks gone VMs left: %w", p.Cfg.Deploy.Storage, node, err)
+			}
+			listed[i] = vols
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	for i, node := range nodes {
+		for _, v := range listed[i] {
 			vmid, _ := volumeOwner(v)
 			team, ok := p.Naming.TeamOfCloneVMID(vmid)
 			if !ok || !want[team] || held[vmid] {
@@ -520,6 +539,37 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	}
 	sort.SliceStable(plan.Items, func(i, j int) bool { return plan.Items[i].Name < plan.Items[j].Name })
 	return nil
+}
+
+// storageNodes are the online nodes to list deploy.storage on: one, when
+// Proxmox says the storage is shared (every node sees the same volumes),
+// else those that have it. Without a resources read (an API that can't, or
+// a user who may not audit the storage) it is every online node.
+func (p Planner) storageNodes(ctx context.Context, online []string) ([]string, error) {
+	rr, ok := p.API.(ResourceReader)
+	if !ok || len(online) == 0 {
+		return online, nil
+	}
+	res, err := rr.ClusterResources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var has []string
+	for _, node := range online {
+		for _, st := range res.Storage {
+			if st.Storage != p.Cfg.Deploy.Storage || st.Node != node {
+				continue
+			}
+			if st.Shared {
+				return []string{node}, nil
+			}
+			has = append(has, node)
+		}
+	}
+	if len(has) == 0 {
+		return online, nil
+	}
+	return has, nil
 }
 
 // Reset rolls team VMs back to snapshot and starts them; an empty snapshot
