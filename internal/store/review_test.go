@@ -8,8 +8,7 @@ import (
 	"github.com/wccomps/battleship/internal/store/storetest"
 )
 
-// Item 13: a refused renewal of an old ticket clears it only if it is
-// still the one stored; a newer ticket another request stored stays.
+// Clearing a refused old ticket leaves a newer stored one alone.
 func TestClearSessionTicketOnlyClearsTheTicketItRead(t *testing.T) {
 	s := storetest.New(t)
 	createSession(t, s, newSession("sess-1"))
@@ -32,8 +31,7 @@ func TestClearSessionTicketOnlyClearsTheTicketItRead(t *testing.T) {
 	}
 }
 
-// Item 16: the schema itself refuses a ticket without a renewal time and
-// a token with one.
+// The schema refuses a ticket without a renewal time and a token with one.
 func TestJobCredentialKindMatchesRenewAfter(t *testing.T) {
 	s := storetest.New(t)
 	conn, err := store.Acquire(ctx, s)

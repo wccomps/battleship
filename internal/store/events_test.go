@@ -15,10 +15,8 @@ import (
 	"github.com/wccomps/battleship/internal/store/storetest"
 )
 
-// A reader that follows a job's log with Events(after=last) must never miss
-// a line. The line that commits late (here "first", held back before its
-// commit) must not get an ID below one that is already visible: AddEvent
-// serializes on the job's row, so event IDs are handed out in commit order.
+// A follower using Events(after=last) must never miss a line, so a
+// late-committing event must not get an ID below a visible one.
 func TestAddEventCommitsInIDOrder(t *testing.T) {
 	s := storetest.New(t)
 	id := create(t, s, "team:01")
@@ -115,13 +113,9 @@ func TestAddEventCommitsInIDOrder(t *testing.T) {
 	}
 }
 
-// AddEvent locks the job's row before its items, as Finish, RequestCancel
-// and ReapStale do, so running them all at once never deadlocks. Nor does
-// the pool starve: a RequestCancel that finds the job already finished
-// still holds the row's lock, so it must not wait for another pool
-// connection (these used to end in lock timeouts). This stress run catches
-// that only sometimes; TestRequestCancelOnFinishedJobDoesNotStarveThePool
-// pins it down every time.
+// Running AddEvent beside the other job-row writers neither deadlocks nor
+// starves the pool. This stress run is probabilistic;
+// TestRequestCancelOnFinishedJobDoesNotStarveThePool pins the starvation.
 func TestAddEventAlongsideJobRowWriters(t *testing.T) {
 	s := storetest.New(t)
 	ids := []int64{create(t, s, "team:01"), create(t, s, "team:02")}
@@ -200,12 +194,10 @@ func waitForLockWaits(t *testing.T, s *store.Store, n int) {
 	}
 }
 
-// The deterministic form of the pool-starvation case above. A RequestCancel
-// whose UPDATE waited for a Finish, then found the job no longer active,
-// still holds the job row's lock. On a two-connection pool, an AddEvent
-// holds the other connection while it waits for that lock, so RequestCancel
-// must finish on its own connection: waiting for another one would starve
-// the pool until AddEvent's lock_timeout (55P03).
+// Deterministic pool starvation: a RequestCancel that waited on a Finish
+// still holds the row lock while an AddEvent holds the other of two
+// connections waiting on it. RequestCancel must finish on its own
+// connection, or the pool starves until lock_timeout (55P03).
 func TestRequestCancelOnFinishedJobDoesNotStarveThePool(t *testing.T) {
 	big, dbURL := storetest.NewWithURL(t)
 	u, err := url.Parse(dbURL)
@@ -289,9 +281,8 @@ func TestRequestCancelOnFinishedJobDoesNotStarveThePool(t *testing.T) {
 	}
 }
 
-// Only a running job records events. A finished job has every event it
-// will ever have, which its page and the CLI's follower rely on, and its
-// items keep the statuses it finished with.
+// Only a running job records events; followers rely on a finished job's
+// log and item statuses being final.
 func TestAddEventRefusesJobsNotRunning(t *testing.T) {
 	s := storetest.New(t)
 	pending := create(t, s, "team:01")

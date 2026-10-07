@@ -16,9 +16,8 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// History tells how the last finished deploy, reset or teardown that touched each VM
-// left it, and what time the database's clock says, which job finish times
-// are in. *store.Store is one.
+// History reports how the last finished job left each VM, and the database
+// clock that job finish times use. *store.Store is one.
 type History interface {
 	LastItemResults(ctx context.Context, names, kinds []string) (map[string]store.ItemResult, error)
 	Now(ctx context.Context) (time.Time, error)
@@ -31,8 +30,8 @@ type Options struct {
 	Clock Clock                            // default SystemClock
 	Hub   *Hub                             // grid changes are published here; nil for none
 	Logf  func(format string, args ...any) // default log.Printf
-	// Manual, for Views in tests: views don't poll by themselves and never
-	// stop; the test drives them (Views.Each).
+	// Manual (tests): views never poll or stop on their own; the test drives
+	// them via Views.Each.
 	Manual bool
 }
 
@@ -40,10 +39,9 @@ type Options struct {
 const WaitingForPoll = "waiting for the first poll of the cluster"
 
 // Poller keeps the status grid: it polls the cluster every web.status_poll
-// and whenever a job starts or ends, deep-scans every team VM every
-// web.drift_scan, and publishes each change of the grid to the hub. Its methods are safe for concurrent use, except
-// that Poll must not run beside itself (it keeps its task follow outside
-// the lock); Run calls it from one goroutine.
+// and when a job starts or ends, deep-scans team VMs every web.drift_scan,
+// and publishes grid changes to the hub. Methods are concurrency-safe except
+// Poll, which must not run concurrently with itself (follow is unlocked).
 type Poller struct {
 	api   pods.API
 	hist  History
@@ -52,9 +50,8 @@ type Poller struct {
 	clock Clock
 	hub   *Hub
 	logf  func(format string, args ...any)
-	// scanWorkers is how many VMs the deep scan reads at once, each holding
-	// at most one of the shared config-call slots at a time: half of
-	// concurrency.config_calls rounded up, leaving the rest to jobs.
+	// scanWorkers is half of concurrency.config_calls (rounded up), leaving
+	// the other config-call slots to jobs.
 	scanWorkers int
 	pollEvery   time.Duration
 	scanEvery   time.Duration
@@ -69,22 +66,19 @@ type Poller struct {
 	scannedAt time.Time
 	scanErr   string
 	grid      Grid
-	// dbOffset is the database's clock minus p.clock, as the last scan
-	// measured it. Scan read times are kept in the database's clock, so they
-	// compare with job finish times whatever the skew between the hosts.
+	// dbOffset is the database clock minus p.clock, from the last scan. Scan
+	// times are kept in database time so they compare with job finish times
+	// despite host clock skew.
 	dbOffset time.Duration
-	// dbClockTimeout bounds a scan's database clock read: dbClockReadTimeout,
-	// which tests shorten.
+	// dbClockTimeout is dbClockReadTimeout; tests shorten it.
 	dbClockTimeout time.Duration
 
-	// follow is where reading task lists has got to (tasks.go); only Poll
-	// uses it, one at a time.
+	// follow is task-list read progress (tasks.go); only Poll uses it.
 	follow taskFollow
 }
 
-// NewPoller makes a poller over the teams that have team VMs. lim must be
-// the Limits the process's job executors share, so the deep scan's reads count
-// against the same cap as theirs.
+// NewPoller makes a poller. lim must be the Limits the job executors share,
+// so scan reads count against the same cap.
 func NewPoller(api pods.API, hist History, lim *apply.Limits, cfg config.Config, opts Options) (*Poller, error) {
 	if api == nil || hist == nil || lim == nil {
 		return nil, errors.New("status: a Proxmox API, a job history and limits are required")
@@ -127,9 +121,8 @@ func (p *Poller) Grid() Grid {
 	return p.grid.clone()
 }
 
-// Teams is the current grid's rows: the teams that had team VMs in the
-// last good poll, sorted: every team that exists, as far as this viewer
-// can see.
+// Teams is the current grid's rows: teams with VMs in the last good poll,
+// sorted.
 func (p *Poller) Teams() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -152,9 +145,8 @@ func (p *Poller) Run(ctx context.Context) {
 		defer wg.Done()
 		p.scanLoop(ctx)
 	}()
-	// A job that starts or ends has just changed VMs, or is about to: poll
-	// then rather than up to pollEvery later, so the grid shows what it
-	// left as its busy marks clear.
+	// Poll when a job starts or ends, so the grid shows what it left as its
+	// busy marks clear.
 	var jobs <-chan Msg
 	if p.hub != nil {
 		var unsubscribe func()
@@ -197,10 +189,9 @@ func (p *Poller) scanLoop(ctx context.Context) {
 	}
 }
 
-// Poll reads the cluster and the job history once and updates the grid. If
-// either read fails, the grid keeps the last good poll's cells and is marked
-// stale with the error, which Poll also returns. A poll cancelled by ctx
-// changes nothing; one that passes ctx's deadline counts as failed.
+// Poll reads the cluster and job history once and updates the grid. On
+// failure the grid keeps the last good cells and is marked stale. A
+// cancelled poll changes nothing; a timed-out one counts as failed.
 func (p *Poller) Poll(ctx context.Context) error {
 	vms, err := p.api.ClusterVMs(ctx)
 	if err != nil {
@@ -296,8 +287,7 @@ func (p *Poller) update() bool {
 	return true
 }
 
-// publish tells the hub that the grid changed. It is called without p.mu;
-// subscribers re-read Grid, which is always the latest.
+// publish tells the hub the grid changed. Call without p.mu.
 func (p *Poller) publish(changed bool) {
 	if changed && p.hub != nil {
 		p.hub.Publish(Msg{Topic: TopicGrid})

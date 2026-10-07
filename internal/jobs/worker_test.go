@@ -323,10 +323,8 @@ func TestWorkerStopDuringPlanning(t *testing.T) {
 	}
 }
 
-// holdBeats makes w's heartbeats succeed without touching the database
-// until release is called; after that they reach the store again. While
-// they are held, the job's heartbeat_at stays at its claim time, so a reap
-// can't race a live heartbeat that would make the job look fresh.
+// holdBeats fakes successful heartbeats until release, leaving heartbeat_at
+// at the claim time so a reap can't race a live beat.
 func holdBeats(w *Worker) (release func()) {
 	released := make(chan struct{})
 	w.beat = func(ctx context.Context, jobID int64, worker string) (bool, error) {
@@ -560,9 +558,8 @@ func TestWorkerStopsWhenHeartbeatHangs(t *testing.T) {
 	}
 }
 
-// A machine that sleeps stops the monotonic clock, so a timer alone would
-// never fire; the wall clock shows the gap when it wakes, even if its beats
-// then succeed.
+// Sleep stops the monotonic clock, so only the wall clock shows the gap,
+// even if beats then succeed.
 func TestWorkerStopsAfterWallClockGap(t *testing.T) {
 	st := storetest.New(t)
 	f := teamVMs()
@@ -692,9 +689,8 @@ func TestWorkerReportsJobsItRuns(t *testing.T) {
 	})
 }
 
-// A stop during the pause before a retry round leaves a failed VM without its
-// retry, so the job didn't finish: it reads cancelled or interrupted, not
-// completed with failures.
+// A stop before a retry round leaves the job unfinished: cancelled or
+// interrupted, not completed with failures.
 func TestWorkerStopDuringRetryPauseIsUnfinished(t *testing.T) {
 	for _, stop := range []string{"cancel", "shutdown"} {
 		t.Run(stop, func(t *testing.T) {
@@ -783,9 +779,8 @@ func TestInterruptedOnlyOutcomeHasFailures(t *testing.T) {
 	}
 }
 
-// A job runs with the config of the process that claims it. A preview made
-// under other settings for what a run does to VMs (here, how long a
-// teardown waits for a clean shutdown) is stale: nothing runs.
+// A preview made under other config (here, teardown shutdown wait) is stale
+// in the claiming process: nothing runs.
 func TestWorkerRefusesPlanUnderOtherConfig(t *testing.T) {
 	st := storetest.New(t)
 	f := teamVMs()

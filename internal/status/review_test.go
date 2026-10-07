@@ -5,9 +5,8 @@ import (
 	"time"
 )
 
-// Item 20: a stream opening a view during its linger keeps it: the linger
-// running out then leaves the view polling, and only the last release's
-// linger stops it.
+// Opening a view during its linger keeps it polling; only the last
+// release's linger stops it.
 func TestOpenDuringTheLingerGetsALiveView(t *testing.T) {
 	h := newViewsHarness(t)
 	v, release := h.views.Open("alice@r", ticket("alice@r", "A1"))

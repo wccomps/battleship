@@ -11,10 +11,9 @@ import (
 	"github.com/wccomps/battleship/internal/pods"
 )
 
-// Fingerprint identifies what a plan will do, so a run can't differ from the
-// preview it was confirmed from. It leaves out nodes and blocked reasons,
-// which change between preview and run; fingerprint_test.go classifies
-// every plan field.
+// Fingerprint identifies what a plan will do, so a run can't differ from its
+// confirmed preview. Nodes and blocked reasons are left out;
+// fingerprint_test.go classifies every plan field.
 func Fingerprint(plan *pods.Plan) string {
 	type fpItem struct {
 		Name     string
@@ -24,8 +23,7 @@ func Fingerprint(plan *pods.Plan) string {
 		Snapshot string
 		Action   string
 		Template string
-		// Left out when empty, so other kinds' plans keep their
-		// fingerprints.
+		// omitempty keeps other kinds' fingerprints unchanged.
 		Description string `json:",omitempty"`
 		VMState     bool   `json:",omitempty"`
 	}
@@ -79,11 +77,9 @@ func Fingerprint(plan *pods.Plan) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// LockKeys names what a plan touches, so jobs that overlap run one at a time:
-// team:NN for each team, and template:<name> and vmid:<n> for each template
-// a deploy uses. The VMID is a key of its own because deploys of different
-// masters can pick the same free VMID for their new templates. Keys are
-// sorted and unique.
+// LockKeys names what a plan touches, so overlapping jobs serialize. VMIDs
+// are keys too because deploys of different masters can pick the same free
+// VMID for new templates.
 func LockKeys(plan *pods.Plan) []string {
 	seen := map[string]bool{}
 	for _, t := range plan.Teams {

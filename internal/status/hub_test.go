@@ -13,9 +13,8 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// fakeListener stands in for store.Notifications. Each call waits for the
-// test to either connect it (returning a channel the test feeds and closes
-// to drop the connection) or fail it.
+// fakeListener stands in for store.Notifications: each call waits for the
+// test to connect it (a channel the test feeds and closes) or fail it.
 type fakeListener struct {
 	next chan listenResult
 }
@@ -196,9 +195,8 @@ func TestHubFansOutNotifications(t *testing.T) {
 	none(t, all[0])
 }
 
-// A subscriber that doesn't read never blocks Publish or the other
-// subscribers, and is never dropped: what it hasn't read is merged into one
-// message, which is a Resync if any of the merged ones was.
+// A non-reading subscriber blocks nothing and isn't dropped; its unread
+// messages merge into one.
 func TestHubCoalescesForSlowSubscriber(t *testing.T) {
 	var logs logLines
 	h := NewHub(nil, HubOptions{Logf: logs.Logf})
@@ -241,9 +239,8 @@ func TestHubCoalescesForSlowSubscriber(t *testing.T) {
 	}
 }
 
-// Many publishers and a reader racing the hub for the one slot: the reader
-// sees every change reflected (the last message always arrives), and
-// nothing blocks.
+// Publishers racing a reader for the slot: the last message always arrives
+// and nothing blocks.
 func TestHubCoalesceRacesReader(t *testing.T) {
 	h := NewHub(nil, HubOptions{Logf: t.Logf})
 	ch, cancel := h.SubscribeTopics(TopicJobs)
@@ -390,9 +387,8 @@ func TestHubBackoffResetsOnlyAfterStableConnection(t *testing.T) {
 			t.Fatalf("waits = %v, want [%s]", w, want)
 		}
 	}
-	// connect hands the hub a connection and a notice, which the hub takes
-	// only once it has read the clock for the connection's start, so the
-	// test advances the clock after that.
+	// The hub takes the notice only after reading the connection's start
+	// time, so the test advances the clock after that.
 	connect := func() chan store.Notice {
 		t.Helper()
 		conn := l.connect()
@@ -432,9 +428,8 @@ func TestHubResyncsWhenFirstConnectFails(t *testing.T) {
 	}
 }
 
-// Streams open before the hub first listens (battleship serve starts both
-// at once) sent their state when they opened, and changes from then until
-// LISTEN took hold sent no notice.
+// Streams opened before the first LISTEN missed changes until it took hold,
+// so the first connect resyncs.
 func TestHubResyncsOnFirstConnect(t *testing.T) {
 	l := newFakeListener()
 	h, _ := startHub(t, l, newFakeClock())
@@ -541,9 +536,8 @@ func TestHubSeq(t *testing.T) {
 	}
 }
 
-// Reads made while LISTEN is down, or before it first connects, may miss
-// changes whose notices never arrive, so Seq must move on both edges: a
-// snapshot read before either can't satisfy a later stream's need.
+// Reads while LISTEN is down may miss changes, so Seq moves on both
+// connection edges.
 func TestHubSeqAdvancesOnConnectionEdges(t *testing.T) {
 	l := newFakeListener()
 	clock := newFakeClock()

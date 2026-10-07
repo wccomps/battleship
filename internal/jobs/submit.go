@@ -10,28 +10,22 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// ErrNothingToRun is returned when every VM in the plan is blocked or there
-// are none.
+// ErrNothingToRun: the plan has no runnable VMs.
 var ErrNothingToRun = errors.New("nothing to run: the plan has no runnable VMs")
 
 // Submitter is who submits a job, as the job records it.
 type Submitter struct {
 	User string // who: a login name from the CLI, an email address from the web
-	// Preview, from the web app, is the preview the user confirmed. The
-	// job consumes it, so a preview is submitted at most once. Submit stores
-	// nothing and returns store.ErrPreviewUsed if a job already submitted
-	// it, store.ErrPreviewNotFound if it isn't the session's, and
-	// store.ErrPreviewExpired if it expired before the confirm.
+	// Preview, from the web app, is the confirmed preview; the job consumes
+	// it (see store.NewJob.Preview).
 	Preview *store.PreviewClaim
-	// Credential is the submitter's Proxmox credential, which the job
-	// runs with; Seal stores it sealed with the job.
+	// Credential is the submitter's; the job runs with it.
 	Credential proxmox.Credential
 	Seal       Credentials
 }
 
-// Submit stores a job for a plan the user has confirmed. The plan must have
-// been built from in; the worker plans in again and runs only if the result
-// has the same fingerprint.
+// Submit stores a job for a confirmed plan built from in; the worker runs it
+// only if a replan has the same fingerprint.
 func Submit(ctx context.Context, st *store.Store, in Inputs, plan *pods.Plan, by Submitter) (int64, error) {
 	if err := in.Validate(); err != nil {
 		return 0, err

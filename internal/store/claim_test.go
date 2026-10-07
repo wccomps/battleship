@@ -371,9 +371,8 @@ func TestClaimJobLosesToCancel(t *testing.T) {
 	}
 }
 
-// A job that ends early leaves its unfinished items interrupted, or not run
-// if they never reached a step, as ReapStale does, so no item of a finished
-// job still reads as pending or running.
+// Finish leaves no item pending or running: unfinished ones become
+// interrupted, or not run if they never reached a step.
 func TestFinishInterruptsUnfinishedItems(t *testing.T) {
 	for _, status := range []string{store.StatusInterrupted, store.StatusCancelled} {
 		t.Run(status, func(t *testing.T) {

@@ -270,9 +270,7 @@ func TestLastItemResultsSkipsPowerJobs(t *testing.T) {
 	}
 }
 
-// A snapshot job leaves a VM's config as it was too: a successful one
-// doesn't hide a failed deploy, and a failed one doesn't make the VM
-// drifted.
+// Snapshot jobs don't count, whether they succeed or fail.
 func TestLastItemResultsSkipsSnapshotJobs(t *testing.T) {
 	s := storetest.New(t)
 	dep := runJob(t, s, "deploy", items("team01-dc", "team01-web"), []string{"team01-dc", "team01-web"},
@@ -370,9 +368,8 @@ func TestLastJobOf(t *testing.T) {
 	}
 }
 
-// An item cut off before it sent anything that changes the config
-// (LeftUntouched) left the VM as the job before did, so that job still
-// counts. One cut off part way, or once only power steps were left, counts.
+// A LeftUntouched interruption doesn't count, so the job before still does;
+// part-way or converged interruptions count.
 func TestLastItemResultsSkipsUntouchedInterruptions(t *testing.T) {
 	s := storetest.New(t)
 	names := items("team01-dc", "team01-web", "team01-mail")

@@ -19,27 +19,23 @@ const (
 // JobTopic is the topic for changes to one job: its status, items or log.
 func JobTopic(id int64) string { return "job:" + strconv.FormatInt(id, 10) }
 
-// CancelTopic is the topic for requests to cancel one job, which the worker
-// running it subscribes to.
+// CancelTopic is the topic for cancel requests for one job; its worker
+// subscribes to it.
 func CancelTopic(id int64) string { return "cancel:" + strconv.FormatInt(id, 10) }
 
-// Msg is one message to a subscriber. It only says that its topic changed;
-// the subscriber re-reads the grid or the store. Messages a subscriber
-// hasn't read yet are coalesced into one (see Hub), so a Msg may stand for
-// several changes: it is a Resync if any of them was. A Resync means
-// changes may have been missed, so the subscriber must re-read everything
-// it shows. A subscriber's channel closes when it cancels or the hub stops.
+// Msg says only that its topic changed; the subscriber re-reads. Unread
+// messages coalesce (see Hub), so one Msg may stand for several changes and
+// is a Resync if any was. Resync means changes may have been missed: re-read
+// everything shown.
 type Msg struct {
 	Topic  string
 	Resync bool
-	// Seq is the hub's sequence number for the (latest) message, set by
-	// Publish; see Hub.Seq.
+	// Seq is set by Publish; see Hub.Seq.
 	Seq uint64
 }
 
-// ListenFunc delivers a notice for each changed job until ctx is done or
-// the connection fails, when it closes the channel. store.Notifications is
-// one.
+// ListenFunc delivers a notice per changed job, closing the channel when ctx
+// is done or the connection fails. store.Notifications is one.
 type ListenFunc func(ctx context.Context) (<-chan store.Notice, error)
 
 // HubOptions tune a Hub. Zero values take the defaults.
@@ -48,24 +44,19 @@ type HubOptions struct {
 	Logf  func(format string, args ...any) // default log.Printf
 }
 
-// stableConnection is how long a LISTEN connection must stay up for its loss
-// to restart the reconnect backoff at minB.
+// stableConnection is how long a LISTEN connection must last to reset the
+// reconnect backoff.
 const stableConnection = 30 * time.Second
 
-// Hub fans change notifications out to subscribers, such as the web app's
-// server-sent event streams. Run owns the process's only LISTEN connection
-// to Postgres; nothing else in the process listens.
+// Hub fans change notifications out to subscribers (e.g. SSE streams). Run
+// owns the process's only LISTEN connection to Postgres.
 //
-// Publishing never blocks and never drops a subscriber: each subscriber
-// holds at most one unread message, and a message published while one is
-// unread is merged into it (see Msg). So a burst of changes reaches a
-// subscriber that is busy (say, waiting out its send gap) as one message,
-// and a subscriber whose reader has stalled costs one message of memory; its
-// owner, not the hub, decides when to give up on it (event streams do so
-// when a write passes its deadline).
+// Publishing never blocks or drops a subscriber: each holds at most one
+// unread message, and later ones merge into it. A stalled reader costs one
+// message of memory; its owner decides when to give up on it.
 //
-// When the LISTEN connection is lost, Run reconnects with backoff and sends
-// every subscriber a Resync, since changes in between were missed.
+// After a lost connection Run reconnects with backoff and sends everyone a
+// Resync.
 type Hub struct {
 	listen ListenFunc
 	clock  Clock
@@ -105,12 +96,10 @@ func NewHub(listen ListenFunc, opts HubOptions) *Hub {
 	return h
 }
 
-// SubscribeTopics returns a channel of messages for topics and a function
-// that ends the subscription and closes the channel. cancel may be called
-// more than once, and after the hub stopped. Once the hub has stopped, it
-// returns a closed channel. The topics' messages share the one channel and
-// merge like any other (the merged message's Topic is the latest one's). A
-// Resync carries the first topic.
+// SubscribeTopics returns one channel for all topics and a cancel that
+// closes it (safe to call repeatedly or after the hub stopped). A stopped hub
+// returns a closed channel. Merged messages carry the latest Topic; a Resync
+// carries the first topic.
 func (h *Hub) SubscribeTopics(topics ...string) (<-chan Msg, func()) {
 	// The one slot holds the unread message that later ones merge into.
 	s := &subscriber{topics: topics, ch: make(chan Msg, 1)}
@@ -133,10 +122,8 @@ func (h *Hub) SubscribeTopics(topics ...string) (<-chan Msg, func()) {
 	}
 }
 
-// Wake is SubscribeTopics for a subscriber that only needs to know a topic
-// may have changed, such as a worker woken by a cancel. wake holds at most
-// one signal waiting, so the hub never blocks on it, and closes once stop
-// is called or the hub stops.
+// Wake is SubscribeTopics for a subscriber that only needs a "may have
+// changed" signal. wake buffers one signal and closes on stop or hub stop.
 func (h *Hub) Wake(topics ...string) (wake <-chan struct{}, stop func()) {
 	msgs, stop := h.SubscribeTopics(topics...)
 	ch := make(chan struct{}, 1)
@@ -152,10 +139,9 @@ func (h *Hub) Wake(topics ...string) (wake <-chan struct{}, stop func()) {
 	return ch, stop
 }
 
-// Seq is the sequence number of the last message published (Msg.Seq);
-// gaining or losing the LISTEN connection takes one too. Notices are
-// published after their change commits, so a read started once Seq reached
-// a message's Seq sees that message's change.
+// Seq is the last published Msg.Seq; connecting and disconnecting take one
+// too. Notices publish after commit, so a read started once Seq reached a
+// message's Seq sees its change.
 func (h *Hub) Seq() uint64 {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -174,10 +160,9 @@ func (h *Hub) Publish(m Msg) {
 	}
 }
 
-// deliver puts m in s's one slot, merging it into the message already there
-// if s hasn't read that yet. Only the hub sends on s.ch, and always under
-// h.mu, so once the slot is emptied (by the hub taking the unread message
-// out, or by the reader taking it meanwhile) the send can't block.
+// deliver puts m in s's slot, merging with any unread message. Only the hub
+// sends on s.ch, always under h.mu, so once the slot is empty the send can't
+// block.
 func (h *Hub) deliver(s *subscriber, m Msg) {
 	select {
 	case s.ch <- m:
@@ -192,8 +177,7 @@ func (h *Hub) deliver(s *subscriber, m Msg) {
 	s.ch <- m
 }
 
-// merge is the one message that stands for old followed by m: m's topic
-// and Seq, and a Resync if either was one.
+// merge combines old then m: m's topic and Seq, Resync if either was.
 func merge(old, m Msg) Msg {
 	m.Resync = m.Resync || old.Resync
 	return m
@@ -214,9 +198,8 @@ func (h *Hub) remove(s *subscriber) {
 	}
 }
 
-// bumpSeq takes the next sequence number without a message, so that reads
-// started before it can't serve a stream that starts after it. Run calls it
-// when the connection is lost.
+// bumpSeq takes a sequence number without a message, so reads started
+// before a lost connection can't serve streams started after it.
 func (h *Hub) bumpSeq() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -230,8 +213,7 @@ func (h *Hub) resyncAll() {
 	h.seq++
 	for _, subs := range h.subs {
 		for s := range subs {
-			// A subscriber of several topics gets one Resync per topic;
-			// they merge into one message.
+			// Multi-topic subscribers get one per topic; they merge.
 			h.deliver(s, Msg{Topic: s.topics[0], Resync: true, Seq: h.seq})
 		}
 	}
@@ -250,13 +232,10 @@ func (h *Hub) stop() {
 }
 
 // Run listens for job changes until ctx is done, publishing each to
-// TopicJobs (unless it is a log line), then to the job's JobTopic and, for a
-// cancel request, its CancelTopic. Every
-// connection, the first included, sends all subscribers a Resync, since
-// changes made before it sent them no notice. When the connection is lost
-// or can't be made, Run retries with exponential backoff, which starts over
-// only after a connection stayed up for 30s. When Run returns, every
-// subscription is closed. Call it once.
+// TopicJobs (except log lines), JobTopic and, for cancels, CancelTopic.
+// Every connection, the first included, resyncs all subscribers. Failures
+// retry with exponential backoff. When Run returns every subscription is
+// closed. Call it once.
 func (h *Hub) Run(ctx context.Context) {
 	defer h.stop()
 	if h.listen == nil {
@@ -281,14 +260,11 @@ func (h *Hub) Run(ctx context.Context) {
 			if !h.forward(ctx, ch) {
 				return
 			}
-			// Only a connection that stayed up a while resets the backoff,
-			// so a server that accepts and then drops connections isn't
-			// retried every minB.
+			// A server that accepts then drops shouldn't be retried every minB.
 			if h.clock.Now().Sub(up) >= stableConnection {
 				backoff = h.minB
 			}
-			// Changes made from here on send no notice until the
-			// reconnect, so reads made earlier must not satisfy later needs.
+			// Changes until the reconnect send no notice.
 			h.bumpSeq()
 			h.logf("status: lost the connection that listens for job changes; reconnecting in %s", backoff)
 		}

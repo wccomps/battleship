@@ -38,16 +38,16 @@ type scanResult struct {
 // scanResults are the latest scan results, by VM name.
 type scanResults map[string]scanResult
 
-// put records r under name unless what is there was read later: the scan,
-// the task follower and cell details read VMs concurrently.
+// put records r unless a later read is already there (scan, task follower
+// and cell details race).
 func (s scanResults) put(name string, r scanResult) {
 	if old, ok := s[name]; !ok || !old.readAt.After(r.readAt) {
 		s[name] = r
 	}
 }
 
-// shownVMs is, of each name among vms, the VM a grid cell shows: the lowest
-// VMID. They are in the order their names first appear.
+// shownVMs picks, per name, the VM a cell shows (lowest VMID), in order of
+// first appearance.
 func shownVMs(vms []proxmox.VM) []proxmox.VM {
 	var out []proxmox.VM
 	index := map[string]int{}
@@ -64,12 +64,8 @@ func shownVMs(vms []proxmox.VM) []proxmox.VM {
 	return out
 }
 
-// grid lays the team VMs out as teams × hosts. The teams are those that
-// have team VMs.
-// The hosts are those of their team VMs plus, when web.templates is set, those of the tagged
-// masters it matches, so a host of the competition's set that no team has
-// yet still gets a column of missing cells. Masters of other sets never add
-// columns.
+// grid lays team VMs out as teams × hosts. With web.templates set, hosts of
+// matching tagged masters get a column even if no team has them yet.
 func (r rules) grid(in inputs) (teams, hosts []string, rows []Row) {
 	teams = pods.TeamsWithVMs(in.vms, r.naming)
 	byCell := map[[2]string][]proxmox.VM{}
@@ -153,12 +149,8 @@ func withState(c Cell) Cell {
 	return c
 }
 
-// jobDrift is the drift a VM's last finished deploy, reset or teardown
-// left, if it failed on it or was cut off before its config steps finished
-// (store.ItemOutcome.LeftConfig). A later
-// power or snapshot job doesn't change it: drift is about the NICs, pool
-// and baseline snapshot, which those jobs don't touch (a snapshot job
-// refuses the baseline's names).
+// jobDrift is the drift a VM's last driftKinds job left if it failed on it
+// or was cut off before its config steps finished (store.ItemOutcome.LeftConfig).
 func jobDrift(r store.ItemResult) (Drift, bool) {
 	switch r.Status {
 	case store.ItemFailed:
@@ -177,22 +169,18 @@ func jobDrift(r store.ItemResult) (Drift, bool) {
 	return Drift{}, false
 }
 
-// driftKinds are the kinds of job whose outcome on a VM can be drift: they
-// converge what the scan judges (its NICs, disk limits, pool, baseline).
-// Power and snapshot jobs converge none of it, so their outcome neither
-// clears a failure nor causes one.
+// driftKinds are the job kinds that converge what the scan judges (NICs,
+// disk limits, pool, baseline). Power and snapshot jobs touch none of it.
 var driftKinds = []string{string(pods.KindDeploy), string(pods.KindReset), string(pods.KindTeardown)}
 
-// supersedes reports whether a job that re-converges a VM's config (a deploy
-// or a reset, whose rollback restores it) finished after the scan read it,
-// making the scan's finding out of date. Both times are the database's.
+// supersedes reports whether a re-converging job (deploy or reset) finished
+// after the scan read the VM. Both times are database time.
 func supersedes(r store.ItemResult, s scanResult) bool {
 	return (r.JobKind == string(pods.KindDeploy) || r.JobKind == string(pods.KindReset)) && r.FinishedAt.After(s.readAt)
 }
 
-// configDrift judges a team VM's config and snapshots by the rules a deploy
-// converges them with. The NIC count comes from the VM, since a clone has
-// its template's NICs.
+// configDrift judges a team VM by the rules a deploy converges it with. The
+// NIC count comes from the VM, since a clone has its template's NICs.
 func (r rules) configDrift(team string, cfg map[string]string, snaps []string) []Drift {
 	var out []Drift
 	if net := pods.NetworkChanges(r.cfg.Network, cfg, team, pods.CountInterfaces(cfg)); len(net) > 0 {

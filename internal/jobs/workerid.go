@@ -7,10 +7,9 @@ import (
 	"os"
 )
 
-// NewWorkerID returns a Worker.ID of the form prefix-hostname-pid-xxxxxxxx.
-// The host and PID say where a job runs; the 8 random hex digits keep IDs
-// unique even when several workers share a process, or a PID is reused on
-// the same host (e.g. PID 1 in containers).
+// NewWorkerID returns prefix-hostname-pid-xxxxxxxx. The random suffix keeps
+// IDs unique across workers in one process and reused PIDs (PID 1 in
+// containers).
 func NewWorkerID(prefix string) string {
 	host, err := os.Hostname()
 	if err != nil || host == "" {

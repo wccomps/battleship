@@ -24,9 +24,8 @@ var stepPrivileges = map[pods.Step][]string{
 	pods.StepRollback: {"VM.Snapshot", "VM.Snapshot.Rollback"},
 }
 
-// For random privileges and operations: the preview offers (leaves
-// runnable) exactly the VMs the user may do every step of, and the job
-// touches only those, every call carrying the job's own ticket.
+// For random privileges: the preview leaves runnable exactly the VMs the
+// user may fully act on, and the job touches only those, with its own ticket.
 func TestPropertyPreviewOffersOnlyWhatTheUserMayDo(t *testing.T) {
 	st := storetest.New(t)
 	privs := []string{"VM.PowerMgmt", "VM.Allocate", "VM.Snapshot", "VM.Snapshot.Rollback"}

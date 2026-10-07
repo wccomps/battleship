@@ -106,9 +106,8 @@ func TestSnapshotLockKeysOverlapOtherJobs(t *testing.T) {
 	}
 }
 
-// A snapshot job takes its snapshot; the same job confirmed twice runs
-// once: the second finds the VMs have it, so its plan no longer matches
-// and it ends stale without touching them.
+// A snapshot job confirmed twice runs once: the second's plan no longer
+// matches, so it ends stale.
 func TestWorkerRunsSnapshotJobOnce(t *testing.T) {
 	st := storetest.New(t)
 	f := teamVMs()

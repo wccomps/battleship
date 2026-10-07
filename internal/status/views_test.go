@@ -127,9 +127,7 @@ func TestViewsAreSharedPerUser(t *testing.T) {
 	}
 }
 
-// A view polls while a stream holds it, and a little after (so a page
-// load's stream can take it over), then stops: nobody watching, no
-// polling.
+// A view polls while held and through its linger, then stops.
 func TestViewStopsAfterItsLastStream(t *testing.T) {
 	h := newViewsHarness(t)
 	v, release := h.views.Open("alice@r", ticket("alice@r", "A1"))

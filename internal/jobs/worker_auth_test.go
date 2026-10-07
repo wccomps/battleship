@@ -66,9 +66,7 @@ func TestWorkerPendingJobWithLapsedCredentialIsStale(t *testing.T) {
 	}
 }
 
-// Proxmox refusing the ticket while the job runs (the user was disabled,
-// or the ticket ran out) stops the job: no new steps, cleanup, and the job
-// ends interrupted.
+// A 401 mid-job stops it: no new steps, cleanup runs, it ends interrupted.
 func TestWorkerRunningJobStopsWhenProxmoxRefusesTheTicket(t *testing.T) {
 	st := storetest.New(t)
 	f := teamVMs()
@@ -99,8 +97,7 @@ func TestWorkerRunningJobStopsWhenProxmoxRefusesTheTicket(t *testing.T) {
 	}
 }
 
-// The renewer dropping the ticket (Proxmox refused to renew it, or the
-// login passed proxmox.ticket_max_age) stops a running job too.
+// The renewer dropping the ticket stops a running job too.
 func TestWorkerRunningJobStopsWhenItsCredentialIsDropped(t *testing.T) {
 	st := storetest.New(t)
 	f := teamVMs()
@@ -115,8 +112,7 @@ func TestWorkerRunningJobStopsWhenItsCredentialIsDropped(t *testing.T) {
 	if _, lapsed := newRenewer(st, mustCreds(), r, time.Now().Add(61*time.Minute)).RenewDue(bg); lapsed != 1 {
 		t.Fatal("the renewer didn't drop the ticket")
 	}
-	// The job stops by itself within a heartbeat or so, abandoning the
-	// wait; the gate never opens.
+	// The job stops within about a heartbeat; the gate never opens.
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):

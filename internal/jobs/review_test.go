@@ -15,14 +15,13 @@ import (
 	"github.com/wccomps/battleship/internal/store/storetest"
 )
 
-// Item 6: a 401 in the last round (here the only one) still ends the job
-// interrupted as "authorization lapsed", not completed with failures.
+// A 401 in the last round still ends the job interrupted as "authorization
+// lapsed", not completed with failures.
 func TestLapseInTheLastRoundIsInterrupted(t *testing.T) {
 	st := storetest.New(t)
 	f := teamVMs()
 	id := submit(t, st, f, Inputs{Kind: pods.KindPower, Teams: "1", Hosts: []string{"dc"}, Action: "stop"})
-	// Proxmox stops accepting the ticket right after the power call: the
-	// task wait, the item's last call, gets the 401.
+	// The task wait, the item's last call, gets the 401.
 	f.accept = func(proxmox.Credential) bool {
 		f.Mu.Lock()
 		defer f.Mu.Unlock()
@@ -37,8 +36,8 @@ func TestLapseInTheLastRoundIsInterrupted(t *testing.T) {
 	}
 }
 
-// Item 7: a job reaped while it runs (its credential deleted by the
-// trigger) is a claim this worker lost, not an authorization that lapsed.
+// A job reaped mid-run (credential deleted by the trigger) is a lost claim,
+// not a lapse.
 func TestReapedJobIsALostClaimNotALapse(t *testing.T) {
 	st := storetest.New(t)
 	f := teamVMs()
@@ -90,8 +89,8 @@ func (l *syncLog) String() string {
 	return strings.Join(l.lines, "\n")
 }
 
-// Item 8: a pass renews several tickets at once, so a backlog of due
-// tickets can't outlast the hour before they expire.
+// A pass renews several tickets at once, so a backlog can't outlast the
+// tickets' remaining hour.
 func TestRenewerRenewsInParallel(t *testing.T) {
 	st := storetest.New(t)
 	creds := testCreds(t)
@@ -128,8 +127,7 @@ func credsWithKey(t *testing.T, key string) Credentials {
 
 const otherSealKey = "a different seal key, also long enough!!"
 
-// Item 11: a replica with the wrong database.seal_key can't open the
-// tickets; it must not take that for a lapse and delete them.
+// A wrong seal key must not be taken for a lapse that deletes tickets.
 func TestRenewerWithTheWrongKeyDeletesNothing(t *testing.T) {
 	st := storetest.New(t)
 	cred := aliceTicket()
@@ -149,8 +147,7 @@ func TestRenewerWithTheWrongKeyDeletesNothing(t *testing.T) {
 	}
 }
 
-// Item 11: a worker with the wrong key fails the job saying so; it isn't
-// "authorization lapsed".
+// A worker with the wrong key fails the job saying so, not as a lapse.
 func TestWorkerWithTheWrongKeyFailsNotLapsed(t *testing.T) {
 	st := storetest.New(t)
 	f := teamVMs()
@@ -164,8 +161,7 @@ func TestWorkerWithTheWrongKeyFailsNotLapsed(t *testing.T) {
 	}
 }
 
-// Item 11: processes check their seal key against the one the database
-// was first used with, so a wrong key fails at startup.
+// A wrong seal key fails at startup.
 func TestSealKeyCheck(t *testing.T) {
 	st := storetest.New(t)
 	if err := testCreds(t).CheckKey(bg, st); err != nil {

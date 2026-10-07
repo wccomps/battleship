@@ -28,8 +28,8 @@ func New(t testing.TB) *store.Store {
 	return s
 }
 
-// NewWithURL is New, and also returns the new database's URL, for tests that
-// need their own connection to it, e.g. to kill the store's connections.
+// NewWithURL is New plus the database URL, for tests needing their own
+// connection.
 func NewWithURL(t testing.TB) (*store.Store, string) {
 	t.Helper()
 	admin := os.Getenv(EnvVar)

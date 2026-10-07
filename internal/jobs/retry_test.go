@@ -95,9 +95,7 @@ func TestRetryInputsCoversEveryUnfinishedStatus(t *testing.T) {
 	}
 }
 
-// Freeing a gone VM's disks and a half-deleted VM have no host and are
-// planned only by a whole-team teardown, so a retry that includes one asks
-// every host and narrows by name.
+// Hostless teardown items force a retry to ask every host, narrowed by name.
 func TestRetryInputsOfFreeDisksAsksEveryHost(t *testing.T) {
 	plan := planItems(pods.KindTeardown, [2]string{"01", "dc"}, [2]string{"01", "web"})
 	plan.Items = append(plan.Items,
@@ -138,9 +136,8 @@ func TestRetryInputsOfADeployDoesNotRebuild(t *testing.T) {
 	}
 }
 
-// A retry of a reset must never roll back VMs that already succeeded: the
-// failed VMs' teams × hosts include finished ones, and the plan leaves
-// those out.
+// A reset retry must never roll back VMs that already succeeded, though the
+// failed VMs' teams × hosts include them.
 func TestRetryOfAResetTargetsOnlyTheFailedVMs(t *testing.T) {
 	cfg := testCfg()
 	p := pods.NewPlanner(twoTeams(), cfg)

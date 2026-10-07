@@ -16,11 +16,10 @@ const (
 )
 
 // Item statuses. An item is created pending, or blocked (never run); its
-// first event makes it running. When its job ends, Finish sets it from the
-// worker's outcome (done, failed, interrupted, removed), then endItems marks
-// an item that never reached a step not run and, for a stopped job, any
-// other unfinished one interrupted. Events and outcomes leave blocked and
-// interrupted items be; nothing changes a not run one.
+// first event makes it running. When its job ends, Finish applies the
+// worker's outcome, then endItems marks items that never reached a step not
+// run and, for a stopped job, other unfinished ones interrupted. Events and
+// outcomes leave blocked and interrupted items be; not run is final.
 const (
 	ItemPending     = "pending"
 	ItemRunning     = "running"
@@ -29,8 +28,7 @@ const (
 	ItemBlocked     = "blocked"
 	ItemRemoved     = "removed"     // created, didn't finish, and cleaned up
 	ItemInterrupted = "interrupted" // its job was interrupted or cancelled after it reached a step
-	// ItemNotRun: its job ended (or was cancelled) before it reached a
-	// step, so it never touched its VM.
+	// ItemNotRun: its job ended before it reached a step.
 	ItemNotRun = "not run"
 )
 
@@ -79,8 +77,8 @@ func (s JobStatus) CanRetry() bool { r, _ := s.rule(); return r.retry }
 // or it was cancelled.
 func (s JobStatus) StartAgain() bool { r, _ := s.rule(); return r.startAgain }
 
-// CancelTooLate reports whether a cancel requested on a job that ended so
-// stopped nothing: the job ended as its work did.
+// CancelTooLate reports whether a cancel on a job ending this way stopped
+// nothing.
 func (s JobStatus) CancelTooLate() bool { r, _ := s.rule(); return r.cancelTooLate }
 
 // ItemStatus is a job item's status, with the rules that hang on it.
@@ -112,9 +110,7 @@ func (s ItemStatus) rule() itemRule { return itemRules[s] }
 // Unfinished reports whether the item is pending or running.
 func (s ItemStatus) Unfinished() bool { return s.rule().unfinished }
 
-// Retryable reports whether an item of a finished job didn't finish, so a
-// retry should run it again: it failed, was blocked, was interrupted, was
-// removed after failing half-built, or never ran.
+// Retryable reports whether a retry should run the item again.
 func (s ItemStatus) Retryable() bool { return s.rule().retry }
 
 // TouchedVM reports whether the item's job reached an outcome on its VM.

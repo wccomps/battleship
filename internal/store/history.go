@@ -8,8 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ItemResult is how the most recent finished job that converges or
-// removes VMs (a deploy, reset or teardown) and touched a VM left it.
+// ItemResult is how the latest finished job of the given kinds left a VM.
 type ItemResult struct {
 	JobID      int64
 	JobKind    string
@@ -20,15 +19,11 @@ type ItemResult struct {
 	LeftConfig string // for an interrupted item: LeftConverged, or "" (see ItemOutcome)
 }
 
-// lastItemResultsSQL picks, for each name, the item of the most recently
-// finished job that touched that VM: it reached a final outcome or was
-// interrupted after reaching a step (blocked and not-run items didn't,
-// legacy ones included: see legacyNotRunSQL). Nor does an item interrupted
-// before it sent anything that changes the config (LeftUntouched): the VM
-// is as the job before left it. Only jobs of the kinds the caller names
-// count. Jobs are ordered by finished_at, not ID, so a job that
-// finished first doesn't hide an older job's later outcome; the IS NOT NULL
-// keeps DESC from putting unfinished jobs first.
+// lastItemResultsSQL picks, per name, the item of the most recently finished
+// job that touched the VM. Blocked, not-run (legacyNotRunSQL too) and
+// LeftUntouched items didn't touch it. Order is by finished_at, not ID, so
+// an earlier-finishing job can't hide an older job's later outcome; IS NOT
+// NULL keeps DESC from putting unfinished jobs first.
 const lastItemResultsSQL = `SELECT n.name, x.job_id, x.kind, x.finished_at, x.status, x.step, x.error, x.left_config
 	FROM unnest($1::text[]) AS n(name)
 	CROSS JOIN LATERAL (
@@ -44,10 +39,8 @@ const lastItemResultsSQL = `SELECT n.name, x.job_id, x.kind, x.finished_at, x.st
 		LIMIT 1
 	) x`
 
-// LastItemResults returns, for each VM name that a finished job of one of
-// kinds touched, how the most recent such job left it. Names none
-// touched are absent. It is one query, using the job_items_by_name
-// index.
+// LastItemResults returns, per VM name, how the latest finished job of
+// kinds left it; untouched names are absent.
 func (s *Store) LastItemResults(ctx context.Context, names, kinds []string) (map[string]ItemResult, error) {
 	out := map[string]ItemResult{}
 	if len(names) == 0 {
@@ -77,18 +70,16 @@ func (s *Store) LastItemResults(ctx context.Context, names, kinds []string) (map
 	return out, rows.Err()
 }
 
-// Now returns the database server's clock. Job times (finished_at) are the
-// server's, so a caller comparing its own times with them measures its
-// offset from the server with this.
+// Now returns the database clock, which job times use; callers measure
+// their skew with it.
 func (s *Store) Now(ctx context.Context) (time.Time, error) {
 	var now time.Time
 	err := s.pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
 	return now, err
 }
 
-// LastJobOf returns the newest job, of any kind and status, with an item
-// for the VM name, and that item; ErrNotFound if no job has one. A VM's
-// page shows it as its last job.
+// LastJobOf returns the newest job of any kind with an item for the VM, and
+// that item, or ErrNotFound.
 func (s *Store) LastJobOf(ctx context.Context, name string) (Job, Item, error) {
 	row := s.pool.QueryRow(ctx, `SELECT i.job_id, i.idx, i.name, i.team, i.vmid, i.step, `+itemStatusSQL+`, i.error
 		FROM job_items i JOIN jobs j ON j.id = i.job_id WHERE i.name = $1 ORDER BY i.job_id DESC LIMIT 1`, name)

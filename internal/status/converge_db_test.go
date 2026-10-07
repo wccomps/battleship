@@ -114,10 +114,9 @@ func TestConvergeFailedDeployThenPowerStaysDrifted(t *testing.T) {
 	}
 }
 
-// A VM a teardown failed on is left drifted, and a teardown that did remove a
-// VM clears an older failed deploy (here the VM's name is back, as if made
-// again outside battleship). A teardown doesn't date a scan: only deploys and
-// resets re-converge a VM's config.
+// A failed teardown leaves drift; a successful one clears an older failed
+// deploy. A teardown doesn't supersede a scan: only deploys and resets
+// re-converge config.
 func TestConvergeTeardownOutcomes(t *testing.T) {
 	h := newDBHarness(t)
 	driftCluster(h.harness)

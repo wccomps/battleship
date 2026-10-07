@@ -17,9 +17,8 @@ var (
 	ErrEmptyPreview    = errors.New("preview needs an ID, a session, a kind, inputs, a fingerprint and an expiry")
 )
 
-// Preview is a plan the web app showed a user, which one confirm from the
-// same session may submit. The web app keeps the confirm form's nonce; the
-// store only ever sees its hash.
+// Preview is a plan shown to a user, submittable once from the same
+// session. The store only sees the confirm nonce's hash.
 type Preview struct {
 	ID          string // SHA-256 hex of the nonce in the confirm form
 	SessionID   string // the session it was shown to
@@ -31,22 +30,18 @@ type Preview struct {
 	JobID       int64 // the job that submitted it; 0 until then
 }
 
-// PreviewClaim names the preview a job submits. CreateJob marks it
-// submitted in the same transaction that stores the job, so a preview
-// yields at most one job.
+// PreviewClaim names the preview a job submits; CreateJob marks it in the
+// same transaction, so a preview yields at most one job.
 type PreviewClaim struct {
 	SessionID string
 	ID        string
-	// At is when the confirm was made: a preview expired by then is not
-	// submitted (ErrPreviewExpired). Zero skips the check.
+	// At is the confirm time for the expiry check; zero skips it.
 	At time.Time
 }
 
-// CreatePreview stores a preview. It also deletes the session's
-// unsubmitted previews that expired by p.CreatedAt, so a long session
-// doesn't collect them. Submitted ones stay, so a late repeat of their
-// confirm (the back button) still finds its job; they go with the
-// session.
+// CreatePreview stores a preview and prunes the session's expired
+// unsubmitted ones. Submitted previews stay with the session so a repeated
+// confirm (back button) still finds its job.
 func (s *Store) CreatePreview(ctx context.Context, p Preview) error {
 	if p.ID == "" || p.SessionID == "" || p.Kind == "" || len(p.Inputs) == 0 || p.Fingerprint == "" || p.ExpiresAt.IsZero() {
 		return ErrEmptyPreview
@@ -68,11 +63,9 @@ func (s *Store) CreatePreview(ctx context.Context, p Preview) error {
 	return tx.Commit(ctx)
 }
 
-// DeleteExpiredPreviews deletes every unsubmitted preview that expired by
-// now and returns how many. battleship serve runs it hourly, for sessions that stay
-// open without making another preview. A submitted preview stays while its
-// session does, so a late repeat of its confirm still finds its job; the
-// session's deletion cascades to it (its job is kept).
+// DeleteExpiredPreviews deletes unsubmitted previews expired by now and
+// returns the count, for sessions that never make another preview.
+// Submitted ones go when their session does.
 func (s *Store) DeleteExpiredPreviews(ctx context.Context, now time.Time) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `DELETE FROM previews WHERE expires_at <= $1 AND job_id IS NULL`, now)
 	if err != nil {
@@ -81,8 +74,8 @@ func (s *Store) DeleteExpiredPreviews(ctx context.Context, now time.Time) (int64
 	return tag.RowsAffected(), nil
 }
 
-// Preview returns the session's preview with id, expired or not, or
-// ErrPreviewNotFound. Another session's preview is not found.
+// Preview returns the session's preview, even if expired, or
+// ErrPreviewNotFound (also for another session's).
 func (s *Store) Preview(ctx context.Context, sessionID, id string) (Preview, error) {
 	var p Preview
 	var jobID *int64
@@ -101,9 +94,8 @@ func (s *Store) Preview(ctx context.Context, sessionID, id string) (Preview, err
 	return p, nil
 }
 
-// claimPreview locks the claimed preview for tx and checks it hasn't been
-// submitted, nor expired by c.At. A concurrent submit of the same preview
-// waits here until tx ends, then finds it submitted.
+// claimPreview locks the preview for tx and checks it is unsubmitted and
+// unexpired; a concurrent submit waits here, then finds it submitted.
 func claimPreview(ctx context.Context, tx pgx.Tx, c PreviewClaim) error {
 	var jobID *int64
 	var expiresAt time.Time

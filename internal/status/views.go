@@ -12,14 +12,10 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// Views keeps one status grid per Proxmox user who is watching it. Each
-// view is a Poller reading the cluster with that user's own ticket, so it
-// shows exactly the VMs Proxmox lets them see. A view lives while event
-// streams hold it (Open), and for a linger after the last one lets go, so
-// the stream a page load opens takes over the view the page was rendered
-// from; then it stops. Nobody watching means no polling at all. Several
-// tabs of one person share their view. Job history, drift reasons and busy
-// marks come from the shared database.
+// Views keeps one grid per watching Proxmox user, polled with that user's
+// ticket so it shows exactly what Proxmox lets them see. A view lives while
+// streams hold it plus a linger, so a page's stream takes over the view the
+// page was rendered from. Nobody watching means no polling.
 type Views struct {
 	bind   func(cred func() proxmox.Credential) pods.API
 	hist   History
@@ -50,9 +46,8 @@ type View struct {
 	views *Views
 }
 
-// NewViews makes views whose pollers read the cluster through bind, which
-// makes an API acting as the credential its argument returns. linger is
-// how long a view outlives its last stream.
+// NewViews makes views whose pollers read the cluster through bind. linger
+// is how long a view outlives its last stream.
 func NewViews(bind func(cred func() proxmox.Credential) pods.API, hist History, lim *apply.Limits, cfg config.Config, opts Options, linger time.Duration) (*Views, error) {
 	if bind == nil {
 		return nil, errors.New("status: views need a way to read the cluster as someone")
@@ -72,9 +67,8 @@ func NewViews(bind func(cred func() proxmox.Credential) pods.API, hist History, 
 // Close stops every view.
 func (vs *Views) Close() { vs.end() }
 
-// Open returns user's view, starting it if there is none, and holds it
-// until release is called. cred, the ticket of the request opening it,
-// becomes the view's if it is newer than the one it has.
+// Open returns user's view (starting it if needed) and holds it until
+// release. cred replaces the view's ticket if newer.
 func (vs *Views) Open(user string, cred proxmox.Credential) (v *View, release func()) {
 	vs.mu.Lock()
 	v = vs.views[user]
@@ -97,9 +91,8 @@ func (vs *Views) Open(user string, cred proxmox.Credential) (v *View, release fu
 		}()
 		vs.views[user] = v
 	}
-	// The hold is taken under vs.mu, which the linger holds while it
-	// decides to stop the view: so it sees this hold, or has already
-	// removed the view and this Open made a new one.
+	// Taken under vs.mu, which the linger holds while deciding to stop, so
+	// it either sees this hold or already removed the view.
 	v.mu.Lock()
 	v.refs++
 	v.gen++
@@ -118,8 +111,7 @@ func (v *View) credential() proxmox.Credential {
 	return v.cred
 }
 
-// release lets go of one hold; the last one starts the linger, after which
-// the view stops unless it was opened again meanwhile.
+// release drops one hold; the last starts the linger.
 func (v *View) release() {
 	v.mu.Lock()
 	v.refs--

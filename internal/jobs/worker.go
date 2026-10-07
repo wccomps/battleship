@@ -24,26 +24,22 @@ var (
 	errAuthLapsed = errors.New("authorization lapsed")
 )
 
-// DBCallTimeout bounds each of a worker's claims and reaps, and each
-// database call of the CLI waiting for and following its job, so one dead
-// database connection can't stall either indefinitely.
+// DBCallTimeout bounds each worker claim/reap and each CLI database call, so a
+// dead connection can't stall either.
 const DBCallTimeout = 30 * time.Second
 
 // eventTimeoutFloor keeps a very short heartbeat interval (tests use 20ms) from
 // making event writes time out under load; real intervals are at least 1s.
 const eventTimeoutFloor = 2 * time.Second
 
-// Worker claims pending jobs and runs them, one at a time. Several workers,
-// in one process or several, can share a store; lock keys keep overlapping
-// jobs apart.
+// Worker claims and runs pending jobs one at a time. Workers can share a
+// store; lock keys keep overlapping jobs apart.
 type Worker struct {
 	Store *store.Store
 	Cfg   config.Config
-	// Bind gives the API a job runs with: every call made through it
-	// carries the credential cred returns at the time, which is the job's
-	// own, as its submitter (see Credentials), and calls refused each time
-	// Proxmox refuses it (401), so the job stops at once. The worker holds
-	// no credential of its own.
+	// Bind gives the API a job runs with. Each call carries cred()'s current
+	// value (the submitter's credential) and calls refused on a 401, so the
+	// job stops at once. The worker has no credential of its own.
 	Bind func(cred func() proxmox.Credential, refused func()) pods.API
 	// Credentials opens the jobs' sealed credentials.
 	Credentials Credentials
@@ -58,15 +54,12 @@ type Worker struct {
 	// OnEvent, if set, also receives each progress event as it is recorded,
 	// e.g. to print it. It is called from many goroutines.
 	OnEvent func(apply.Event)
-	// OnStart, if set, is told when this worker starts running a job it
-	// claimed, and OnFinish after it records the job's outcome. A job taken
-	// away from the worker (its claim was reaped) has no outcome from it,
-	// so OnFinish isn't called for it.
+	// OnStart, if set, is called when a claimed job starts; OnFinish after
+	// its outcome is recorded (not for a job whose claim was reaped).
 	OnStart  func(job *store.Job)
 	OnFinish func(job *store.Job, out store.Outcome)
-	// Cancels, if set, subscribes to requests to cancel a job: wake
-	// receives when one may have come, and the worker checks at once. Nil:
-	// cancels wait for the next heartbeat.
+	// Cancels, if set, subscribes to cancel requests: wake fires when one may
+	// have come. Nil: cancels wait for the next heartbeat.
 	Cancels func(jobID int64) (wake <-chan struct{}, stop func())
 
 	// beat sends a heartbeat; tests replace it. Nil means Store.Heartbeat.
@@ -94,8 +87,8 @@ func (w *Worker) init() {
 	})
 }
 
-// Run claims and runs jobs until ctx is done. Each pass it first marks jobs
-// whose workers went silent as interrupted.
+// Run claims and runs jobs until ctx is done, first reaping jobs whose
+// workers went silent each pass.
 func (w *Worker) Run(ctx context.Context) error {
 	w.init()
 	for ctx.Err() == nil {
@@ -128,10 +121,9 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 // RunJob runs a job this worker has claimed and records how it ended. A
-// shutdown (ctx cancelled) or someone's cancel stops it gracefully, cleanup
-// included, and records it interrupted or cancelled, with the VMs the stop
-// cut off interrupted (or removed by cleanup). A stop that arrives after
-// every runnable VM finished changes nothing.
+// shutdown or cancel stops it gracefully (cleanup included) and records it
+// interrupted or cancelled; a stop after every runnable VM finished changes
+// nothing.
 func (w *Worker) RunJob(ctx context.Context, job *store.Job) {
 	w.init()
 	if w.OnStart != nil {
@@ -171,9 +163,8 @@ func (w *Worker) RunJob(ctx context.Context, job *store.Job) {
 	// A lost claim (errLostClaim) needs no case: Finish refuses it below.
 	switch cause := context.Cause(runCtx); {
 	case errors.Is(cause, errAuthLapsed) && !(finished && outcome.Status == store.StatusSucceeded):
-		// Checked before finished: a 401 in the last round leaves no VM
-		// interrupted, but the job still stopped for its authorization.
-		// Nothing ran if it lapsed while planning: preview it again.
+		// Before finished: a 401 in the last round interrupts no VM but
+		// still stopped the job. No Summary means it lapsed while planning.
 		if outcome.Summary == nil {
 			outcome = store.Outcome{Status: store.StatusStale, Error: lapsedMessage}
 			break
@@ -184,9 +175,9 @@ func (w *Worker) RunJob(ctx context.Context, job *store.Job) {
 	case errors.Is(cause, apply.ErrCancelRequested):
 		outcome.Status = store.StatusCancelled
 	case errors.Is(cause, errNoHeartbeat):
-		// Stopped before another worker may reap the job. Stale and failed
-		// outcomes stand. Cleanup still runs, so a partition that outlasts
-		// StaleAfter can overlap a new job on the team (accepted risk).
+		// Stopped before another worker may reap it. Cleanup still runs, so
+		// a partition outlasting StaleAfter can overlap a new job on the
+		// team (accepted risk).
 		if store.JobStatus(outcome.Status).RanNothing() {
 			break
 		}
@@ -197,8 +188,7 @@ func (w *Worker) RunJob(ctx context.Context, job *store.Job) {
 		outcome.Error = "the worker shut down during the job; re-run it to finish"
 	}
 	stopHeartbeat()
-	// Finish records nothing for a job that is no longer this worker's,
-	// however the run stopped.
+	// Finish refuses a job that is no longer this worker's.
 	finCtx, stopFin := context.WithTimeout(bg, 30*time.Second)
 	defer stopFin()
 	switch err := w.Store.Finish(finCtx, job.ID, w.ID, outcome); {
@@ -214,16 +204,12 @@ func (w *Worker) RunJob(ctx context.Context, job *store.Job) {
 	}
 }
 
-// heartbeat proves the job is alive until done is closed. It cancels the run
-// when someone asks, and when the job is no longer this worker's (then it
-// returns). It beats every Jobs.Heartbeat, and at once when
-// wake receives, so a cancel takes effect without waiting for the next beat.
+// heartbeat beats every Jobs.Heartbeat (and at once on wake) until done is
+// closed, cancelling the run on a cancel request or a lost claim.
 //
-// A timer enforces the deadline, so a beat hung on a dead connection can't
-// put it off: no successful beat for StaleAfter/2 cancels the run with
-// errNoHeartbeat. The timer doesn't advance while the machine sleeps, so each
-// tick also checks the wall clock. Beating goes on after that, keeping the
-// job claimed while its cleanup runs.
+// No successful beat for StaleAfter/2 cancels with errNoHeartbeat; a timer
+// enforces this so a beat hung on a dead connection can't defer it. Beating
+// continues afterwards to keep the job claimed during cleanup.
 func (w *Worker) heartbeat(ctx context.Context, jobID int64, cancel context.CancelCauseFunc, wake <-chan struct{}, done <-chan struct{}) {
 	t := time.NewTicker(w.Cfg.Jobs.Heartbeat)
 	defer t.Stop()
@@ -231,9 +217,8 @@ func (w *Worker) heartbeat(ctx context.Context, jobID int64, cancel context.Canc
 	// The claim itself counts as a heartbeat.
 	deadline := time.AfterFunc(threshold, func() { cancel(errNoHeartbeat) })
 	defer deadline.Stop()
-	// The timer runs on the monotonic clock, which stops while the machine
-	// sleeps; the wall clock doesn't, so check it too. Round(0) strips the
-	// monotonic reading.
+	// The timer's monotonic clock stops while the machine sleeps, so also
+	// check the wall clock. Round(0) strips the monotonic reading.
 	lastOKWall := w.now().Round(0)
 	for {
 		select {
@@ -270,11 +255,10 @@ func (w *Worker) heartbeat(ctx context.Context, jobID int64, cancel context.Canc
 	}
 }
 
-// execute plans the job again, checks it against the confirmed preview, and
-// runs it. bg outlives ctx and is used to record progress; halt closes on
-// shutdown, ending a cancel's grace (apply.Executor.Halt). finished reports
-// that the plan ran, no runnable VM was interrupted and no retry round was
-// skipped.
+// execute replans the job, checks it against the confirmed preview, and runs
+// it. bg outlives ctx and records progress; halt closes on shutdown
+// (apply.Executor.Halt). finished means no VM was interrupted and no retry
+// round was skipped.
 func (w *Worker) execute(ctx, bg context.Context, halt <-chan struct{}, job *store.Job, api pods.API) (out store.Outcome, finished bool) {
 	var in Inputs
 	if err := json.Unmarshal(job.Inputs, &in); err != nil {
@@ -283,9 +267,7 @@ func (w *Worker) execute(ctx, bg context.Context, halt <-chan struct{}, job *sto
 	plan, err := BuildPlan(ctx, pods.NewPlanner(api, w.Cfg), in)
 	if err != nil {
 		if ctx.Err() != nil {
-			// The run was stopped (shutdown, cancel or lost heartbeats)
-			// while planning, not failed: RunJob records why, and the
-			// job can be run again.
+			// Stopped, not failed: RunJob records why.
 			return store.Outcome{Status: store.StatusInterrupted, Error: "stopped before anything ran; nothing was changed"}, false
 		}
 		return store.Outcome{Status: store.StatusFailed, Error: "planning: " + proxmox.Describe(err)}, false
@@ -319,15 +301,12 @@ func (w *Worker) execute(ctx, bg context.Context, halt <-chan struct{}, job *sto
 		},
 	}
 	res := exec.Run(ctx, plan)
-	// A stop that cut retry rounds short left failed VMs without their
-	// retry, so the job didn't finish even if no VM was interrupted.
+	// Skipped retry rounds mean the job didn't finish.
 	return outcomeOf(res), len(res.Interrupted) == 0 && !res.RoundsSkipped
 }
 
-// jobCredential opens the job's credential. An error wrapping
-// errAuthLapsed means it can't be used: it is gone (the job ended, or the
-// renewer dropped it) or has lapsed, judged from the row's own columns.
-// Any other error is the database's, or this process's seal key.
+// jobCredential opens the job's credential. errAuthLapsed means it is gone
+// or lapsed; any other error is the database's or the seal key's.
 func (w *Worker) jobCredential(ctx context.Context, jobID int64) (proxmox.Credential, error) {
 	callCtx, stop := context.WithTimeout(ctx, DBCallTimeout)
 	defer stop()
@@ -376,10 +355,9 @@ func (h *heldCredential) set(c proxmox.Credential) {
 	h.cred = c
 }
 
-// watchCredential reloads the job's credential every heartbeat until done
-// is closed, so calls use a ticket the renewer renewed. If the credential
-// is gone or has lapsed, it stops the run (errAuthLapsed). A database error
-// keeps the current credential; the heartbeat deals with lost contact.
+// watchCredential reloads the job's credential every heartbeat so calls
+// pick up renewed tickets, and stops the run if it lapsed. A database error
+// keeps the current one; the heartbeat handles lost contact.
 func (w *Worker) watchCredential(ctx context.Context, jobID int64, held *heldCredential, cancel context.CancelCauseFunc, done <-chan struct{}) {
 	t := time.NewTicker(w.Cfg.Jobs.Heartbeat)
 	defer t.Stop()
@@ -391,8 +369,8 @@ func (w *Worker) watchCredential(ctx context.Context, jobID int64, held *heldCre
 		}
 		cred, err := w.jobCredential(ctx, jobID)
 		if errors.Is(err, errAuthLapsed) && !w.stillOurs(ctx, jobID) {
-			// The job ended elsewhere (reaped, which deletes its
-			// credential): the heartbeat will find the claim lost.
+			// Reaped elsewhere (which deletes the credential); the
+			// heartbeat will find the claim lost.
 			return
 		}
 		switch {
@@ -408,9 +386,8 @@ func (w *Worker) watchCredential(ctx context.Context, jobID int64, held *heldCre
 	}
 }
 
-// staleMessage explains why a job didn't run: the cluster, or the config of
-// the process that claimed it, no longer matches the preview the user
-// confirmed.
+// staleMessage explains why the replan no longer matches the confirmed
+// preview.
 func staleMessage(then, now *pods.Plan) string {
 	if then.Config != now.Config {
 		return "battleship's config for what this job does to VMs changed since the preview (a config change was rolled out); nothing was changed. Preview it again."

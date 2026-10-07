@@ -23,42 +23,36 @@ var migrations embed.FS
 // migrateLockID serializes schema migrations across replicas.
 const migrateLockID = 727070
 
-// Store is the job database. It keeps two connection pools: the main one,
-// for everything else, and a small one for job heartbeats and readiness
-// pings only, so page traffic that takes every main connection can't make
-// a running job look dead or a healthy replica look unready. A third,
-// single connection holds the process's slots (see AcquireSlot), and each
-// listener has one of its own (see Notifications).
+// Store is the job database. A small liveness pool serves heartbeats and
+// pings only, so page traffic exhausting the main pool can't make a job look
+// dead or a replica unready. Slots (AcquireSlot) and each listener
+// (Notifications) get their own connection.
 type Store struct {
 	pool     *pgxpool.Pool // everything but heartbeats and pings
 	liveness *pgxpool.Pool // Heartbeat and Ping only, so a busy main pool can't delay them
 	slots    *slots        // AcquireSlot's own connection
-	// connCfg opens connections outside the pools: each listener's
-	// (Notifications), so none holds up Close, and Migrate's.
+	// connCfg opens non-pool connections (listeners, Migrate), so listeners
+	// don't hold up Close.
 	connCfg *pgx.ConnConfig
 }
 
 const (
 	// DefaultMaxConns is the main pool's size when Options.MaxConns is 0.
 	DefaultMaxConns = 16
-	// LivenessConns is the size of the pool for heartbeats and pings. It
-	// is on top of the main pool's.
+	// LivenessConns sizes the heartbeat/ping pool, on top of the main pool.
 	LivenessConns = 2
 )
 
 // Options tune Open. Zero values take the defaults.
 type Options struct {
-	// MaxConns is the most connections the main pool opens (database.
-	// max_conns); default DefaultMaxConns. The store opens up to
-	// LivenessConns more for heartbeats and pings, one for slots, and one
-	// per listener (Notifications).
+	// MaxConns sizes the main pool (database.max_conns). The store also
+	// opens LivenessConns, one slot connection and one per listener.
 	MaxConns int
 }
 
-// sessionParams bound how long any session waits, so one dead or hung
-// connection can't stall every replica: a transaction left idle is aborted,
-// lock waits give up, and the server notices a vanished client in about a
-// minute instead of two hours.
+// sessionParams bound every session's waits so one hung connection can't
+// stall every replica; the keepalives make the server notice a vanished
+// client in about a minute instead of two hours.
 var sessionParams = map[string]string{
 	"idle_in_transaction_session_timeout": "30s",
 	"lock_timeout":                        "10s",
@@ -67,9 +61,7 @@ var sessionParams = map[string]string{
 	"tcp_keepalives_count":                "3",
 }
 
-// Open connects to Postgres with a main pool of opts.MaxConns connections
-// and a pool of LivenessConns for heartbeats and pings. Call Migrate before
-// using the store.
+// Open connects to Postgres. Call Migrate before using the store.
 func Open(ctx context.Context, url string, opts Options) (*Store, error) {
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
@@ -88,8 +80,7 @@ func Open(ctx context.Context, url string, opts Options) (*Store, error) {
 		maxConns = DefaultMaxConns
 	}
 	cfg.MaxConns = int32(maxConns)
-	// The URL may set pool_min_conns; the liveness pool opens its two
-	// connections only as needed.
+	// Ignore any pool_min_conns from the URL for the liveness pool.
 	lcfg := cfg.Copy()
 	lcfg.MaxConns = LivenessConns
 	lcfg.MinConns = 0
@@ -126,8 +117,7 @@ func (s *Store) Close() {
 	s.slots.close()
 }
 
-// Ping checks that the database answers, for readiness checks, on the
-// liveness pool.
+// Ping checks the database answers, on the liveness pool (readiness).
 func (s *Store) Ping(ctx context.Context) error {
 	if err := s.liveness.Ping(ctx); err != nil {
 		return fmt.Errorf("pinging database: %w", err)
@@ -135,13 +125,12 @@ func (s *Store) Ping(ctx context.Context) error {
 	return nil
 }
 
-// Migrate applies embedded migrations that haven't run yet. Replicas starting
-// together take turns through an advisory lock, so each migration runs once.
+// Migrate applies pending embedded migrations, once across replicas
+// (advisory lock).
 func (s *Store) Migrate(ctx context.Context) error {
-	// A connection of its own, whose lock_timeout is off: wait as long as
-	// another replica's migration takes, and let migrations' DDL wait for
-	// running transactions, instead of giving up at the pool's 10s. Closing
-	// it also ends the advisory lock.
+	// Own connection without lock_timeout, so it waits out another replica's
+	// migration and DDL waits for running transactions. Closing it releases
+	// the advisory lock.
 	cfg := s.connCfg.Copy()
 	cfg.RuntimeParams["lock_timeout"] = "0"
 	conn, err := pgx.ConnectConfig(ctx, cfg)
