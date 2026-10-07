@@ -155,7 +155,7 @@ func TestFingerprintCoversExecutionConfig(t *testing.T) {
 func deployPlan(t *testing.T, cfg config.Config) *pods.Plan {
 	t.Helper()
 	f := twoTeams()
-	f.vms[5001] = &proxmox.VM{VMID: 5001, Name: "dc.kilo.alpha", Node: "n1", Status: "stopped", Tags: "dev"}
+	f.addVM(proxmox.VM{VMID: 5001, Name: "dc.kilo.alpha", Node: "n1", Status: "stopped", Tags: "dev"})
 	p, err := BuildPlan(bg, pods.NewPlanner(f, cfg), Inputs{Kind: pods.KindDeploy, Teams: "1", Pattern: "*.kilo.alpha"})
 	if err != nil {
 		t.Fatal(err)

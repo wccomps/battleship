@@ -11,22 +11,23 @@ import (
 	"time"
 
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
 // sevenMasters is a cluster whose seven running masters, h1..h7, are all on
 // spruce, like the production deploy that built its templates one by one.
 // Master 10i builds template 900i, which team 01 clones to 1010i.
-func sevenMasters() *fakeAPI {
-	f := newFakeAPI("cedar", "birch", "spruce")
+func sevenMasters() *podstest.Fake {
+	f := podstest.New("cedar", "birch", "spruce")
 	for i := 1; i <= 7; i++ {
-		f.add(proxmox.VM{VMID: 100 + i, Name: fmt.Sprintf("h%d.kilo.alpha", i), Node: "spruce", Tags: "dev", Status: "running"},
+		f.Add(proxmox.VM{VMID: 100 + i, Name: fmt.Sprintf("h%d.kilo.alpha", i), Node: "spruce", Tags: "dev", Status: "running"},
 			map[string]string{"net0": fmt.Sprintf("virtio=BC:24:11:00:01:%02d,bridge=vmbr0", i)})
 	}
 	return f
 }
 
-func deploySeven(t *testing.T, f *fakeAPI, hosts ...string) *pods.Plan {
+func deploySeven(t *testing.T, f *podstest.Fake, hosts ...string) *pods.Plan {
 	t.Helper()
 	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "*.kilo.alpha", Teams: []string{"01"}, Hosts: hosts})
 	if err != nil {
@@ -67,15 +68,15 @@ type cloneGate struct {
 	inflight, maxInflight int
 }
 
-func newCloneGate(t *testing.T, f *fakeAPI, capacity int, hold func(upid string) bool) *cloneGate {
+func newCloneGate(t *testing.T, f *podstest.Fake, capacity int, hold func(upid string) bool) *cloneGate {
 	return newTaskGate(t, f, capacity, "qmclone", hold)
 }
 
 // newTaskGate is a cloneGate for tasks of another kind, such as qmdestroy.
-func newTaskGate(t *testing.T, f *fakeAPI, capacity int, kind string, hold func(upid string) bool) *cloneGate {
+func newTaskGate(t *testing.T, f *podstest.Fake, capacity int, kind string, hold func(upid string) bool) *cloneGate {
 	g := &cloneGate{t: t, kind: kind, hold: hold, arrive: make(chan *gateWaiter), seen: map[string]bool{},
 		arrived: map[string]bool{}, released: map[string]bool{}, capacity: capacity}
-	f.waitGate = g.wait
+	f.WaitGate = g.wait
 	return g
 }
 
@@ -173,8 +174,8 @@ func (g *cloneGate) drive(total int, startable func() int) {
 	}
 }
 
-func masterClone(i int) string { return upid("spruce", "qmclone", 100+i) }
-func itemClone(i int) string   { return upid("spruce", "qmclone", 9000+i) }
+func masterClone(i int) string { return podstest.UPID("spruce", "qmclone", 100+i) }
+func itemClone(i int) string   { return podstest.UPID("spruce", "qmclone", 9000+i) }
 
 // runAsync runs plan in the background. Cleanup cancels it and waits, so a
 // failed test does not leave the run blocked in the gate.
@@ -207,14 +208,14 @@ func waitResult(t *testing.T, done <-chan Result) Result {
 
 // checkMasters asserts that every master that was stopped was started again
 // after its clone task, and that all are running.
-func checkMasters(t *testing.T, f *fakeAPI) {
+func checkMasters(t *testing.T, f *podstest.Fake) {
 	t.Helper()
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
 	for i := 1; i <= 7; i++ {
 		vmid := 100 + i
 		stops, starts, lastStop, lastStart, lastClone := 0, 0, -1, -1, -1
-		for k, c := range f.calls {
+		for k, c := range f.Calls {
 			switch c {
 			case fmt.Sprintf("power:%d:stop", vmid):
 				stops, lastStop = stops+1, k
@@ -230,7 +231,7 @@ func checkMasters(t *testing.T, f *fakeAPI) {
 		if stops > 0 && (lastStart < lastStop || lastStart < lastClone) {
 			t.Errorf("master h%d: last start at %d, before its stop (%d) or clone wait (%d)", i, lastStart, lastStop, lastClone)
 		}
-		if st := f.vms[vmid].Status; st != "running" {
+		if st := f.VMs[vmid].Status; st != "running" {
 			t.Errorf("master h%d is %s, want running", i, st)
 		}
 	}
@@ -254,7 +255,7 @@ func TestTemplatesBuildConcurrentlyUpToCap(t *testing.T) {
 		t.Errorf("result = %+v", res)
 	}
 	for i := 1; i <= 7; i++ {
-		if tpl := f.vms[9000+i]; tpl == nil || !tpl.Template {
+		if tpl := f.VMs[9000+i]; tpl == nil || !tpl.Template {
 			t.Errorf("template %d = %+v", 9000+i, tpl)
 		}
 	}
@@ -326,7 +327,7 @@ func TestItemsStartWhenTheirOwnTemplateIsReady(t *testing.T) {
 func TestConcurrentTemplatesFailAndCancel(t *testing.T) {
 	f := sevenMasters()
 	// team01-h6 already exists, so h6's template is not needed.
-	f.add(proxmox.VM{VMID: 10106, Name: "team01-h6", Node: "cedar", Status: "running"},
+	f.Add(proxmox.VM{VMID: 10106, Name: "team01-h6", Node: "cedar", Status: "running"},
 		map[string]string{"name": "team01-h6", "net0": "virtio=BC:24:11:00:01:06,bridge=ext01"}, "initial")
 	plan := deploySeven(t, f)
 	ex := testExecutor(f, &recorder{})
@@ -357,22 +358,22 @@ func TestConcurrentTemplatesFailAndCancel(t *testing.T) {
 	res := waitResult(t, done)
 
 	checkMasters(t, f)
-	if f.called("power:106:") != 0 {
+	if f.Called("power:106:") != 0 {
 		t.Error("h6's master was touched though its template was not needed")
 	}
-	if tpl := f.vms[9000+ok]; tpl == nil || !tpl.Template {
+	if tpl := f.VMs[9000+ok]; tpl == nil || !tpl.Template {
 		t.Errorf("finished template h%d = %+v", ok, tpl)
 	}
-	if f.vms[9000+bad] != nil || f.called(fmt.Sprintf("template:%d", 9000+bad)) != 0 {
+	if f.VMs[9000+bad] != nil || f.Called(fmt.Sprintf("template:%d", 9000+bad)) != 0 {
 		t.Errorf("failed copy h%d was not removed", bad)
 	}
-	if f.vms[10100+ok] != nil {
+	if f.VMs[10100+ok] != nil {
 		t.Errorf("cancelled team01-h%d was left behind", ok)
 	}
 	var wantCompleted []string
 	for i := range cut {
 		wantCompleted = append(wantCompleted, fmt.Sprintf("h%d.kilo.alpha.tpl", i))
-		if tpl := f.vms[9000+i]; tpl == nil || !tpl.Template {
+		if tpl := f.VMs[9000+i]; tpl == nil || !tpl.Template {
 			t.Errorf("copy cut off by the cancel h%d = %+v, want completed", i, tpl)
 		}
 	}
@@ -383,15 +384,15 @@ func TestConcurrentTemplatesFailAndCancel(t *testing.T) {
 	if fmt.Sprint(res.Removed) != fmt.Sprint(wantRemoved) || len(res.CleanupFailed) != 0 {
 		t.Errorf("Removed = %v, want %v; CleanupFailed = %v", res.Removed, wantRemoved, res.CleanupFailed)
 	}
-	if n := f.called("delete:"); n != 2 {
-		t.Errorf("%d deletes, want 2: %v", n, f.calls)
+	if n := f.Called("delete:"); n != 2 {
+		t.Errorf("%d deletes, want 2: %v", n, f.Calls)
 	}
-	if f.vms[10106] == nil {
+	if f.VMs[10106] == nil {
 		t.Error("team01-h6, which this run did not create, was removed")
 	}
 	// Templates never started leave no VM behind.
 	for i := 1; i <= 7; i++ {
-		if vm := f.vms[9000+i]; vm != nil && !vm.Template {
+		if vm := f.VMs[9000+i]; vm != nil && !vm.Template {
 			t.Errorf("unconverted copy left at %d: %+v", 9000+i, vm)
 		}
 	}
@@ -402,11 +403,11 @@ func TestConcurrentTemplatesFailAndCancel(t *testing.T) {
 // fail it.
 func TestExistingTeamVMIgnoresFailedTemplateBuild(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{
 		"name": "team01-teak", "net0": "virtio=BC:24:11:00:01:21,bridge=vmbr0", "net1": "virtio=BC:24:11:00:01:22,bridge=vmbr1",
 	}, "initial")
 	plan := deployTeak(t, f, "01", "02")
-	f.failOn("clone:9021", &proxmox.APIError{Status: 403, Message: "Permission check failed (/vms/121, VM.Clone)"},
+	f.FailOn("clone:9021", &proxmox.APIError{Status: 403, Message: "Permission check failed (/vms/121, VM.Clone)"},
 		&proxmox.APIError{Status: 403, Message: "Permission check failed (/vms/121, VM.Clone)"})
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)

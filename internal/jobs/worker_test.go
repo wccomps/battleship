@@ -90,8 +90,8 @@ func TestWorkerRunsJob(t *testing.T) {
 	if j.Status != store.StatusSucceeded || j.FinishedAt == nil {
 		t.Fatalf("job = %s (%s)", j.Status, j.Error)
 	}
-	if len(f.deletedIDs()) != 2 {
-		t.Errorf("deleted %v, want both VMs", f.deletedIDs())
+	if len(f.DeletedIDs()) != 2 {
+		t.Errorf("deleted %v, want both VMs", f.DeletedIDs())
 	}
 	items, _ := st.Items(bg, id)
 	for _, it := range items {
@@ -114,9 +114,9 @@ func TestWorkerRefusesStalePlan(t *testing.T) {
 	f := teamVMs()
 	id := submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
 	// Someone adds a VM to team 01 after the preview.
-	f.mu.Lock()
-	f.vms[10107] = &proxmox.VM{VMID: 10107, Name: "team01-web", Node: "n1", Status: "running"}
-	f.mu.Unlock()
+	f.Mu.Lock()
+	f.addVM(proxmox.VM{VMID: 10107, Name: "team01-web", Node: "n1", Status: "running"})
+	f.Mu.Unlock()
 
 	newWorker(st, f).RunJob(bg, claim(t, st))
 
@@ -124,8 +124,8 @@ func TestWorkerRefusesStalePlan(t *testing.T) {
 	if j.Status != store.StatusStale || !strings.Contains(j.Error, "changed since the preview") {
 		t.Fatalf("job = %s: %s", j.Status, j.Error)
 	}
-	if len(f.deletedIDs()) != 0 {
-		t.Errorf("a stale job deleted %v", f.deletedIDs())
+	if len(f.DeletedIDs()) != 0 {
+		t.Errorf("a stale job deleted %v", f.DeletedIDs())
 	}
 }
 
@@ -498,8 +498,8 @@ func TestWorkerStopsWhenHeartbeatsKeepFailing(t *testing.T) {
 	if got.Status != store.StatusInterrupted || !strings.Contains(got.Error, "lost contact with the database") {
 		t.Errorf("job = %s: %s", got.Status, got.Error)
 	}
-	if len(f.deletedIDs()) != 0 {
-		t.Errorf("deleted %v while cut off", f.deletedIDs())
+	if len(f.DeletedIDs()) != 0 {
+		t.Errorf("deleted %v while cut off", f.DeletedIDs())
 	}
 }
 
@@ -555,8 +555,8 @@ func TestWorkerStopsWhenHeartbeatHangs(t *testing.T) {
 	if got.Status != store.StatusInterrupted || !strings.Contains(got.Error, "lost contact with the database") {
 		t.Errorf("job = %s: %s", got.Status, got.Error)
 	}
-	if len(f.deletedIDs()) != 0 {
-		t.Errorf("deleted %v while cut off", f.deletedIDs())
+	if len(f.DeletedIDs()) != 0 {
+		t.Errorf("deleted %v while cut off", f.DeletedIDs())
 	}
 }
 
@@ -799,8 +799,8 @@ func TestWorkerRefusesPlanUnderOtherConfig(t *testing.T) {
 	if j.Status != store.StatusStale || !strings.Contains(j.Error, "config") {
 		t.Fatalf("job = %s: %s", j.Status, j.Error)
 	}
-	if len(f.deletedIDs()) != 0 {
-		t.Errorf("a stale job deleted %v", f.deletedIDs())
+	if len(f.DeletedIDs()) != 0 {
+		t.Errorf("a stale job deleted %v", f.DeletedIDs())
 	}
 }
 
@@ -827,8 +827,8 @@ func TestWorkerRefusesJobStoredWithoutConfigHash(t *testing.T) {
 	if j.Status != store.StatusStale || !strings.Contains(j.Error, "config") {
 		t.Fatalf("job = %s: %s, want stale for a config change", j.Status, j.Error)
 	}
-	if len(f.deletedIDs()) != 0 {
-		t.Errorf("a stale job deleted %v", f.deletedIDs())
+	if len(f.DeletedIDs()) != 0 {
+		t.Errorf("a stale job deleted %v", f.DeletedIDs())
 	}
 }
 

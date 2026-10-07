@@ -14,10 +14,10 @@ import (
 // snapshot_name if it has it, else its newest pattern match.
 func TestResetDefaultsToEachVMsBaseline(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "fresh_clone_20261001000000", "fresh_clone_20261002034615", "pre-inject")
-	f.add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil, "fresh_clone_20260901000000")
-	f.add(proxmox.VM{VMID: 10130, Name: "team01-notes", Node: "cedar"}, nil, "fresh_clone_20261002034615", "initial")
-	f.add(proxmox.VM{VMID: 10131, Name: "team01-mail", Node: "cedar"}, nil, "before-scoring")
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "fresh_clone_20261001000000", "fresh_clone_20261002034615", "pre-inject")
+	f.Add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil, "fresh_clone_20260901000000")
+	f.Add(proxmox.VM{VMID: 10130, Name: "team01-notes", Node: "cedar"}, nil, "fresh_clone_20261002034615", "initial")
+	f.Add(proxmox.VM{VMID: 10131, Name: "team01-mail", Node: "cedar"}, nil, "before-scoring")
 
 	rs, err := testPlanner(f).Reset(context.Background(), []string{"01"}, nil, "")
 	if err != nil {
@@ -46,8 +46,8 @@ func TestResetDefaultsToEachVMsBaseline(t *testing.T) {
 	}
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), rs)
-	if len(res.Failed) != 0 || f.called("rollback:10121:fresh_clone_20261002034615") != 1 || f.called("rollback:10125:fresh_clone_20260901000000") != 1 || f.called("rollback:10130:initial") != 1 {
-		t.Errorf("result %+v, calls %v", res, f.calls)
+	if len(res.Failed) != 0 || f.Called("rollback:10121:fresh_clone_20261002034615") != 1 || f.Called("rollback:10125:fresh_clone_20260901000000") != 1 || f.Called("rollback:10130:initial") != 1 {
+		t.Errorf("result %+v, calls %v", res, f.Calls)
 	}
 }
 
@@ -56,7 +56,7 @@ func TestResetDefaultsToEachVMsBaseline(t *testing.T) {
 func TestDeployKeepsPatternBaseline(t *testing.T) {
 	f := newCluster()
 	testExecutor(f, &recorder{}).Run(context.Background(), deployTeak(t, f, "01"))
-	vm := f.vms[10121]
+	vm := f.VMs[10121]
 	vm.Snapshots = []string{"fresh_clone_20261002034615"}
 	vm.Status = "running"
 	res := testExecutor(f, &recorder{}).Run(context.Background(), deployTeak(t, f, "01"))

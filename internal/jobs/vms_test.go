@@ -82,12 +82,11 @@ func TestBuildPlanChecksVMNames(t *testing.T) {
 func TestBuildPlanNarrowsDeployTemplates(t *testing.T) {
 	cfg := testCfg()
 	f := twoTeams()
-	for _, m := range []proxmox.VM{
+	for _, vm := range []proxmox.VM{
 		{VMID: 5001, Name: "dc.kilo.alpha", Node: "n1", Status: "stopped", Tags: "dev"},
 		{VMID: 5002, Name: "web.kilo.alpha", Node: "n1", Status: "stopped", Tags: "dev"},
 	} {
-		vm := m
-		f.vms[vm.VMID] = &vm
+		f.addVM(vm)
 	}
 	p := pods.NewPlanner(f, cfg)
 	all, err := BuildPlan(bg, p, Inputs{Kind: pods.KindDeploy, Teams: "1-2", Pattern: "*.kilo.alpha"})

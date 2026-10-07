@@ -8,28 +8,29 @@ import (
 	"testing"
 
 	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
 // newCluster returns a fake with two tagged masters (teak: 2 NICs,
 // cloud-init; oak: GPU) and one untagged VM.
-func newCluster() *fakeAPI {
-	f := newFakeAPI("cedar", "birch", "spruce")
-	f.add(proxmox.VM{VMID: 121, Name: "teak.tango.delta", Node: "cedar", Tags: "dev;tango.delta"}, map[string]string{
+func newCluster() *podstest.Fake {
+	f := podstest.New("cedar", "birch", "spruce")
+	f.Add(proxmox.VM{VMID: 121, Name: "teak.tango.delta", Node: "cedar", Tags: "dev;tango.delta"}, map[string]string{
 		"net0":  "virtio=BC:24:11:00:01:21,bridge=vmbr0",
 		"net1":  "virtio=BC:24:11:00:01:22,bridge=vmbr1",
 		"ide2":  "competitions:vm-121-cloudinit,media=cdrom",
 		"scsi0": "competitions:121/vm-121-disk-0.qcow2,size=32G",
 	})
-	f.add(proxmox.VM{VMID: 125, Name: "oak.tango.delta", Node: "birch", Tags: "dev"}, map[string]string{
+	f.Add(proxmox.VM{VMID: 125, Name: "oak.tango.delta", Node: "birch", Tags: "dev"}, map[string]string{
 		"net0": "virtio=BC:24:11:00:01:25,bridge=vmbr0",
 		"vga":  "virtio-gl,memory=256",
 	})
-	f.add(proxmox.VM{VMID: 130, Name: "notes.tango.delta", Node: "cedar", Tags: "docs"}, nil)
+	f.Add(proxmox.VM{VMID: 130, Name: "notes.tango.delta", Node: "cedar", Tags: "docs"}, nil)
 	return f
 }
 
-func testPlanner(f *fakeAPI) Planner {
+func testPlanner(f *podstest.Fake) Planner {
 	cfg := config.Default()
 	return NewPlanner(f, cfg)
 }
@@ -81,8 +82,8 @@ func TestDeployPlanFromScratch(t *testing.T) {
 
 func TestDeployPlanReusesTemplateAndConvergesExistingVM(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "spruce"}, nil)
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "spruce"}, nil)
 
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{
 		Pattern: "teak.*", Teams: []string{"01"},
@@ -101,7 +102,7 @@ func TestDeployPlanReusesTemplateAndConvergesExistingVM(t *testing.T) {
 
 func TestDeployPlanBlocksVMIDConflict(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "someone-elses-vm", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "someone-elses-vm", Node: "cedar"}, nil)
 
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 	if err != nil {
@@ -117,8 +118,8 @@ func TestDeployPlanBlocksVMIDConflict(t *testing.T) {
 
 func TestDeployPlanRebuildBlockedByClones(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
-	f.add(proxmox.VM{VMID: 10521, Name: "team05-teak", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10521, Name: "team05-teak", Node: "cedar"}, nil)
 
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
 	if err != nil {
@@ -141,9 +142,9 @@ func TestDeployPlanExplainsUntaggedMasters(t *testing.T) {
 
 func TestTeardownAndResetPlans(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "initial")
-	f.add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil)
-	f.add(proxmox.VM{VMID: 10221, Name: "team02-teak", Node: "cedar"}, nil, "initial")
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "initial")
+	f.Add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil)
+	f.Add(proxmox.VM{VMID: 10221, Name: "team02-teak", Node: "cedar"}, nil, "initial")
 	p := testPlanner(f)
 
 	td, err := p.Teardown(context.Background(), []string{"01"}, nil)
@@ -175,7 +176,7 @@ func TestDeployPlanBlocksTemplateOutsideVMIDRange(t *testing.T) {
 	f := newCluster()
 	// A hand-made template at 9121 would give teak the same clone VMIDs as a
 	// template at 9021.
-	f.add(proxmox.VM{VMID: 9121, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 9121, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
 
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 	if err != nil {
@@ -190,9 +191,9 @@ func TestDeployPlanBlocksTemplateOutsideVMIDRange(t *testing.T) {
 }
 
 func TestDeployPlanBlocksTemplateVMIDBumpedPastRange(t *testing.T) {
-	f := newFakeAPI("cedar")
-	f.add(proxmox.VM{VMID: 199, Name: "edge.x", Node: "cedar", Tags: "dev"}, map[string]string{"net0": "virtio=BC:24:11:00:01:99,bridge=vmbr0"})
-	f.add(proxmox.VM{VMID: 9099, Name: "unrelated", Node: "cedar"}, nil)
+	f := podstest.New("cedar")
+	f.Add(proxmox.VM{VMID: 199, Name: "edge.x", Node: "cedar", Tags: "dev"}, map[string]string{"net0": "virtio=BC:24:11:00:01:99,bridge=vmbr0"})
+	f.Add(proxmox.VM{VMID: 9099, Name: "unrelated", Node: "cedar"}, nil)
 
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "edge.*", Teams: []string{"01"}})
 	if err != nil {
@@ -205,7 +206,7 @@ func TestDeployPlanBlocksTemplateVMIDBumpedPastRange(t *testing.T) {
 
 func TestDeployPlanRebuildDeletesOldTemplateOnItsNode(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)
 
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
 	if err != nil {
@@ -219,7 +220,7 @@ func TestDeployPlanRebuildDeletesOldTemplateOnItsNode(t *testing.T) {
 
 func TestDeployPlanReusedTemplateDescribesItself(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, map[string]string{
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, map[string]string{
 		"net0": "virtio=BC:24:11:00:01:21,bridge=vmbr0",
 	})
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
@@ -233,8 +234,8 @@ func TestDeployPlanReusedTemplateDescribesItself(t *testing.T) {
 
 func TestDeployPlanGPUDetectionIsExact(t *testing.T) {
 	for vga, want := range map[string]bool{"type=virtio-gl,memory=256": true, "virtio-gl": true, "virtio-gl2": false, "std": false} {
-		f := newFakeAPI("cedar")
-		f.add(proxmox.VM{VMID: 121, Name: "teak.x", Node: "cedar", Tags: "dev"}, map[string]string{"vga": vga})
+		f := podstest.New("cedar")
+		f.Add(proxmox.VM{VMID: 121, Name: "teak.x", Node: "cedar", Tags: "dev"}, map[string]string{"vga": vga})
 		plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 		if err != nil {
 			t.Fatal(err)
@@ -247,7 +248,7 @@ func TestDeployPlanGPUDetectionIsExact(t *testing.T) {
 
 func TestDeployPlanBlocksNonTemplateTpl(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar"}, nil)
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 	if err != nil {
 		t.Fatal(err)
@@ -263,8 +264,8 @@ func TestDeployPlanBlocksNonTemplateTpl(t *testing.T) {
 
 func TestDeployPlanBlocksDuplicateNames(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 9099, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 9099, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 	if err != nil {
 		t.Fatal(err)
@@ -275,9 +276,9 @@ func TestDeployPlanBlocksDuplicateNames(t *testing.T) {
 	}
 
 	f = newCluster()
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
-	f.add(proxmox.VM{VMID: 10221, Name: "team01-teak", Node: "cedar"}, nil)
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10221, Name: "team01-teak", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
 	plan, err = testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 	if err != nil {
 		t.Fatal(err)
@@ -289,8 +290,8 @@ func TestDeployPlanBlocksDuplicateNames(t *testing.T) {
 
 func TestDeployPlanBlocksMismatchedExistingVM(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
-	f.add(proxmox.VM{VMID: 10105, Name: "team01-teak", Node: "spruce"}, nil)
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10105, Name: "team01-teak", Node: "spruce"}, nil)
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 	if err != nil {
 		t.Fatal(err)
@@ -304,10 +305,10 @@ func TestDeployPlanBlocksMismatchedExistingVM(t *testing.T) {
 
 func TestResetSurvivesSnapshotErrors(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "initial")
-	f.add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil)
-	f.add(proxmox.VM{VMID: 10225, Name: "team02-oak", Node: "birch"}, nil, "initial")
-	f.failOn("snapshots:10225", errors.New("boom"))
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "initial")
+	f.Add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil)
+	f.Add(proxmox.VM{VMID: 10225, Name: "team02-oak", Node: "birch"}, nil, "initial")
+	f.FailOn("snapshots:10225", errors.New("boom"))
 	rs, err := testPlanner(f).Reset(context.Background(), []string{"01", "02"}, nil, "initial")
 	if err != nil {
 		t.Fatal(err)
@@ -328,7 +329,7 @@ func TestResetSurvivesSnapshotErrors(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	f.failOn("snapshots:10121", context.Canceled)
+	f.FailOn("snapshots:10121", context.Canceled)
 	if _, err := testPlanner(f).Reset(ctx, []string{"01"}, nil, "initial"); err == nil {
 		t.Error("cancelled context should return an error")
 	}
@@ -365,9 +366,9 @@ func TestDeployNoMastersWithHostFilter(t *testing.T) {
 
 func TestDeployPlanBlockedTemplateReasonWins(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 9050, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
-	f.add(proxmox.VM{VMID: 10150, Name: "team01-teak", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 9050, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10150, Name: "team01-teak", Node: "cedar"}, nil)
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01", "02"}})
 	if err != nil {
 		t.Fatal(err)
@@ -411,7 +412,7 @@ func TestFakeRollbackAndCloudInitCheckNode(t *testing.T) {
 
 func TestDuplicateHostAcrossMastersBlocksBothTemplates(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 131, Name: "teak.kilo.delta", Node: "cedar", Tags: "dev"}, nil)
+	f.Add(proxmox.VM{VMID: 131, Name: "teak.kilo.delta", Node: "cedar", Tags: "dev"}, nil)
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 	if err != nil {
 		t.Fatal(err)
@@ -434,7 +435,7 @@ func TestDuplicateHostAcrossMastersBlocksBothTemplates(t *testing.T) {
 
 func TestDeployBlocksExistingTemplateNamedAsTeamVM(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Template: true}, nil)
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 	if err != nil {
 		t.Fatal(err)
@@ -446,19 +447,19 @@ func TestDeployBlocksExistingTemplateNamedAsTeamVM(t *testing.T) {
 
 func TestWillStopMasterOnlyWhenBuildingFromRunningMaster(t *testing.T) {
 	f := newCluster()
-	f.vms[121].Status = "running"
+	f.VMs[121].Status = "running"
 	p := testPlanner(f)
 	plan, _ := p.Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 	if !plan.Templates[0].WillStopMaster {
 		t.Error("new template from a running master: WillStopMaster = false")
 	}
-	f.vms[121].Status = "stopped"
+	f.VMs[121].Status = "stopped"
 	plan, _ = p.Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 	if plan.Templates[0].WillStopMaster {
 		t.Error("stopped master: WillStopMaster = true")
 	}
-	f.vms[121].Status = "running"
-	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.VMs[121].Status = "running"
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
 	plan, _ = p.Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 	if plan.Templates[0].WillStopMaster {
 		t.Error("reused template: WillStopMaster = true")

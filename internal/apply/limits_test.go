@@ -11,13 +11,14 @@ import (
 
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
 // slowStatus wraps the fake so CurrentStatus takes a moment and records the
 // most calls in flight at once.
 type slowStatus struct {
-	*fakeAPI
+	*podstest.Fake
 	mu       sync.Mutex
 	inFlight int
 	max      int
@@ -34,7 +35,7 @@ func (s *slowStatus) CurrentStatus(ctx context.Context, node string, vmid int) (
 	s.mu.Lock()
 	s.inFlight--
 	s.mu.Unlock()
-	return s.fakeAPI.CurrentStatus(ctx, node, vmid)
+	return s.Fake.CurrentStatus(ctx, node, vmid)
 }
 
 // runTwoPowerJobs runs power plans for teams 01 and 02 at the same time and
@@ -43,9 +44,9 @@ func runTwoPowerJobs(t *testing.T, shared bool) int {
 	t.Helper()
 	f := newCluster()
 	for team, vmid := range map[string]int{"01": 10121, "02": 10221} {
-		f.add(proxmox.VM{VMID: vmid, Name: "team" + team + "-teak", Node: "cedar", Status: "running"}, nil)
+		f.Add(proxmox.VM{VMID: vmid, Name: "team" + team + "-teak", Node: "cedar", Status: "running"}, nil)
 	}
-	api := &slowStatus{fakeAPI: f}
+	api := &slowStatus{Fake: f}
 	cfg := testExecutor(f, &recorder{}).Cfg
 	cfg.Concurrency.ConfigCalls = 1
 	lim := NewLimits(cfg.Concurrency)
@@ -88,7 +89,7 @@ func TestSeparateLimitsDoNotCapEachOther(t *testing.T) {
 
 func TestBlockedItemsEmitBlockedEvents(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "someone-elses-vm", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "someone-elses-vm", Node: "cedar"}, nil)
 	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 	if err != nil {
 		t.Fatal(err)
@@ -252,7 +253,7 @@ func (r *recordingSlots) AcquireSlot(ctx context.Context, name string, n int) (f
 
 func TestDeletesTakeClusterSlots(t *testing.T) {
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
 	plan := teardownTeam01(t, f)
 	ex := testExecutor(f, &recorder{})
 	slots := &recordingSlots{}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -198,7 +199,7 @@ func TestCapacitySharedStorageIsOneRow(t *testing.T) {
 
 // resourceAPI is the fake with /cluster/resources, counting calls.
 type resourceAPI struct {
-	*fakeAPI
+	*podstest.Fake
 	res   proxmox.Resources
 	calls int
 }
@@ -216,8 +217,8 @@ func TestReadCapacityOneCallFromPlannerPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := len(f.calls)
-	api := &resourceAPI{fakeAPI: f, res: proxmox.Resources{
+	before := len(f.Calls)
+	api := &resourceAPI{Fake: f, res: proxmox.Resources{
 		VMs: []proxmox.VM{
 			{VMID: 121, Node: "cedar", MaxMem: 4 * gib, MaxDisk: 10 * gib},
 			{VMID: 125, Node: "birch", MaxMem: 2 * gib, MaxDisk: 10 * gib},
@@ -232,8 +233,8 @@ func TestReadCapacityOneCallFromPlannerPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if api.calls != 1 || len(f.calls) != before {
-		t.Errorf("ClusterResources called %d times and %d other calls, want 1 and 0", api.calls, len(f.calls)-before)
+	if api.calls != 1 || len(f.Calls) != before {
+		t.Errorf("ClusterResources called %d times and %d other calls, want 1 and 0", api.calls, len(f.Calls)-before)
 	}
 	var total int64
 	nodes := map[string]int64{}

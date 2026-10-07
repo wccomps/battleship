@@ -30,13 +30,13 @@ import (
 	"github.com/wccomps/battleship/internal/store/storetest"
 )
 
-// serveAPI is the fake Proxmox for battleship serve: the CLI fake plus the reads
-// the status grid makes, and a task wait that tests can hold.
+// serveAPI is the fake Proxmox for battleship serve: the CLI fake plus a
+// listing that can fail, task waits that tests can hold, and Proxmox's
+// sign-in. Its fields are guarded by the fake's Mu.
 type serveAPI struct {
 	*fakeAPI
 	powered chan int // gets the VMID of every power call
 
-	mu      sync.Mutex
 	down    error         // non-nil: listing the cluster fails with it
 	gate    chan struct{} // non-nil: WaitTask blocks until it closes (or ctx ends)
 	hang    bool          // WaitTask ignores ctx too, like a Proxmox call that hangs
@@ -60,46 +60,40 @@ func (a *serveAPI) RenewTicket(ctx context.Context, cred proxmox.Credential, now
 }
 
 func newServeAPI(vms ...proxmox.VM) *serveAPI {
-	return &serveAPI{
-		fakeAPI: &fakeAPI{vms: vms, snapshots: map[int][]string{}, deleteErr: map[int]error{}},
+	a := &serveAPI{
+		fakeAPI: newFakeAPI(vms...),
 		powered: make(chan int, 100),
 		waiting: make(chan struct{}, 100),
 	}
-}
-
-func (a *serveAPI) ClusterVMs(ctx context.Context) ([]proxmox.VM, error) {
-	a.mu.Lock()
-	down := a.down
-	a.mu.Unlock()
-	if down != nil {
-		return nil, down
+	cli := a.Gate
+	a.Gate = func(ctx context.Context, key string) (func(), error) {
+		a.Mu.Lock()
+		down := a.down
+		a.Mu.Unlock()
+		if key == "cluster" && down != nil {
+			return nil, down
+		}
+		return cli(ctx, key)
 	}
-	return a.fakeAPI.ClusterVMs(ctx)
-}
-
-func (a *serveAPI) VMConfig(ctx context.Context, node string, vmid int) (map[string]string, error) {
-	return a.fakeAPI.VMConfig(ctx, node, vmid)
-}
-
-func (a *serveAPI) Power(ctx context.Context, node string, vmid int, action string) (string, error) {
-	a.powered <- vmid
-	return a.fakeAPI.Power(ctx, node, vmid, action)
+	a.PowerHook = func(vmid int, _ string) { a.powered <- vmid }
+	a.WaitGate = a.waitGate
+	return a
 }
 
 // hold makes task waits block until the returned func is called.
 func (a *serveAPI) hold(hang bool) (release func()) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.Mu.Lock()
+	defer a.Mu.Unlock()
 	a.gate, a.hang = make(chan struct{}), hang
 	gate := a.gate
 	var once sync.Once
 	return func() { once.Do(func() { close(gate) }) }
 }
 
-func (a *serveAPI) WaitTask(ctx context.Context, _ string, _ time.Duration) error {
-	a.mu.Lock()
+func (a *serveAPI) waitGate(ctx context.Context, _ string) error {
+	a.Mu.Lock()
 	gate, hang := a.gate, a.hang
-	a.mu.Unlock()
+	a.Mu.Unlock()
 	if gate == nil {
 		return nil
 	}
@@ -363,9 +357,9 @@ func TestServeHealthAndReadiness(t *testing.T) {
 // out of the load balancer.
 func TestServeStaysReadyWithoutProxmox(t *testing.T) {
 	e := startServe(t)
-	e.api.mu.Lock()
+	e.api.Mu.Lock()
 	e.api.down = &proxmox.APIError{Status: 595, Message: "no route to host"}
-	e.api.mu.Unlock()
+	e.api.Mu.Unlock()
 	e.ready()
 	if code, body := e.get("/readyz"); code != http.StatusOK || body != "ready\n" {
 		t.Errorf("/readyz with Proxmox down = %d %q, want 200 ready", code, body)

@@ -184,7 +184,7 @@ func TestTeardownNeeds(t *testing.T) {
 func TestOfferPrivilegesAreItemNeeds(t *testing.T) {
 	ctx := context.Background()
 	f := newCluster()
-	f.add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "initial")
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil, "initial")
 	p := testPlanner(f)
 	plans := map[Kind]func() (*Plan, error){
 		KindDeploy: func() (*Plan, error) {

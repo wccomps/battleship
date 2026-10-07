@@ -46,13 +46,9 @@ func TestOldToolBaselines(t *testing.T) {
 // it is unknown, and it isn't drift.
 func TestCellPageUnknownPool(t *testing.T) {
 	h := newHarness(t)
-	h.api.mu.Lock()
-	for i := range h.api.vms {
-		if h.api.vms[i].VMID == 10301 {
-			h.api.vms[i].Pool = ""
-		}
-	}
-	h.api.mu.Unlock()
+	h.api.Mu.Lock()
+	h.api.VMs[10301].Pool = ""
+	h.api.Mu.Unlock()
 	h.poll()
 	op := h.login(asOperator)
 	body := h.get(&op, "/vm/03/dc").Body.String()
