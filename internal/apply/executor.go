@@ -1,4 +1,4 @@
-package pods
+package apply
 
 import (
 	"cmp"
@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -100,7 +101,7 @@ func LeftBy(err error) Left {
 type Event struct {
 	Time    time.Time
 	Item    string
-	Step    Step
+	Step    pods.Step
 	Status  EventStatus
 	Message string
 }
@@ -140,7 +141,7 @@ type Result struct {
 // a database configured, the job system enforces this, including for direct
 // CLI runs; without one, don't run overlapping operations.
 type Executor struct {
-	API     API
+	API     pods.API
 	Cfg     config.Config
 	OnEvent func(Event)
 	// Sleep waits out backoffs, polls and the pause before retry rounds;
@@ -155,9 +156,9 @@ type Executor struct {
 
 	// api is API, guarded so a step makes no change after a stop (see
 	// stepContext).
-	api API
+	api pods.API
 
-	naming     Naming
+	naming     pods.Naming
 	classifier proxmox.Classifier
 	retrier    proxmox.Retrier
 	lim        *Limits
@@ -202,7 +203,7 @@ type ownedVM struct {
 }
 
 func (e *Executor) init() {
-	e.naming = NewNaming(e.Cfg.Naming)
+	e.naming = pods.NewNaming(e.Cfg.Naming)
 	if e.Sleep == nil {
 		e.Sleep = proxmox.SleepContext
 	}
@@ -233,7 +234,7 @@ func (e *Executor) noteMasterStopped(master, msg string) {
 	e.mastersStopped[master] = msg
 }
 
-func (e *Executor) emit(item string, step Step, status EventStatus, msg string) {
+func (e *Executor) emit(item string, step pods.Step, status EventStatus, msg string) {
 	if e.OnEvent != nil {
 		e.OnEvent(Event{Time: time.Now(), Item: item, Step: step, Status: status, Message: msg})
 	}
@@ -241,7 +242,7 @@ func (e *Executor) emit(item string, step Step, status EventStatus, msg string) 
 
 // Run executes the plan, then retries failed items for the configured number
 // of rounds.
-func (e *Executor) Run(ctx context.Context, plan *Plan) Result {
+func (e *Executor) Run(ctx context.Context, plan *pods.Plan) Result {
 	e.init()
 	res := Result{Failed: map[string]error{}, Interrupted: map[string]error{}, CleanupFailed: map[string]error{}}
 	failed := map[string]error{} // by item, its last error
@@ -351,7 +352,7 @@ type vmRef struct {
 //
 // A VM that stays locked, changed identity, or fails to delete is not forced;
 // it is reported.
-func (e *Executor) cleanup(ctx context.Context, specs []TemplateSpec, builds map[string]*tplBuild, succeeded map[string]bool, res *Result) {
+func (e *Executor) cleanup(ctx context.Context, specs []pods.TemplateSpec, builds map[string]*tplBuild, succeeded map[string]bool, res *Result) {
 	e.mu.Lock()
 	var teams []vmRef
 	for vmid, o := range e.owned {
@@ -359,7 +360,7 @@ func (e *Executor) cleanup(ctx context.Context, specs []TemplateSpec, builds map
 			teams = append(teams, vmRef{vmid, o.name, o.node})
 		}
 	}
-	var tpls []*TemplateSpec
+	var tpls []*pods.TemplateSpec
 	states := map[int]cloneState{}
 	for i := range specs {
 		if o := e.owned[specs[i].VMID]; o != nil && o.template && !builds[specs[i].Name].done {
@@ -387,15 +388,15 @@ func (e *Executor) cleanup(ctx context.Context, specs []TemplateSpec, builds map
 	fail := func(ref vmRef, err error) {
 		res.CleanupFailed[ref.name] = err
 		if errors.Is(err, errExplained) {
-			e.emit(ref.name, StepDelete, EventFailed, err.Error())
+			e.emit(ref.name, pods.StepDelete, EventFailed, err.Error())
 			return
 		}
-		e.emit(ref.name, StepDelete, EventFailed, fmt.Sprintf("could not remove %s (%d): %s; remove it in Proxmox",
+		e.emit(ref.name, pods.StepDelete, EventFailed, fmt.Sprintf("could not remove %s (%d): %s; remove it in Proxmox",
 			ref.name, ref.vmid, proxmox.Describe(err)))
 	}
 	gone := func(ref vmRef) {
 		res.AlreadyGone = append(res.AlreadyGone, ref.name)
-		e.emit(ref.name, StepDelete, EventInfo, fmt.Sprintf("%s (%d) is already gone", ref.name, ref.vmid))
+		e.emit(ref.name, pods.StepDelete, EventInfo, fmt.Sprintf("%s (%d) is already gone", ref.name, ref.vmid))
 	}
 	exhausted := func(ref vmRef) bool {
 		if cctx.Err() == nil {
@@ -434,7 +435,7 @@ func (e *Executor) cleanup(ctx context.Context, specs []TemplateSpec, builds map
 		}
 		ref.node = node
 		remove := func(reason string) { e.removeCreated(cctx, res, ref, false, reason, fail, gone) }
-		switch key, vol := UnconvertedDisk(cfg); {
+		switch key, vol := pods.UnconvertedDisk(cfg); {
 		case cfg["template"] == "1" && key != "":
 			// A conversion that failed partway sets template: 1 without
 			// renaming the disks; such a template can never be cloned.
@@ -533,14 +534,14 @@ func (e *Executor) removeCreated(ctx context.Context, res *Result, ref vmRef, li
 	default:
 		e.setPresent(proxmox.VM{VMID: ref.vmid}, false)
 		res.Removed = append(res.Removed, ref.name)
-		e.emit(ref.name, StepDelete, EventInfo, fmt.Sprintf("removed %s (created this run; %s)", ref.name, reason))
+		e.emit(ref.name, pods.StepDelete, EventInfo, fmt.Sprintf("removed %s (created this run; %s)", ref.name, reason))
 	}
 }
 
 // needsTemplate reports whether any item will clone from the template.
-func needsTemplate(items []Item, name string) bool {
+func needsTemplate(items []pods.Item, name string) bool {
 	for _, it := range items {
-		if it.Template == name && slices.Contains(it.Steps, StepClone) {
+		if it.Template == name && slices.Contains(it.Steps, pods.StepClone) {
 			return true
 		}
 	}
@@ -550,8 +551,8 @@ func needsTemplate(items []Item, name string) bool {
 // tplBuild is what the run knows of a template it may build. A build
 // writes it before closing ready; items read it after.
 type tplBuild struct {
-	spec *TemplateSpec // as planned
-	node string        // where the template is
+	spec *pods.TemplateSpec // as planned
+	node string             // where the template is
 	// oldGone: a rebuild deleted the old template, so later rounds create
 	// or resume the new one.
 	oldGone bool
@@ -567,7 +568,7 @@ type tplBuild struct {
 // Builds take a template_builds slot from the shared Limits for their whole
 // run, so the masters stopped at once stay bounded; the copy itself also
 // takes one of the master node's clone slots (see ensureTemplate).
-func (e *Executor) startTemplates(ctx context.Context, specs []TemplateSpec, builds map[string]*tplBuild, pending []Item) (wait func()) {
+func (e *Executor) startTemplates(ctx context.Context, specs []pods.TemplateSpec, builds map[string]*tplBuild, pending []pods.Item) (wait func()) {
 	var wg sync.WaitGroup
 	for _, spec := range specs {
 		b := builds[spec.Name]
@@ -595,8 +596,8 @@ func (e *Executor) startTemplates(ctx context.Context, specs []TemplateSpec, bui
 // (cut). An item that clones from a template being built waits for that
 // build to end, and fails if the build did; other items start at once, so
 // no item waits for a build it doesn't use.
-func (e *Executor) runItems(ctx context.Context, kind Kind, items []Item, builds map[string]*tplBuild,
-	failed map[string]error, succeeded map[string]bool) (retry []Item, cut bool) {
+func (e *Executor) runItems(ctx context.Context, kind pods.Kind, items []pods.Item, builds map[string]*tplBuild,
+	failed map[string]error, succeeded map[string]bool) (retry []pods.Item, cut bool) {
 	workers := make(sem, e.Cfg.Concurrency.Workers)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -604,7 +605,7 @@ func (e *Executor) runItems(ctx context.Context, kind Kind, items []Item, builds
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			clones := slices.Contains(it.Steps, StepClone)
+			clones := slices.Contains(it.Steps, pods.StepClone)
 			b := builds[it.Template]
 			run := func() error {
 				var err error
@@ -730,8 +731,7 @@ type halfDeletedError struct {
 }
 
 func (h *halfDeletedError) Error() string {
-	msg := fmt.Sprintf("Proxmox left VM %d half-deleted (locked as destroyed); an admin must finish it: `qm destroy %d --skiplock --purge` on %s",
-		h.vmid, h.vmid, h.node)
+	msg := pods.HalfDeletedText(h.vmid, h.node)
 	if h.cause != nil {
 		msg += "\nthe delete failed with: " + proxmox.Describe(h.cause)
 	}
@@ -935,7 +935,7 @@ type unfollowedError struct{ msg string }
 
 func (u *unfollowedError) Error() string { return u.msg }
 
-func (e *Executor) runItem(ctx context.Context, kind Kind, it Item, tpl *tplBuild) error {
+func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tpl *tplBuild) error {
 	if len(it.Steps) == 0 {
 		return e.endItem(ctx, it, "", -1, false, errors.New("no steps planned"))
 	}
@@ -943,8 +943,8 @@ func (e *Executor) runItem(ctx context.Context, kind Kind, it Item, tpl *tplBuil
 	if exists {
 		it.Node = vm.Node
 	}
-	if !exists && !slices.Contains(it.Steps, StepClone) {
-		if kind == KindTeardown {
+	if !exists && !slices.Contains(it.Steps, pods.StepClone) {
+		if kind == pods.KindTeardown {
 			// StepDelete, or StepFreeDisks for a VM already gone at planning.
 			step := it.Steps[len(it.Steps)-1]
 			// Gone by name is not enough: a VM half-deleted by a failed
@@ -956,7 +956,7 @@ func (e *Executor) runItem(ctx context.Context, kind Kind, it Item, tpl *tplBuil
 			if err := e.retryLeftovers(ctx, it.VMID, it.Node, it.Name); err != nil {
 				return e.endItem(ctx, it, step, -1, false, err)
 			}
-			if step == StepFreeDisks {
+			if step == pods.StepFreeDisks {
 				e.emit(it.Name, step, EventDone, "")
 			} else {
 				e.emit(it.Name, step, EventSkipped, "already deleted")
@@ -976,7 +976,7 @@ func (e *Executor) runItem(ctx context.Context, kind Kind, it Item, tpl *tplBuil
 		if step.ChangesConfig() && sent() {
 			e.left[it.Name] = LeftChanged
 		}
-		if err == nil && !slices.ContainsFunc(it.Steps[i+1:], Step.ChangesConfig) {
+		if err == nil && !slices.ContainsFunc(it.Steps[i+1:], pods.Step.ChangesConfig) {
 			e.left[it.Name] = LeftConverged
 		}
 		e.mu.Unlock()
@@ -988,7 +988,7 @@ func (e *Executor) runItem(ctx context.Context, kind Kind, it Item, tpl *tplBuil
 		default:
 			e.emit(it.Name, step, EventSkipped, "")
 		}
-		if step == StepClone {
+		if step == pods.StepClone {
 			exists = true
 		}
 	}
@@ -1002,7 +1002,7 @@ func (e *Executor) runItem(ctx context.Context, kind Kind, it Item, tpl *tplBuil
 // Only a step under way is logged as the item's step, so the step column
 // keeps the last step the item reported, and one that never reached a
 // step reads as not run.
-func (e *Executor) endItem(ctx context.Context, it Item, step Step, i int, underWay bool, err error) error {
+func (e *Executor) endItem(ctx context.Context, it pods.Item, step pods.Step, i int, underWay bool, err error) error {
 	if ctx.Err() == nil || !errors.Is(err, context.Canceled) {
 		e.emit(it.Name, step, EventFailed, proxmox.Describe(err))
 		if step != "" {
@@ -1010,7 +1010,7 @@ func (e *Executor) endItem(ctx context.Context, it Item, step Step, i int, under
 		}
 		return err
 	}
-	when, at := "before "+string(step), Step("")
+	when, at := "before "+string(step), pods.Step("")
 	switch {
 	case underWay:
 		when, at = "during "+string(step)+"; a Proxmox task it started may still be running", step
@@ -1027,14 +1027,14 @@ func (e *Executor) endItem(ctx context.Context, it Item, step Step, i int, under
 // it, else untouched. An item with no step that changes the config is
 // converged once it reaches its steps, though a later round's stop before
 // them still finds it untouched.
-func (e *Executor) leftAt(it Item, i int) Left {
+func (e *Executor) leftAt(it pods.Item, i int) Left {
 	e.mu.Lock()
 	l, ok := e.left[it.Name]
 	e.mu.Unlock()
 	switch {
 	case ok:
 		return l
-	case i >= 0 && !slices.ContainsFunc(it.Steps, Step.ChangesConfig):
+	case i >= 0 && !slices.ContainsFunc(it.Steps, pods.Step.ChangesConfig):
 		return LeftConverged
 	}
 	return LeftUntouched
@@ -1108,7 +1108,7 @@ func mayChange(ctx context.Context) error {
 
 // guardedAPI is an API whose changes go through mayChange. Reads, task
 // waits and StopTask pass through.
-type guardedAPI struct{ API }
+type guardedAPI struct{ pods.API }
 
 func (g guardedAPI) SetVMConfig(ctx context.Context, node string, vmid int, changes map[string]string) error {
 	if err := mayChange(ctx); err != nil {
@@ -1181,9 +1181,9 @@ func (g guardedAPI) DeleteVolume(ctx context.Context, node, storage, volid strin
 }
 
 // runStep performs one step and reports whether it changed anything.
-func (e *Executor) runStep(ctx context.Context, kind Kind, it *Item, step Step, tpl *tplBuild, exists bool) (bool, error) {
+func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, step pods.Step, tpl *tplBuild, exists bool) (bool, error) {
 	switch step {
-	case StepClone:
+	case pods.StepClone:
 		if exists {
 			return false, nil
 		}
@@ -1202,19 +1202,19 @@ func (e *Executor) runStep(ctx context.Context, kind Kind, it *Item, step Step, 
 		}
 		return err == nil, err
 
-	case StepNetwork:
+	case pods.StepNetwork:
 		return e.applyConfig(ctx, it, true, func(cur map[string]string) map[string]string {
-			return NetworkChanges(e.Cfg.Network, cur, it.Team, tpl.spec.Interfaces)
+			return pods.NetworkChanges(e.Cfg.Network, cur, it.Team, tpl.spec.Interfaces)
 		})
-	case StepDiskLimits:
+	case pods.StepDiskLimits:
 		return e.applyConfig(ctx, it, false, func(cur map[string]string) map[string]string {
-			return DiskLimitChanges(cur, e.Cfg.Deploy.DiskMBpsRead, e.Cfg.Deploy.DiskMBpsWrite)
+			return pods.DiskLimitChanges(cur, e.Cfg.Deploy.DiskMBpsRead, e.Cfg.Deploy.DiskMBpsWrite)
 		})
-	case StepCDROM:
-		return e.applyConfig(ctx, it, false, CDROMChanges)
+	case pods.StepCDROM:
+		return e.applyConfig(ctx, it, false, pods.CDROMChanges)
 
-	case StepSnapshot:
-		if kind == KindSnapshot {
+	case pods.StepSnapshot:
+		if kind == pods.KindSnapshot {
 			return e.takeSnapshot(ctx, it)
 		}
 		var snaps []proxmox.Snapshot
@@ -1223,7 +1223,7 @@ func (e *Executor) runStep(ctx context.Context, kind Kind, it *Item, step Step, 
 		}
 		// Any baseline will do, such as the old deploy tool's: a new one
 		// taken now would capture whatever the VM has been through.
-		if HasBaseline(e.Cfg.Deploy, SnapshotNames(snaps)) {
+		if pods.HasBaseline(e.Cfg.Deploy, pods.SnapshotNames(snaps)) {
 			return false, nil
 		}
 		status, err := e.status(ctx, it)
@@ -1231,24 +1231,24 @@ func (e *Executor) runStep(ctx context.Context, kind Kind, it *Item, step Step, 
 			return false, err
 		}
 		if status == "running" {
-			return false, fmt.Errorf("VM is running and has %s; stop it first so the baseline is clean", NoBaseline(e.Cfg.Deploy))
+			return false, fmt.Errorf("VM is running and has %s; stop it first so the baseline is clean", pods.NoBaseline(e.Cfg.Deploy))
 		}
 		return true, e.createSnapshot(ctx, it.Node, it.VMID, proxmox.SnapshotRequest{Name: e.Cfg.Deploy.SnapshotName, Description: "baseline from battleship deploy"})
 
-	case StepStart:
+	case pods.StepStart:
 		return e.power(ctx, it, "start")
-	case StepStop:
-		if kind == KindTeardown {
+	case pods.StepStop:
+		if kind == pods.KindTeardown {
 			return e.shutdownForDelete(ctx, it)
 		}
 		return e.power(ctx, it, "stop") // reset: the rollback discards the state anyway
-	case StepPower:
+	case pods.StepPower:
 		return e.power(ctx, it, it.Action)
 
-	case StepRollback:
+	case pods.StepRollback:
 		return true, e.task(ctx, func() (string, error) { return e.api.Rollback(ctx, it.Node, it.VMID, it.Snapshot) })
 
-	case StepDelete:
+	case pods.StepDelete:
 		err := e.deleteVM(ctx, it.Node, it.VMID, it.Name)
 		if err == nil {
 			e.setPresent(proxmox.VM{VMID: it.VMID}, false)
@@ -1286,7 +1286,7 @@ func (e *Executor) deleteVM(ctx context.Context, node string, vmid int, name str
 	case cfg["lock"] == "destroyed":
 		return &halfDeletedError{vmid: vmid, node: node}
 	default:
-		disks = DiskVolumes(cfg)
+		disks = pods.DiskVolumes(cfg)
 		template = cfg["template"] == "1"
 	}
 	destroying := false // an earlier request's destroy is running
@@ -1446,7 +1446,7 @@ func (e *Executor) freeLeftovers(ctx context.Context, vmid int, name string, l l
 		}
 		if errors.Is(err, context.Canceled) { // a stop: nothing more is sent
 			e.rememberLeftover(vmid, l)
-			e.emit(name, StepDelete, EventInfo, fmt.Sprintf("VM %d is deleted; the job was stopped before it freed the disks the delete left on the storage: %s", vmid, strings.Join(left, ", ")))
+			e.emit(name, pods.StepDelete, EventInfo, fmt.Sprintf("VM %d is deleted; the job was stopped before it freed the disks the delete left on the storage: %s", vmid, strings.Join(left, ", ")))
 			return fmt.Errorf("VM %d is deleted; freeing the disks it left: %w", vmid, err)
 		}
 		if err != nil {
@@ -1461,7 +1461,7 @@ func (e *Executor) freeLeftovers(ctx context.Context, vmid int, name string, l l
 		causes = append(causes, "checking what is left: "+proxmox.Describe(err))
 	}
 	if freed := minus(left, still); len(freed) > 0 {
-		e.emit(name, StepDelete, EventInfo, fmt.Sprintf("freed disks that deleting VM %d left on the storage: %s", vmid, strings.Join(freed, ", ")))
+		e.emit(name, pods.StepDelete, EventInfo, fmt.Sprintf("freed disks that deleting VM %d left on the storage: %s", vmid, strings.Join(freed, ", ")))
 	}
 	if len(still) > 0 {
 		e.rememberLeftover(vmid, l)
@@ -1481,7 +1481,7 @@ func (e *Executor) leftDisks(ctx context.Context, node string, vmid int, disks m
 		if files[storage] == nil {
 			files[storage] = map[string]bool{}
 		}
-		files[storage][volumeFile(vol)] = true
+		files[storage][pods.VolumeFile(vol)] = true
 	}
 	var left []string
 	for _, storage := range slices.Sorted(maps.Keys(files)) {
@@ -1490,7 +1490,7 @@ func (e *Executor) leftDisks(ctx context.Context, node string, vmid int, disks m
 			return nil, fmt.Errorf("listing %s: %w", storage, err)
 		}
 		for _, v := range vols {
-			if files[storage][volumeFile(v)] {
+			if files[storage][pods.VolumeFile(v)] {
 				left = append(left, v)
 			}
 		}
@@ -1541,33 +1541,13 @@ func (e *Executor) retryLeftovers(ctx context.Context, vmid int, node, name stri
 		}
 		l = leftover{node: node, disks: map[string]string{}}
 		for _, v := range vols {
-			if owner, base := volumeOwner(v); owner == vmid {
+			if owner, base := pods.VolumeOwner(v); owner == vmid {
 				l.disks[v] = v
 				l.template = l.template || base
 			}
 		}
 	}
 	return e.freeLeftovers(ctx, vmid, name, l)
-}
-
-// volumeOwner is the VMID a volume's file name says owns it
-// (vm-<vmid>-… or base-<vmid>-…), and whether it is a base volume; 0 for
-// any other file, such as an ISO or an import.
-func volumeOwner(vol string) (vmid int, base bool) {
-	file := volumeFile(vol)
-	rest, base := strings.CutPrefix(file, "base-")
-	if !base {
-		var ok bool
-		if rest, ok = strings.CutPrefix(file, "vm-"); !ok {
-			return 0, false
-		}
-	}
-	digits, _, ok := strings.Cut(rest, "-")
-	n, err := strconv.Atoi(digits)
-	if !ok || err != nil {
-		return 0, false
-	}
-	return n, base
 }
 
 // readVM reads a VM's config through check, reporting "does not exist" as
@@ -1608,7 +1588,7 @@ func (e *Executor) checkVMIDFree(ctx context.Context, vmid int) error {
 // at once. Proxmox hard-stops the VM if it is still running after
 // teardown.shutdown_timeout (forceStop); if the shutdown task fails anyway
 // and the VM is still running, it is hard-stopped here.
-func (e *Executor) shutdownForDelete(ctx context.Context, it *Item) (bool, error) {
+func (e *Executor) shutdownForDelete(ctx context.Context, it *pods.Item) (bool, error) {
 	status, err := e.status(ctx, it)
 	if err != nil || status == "stopped" {
 		return false, err
@@ -1621,14 +1601,14 @@ func (e *Executor) shutdownForDelete(ctx context.Context, it *Item) (bool, error
 	if st, serr := e.status(ctx, it); serr == nil && st == "stopped" {
 		return true, nil
 	}
-	e.emit(it.Name, StepStop, EventInfo, "clean shutdown failed, stopping it hard: "+proxmox.Describe(err))
+	e.emit(it.Name, pods.StepStop, EventInfo, "clean shutdown failed, stopping it hard: "+proxmox.Describe(err))
 	if serr := e.taskOnce(ctx, func() (string, error) { return e.api.Power(ctx, it.Node, it.VMID, "stop") }); serr != nil {
 		return true, fmt.Errorf("hard stop after a failed shutdown (%s): %w", proxmox.Describe(err), serr)
 	}
 	return true, nil
 }
 
-func (e *Executor) status(ctx context.Context, it *Item) (string, error) {
+func (e *Executor) status(ctx context.Context, it *pods.Item) (string, error) {
 	var status string
 	err := e.call(ctx, func() (err error) { status, err = e.api.CurrentStatus(ctx, it.Node, it.VMID); return })
 	return status, err
@@ -1700,7 +1680,7 @@ func (e *Executor) probeClone(ctx context.Context, node string, vmid int, name s
 	}
 	if lock != "" {
 		err := fmt.Errorf("VM %d is locked (%s): %w", vmid, lock, proxmox.ErrLocked)
-		e.emit(name, StepClone, EventInfo, "waiting: "+err.Error())
+		e.emit(name, pods.StepClone, EventInfo, "waiting: "+err.Error())
 		return probeSame, err
 	}
 	return probeSame, nil
@@ -1709,7 +1689,7 @@ func (e *Executor) probeClone(ctx context.Context, node string, vmid int, name s
 // applyConfig reads the VM config, computes changes, and applies them. When
 // cloudInit is set and the VM has a cloud-init drive, the drive is
 // regenerated every time. It reports whether config changes were applied.
-func (e *Executor) applyConfig(ctx context.Context, it *Item, cloudInit bool,
+func (e *Executor) applyConfig(ctx context.Context, it *pods.Item, cloudInit bool,
 	changes func(map[string]string) map[string]string) (bool, error) {
 	var cur map[string]string
 	if err := e.call(ctx, func() (err error) { cur, err = e.api.VMConfig(ctx, it.Node, it.VMID); return }); err != nil {
@@ -1724,7 +1704,7 @@ func (e *Executor) applyConfig(ctx context.Context, it *Item, cloudInit bool,
 	}
 	// Regenerate even without changes, so a failed regeneration on an earlier
 	// attempt is repaired by the next one.
-	if cloudInit && HasCloudInit(cur) {
+	if cloudInit && pods.HasCloudInit(cur) {
 		if err := e.call(ctx, func() error { return e.api.RegenerateCloudInit(ctx, it.Node, it.VMID) }); err != nil {
 			return changed, fmt.Errorf("regenerating cloud-init: %w", err)
 		}
@@ -1735,12 +1715,12 @@ func (e *Executor) applyConfig(ctx context.Context, it *Item, cloudInit bool,
 // power applies action, skipping a VM already in the status the action
 // leaves (see PowerAction.Leaves). Rebooting a VM that is not running starts
 // it.
-func (e *Executor) power(ctx context.Context, it *Item, action string) (bool, error) {
+func (e *Executor) power(ctx context.Context, it *pods.Item, action string) (bool, error) {
 	status, err := e.status(ctx, it)
 	if err != nil {
 		return false, err
 	}
-	if a, _ := PowerActionOf(action); a.Leaves != "" && status == a.Leaves {
+	if a, _ := pods.PowerActionOf(action); a.Leaves != "" && status == a.Leaves {
 		return false, nil
 	}
 	if action == "reboot" && status != "running" {
@@ -1778,7 +1758,7 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 				return fmt.Errorf("deleting old template: %w", err)
 			}
 			e.setPresent(proxmox.VM{VMID: spec.VMID}, false)
-			e.emit(name, StepDelete, EventDone, "old template deleted")
+			e.emit(name, pods.StepDelete, EventDone, "old template deleted")
 		}
 		b.oldGone = true // later rounds must create or resume, never delete the new VM
 	case found && cur.Template:
@@ -1791,11 +1771,11 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 		case err != nil:
 			return fmt.Errorf("checking template %s's disks: %w", name, err)
 		}
-		if key, vol := UnconvertedDisk(cfg); key != "" {
+		if key, vol := pods.UnconvertedDisk(cfg); key != "" {
 			return &unconvertedError{name: name, vmid: spec.VMID, key: key, vol: vol, reused: true}
 		}
 		b.node = cur.Node
-		e.emit(name, StepClone, EventSkipped, "template exists")
+		e.emit(name, pods.StepClone, EventSkipped, "template exists")
 		return nil
 	case found:
 		e.mu.Lock()
@@ -1834,7 +1814,7 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 // it is running and starting it again once the copy can no longer be
 // running. A copy still running when the job is stopped is stopped too (see
 // stopCopy).
-func (e *Executor) copyMaster(ctx context.Context, spec *TemplateSpec) error {
+func (e *Executor) copyMaster(ctx context.Context, spec *pods.TemplateSpec) error {
 	name := spec.Name
 	// Full clones on NFS are only reliable from a stopped source.
 	var status, stopUPID, cloneUPID string
@@ -1913,12 +1893,12 @@ type startedTask struct {
 // cancel, but only once its stop and its copy can no longer be running,
 // waiting for them within wctx: starting the master under a copy corrupts
 // it. A master it can't restart is reported left stopped.
-func (e *Executor) restartMaster(ctx, wctx context.Context, spec *TemplateSpec, tasks ...startedTask) {
+func (e *Executor) restartMaster(ctx, wctx context.Context, spec *pods.TemplateSpec, tasks ...startedTask) {
 	// leftStopped reports the master left stopped, in the run's result
 	// too: someone must start it.
 	leftStopped := func(reason string) {
 		msg := "master " + spec.MasterName + " left stopped: " + reason + "; start it in Proxmox once nothing is working on it"
-		e.emit(spec.Name, StepStart, EventFailed, msg)
+		e.emit(spec.Name, pods.StepStart, EventFailed, msg)
 		e.noteMasterStopped(spec.MasterName, msg)
 	}
 	lapsed := func(kind string) {
@@ -1978,7 +1958,7 @@ func (e *Executor) restartMaster(ctx, wctx context.Context, spec *TemplateSpec, 
 // stopCopy asks Proxmox to stop a template copy that a stopped job cut off,
 // and marks the copy failed: cleanup removes it, unless a later wait sees its
 // task finish OK (see settleCopy).
-func (e *Executor) stopCopy(ctx context.Context, spec *TemplateSpec, upid string) {
+func (e *Executor) stopCopy(ctx context.Context, spec *pods.TemplateSpec, upid string) {
 	e.mu.Lock()
 	if o := e.owned[spec.VMID]; o != nil && o.state == cloneUnknown {
 		o.state = cloneTaskFailed
@@ -1987,10 +1967,10 @@ func (e *Executor) stopCopy(ctx context.Context, spec *TemplateSpec, upid string
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancel()
 	if err := e.api.StopTask(sctx, upid); err != nil {
-		e.emit(spec.Name, StepClone, EventInfo, "stopping the copy of "+spec.MasterName+": "+proxmox.Describe(err))
+		e.emit(spec.Name, pods.StepClone, EventInfo, "stopping the copy of "+spec.MasterName+": "+proxmox.Describe(err))
 		return
 	}
-	e.emit(spec.Name, StepClone, EventInfo, "stopped the copy of "+spec.MasterName+" (the job was stopped)")
+	e.emit(spec.Name, pods.StepClone, EventInfo, "stopped the copy of "+spec.MasterName+" (the job was stopped)")
 }
 
 // settleCopy records how a template copy's task ended, once a wait for it
@@ -2039,10 +2019,10 @@ func (e *Executor) waitUnlocked(ctx context.Context, node string, vmid int) (map
 
 // finishTemplate ejects the CD-ROM and converts the cloned VM on node to a
 // template. It is safe to repeat after a partial failure.
-func (e *Executor) finishTemplate(ctx context.Context, spec *TemplateSpec, node string) error {
+func (e *Executor) finishTemplate(ctx context.Context, spec *pods.TemplateSpec, node string) error {
 	name := spec.Name
-	tplItem := &Item{Name: name, VMID: spec.VMID, Node: node}
-	if _, err := e.applyConfig(ctx, tplItem, false, CDROMChanges); err != nil {
+	tplItem := &pods.Item{Name: name, VMID: spec.VMID, Node: node}
+	if _, err := e.applyConfig(ctx, tplItem, false, pods.CDROMChanges); err != nil {
 		return fmt.Errorf("ejecting CD-ROM: %w", err)
 	}
 	// Converting renames disks to base-*, which linked clones require. Its
@@ -2062,7 +2042,7 @@ func (e *Executor) finishTemplate(ctx context.Context, spec *TemplateSpec, node 
 		return fmt.Errorf("converting to template finished, but its disks could not be checked: %w", rerr)
 	}
 	isTemplate := cfg["template"] == "1"
-	if key, vol := UnconvertedDisk(cfg); key != "" && isTemplate {
+	if key, vol := pods.UnconvertedDisk(cfg); key != "" && isTemplate {
 		return &unconvertedError{name: name, vmid: spec.VMID, key: key, vol: vol, cause: convErr}
 	}
 	switch {
@@ -2072,7 +2052,7 @@ func (e *Executor) finishTemplate(ctx context.Context, spec *TemplateSpec, node 
 		return fmt.Errorf("converting to template: the task finished OK, but VM %d is still not a template", spec.VMID)
 	}
 	e.setPresent(proxmox.VM{VMID: spec.VMID, Name: name, Node: node, Template: true}, true)
-	e.emit(name, StepClone, EventDone, "template created")
+	e.emit(name, pods.StepClone, EventDone, "template created")
 	return nil
 }
 
@@ -2110,7 +2090,7 @@ func (e *Executor) convert(ctx context.Context, node string, vmid int) error {
 		if cfg["template"] != "1" {
 			return true // not converting
 		}
-		key, _ := UnconvertedDisk(cfg)
+		key, _ := pods.UnconvertedDisk(cfg)
 		return key == ""
 	})
 	if cfg["template"] == "1" {

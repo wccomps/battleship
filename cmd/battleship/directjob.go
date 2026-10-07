@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
@@ -44,7 +45,7 @@ func runAsJob(ctx context.Context, d deps, cfg config.Config, client pods.API, i
 		ID:          jobs.NewWorkerID("cli"),
 		Logf:        func(format string, a ...any) { fmt.Fprintf(d.stderr, format+"\n", a...) },
 		Cancels:     cancels,
-		OnEvent: func(e pods.Event) {
+		OnEvent: func(e apply.Event) {
 			evMu.Lock()
 			defer evMu.Unlock()
 			printEvent(d.stdout, e)
@@ -185,8 +186,8 @@ func followJob(ctx context.Context, d deps, cfg config.Config, st *store.Store, 
 				announced = true
 			}
 			for _, ev := range evs {
-				printEvent(d.stdout, pods.Event{Time: ev.At, Item: ev.Item, Step: pods.Step(ev.Step),
-					Status: pods.EventStatus(ev.Status), Message: ev.Message})
+				printEvent(d.stdout, apply.Event{Time: ev.At, Item: ev.Item, Step: pods.Step(ev.Step),
+					Status: apply.EventStatus(ev.Status), Message: ev.Message})
 				after = ev.ID
 			}
 			// The job was read first, so a finished job's events are all in.

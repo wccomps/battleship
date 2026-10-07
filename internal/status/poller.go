@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -46,7 +47,7 @@ const WaitingForPoll = "waiting for the first poll of the cluster"
 type Poller struct {
 	api   pods.API
 	hist  History
-	lim   *pods.Limits
+	lim   *apply.Limits
 	rules rules
 	clock Clock
 	hub   *Hub
@@ -84,7 +85,7 @@ type Poller struct {
 // NewPoller makes a poller over the teams that have team VMs. lim must be
 // the Limits the process's job executors share, so the deep scan's reads count
 // against the same cap as theirs.
-func NewPoller(api pods.API, hist History, lim *pods.Limits, cfg config.Config, opts Options) (*Poller, error) {
+func NewPoller(api pods.API, hist History, lim *apply.Limits, cfg config.Config, opts Options) (*Poller, error) {
 	if api == nil || hist == nil || lim == nil {
 		return nil, errors.New("status: a Proxmox API, a job history and limits are required")
 	}

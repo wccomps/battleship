@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
@@ -196,7 +197,7 @@ func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 	// these teams or templates right now.
 	// The executor calls OnEvent from many goroutines.
 	var evMu sync.Mutex
-	exec := &pods.Executor{API: api, Cfg: cfg, OnEvent: func(e pods.Event) {
+	exec := &apply.Executor{API: api, Cfg: cfg, OnEvent: func(e apply.Event) {
 		evMu.Lock()
 		defer evMu.Unlock()
 		printEvent(stdout, e)

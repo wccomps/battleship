@@ -469,9 +469,16 @@ func (p Planner) halfDeleted(plan *Plan, vms []proxmox.VM) {
 		}
 		plan.Items = append(plan.Items, Item{Team: team, Name: p.Naming.VMName(team, "half-deleted-"+strconv.Itoa(vm.VMID)),
 			VMID: vm.VMID, Node: vm.Node, Steps: []Step{StepDelete},
-			Blocked: (&halfDeletedError{vmid: vm.VMID, node: vm.Node}).Error()})
+			Blocked: HalfDeletedText(vm.VMID, vm.Node)})
 	}
 	sort.SliceStable(plan.Items, func(i, j int) bool { return plan.Items[i].Name < plan.Items[j].Name })
+}
+
+// HalfDeletedText says that a failed destroy task left VM vmid on node
+// half-deleted, and how an admin finishes it.
+func HalfDeletedText(vmid int, node string) string {
+	return fmt.Sprintf("Proxmox left VM %d half-deleted (locked as destroyed); an admin must finish it: `qm destroy %d --skiplock --purge` on %s",
+		vmid, vmid, node)
 }
 
 // orphanedDisks adds a free-disks item for each VMID of plan's teams that
@@ -520,7 +527,7 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	}
 	for i, node := range nodes {
 		for _, v := range listed[i] {
-			vmid, _ := volumeOwner(v)
+			vmid, _ := VolumeOwner(v)
 			team, ok := p.Naming.TeamOfCloneVMID(vmid)
 			if !ok || !want[team] || held[vmid] {
 				continue

@@ -1,4 +1,4 @@
-package pods
+package apply
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -51,7 +52,7 @@ func runTwoPowerJobs(t *testing.T, shared bool) int {
 
 	var wg sync.WaitGroup
 	for _, team := range []string{"01", "02"} {
-		plan, err := NewPlanner(f, cfg).Power(context.Background(), []string{team}, nil, "start")
+		plan, err := pods.NewPlanner(f, cfg).Power(context.Background(), []string{team}, nil, "start")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -88,7 +89,7 @@ func TestSeparateLimitsDoNotCapEachOther(t *testing.T) {
 func TestBlockedItemsEmitBlockedEvents(t *testing.T) {
 	f := newCluster()
 	f.add(proxmox.VM{VMID: 10121, Name: "someone-elses-vm", Node: "cedar"}, nil)
-	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +205,7 @@ func runTwoProcesses(t *testing.T, slots Slots) int {
 	w := watchStorageTasks(f)
 	var wg sync.WaitGroup
 	for _, pattern := range []string{"teak.*", "oak.*"} {
-		plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: pattern, Teams: []string{"01"}})
+		plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: pattern, Teams: []string{"01"}})
 		if err != nil {
 			t.Fatal(err)
 		}

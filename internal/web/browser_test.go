@@ -21,6 +21,7 @@ import (
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/auth/authtest"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
@@ -460,7 +461,7 @@ func TestBrowserPreviewAndJob(t *testing.T) {
 			}
 			n, _ := parseID(id)
 			h.start(n)
-			h.event(n, "team07-web", "stop", string(pods.EventDone), "")
+			h.event(n, "team07-web", "stop", string(apply.EventDone), "")
 			publishJob(h, n)
 			b.waitFor("the job to run", `document.querySelector("#job-head .st").textContent.trim() === "running"`)
 			b.waitFor("the log line", `document.querySelectorAll("#job-log li").length > 0`)

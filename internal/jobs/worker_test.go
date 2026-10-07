@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/status"
@@ -231,7 +232,7 @@ func TestWorkerKeepsOutcomeWhenStopArrivesAfterWork(t *testing.T) {
 				}
 				return cancel, err
 			}
-			w.OnEvent = func(ev pods.Event) {
+			w.OnEvent = func(ev apply.Event) {
 				if !strings.HasPrefix(ev.Message, "finished:") {
 					return
 				}
@@ -391,9 +392,9 @@ func TestWorkerLogsEventsItCannotRecord(t *testing.T) {
 		defer mu.Unlock()
 		logs = append(logs, fmt.Sprintf(format, args...))
 	}
-	var unstored []pods.Event
+	var unstored []apply.Event
 	stored := map[string]bool{}
-	w.OnEvent = func(ev pods.Event) {
+	w.OnEvent = func(ev apply.Event) {
 		mu.Lock()
 		defer mu.Unlock()
 		unstored = append(unstored, ev)
@@ -600,8 +601,8 @@ func TestWorkerOnEventSeesProgress(t *testing.T) {
 	id := submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
 	w := newWorker(st, f)
 	var mu sync.Mutex
-	var seen []pods.Event
-	w.OnEvent = func(ev pods.Event) { mu.Lock(); seen = append(seen, ev); mu.Unlock() }
+	var seen []apply.Event
+	w.OnEvent = func(ev apply.Event) { mu.Lock(); seen = append(seen, ev); mu.Unlock() }
 	w.RunJob(bg, claim(t, st))
 
 	stored, _ := st.Events(bg, id, 0, 1000)
@@ -706,7 +707,7 @@ func TestWorkerStopDuringRetryPauseIsUnfinished(t *testing.T) {
 			w.Cfg.Retry.RoundPause = time.Minute
 			ctx, shutdown := context.WithCancel(bg)
 			defer shutdown()
-			w.OnEvent = func(ev pods.Event) {
+			w.OnEvent = func(ev apply.Event) {
 				if !strings.HasPrefix(ev.Message, "retry round 1") {
 					return
 				}
@@ -743,7 +744,7 @@ func TestWorkerStopDuringRetryPauseIsUnfinished(t *testing.T) {
 // Summary.Failed holds only VMs that failed; VMs a stop cut off are listed as
 // interrupted, matching their item status.
 func TestOutcomeSummaryListsInterruptedApart(t *testing.T) {
-	res := pods.Result{
+	res := apply.Result{
 		Succeeded: []string{"team01-a"},
 		Failed: map[string]error{
 			"team01-b": &proxmox.APIError{Status: 403, Message: "Permission check failed (/vms/10102, VM.Allocate)"},
@@ -776,7 +777,7 @@ func TestOutcomeSummaryListsInterruptedApart(t *testing.T) {
 // A run whose only unfinished VMs were cut off by a stop still completed
 // with failures.
 func TestInterruptedOnlyOutcomeHasFailures(t *testing.T) {
-	out := outcomeOf(pods.Result{Interrupted: map[string]error{"team01-a": context.Canceled}})
+	out := outcomeOf(apply.Result{Interrupted: map[string]error{"team01-a": context.Canceled}})
 	if out.Status != store.StatusCompletedWithFailures {
 		t.Errorf("status = %s, want %s", out.Status, store.StatusCompletedWithFailures)
 	}
@@ -833,7 +834,7 @@ func TestWorkerRefusesJobStoredWithoutConfigHash(t *testing.T) {
 
 // Each of the executor's verdicts is recorded as the store names it.
 func TestLeftConfigRecordsTheVerdict(t *testing.T) {
-	for l, want := range map[pods.Left]string{pods.LeftChanged: "", pods.LeftUntouched: store.LeftUntouched, pods.LeftConverged: store.LeftConverged} {
+	for l, want := range map[apply.Left]string{apply.LeftChanged: "", apply.LeftUntouched: store.LeftUntouched, apply.LeftConverged: store.LeftConverged} {
 		if got := leftConfig(l); got != want {
 			t.Errorf("leftConfig(%v) = %q, want %q", l, got, want)
 		}

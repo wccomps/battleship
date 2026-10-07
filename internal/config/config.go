@@ -193,7 +193,7 @@ type Jobs struct {
 	Poll       time.Duration `toml:"poll"`        // how often an idle worker looks for jobs
 	// CancelGrace is how long, after a cancel, a step that already sent
 	// Proxmox a change may wait for that change's task to end, so the job
-	// records what it did (pods.ErrCancelRequested).
+	// records what it did (apply.ErrCancelRequested).
 	CancelGrace time.Duration `toml:"cancel_grace"`
 }
 

@@ -1,4 +1,4 @@
-package pods
+package apply
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -26,7 +27,7 @@ func userCfgTimeout(node string, vmid int) error {
 	}
 }
 
-func teardownTeam01(t *testing.T, f *fakeAPI) *Plan {
+func teardownTeam01(t *testing.T, f *fakeAPI) *pods.Plan {
 	t.Helper()
 	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
 	if err != nil {
@@ -61,7 +62,7 @@ func TestHalfDeletedVMFailsWithAdvice(t *testing.T) {
 		t.Fatalf("result = %+v, want team01-teak failed", res)
 	}
 	wantHalfDeletedAdvice(t, proxmox.Describe(err))
-	if ev := rec.find("team01-teak", EventDone); len(ev) != 1 || ev[0].Step != StepStop {
+	if ev := rec.find("team01-teak", EventDone); len(ev) != 1 || ev[0].Step != pods.StepStop {
 		t.Errorf("done events = %+v, want only the stop", ev)
 	}
 	if ev := rec.find("team01-teak", EventSkipped); len(ev) != 0 {
@@ -165,7 +166,7 @@ func TestDeletesAreCapped(t *testing.T) {
 	f := newCluster()
 	var teams []string
 	for i := 1; i <= 8; i++ {
-		team := FormatTeam(i)
+		team := pods.FormatTeam(i)
 		teams = append(teams, team)
 		f.add(proxmox.VM{VMID: 10021 + 100*i, Name: "team" + team + "-teak", Node: "cedar"}, nil)
 	}

@@ -1,4 +1,4 @@
-package pods
+package apply
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -247,7 +248,7 @@ func TestRebuildFreesOldTemplateDisk(t *testing.T) {
 	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
 		"name": "teak.tango.delta.tpl", "scsi0": "competitions:9021/base-9021-disk-0.qcow2,size=32G",
 	})
-	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +393,7 @@ func TestConvertAndTemplateDeleteNeverOverlap(t *testing.T) {
 	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
 		"name": "teak.tango.delta.tpl", "scsi0": "competitions:9021/base-9021-disk-0.qcow2,size=32G",
 	})
-	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01"}, Rebuild: true})
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01"}, Rebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +422,7 @@ func TestTemplateDeleteAfterAFailedReadIsSerialized(t *testing.T) {
 	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
 		"name": "teak.tango.delta.tpl", "template": "1", "scsi0": "competitions:9021/base-9021-disk-0.qcow2,size=32G",
 	})
-	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01"}, Rebuild: true})
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01"}, Rebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +526,7 @@ func TestConvertWhoseAnswerWasLostIsNotResent(t *testing.T) {
 // cancelDuringDestroy runs a teardown of team01-teak whose destroy task
 // leaves the disks behind, and cancels the job while the run waits for
 // that task, which then ends inside the grace.
-func cancelDuringDestroy(t *testing.T, f *fakeAPI, plan *Plan) (*recorder, Result) {
+func cancelDuringDestroy(t *testing.T, f *fakeAPI, plan *pods.Plan) (*recorder, Result) {
 	t.Helper()
 	f.deleteKeepsDisks = map[int]bool{10121: true}
 	ctx, cancel := context.WithCancelCause(context.Background())
@@ -636,7 +637,7 @@ func TestTeardownPlansOrphanedDisks(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(again.Items) != 1 || again.Items[0].Name != "team01-disks-10121" || again.Items[0].VMID != 10121 ||
-		!slices.Equal(again.Items[0].Steps, []Step{StepFreeDisks}) {
+		!slices.Equal(again.Items[0].Steps, []pods.Step{pods.StepFreeDisks}) {
 		t.Fatalf("items = %+v, want one free-disks for VMID 10121's disks", again.Items)
 	}
 	if filtered, _ := testPlanner(f).Teardown(context.Background(), []string{"01"}, []string{"teak"}); len(filtered.Items) != 0 {
@@ -722,7 +723,7 @@ func TestOrphanedDisksListSharedStorageOnce(t *testing.T) {
 			res.Storage = append(res.Storage, proxmox.StorageResource{Storage: "competitions", Node: n, Shared: c.shared})
 		}
 		before := f.called("content:competitions:0")
-		plan, err := NewPlanner(&resourceAPI{fakeAPI: f, res: res}, config.Default()).Teardown(context.Background(), []string{"01"}, nil)
+		plan, err := pods.NewPlanner(&resourceAPI{fakeAPI: f, res: res}, config.Default()).Teardown(context.Background(), []string{"01"}, nil)
 		if err != nil || len(plan.Items) != 1 {
 			t.Fatalf("shared %v: plan %+v, err %v", c.shared, plan, err)
 		}

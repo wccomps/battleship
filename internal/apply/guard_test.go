@@ -1,4 +1,4 @@
-package pods
+package apply
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/wccomps/battleship/internal/pods"
 )
 
 // notChanges are the API methods a step may call after its run stopped:
@@ -20,7 +22,7 @@ var notChanges = map[string]bool{
 
 // countingAPI counts the calls that reach it.
 type countingAPI struct {
-	API
+	pods.API
 	calls int
 }
 
@@ -31,7 +33,7 @@ func TestGuardedAPIHoldsBackEveryChange(t *testing.T) {
 	run, stop := context.WithCancel(context.Background())
 	stop()
 	ctx := context.WithValue(context.Background(), stepKey{}, &stepState{run: run})
-	apiType := reflect.TypeFor[API]()
+	apiType := reflect.TypeFor[pods.API]()
 	for i := range apiType.NumMethod() {
 		m := apiType.Method(i)
 		inner := &countingAPI{}

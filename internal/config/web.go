@@ -34,7 +34,7 @@ type Web struct {
 	DriftScan      time.Duration `toml:"drift_scan"`  // how often every team VM's config and snapshots are checked
 	// ShutdownTimeout is how long battleship serve waits, from the stop signal,
 	// for running jobs to clean up and end before it exits anyway. Keep it
-	// above the 14m a stopped job may take (pods.StopBudget), and keep
+	// above the 14m a stopped job may take (apply.StopBudget), and keep
 	// Kubernetes' terminationGracePeriodSeconds above it.
 	ShutdownTimeout time.Duration `toml:"shutdown_timeout"`
 	// TrustedProxies are the CIDRs of reverse proxies whose X-Forwarded-For

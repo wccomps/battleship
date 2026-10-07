@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -22,7 +23,7 @@ import (
 type Views struct {
 	bind   func(cred func() proxmox.Credential) pods.API
 	hist   History
-	lim    *pods.Limits
+	lim    *apply.Limits
 	cfg    config.Config
 	opts   Options
 	linger time.Duration
@@ -52,7 +53,7 @@ type View struct {
 // NewViews makes views whose pollers read the cluster through bind, which
 // makes an API acting as the credential its argument returns. linger is
 // how long a view outlives its last stream.
-func NewViews(bind func(cred func() proxmox.Credential) pods.API, hist History, lim *pods.Limits, cfg config.Config, opts Options, linger time.Duration) (*Views, error) {
+func NewViews(bind func(cred func() proxmox.Credential) pods.API, hist History, lim *apply.Limits, cfg config.Config, opts Options, linger time.Duration) (*Views, error) {
 	if bind == nil {
 		return nil, errors.New("status: views need a way to read the cluster as someone")
 	}
