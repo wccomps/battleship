@@ -687,6 +687,9 @@ func TestBrowserEmptyGridAndDeploy(t *testing.T) {
 			if o.is(`!!document.querySelector("#grid-start .set-deploy")`) {
 				t.Error("an operator's template set cards have Deploy buttons")
 			}
+			if o.is(`!!document.querySelector("#grid-live #grid-status")`) {
+				t.Error("grid-status leaked into #grid-live")
+			}
 			o.noSideways("operator's empty grid")
 			o.shot("empty-operator-" + size.name)
 			o.clean()
@@ -698,6 +701,9 @@ func TestBrowserEmptyGridAndDeploy(t *testing.T) {
 			}
 			if got := b.text("#grid-start .card .masters"); got != "12/12masters" {
 				t.Errorf("masters = %q", got)
+			}
+			if b.is(`!!document.querySelector("#grid-live #grid-status")`) {
+				t.Error("grid-status leaked into #grid-live")
 			}
 			b.noSideways("lead's empty grid")
 			b.shot("empty-lead-" + size.name)

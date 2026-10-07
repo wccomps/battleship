@@ -108,7 +108,10 @@
       var next = parse(html);
       Array.prototype.slice.call(next.children).forEach(function (el) {
         var cur = el.id && $(el.id);
-        if (cur && !live.contains(cur)) swap(el);
+        if (cur && !live.contains(cur)) {
+          if (cur.outerHTML === el.outerHTML) el.remove();
+          else swap(el);
+        }
       });
       var oldTable = $("grid-table"), newTable = next.querySelector("#grid-table");
       if (!oldTable || !newTable || shape(oldTable) !== shape(newTable)) {

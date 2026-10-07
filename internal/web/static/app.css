@@ -39,7 +39,7 @@
 *,*::before,*::after{box-sizing:border-box}
 [hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--tx);font:var(--t3)/1.45 var(--f);font-variant-numeric:tabular-nums}
-.app{container:app/inline-size;min-height:100vh;overflow-x:clip}
+.app{container:app/inline-size;min-height:100vh;min-height:100dvh;overflow-x:clip} /* dvh: the visible height, without mobile toolbars */
 a{color:inherit}
 h1,h2,h3,p{margin:0}
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
@@ -159,7 +159,7 @@ span.cell:hover .cv{border-color:var(--ln2)}
   .grid.cols-l{--cw:38px}
   .grid.cols-xl{--cw:34px}
   .grid.rows-s{--ch:22px}
-  .gscroll.tall{max-height:calc(100vh - 160px);overflow:auto}
+  .gscroll.tall{max-height:calc(100vh - 160px);max-height:calc(100dvh - 160px);overflow:auto}
 }
 .tall .hr .gh{position:sticky;top:0;z-index:2;background:var(--bg)}
 /* select-all corner */
@@ -362,7 +362,7 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .sw input::before{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
 .sw input:checked{background:var(--tx)}
 .sw input:checked::before{transform:translateX(16px)}
-.deny{display:grid;place-items:center;min-height:calc(100vh - 49px);padding:var(--s5)}
+.deny{display:grid;place-items:center;min-height:calc(100vh - 49px);min-height:calc(100dvh - 49px);padding:var(--s5)}
 .deny>div{display:grid;gap:var(--s3);max-width:440px}
 .deny .big{width:28px;height:28px;color:var(--tx2)}
 .deny h1{font-size:var(--t5);font-weight:600}
