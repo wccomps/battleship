@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -314,5 +315,27 @@ func TestIsTeamBridge(t *testing.T) {
 		if got := isTeamBridge(net, bridge); got != want {
 			t.Errorf("isTeamBridge(%q) = %v, want %v", bridge, got, want)
 		}
+	}
+}
+
+// A read cut off by its caller (a request the browser abandoned) is not
+// Proxmox's answer: the next caller asks again. A refusal is remembered.
+func TestAccessDoesNotRememberACancelledRead(t *testing.T) {
+	f := &fakePerms{err: context.Canceled}
+	acc := NewAccess(f)
+	if _, err := acc.Privileges(context.Background(), "/vms/1"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("first read: %v", err)
+	}
+	f.err, f.listed = nil, proxmox.Permissions{"/vms/1": {"VM.Audit": false}}
+	if p, err := acc.Privileges(context.Background(), "/vms/1"); err != nil || len(p) != 1 {
+		t.Fatalf("after a cancelled read: %v, %v; want it asked again", p, err)
+	}
+
+	refused := &fakePerms{err: &proxmox.APIError{Status: 403, Message: "forbidden"}}
+	acc = NewAccess(refused)
+	_, _ = acc.Privileges(context.Background(), "/vms/1")
+	_, _ = acc.Privileges(context.Background(), "/vms/1")
+	if n := len(refused.calls); n != 1 {
+		t.Errorf("a refused listing was asked %d times, want 1", n)
 	}
 }

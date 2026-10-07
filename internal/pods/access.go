@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -60,11 +61,16 @@ func (a *UserAccess) list(ctx context.Context) (proxmox.Permissions, error) {
 	}
 	p, err := a.r.Permissions(ctx)
 	if err != nil {
-		// Remembered for the access's life (a web session keeps one for a
-		// minute): pages then show no actions without asking again for
-		// every cell.
-		a.listErr = fmt.Errorf("reading your Proxmox privileges: %w", err)
-		return nil, a.listErr
+		err = fmt.Errorf("reading your Proxmox privileges: %w", err)
+		// A failed answer is remembered for the access's life (a web
+		// session keeps one for a minute): pages then show no actions
+		// without asking again for every cell. A cancelled or timed-out
+		// read is the caller's, not Proxmox's answer, so the next caller
+		// asks again.
+		if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			a.listErr = err
+		}
+		return nil, err
 	}
 	if p == nil {
 		p = proxmox.Permissions{}

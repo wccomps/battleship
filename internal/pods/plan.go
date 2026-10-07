@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"golang.org/x/sync/errgroup"
 
@@ -498,22 +499,33 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	if err != nil {
 		return err
 	}
-	// A listing takes seconds per node (Proxmox reads every image on it):
-	// the nodes are listed at once.
+	// A whole listing takes seconds per node (Proxmox reads every image on
+	// it); one VMID's takes a moment. A few teams' candidates are asked one
+	// by one, many teams' storage is listed whole; either way at once.
+	candidates := p.orphanCandidates(plan.Teams, vms, held)
+	if len(candidates) > maxOrphanCandidates {
+		candidates = []int{0} // 0: the whole storage
+	}
 	listed := make([][]string, len(nodes))
+	var mu sync.Mutex
 	var g errgroup.Group
+	g.SetLimit(orphanListings)
 	for i, node := range nodes {
-		g.Go(func() error {
-			vols, err := p.API.StorageContent(ctx, node, p.Cfg.Deploy.Storage, 0)
-			switch {
-			case proxmox.IsForbidden(err):
+		for _, vmid := range candidates {
+			g.Go(func() error {
+				vols, err := p.API.StorageContent(ctx, node, p.Cfg.Deploy.Storage, vmid)
+				switch {
+				case proxmox.IsForbidden(err):
+					return nil
+				case err != nil:
+					return fmt.Errorf("listing %s on %s for disks gone VMs left: %w", p.Cfg.Deploy.Storage, node, err)
+				}
+				mu.Lock()
+				listed[i] = append(listed[i], vols...)
+				mu.Unlock()
 				return nil
-			case err != nil:
-				return fmt.Errorf("listing %s on %s for disks gone VMs left: %w", p.Cfg.Deploy.Storage, node, err)
-			}
-			listed[i] = vols
-			return nil
-		})
+			})
+		}
 	}
 	if err := g.Wait(); err != nil {
 		return err
@@ -539,6 +551,36 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	}
 	sort.SliceStable(plan.Items, func(i, j int) bool { return plan.Items[i].Name < plan.Items[j].Name })
 	return nil
+}
+
+const (
+	// maxOrphanCandidates is the most VMIDs a teardown asks the storage
+	// about one by one before it lists the storage whole instead.
+	maxOrphanCandidates = 40
+	// orphanListings is how many storage listings a teardown plan runs at
+	// once.
+	orphanListings = 8
+)
+
+// orphanCandidates are the free VMIDs teams' VMs get when cloned from the
+// templates on the cluster (CloneVMID): where a gone team VM's disks would
+// be. Disks of a VM whose template has since gone aren't among them; a
+// teardown of more teams than maxOrphanCandidates allows lists the whole
+// storage and finds those too.
+func (p Planner) orphanCandidates(teams []string, vms []proxmox.VM, held map[int]bool) []int {
+	var out []int
+	for _, t := range teams {
+		for _, vm := range vms {
+			if !vm.Template || !p.Naming.IsTemplateName(vm.Name) {
+				continue
+			}
+			if id := p.Naming.CloneVMID(t, vm.VMID); !held[id] && !slices.Contains(out, id) {
+				out = append(out, id)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // storageNodes are the online nodes to list deploy.storage on: one, when

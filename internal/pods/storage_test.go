@@ -3,6 +3,7 @@ package pods
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"slices"
 	"strconv"
@@ -670,12 +671,12 @@ func orphanedSetup(t *testing.T) *fakeAPI {
 // the plan rather than leave the disks out unsaid.
 func TestOrphanedDisksListingErrors(t *testing.T) {
 	f := orphanedSetup(t)
-	f.failOn("content:competitions:0", &proxmox.APIError{Status: 403, Message: "Permission check failed"})
+	f.failOn("content:competitions:10121", &proxmox.APIError{Status: 403, Message: "Permission check failed"})
 	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
 	if err != nil || len(plan.Items) != 1 {
 		t.Fatalf("after a 403 on one node: plan %+v, err %v; want the item from another node", plan, err)
 	}
-	f.failOn("content:competitions:0", &proxmox.APIError{Status: 500, Message: "storage timeout"})
+	f.failOn("content:competitions:10121", &proxmox.APIError{Status: 500, Message: "storage timeout"})
 	if _, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil); err == nil {
 		t.Error("a 500 listing the storage planned anyway")
 	}
@@ -721,13 +722,45 @@ func TestOrphanedDisksListSharedStorageOnce(t *testing.T) {
 		for _, n := range c.on {
 			res.Storage = append(res.Storage, proxmox.StorageResource{Storage: "competitions", Node: n, Shared: c.shared})
 		}
-		before := f.called("content:competitions:0")
+		before := f.called("content:competitions:10121")
 		plan, err := NewPlanner(&resourceAPI{fakeAPI: f, res: res}, config.Default()).Teardown(context.Background(), []string{"01"}, nil)
 		if err != nil || len(plan.Items) != 1 {
 			t.Fatalf("shared %v: plan %+v, err %v", c.shared, plan, err)
 		}
-		if n := f.called("content:competitions:0") - before; n != c.want {
+		if n := f.called("content:competitions:10121") - before; n != c.want {
 			t.Errorf("shared %v: listed %d times, want %d", c.shared, n, c.want)
 		}
+	}
+}
+
+// A teardown of a few teams asks the storage about each VMID their VMs
+// would have from the templates on the cluster; one of many teams lists
+// the storage whole, which also finds disks of VMs whose template is gone.
+func TestOrphanedDisksAskFewVMIDsOrListWhole(t *testing.T) {
+	f := orphanedSetup(t)
+	few := f.called("content:competitions:")
+	if _, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.called("content:competitions:0"); n != 0 {
+		t.Errorf("one team listed the whole storage %d times", n)
+	}
+	if n := f.called("content:competitions:") - few; n == 0 {
+		t.Error("one team asked the storage about no VMID")
+	}
+
+	var teams []string
+	for i := 1; i <= 50; i++ {
+		teams = append(teams, fmt.Sprintf("%02d", i))
+	}
+	plan, err := testPlanner(f).Teardown(context.Background(), teams, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := f.called("content:competitions:0"); n == 0 {
+		t.Error("50 teams didn't list the storage whole")
+	}
+	if len(plan.Items) != 1 || plan.Items[0].VMID != 10121 {
+		t.Errorf("items = %+v, want the orphan of VMID 10121", plan.Items)
 	}
 }
