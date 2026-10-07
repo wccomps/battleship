@@ -17,6 +17,9 @@ engine and one Postgres job queue.
   create.
 - **Live updates** use server-sent events; pages also work without JavaScript.
 
+`ARCHITECTURE.md` walks through a job's life, the packages and the terms
+the code uses.
+
 ## CLI
 
 ```sh
