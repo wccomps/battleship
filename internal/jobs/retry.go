@@ -19,28 +19,8 @@ var (
 	ErrNothingToRetry = errors.New("nothing to retry: every VM of the job finished")
 )
 
-// Retryable reports whether an item of a finished job didn't finish, so a
-// retry should run it again: it failed, was blocked, was interrupted, was
-// removed after failing half-built, or never ran.
-func Retryable(it store.Item) bool {
-	switch it.Status {
-	case store.ItemFailed, store.ItemBlocked, store.ItemInterrupted, store.ItemRemoved, store.ItemNotRun:
-		return true
-	}
-	return false
-}
-
-// CanRetry reports whether a job with this status may be retried.
-func CanRetry(status string) bool {
-	switch status {
-	case store.StatusCompletedWithFailures, store.StatusInterrupted, store.StatusCancelled:
-		return true
-	}
-	return false
-}
-
 // RetryInputs works out how to retry a finished job for exactly its items
-// that didn't finish (see Retryable): its stored inputs with VMs set to
+// that didn't finish (see store.ItemStatus.Retryable): its stored inputs with VMs set to
 // those items' names, and Teams and Hosts narrowed to their teams and
 // hosts (the hosts come from the job's stored plan; with a teardown item
 // that has no host among them, a gone VM's disks or a half-deleted VM,
@@ -50,7 +30,7 @@ func CanRetry(status string) bool {
 // the finished ones, still use, which would block every VM of the retry. It
 // returns ErrNotRetryable or ErrNothingToRetry when there's nothing to retry.
 func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
-	if !CanRetry(job.Status) {
+	if !store.JobStatus(job.Status).CanRetry() {
 		return Inputs{}, fmt.Errorf("job %d is %s: %w", job.ID, job.Status, ErrNotRetryable)
 	}
 	var in Inputs
@@ -68,7 +48,7 @@ func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 	var teams, hosts, names []string
 	wholeTeams := false
 	for _, it := range items {
-		if !Retryable(it) {
+		if !store.ItemStatus(it.Status).Retryable() {
 			continue
 		}
 		p, ok := planned[it.Name]

@@ -10,37 +10,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Job statuses. Pending and running jobs are active; the rest are final.
-const (
-	StatusPending               = "pending"
-	StatusRunning               = "running"
-	StatusSucceeded             = "succeeded"
-	StatusCompletedWithFailures = "completed_with_failures"
-	StatusFailed                = "failed"      // could not run at all, e.g. planning failed
-	StatusCancelled             = "cancelled"   // someone cancelled it
-	StatusInterrupted           = "interrupted" // its worker stopped sending heartbeats
-	StatusStale                 = "stale"       // the cluster changed since the preview
-)
-
-const (
-	ItemPending     = "pending"
-	ItemRunning     = "running"
-	ItemDone        = "done"
-	ItemFailed      = "failed"
-	ItemBlocked     = "blocked"
-	ItemRemoved     = "removed"     // created, didn't finish, and cleaned up
-	ItemInterrupted = "interrupted" // its job was interrupted or cancelled after it reached a step
-	// ItemNotRun: its job ended (or was cancelled) before it reached a
-	// step, so it never touched its VM.
-	ItemNotRun = "not run"
-)
-
 // legacyNotRunSQL matches, in job_items i joined to jobs j, an item an
 // older battleship ended without marking it not run: its job finished
 // before it reached a step, and it was left pending or running, or marked
 // interrupted. Such binaries may still run beside this one (another
 // replica, a CLI) after migration 005 converted the rows already there.
-const legacyNotRunSQL = `(j.finished_at IS NOT NULL AND i.step = '' AND i.status IN ('pending', 'running', 'interrupted'))`
+const legacyNotRunSQL = `(j.finished_at IS NOT NULL AND i.step = '' AND i.status IN ` + notRunNoStepSQL + `)`
 
 // itemStatusSQL is an item's status as the store reports it, with legacy
 // rows read as ItemNotRun.
@@ -75,16 +50,12 @@ type Job struct {
 }
 
 // Active reports whether the job is pending or running.
-func (j Job) Active() bool { return j.Status == StatusPending || j.Status == StatusRunning }
+func (j Job) Active() bool { return JobStatus(j.Status).Active() }
 
 // CancelCameTooLate reports whether someone asked to cancel the job and it
 // ended anyway as its work did: the cancel stopped nothing.
 func (j Job) CancelCameTooLate() bool {
-	switch j.Status {
-	case StatusSucceeded, StatusCompletedWithFailures, StatusFailed:
-		return j.CancelRequested
-	}
-	return false
+	return j.CancelRequested && JobStatus(j.Status).CancelTooLate()
 }
 
 type NewJob struct {
@@ -317,7 +288,7 @@ func (s *Store) AddEvent(ctx context.Context, jobID int64, ev Event) error {
 				step = CASE WHEN $3 <> '' THEN $3 ELSE step END,
 				steps = CASE WHEN $3 <> '' AND $4 IN ('done', 'skipped', 'failed', 'interrupted')
 					THEN steps || jsonb_build_object($3::text, $4::text) ELSE steps END,
-				status = CASE WHEN status IN ('blocked', 'interrupted', 'not run') THEN status ELSE 'running' END,
+				status = CASE WHEN status IN `+keptOnEventSQL+` THEN status ELSE 'running' END,
 				error = CASE WHEN $4 = 'failed' THEN $5 ELSE error END,
 				updated_at = now()
 			WHERE job_id = $1 AND name = $2`, jobID, ev.Item, ev.Step, ev.Status, ev.Message); err != nil {
@@ -353,7 +324,7 @@ func (s *Store) RequestCancel(ctx context.Context, jobID int64, by string) error
 			cancelled_by = $2,
 			status = CASE WHEN status = 'pending' THEN 'cancelled' ELSE status END,
 			finished_at = CASE WHEN status = 'pending' THEN now() ELSE finished_at END
-		WHERE id = $1 AND status IN ('pending', 'running') RETURNING status`, jobID, by).Scan(&status)
+		WHERE id = $1 AND status IN `+activeJobsSQL+` RETURNING status`, jobID, by).Scan(&status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if beforeCancelRecheck != nil {
 			beforeCancelRecheck(jobID)
@@ -392,7 +363,7 @@ func (s *Store) RequestCancel(ctx context.Context, jobID int64, by string) error
 // answer unbounded, though the query still reads every active job's items.
 func (s *Store) BusyVMs(ctx context.Context, limit int) (map[string]int64, error) {
 	rows, err := s.pool.Query(ctx, `SELECT i.name, min(j.id) FROM jobs j JOIN job_items i ON i.job_id = j.id
-		WHERE j.status IN ('pending', 'running') AND i.status IN ('pending', 'running')
+		WHERE j.status IN `+activeJobsSQL+` AND i.status IN `+unfinishedItemsSQL+`
 		GROUP BY i.name ORDER BY i.name LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
