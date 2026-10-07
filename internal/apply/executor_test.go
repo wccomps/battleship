@@ -1,4 +1,4 @@
-package pods
+package apply
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -65,9 +66,9 @@ func testSleep(stopWait time.Duration) func(context.Context, time.Duration) erro
 	}
 }
 
-func deployTeak(t *testing.T, f *fakeAPI, teams ...string) *Plan {
+func deployTeak(t *testing.T, f *fakeAPI, teams ...string) *pods.Plan {
 	t.Helper()
-	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: teams, Snapshot: true})
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: teams, Snapshot: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +307,7 @@ func TestCancelCutsAStepOffAfterTheGrace(t *testing.T) {
 	if err := res.Interrupted["team01-teak"]; err == nil || err.Error() != want {
 		t.Errorf("result = %+v, want %q", res, want)
 	}
-	if ev := rec.find("team01-teak", EventInterrupted); len(ev) != 1 || ev[0].Step != StepStop || ev[0].Message != want {
+	if ev := rec.find("team01-teak", EventInterrupted); len(ev) != 1 || ev[0].Step != pods.StepStop || ev[0].Message != want {
 		t.Errorf("interrupted events = %+v", ev)
 	}
 	if len(rec.find("team01-teak", EventFailed)) != 0 {
@@ -488,7 +489,7 @@ func TestRebuildDeletesOldTemplateOnItsNode(t *testing.T) {
 	f := newCluster()
 	// The old template lives on a different node than its master.
 	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)
-	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +534,7 @@ func TestHalfBuiltTemplateIsResumed(t *testing.T) {
 func TestRebuildDeleteFailureExplainsLinkedClones(t *testing.T) {
 	f := newCluster()
 	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)
-	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -884,11 +885,11 @@ func TestMasterStaysStoppedIfLockCannotBeConfirmed(t *testing.T) {
 func TestRunDoesNotMutateThePlan(t *testing.T) {
 	f := newCluster()
 	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)
-	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := append([]TemplateSpec(nil), plan.Templates...)
+	before := append([]pods.TemplateSpec(nil), plan.Templates...)
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	if len(res.Failed) != 0 {
@@ -902,7 +903,7 @@ func TestRunDoesNotMutateThePlan(t *testing.T) {
 func TestRebuildRefusedWhenTeamVMsAppearAfterPlanning(t *testing.T) {
 	f := newCluster()
 	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
-	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"02"}, Rebuild: true})
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"02"}, Rebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -935,7 +936,7 @@ func TestMasterIsNotStoppedWhenNothingWillClone(t *testing.T) {
 
 func TestItemWithoutStepsFails(t *testing.T) {
 	f := newCluster()
-	plan := &Plan{Kind: KindPower, Items: []Item{{Name: "team01-teak", VMID: 10121, Node: "cedar"}}}
+	plan := &pods.Plan{Kind: pods.KindPower, Items: []pods.Item{{Name: "team01-teak", VMID: 10121, Node: "cedar"}}}
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	if err := res.Failed["team01-teak"]; err == nil || !strings.Contains(err.Error(), "no steps planned") {
 		t.Errorf("result = %+v", res)
@@ -1033,7 +1034,7 @@ func TestMasterStoppedDuringCancelIsNeverSilentlyLeftStopped(t *testing.T) {
 	}
 }
 
-func newlyBuiltTeamVMFails(t *testing.T) (*fakeAPI, *Plan) {
+func newlyBuiltTeamVMFails(t *testing.T) (*fakeAPI, *pods.Plan) {
 	t.Helper()
 	f := newCluster()
 	return f, deployTeak(t, f, "01")
@@ -1832,7 +1833,7 @@ func TestCancelDuringARetryRoundInterruptsTheItemsNotRun(t *testing.T) {
 func TestRebuildRetryRoundResumesTheNewCopy(t *testing.T) {
 	f := newCluster()
 	f.add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)
-	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}

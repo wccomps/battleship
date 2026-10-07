@@ -1,4 +1,4 @@
-package pods
+package apply
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -25,9 +26,9 @@ func sevenMasters() *fakeAPI {
 	return f
 }
 
-func deploySeven(t *testing.T, f *fakeAPI, hosts ...string) *Plan {
+func deploySeven(t *testing.T, f *fakeAPI, hosts ...string) *pods.Plan {
 	t.Helper()
-	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "*.kilo.alpha", Teams: []string{"01"}, Hosts: hosts})
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "*.kilo.alpha", Teams: []string{"01"}, Hosts: hosts})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +178,7 @@ func itemClone(i int) string   { return upid("spruce", "qmclone", 9000+i) }
 
 // runAsync runs plan in the background. Cleanup cancels it and waits, so a
 // failed test does not leave the run blocked in the gate.
-func runAsync(t *testing.T, ex *Executor, plan *Plan) (context.CancelFunc, <-chan Result) {
+func runAsync(t *testing.T, ex *Executor, plan *pods.Plan) (context.CancelFunc, <-chan Result) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan Result, 1)
 	finished := make(chan struct{})

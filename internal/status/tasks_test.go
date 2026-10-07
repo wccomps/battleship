@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -72,7 +72,7 @@ func newTaskHarness(t *testing.T, audit bool) (*harness, *taskAPI) {
 	h.api.add(teamVM("01", "dc", 10101), cleanConfig("01"), "initial")
 	h.api.add(teamVM("01", "web", 10102), cleanConfig("01"), "initial")
 	h.cfg.Concurrency.ConfigCalls = 2
-	h.lim = pods.NewLimits(h.cfg.Concurrency)
+	h.lim = apply.NewLimits(h.cfg.Concurrency)
 	p, err := NewPoller(a, h.hist, h.lim, h.cfg, Options{Clock: h.clock, Logf: t.Logf})
 	if err != nil {
 		t.Fatal(err)

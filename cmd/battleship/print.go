@@ -9,13 +9,14 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
 )
 
 // printResult prints how a direct run without a database ended, as a
 // stored job's summary prints.
-func printResult(w io.Writer, res pods.Result) { printSummary(w, jobs.Summarize(res)) }
+func printResult(w io.Writer, res apply.Result) { printSummary(w, jobs.Summarize(res)) }
 
 // printSummary prints how a run ended: what failed, what a stop cut off, and
 // what cleanup did.
@@ -169,8 +170,8 @@ func joinSteps(steps []pods.Step) string {
 	return strings.Join(s, " > ")
 }
 
-func printEvent(w io.Writer, e pods.Event) {
-	if e.Status == pods.EventSkipped && e.Message == "" {
+func printEvent(w io.Writer, e apply.Event) {
+	if e.Status == apply.EventSkipped && e.Message == "" {
 		return // already converged; not worth a line
 	}
 	item := e.Item

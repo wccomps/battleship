@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/auth"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
@@ -395,16 +396,16 @@ type eventView struct {
 // went, and the message.
 func eventText(ev store.Event) string {
 	var head string
-	switch pods.EventStatus(ev.Status) {
-	case pods.EventDone:
+	switch apply.EventStatus(ev.Status) {
+	case apply.EventDone:
 		head = strings.TrimSpace(ev.Step + " done")
-	case pods.EventFailed:
+	case apply.EventFailed:
 		head = strings.TrimSpace(ev.Step + " failed")
-	case pods.EventSkipped:
+	case apply.EventSkipped:
 		head = strings.TrimSpace(ev.Step + " skipped")
-	case pods.EventBlocked:
+	case apply.EventBlocked:
 		head = "blocked"
-	case pods.EventInterrupted:
+	case apply.EventInterrupted:
 		head = strings.TrimSpace(ev.Step + " interrupted")
 	default:
 		head = ev.Step
@@ -717,12 +718,12 @@ func (s *Server) jobEventsAfter(ctx context.Context, id, after int64) ([]eventVi
 		}
 		for _, ev := range evs {
 			after = ev.ID
-			if ev.Status == string(pods.EventSkipped) && ev.Message == "" {
+			if ev.Status == string(apply.EventSkipped) && ev.Message == "" {
 				continue
 			}
 			out = append(out, eventView{
 				ID: ev.ID, At: shortTime(now, ev.At), Full: clockTime(now, ev.At), Item: ev.Item,
-				Text: eventText(ev), Err: ev.Status == string(pods.EventFailed) || ev.Status == string(pods.EventInterrupted),
+				Text: eventText(ev), Err: ev.Status == string(apply.EventFailed) || ev.Status == string(apply.EventInterrupted),
 			})
 		}
 		if len(evs) < eventBatch {

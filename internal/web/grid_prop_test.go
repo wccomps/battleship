@@ -10,6 +10,7 @@ import (
 
 	"pgregory.net/rapid"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/status"
@@ -138,7 +139,7 @@ func TestPropGridViewOfAnyCluster(t *testing.T) {
 		}
 		clock := newFakeClock()
 		hist := &fakeHistory{clock: clock, results: m.hist}
-		poller, err := status.NewPoller(api, hist, pods.NewLimits(cfg.Concurrency), cfg, status.Options{Clock: clock, Logf: func(string, ...any) {}})
+		poller, err := status.NewPoller(api, hist, apply.NewLimits(cfg.Concurrency), cfg, status.Options{Clock: clock, Logf: func(string, ...any) {}})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -21,7 +22,7 @@ type harness struct {
 	hist  *fakeHistory
 	clock *fakeClock
 	hub   *Hub
-	lim   *pods.Limits
+	lim   *apply.Limits
 	cfg   config.Config
 	p     *Poller
 }
@@ -37,7 +38,7 @@ func newHarness(t *testing.T, edit func(*config.Config, *Options)) *harness {
 	if edit != nil {
 		edit(&h.cfg, &opts)
 	}
-	h.lim = pods.NewLimits(h.cfg.Concurrency)
+	h.lim = apply.NewLimits(h.cfg.Concurrency)
 	p, err := NewPoller(h.api, h.hist, h.lim, h.cfg, opts)
 	if err != nil {
 		t.Fatal(err)

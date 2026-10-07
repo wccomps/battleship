@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -50,13 +51,13 @@ type Worker struct {
 	ID string
 	// Limits is shared by every job this worker runs, and should be shared
 	// with other workers in the same process. Nil means one per Worker.
-	Limits *pods.Limits
+	Limits *apply.Limits
 	// Logf reports problems that don't fail a job, e.g. a lost database
 	// connection. Nil discards them.
 	Logf func(format string, args ...any)
 	// OnEvent, if set, also receives each progress event as it is recorded,
 	// e.g. to print it. It is called from many goroutines.
-	OnEvent func(pods.Event)
+	OnEvent func(apply.Event)
 	// OnStart, if set, is told when this worker starts running a job it
 	// claimed, and OnFinish after it records the job's outcome. A job taken
 	// away from the worker (its claim was reaped) has no outcome from it,
@@ -79,7 +80,7 @@ type Worker struct {
 func (w *Worker) init() {
 	w.once.Do(func() {
 		if w.Limits == nil {
-			w.Limits = pods.NewClusterLimits(w.Cfg.Concurrency, w.Store)
+			w.Limits = apply.NewClusterLimits(w.Cfg.Concurrency, w.Store)
 		}
 		if w.Logf == nil {
 			w.Logf = func(string, ...any) {}
@@ -180,7 +181,7 @@ func (w *Worker) RunJob(ctx context.Context, job *store.Job) {
 		outcome.Status = store.StatusInterrupted
 		outcome.Error = "authorization lapsed: Proxmox no longer accepts the submitter's login, so the job stopped; whoever re-runs it acts as themselves"
 	case finished:
-	case errors.Is(cause, pods.ErrCancelRequested):
+	case errors.Is(cause, apply.ErrCancelRequested):
 		outcome.Status = store.StatusCancelled
 	case errors.Is(cause, errNoHeartbeat):
 		// Stopped before another worker may reap the job. Stale and failed
@@ -263,7 +264,7 @@ func (w *Worker) heartbeat(ctx context.Context, jobID int64, cancel context.Canc
 			lastOKWall = startWall
 			deadline.Reset(threshold - time.Since(start))
 			if stop {
-				cancel(pods.ErrCancelRequested)
+				cancel(apply.ErrCancelRequested)
 			}
 		}
 	}
@@ -271,7 +272,7 @@ func (w *Worker) heartbeat(ctx context.Context, jobID int64, cancel context.Canc
 
 // execute plans the job again, checks it against the confirmed preview, and
 // runs it. bg outlives ctx and is used to record progress; halt closes on
-// shutdown, ending a cancel's grace (pods.Executor.Halt). finished reports
+// shutdown, ending a cancel's grace (apply.Executor.Halt). finished reports
 // that the plan ran, no runnable VM was interrupted and no retry round was
 // skipped.
 func (w *Worker) execute(ctx, bg context.Context, halt <-chan struct{}, job *store.Job, api pods.API) (out store.Outcome, finished bool) {
@@ -294,12 +295,12 @@ func (w *Worker) execute(ctx, bg context.Context, halt <-chan struct{}, job *sto
 	if fp := Fingerprint(plan); fp != job.Fingerprint {
 		return store.Outcome{Status: store.StatusStale, Error: staleMessage(&then, plan)}, false
 	}
-	exec := &pods.Executor{
+	exec := &apply.Executor{
 		API:    api,
 		Cfg:    w.Cfg,
 		Limits: w.Limits,
 		Halt:   halt,
-		OnEvent: func(ev pods.Event) {
+		OnEvent: func(ev apply.Event) {
 			evCtx, stopEv := context.WithTimeout(bg, max(w.Cfg.Jobs.Heartbeat, eventTimeoutFloor))
 			defer stopEv()
 			err := w.Store.AddEvent(evCtx, job.ID, store.Event{
@@ -458,8 +459,8 @@ type Summary struct {
 }
 
 // Summarize is how a run ended, for people. Cleanup failures carry their
-// advice (pods.CleanupAdvice).
-func Summarize(res pods.Result) Summary {
+// advice (apply.CleanupAdvice).
+func Summarize(res apply.Result) Summary {
 	sum := Summary{
 		Succeeded: res.Succeeded, Blocked: res.Blocked, Completed: res.Completed,
 		Removed: res.Removed, AlreadyGone: res.AlreadyGone,
@@ -472,7 +473,7 @@ func Summarize(res pods.Result) Summary {
 		sum.Interrupted = append(sum.Interrupted, name)
 	}
 	for name, err := range res.CleanupFailed {
-		sum.CleanupFailed[name] = pods.CleanupAdvice(name, err)
+		sum.CleanupFailed[name] = apply.CleanupAdvice(name, err)
 	}
 	for _, list := range [][]string{sum.Succeeded, sum.Interrupted, sum.Blocked, sum.Completed, sum.Removed, sum.AlreadyGone} {
 		sort.Strings(list)
@@ -482,17 +483,17 @@ func Summarize(res pods.Result) Summary {
 
 // leftConfig is how the store records the executor's verdict on how an
 // interrupted item left its VM's config.
-func leftConfig(l pods.Left) string {
+func leftConfig(l apply.Left) string {
 	switch l {
-	case pods.LeftUntouched:
+	case apply.LeftUntouched:
 		return store.LeftUntouched
-	case pods.LeftConverged:
+	case apply.LeftConverged:
 		return store.LeftConverged
 	}
 	return ""
 }
 
-func outcomeOf(res pods.Result) store.Outcome {
+func outcomeOf(res apply.Result) store.Outcome {
 	sum := Summarize(res)
 	items := map[string]store.ItemOutcome{}
 	for _, name := range res.Succeeded {
@@ -502,7 +503,7 @@ func outcomeOf(res pods.Result) store.Outcome {
 		items[name] = store.ItemOutcome{Status: store.ItemFailed, Error: proxmox.Describe(err)}
 	}
 	for name, err := range res.Interrupted {
-		items[name] = store.ItemOutcome{Status: store.ItemInterrupted, Error: proxmox.Describe(err), LeftConfig: leftConfig(pods.LeftBy(err))}
+		items[name] = store.ItemOutcome{Status: store.ItemInterrupted, Error: proxmox.Describe(err), LeftConfig: leftConfig(apply.LeftBy(err))}
 	}
 	for _, name := range res.Removed {
 		if it, ok := items[name]; ok {

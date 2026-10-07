@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
@@ -58,7 +59,7 @@ func newViewsHarness(t *testing.T) *viewsHarness {
 	cfg.Web.DriftScan = time.Hour
 	bind := func(cred func() proxmox.Credential) pods.API { return asUser{fakeAPI: h.api, cred: cred, log: h.log} }
 	var err error
-	h.views, err = NewViews(bind, &fakeHistory{clock: h.clock}, pods.NewLimits(cfg.Concurrency), cfg,
+	h.views, err = NewViews(bind, &fakeHistory{clock: h.clock}, apply.NewLimits(cfg.Concurrency), cfg,
 		Options{Clock: h.clock, Logf: t.Logf}, time.Minute)
 	if err != nil {
 		t.Fatal(err)

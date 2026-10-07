@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
@@ -413,7 +414,7 @@ func TestPrintPlanShowsMasterStop(t *testing.T) {
 
 func TestPrintCleanupSummary(t *testing.T) {
 	var out bytes.Buffer
-	printResult(&out, pods.Result{
+	printResult(&out, apply.Result{
 		Completed:     []string{"fern.kilo.alpha.tpl"},
 		Removed:       []string{"team01-dc", "team02-dc"},
 		AlreadyGone:   []string{"team04-dc"},
@@ -427,7 +428,7 @@ func TestPrintCleanupSummary(t *testing.T) {
 		t.Errorf("summary = %q, want %q", got, want)
 	}
 	out.Reset()
-	printResult(&out, pods.Result{})
+	printResult(&out, apply.Result{})
 	if out.Len() != 0 {
 		t.Errorf("empty result printed %q", out.String())
 	}
@@ -495,7 +496,7 @@ func TestPrintSummaryListsInterrupted(t *testing.T) {
 // interrupted, as a stored job's summary does, not as failures.
 func TestPrintResultListsInterrupted(t *testing.T) {
 	var buf bytes.Buffer
-	printResult(&buf, pods.Result{
+	printResult(&buf, apply.Result{
 		Failed: map[string]error{"team01-dc": errors.New("the app's Proxmox token is missing VM.Allocate on /vms/10101")},
 		Interrupted: map[string]error{
 			"team01-web": fmt.Errorf("clone: %w", context.Canceled),
@@ -515,7 +516,7 @@ func TestPrintResultListsInterrupted(t *testing.T) {
 		t.Errorf("interrupted VMs are listed as failures:\n%s", out)
 	}
 	buf.Reset()
-	printResult(&buf, pods.Result{Interrupted: map[string]error{"team01-web": context.Canceled}})
+	printResult(&buf, apply.Result{Interrupted: map[string]error{"team01-web": context.Canceled}})
 	if strings.Contains(buf.String(), "failed") || !strings.Contains(buf.String(), "1 VM interrupted") {
 		t.Errorf("interrupted-only result:\n%s", buf.String())
 	}

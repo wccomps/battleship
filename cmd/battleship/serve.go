@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/auth"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
@@ -131,9 +132,9 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	}
 	log.Info("starting", "base_url", cfg.Web.BaseURL,
 		"workers", cfg.Web.Workers, "shutdown_timeout", cfg.Web.ShutdownTimeout.String())
-	if cfg.Web.ShutdownTimeout <= pods.StopBudget {
+	if cfg.Web.ShutdownTimeout <= apply.StopBudget {
 		log.Warn("web.shutdown_timeout is not longer than running jobs may take to stop, so a shutdown can cut their cleanup short and leave half-built VMs or a master stopped",
-			"shutdown_timeout", cfg.Web.ShutdownTimeout.String(), "stop_budget", pods.StopBudget.String())
+			"shutdown_timeout", cfg.Web.ShutdownTimeout.String(), "stop_budget", apply.StopBudget.String())
 	}
 
 	st, closeStore, err := d.openStore(ctx, cfg.Database)
@@ -161,7 +162,7 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	if err != nil {
 		return cantStart(err)
 	}
-	lim := pods.NewClusterLimits(cfg.Concurrency, st)
+	lim := apply.NewClusterLimits(cfg.Concurrency, st)
 	hub := status.NewHub(st.Notifications, status.HubOptions{Logf: logfFor(log, "status")})
 	views, err := status.NewViews(func(cred func() proxmox.Credential) pods.API { return asUser(api, cred, nil) },
 		st, lim, cfg, status.Options{Hub: hub, Logf: logfFor(log, "status")}, viewLinger)
@@ -326,7 +327,7 @@ func listenForCancels(ctx context.Context, st *store.Store, logf func(format str
 // startWorkers starts cfg.Web.Workers job workers sharing api and lim, and
 // returns a channel closed once they all return, which they do once ctx is
 // done and their running jobs have ended. hub tells them of cancels.
-func startWorkers(ctx context.Context, cfg config.Config, st *store.Store, client pods.API, creds jobs.Credentials, lim *pods.Limits, hub *status.Hub, log *slog.Logger) <-chan struct{} {
+func startWorkers(ctx context.Context, cfg config.Config, st *store.Store, client pods.API, creds jobs.Credentials, lim *apply.Limits, hub *status.Hub, log *slog.Logger) <-chan struct{} {
 	var wg sync.WaitGroup
 	for range cfg.Web.Workers {
 		id := jobs.NewWorkerID("serve")

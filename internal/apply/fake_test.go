@@ -1,4 +1,4 @@
-package pods
+package apply
 
 import (
 	"context"
@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -128,7 +130,7 @@ func (f *fakeAPI) addVolumes(vmid int, cfg map[string]string) {
 	if f.vols == nil {
 		f.vols = map[string]int{}
 	}
-	for _, vol := range DiskVolumes(cfg) {
+	for _, vol := range pods.DiskVolumes(cfg) {
 		f.vols[vol] = vmid
 	}
 }
@@ -299,10 +301,10 @@ func (f *fakeAPI) Clone(_ context.Context, r proxmox.CloneRequest) (string, erro
 	// Like Proxmox, a clone gets its own disks: a full clone a copy named
 	// for the new VMID, a linked clone an overlay on the template's base-*
 	// volume.
-	disks := DiskVolumes(src.Config)
+	disks := pods.DiskVolumes(src.Config)
 	for i, k := range slices.Sorted(maps.Keys(disks)) {
 		storage, name, _ := strings.Cut(disks[k], ":")
-		ext := path.Ext(VolumeFile(disks[k]))
+		ext := path.Ext(pods.VolumeFile(disks[k]))
 		if ext == "" {
 			ext = ".qcow2"
 		}
@@ -341,8 +343,8 @@ func (f *fakeAPI) ConvertToTemplate(_ context.Context, node string, vmid int) (s
 	vm.Template = true
 	if !f.convertLeavesDisk[vmid] {
 		// Converting renames each disk's file from vm-* to base-*.
-		for k, vol := range DiskVolumes(vm.Config) {
-			file := VolumeFile(vol)
+		for k, vol := range pods.DiskVolumes(vm.Config) {
+			file := pods.VolumeFile(vol)
 			if strings.HasPrefix(file, "vm-") {
 				base := strings.TrimSuffix(vol, file) + "base-" + strings.TrimPrefix(file, "vm-")
 				vm.Config[k] = base + strings.TrimPrefix(vm.Config[k], vol)
@@ -598,4 +600,39 @@ func (f *fakeAPI) StopTask(_ context.Context, upid string) error {
 		err = hook(upid)
 	}
 	return err
+}
+
+// newCluster returns a fake with two tagged masters (teak: 2 NICs,
+// cloud-init; oak: GPU) and one untagged VM.
+func newCluster() *fakeAPI {
+	f := newFakeAPI("cedar", "birch", "spruce")
+	f.add(proxmox.VM{VMID: 121, Name: "teak.tango.delta", Node: "cedar", Tags: "dev;tango.delta"}, map[string]string{
+		"net0":  "virtio=BC:24:11:00:01:21,bridge=vmbr0",
+		"net1":  "virtio=BC:24:11:00:01:22,bridge=vmbr1",
+		"ide2":  "competitions:vm-121-cloudinit,media=cdrom",
+		"scsi0": "competitions:121/vm-121-disk-0.qcow2,size=32G",
+	})
+	f.add(proxmox.VM{VMID: 125, Name: "oak.tango.delta", Node: "birch", Tags: "dev"}, map[string]string{
+		"net0": "virtio=BC:24:11:00:01:25,bridge=vmbr0",
+		"vga":  "virtio-gl,memory=256",
+	})
+	f.add(proxmox.VM{VMID: 130, Name: "notes.tango.delta", Node: "cedar", Tags: "docs"}, nil)
+	return f
+}
+
+func testPlanner(f *fakeAPI) pods.Planner {
+	cfg := config.Default()
+	return pods.NewPlanner(f, cfg)
+}
+
+// resourceAPI is the fake with /cluster/resources, counting calls.
+type resourceAPI struct {
+	*fakeAPI
+	res   proxmox.Resources
+	calls int
+}
+
+func (r *resourceAPI) ClusterResources(context.Context) (proxmox.Resources, error) {
+	r.calls++
+	return r.res, nil
 }

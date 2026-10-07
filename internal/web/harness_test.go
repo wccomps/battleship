@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/auth"
 	"github.com/wccomps/battleship/internal/auth/authtest"
 	"github.com/wccomps/battleship/internal/config"
@@ -544,7 +545,7 @@ func buildHarness(t *testing.T, listen bool, mut ...func(*config.Config)) *harne
 	h.stop = stop
 	t.Cleanup(func() { stop(); <-hubDone })
 	// The test drives each viewer's grid: h.poll and h.poller poll them.
-	h.views, err = status.NewViews(h.bind, h.hist, pods.NewLimits(cfg.Concurrency), cfg,
+	h.views, err = status.NewViews(h.bind, h.hist, apply.NewLimits(cfg.Concurrency), cfg,
 		status.Options{Clock: h.clock, Hub: h.hub, Logf: h.logs.Logf, Manual: true}, time.Minute)
 	if err != nil {
 		t.Fatalf("status.NewViews: %v", err)

@@ -193,16 +193,36 @@ func DiskVolumes(cfg map[string]string) map[string]string {
 	return out
 }
 
-// volumeFile is the last path segment of a volume's name, e.g.
+// VolumeFile is the last path segment of a volume's name, e.g.
 // "vm-9008-disk-1.qcow2" for "competitions:9008/vm-9008-disk-1.qcow2", or
 // "vm-10105-disk-0.qcow2" for a linked clone's
 // "competitions:base-9005-disk-0.qcow2/10105/vm-10105-disk-0.qcow2".
-func volumeFile(vol string) string {
+func VolumeFile(vol string) string {
 	_, name, ok := strings.Cut(vol, ":")
 	if !ok {
 		name = vol
 	}
 	return name[strings.LastIndex(name, "/")+1:]
+}
+
+// VolumeOwner is the VMID a volume's file name says owns it
+// (vm-<vmid>-… or base-<vmid>-…), and whether it is a base volume; 0 for
+// any other file, such as an ISO or an import.
+func VolumeOwner(vol string) (vmid int, base bool) {
+	file := VolumeFile(vol)
+	rest, base := strings.CutPrefix(file, "base-")
+	if !base {
+		var ok bool
+		if rest, ok = strings.CutPrefix(file, "vm-"); !ok {
+			return 0, false
+		}
+	}
+	digits, _, ok := strings.Cut(rest, "-")
+	n, err := strconv.Atoi(digits)
+	if !ok || err != nil {
+		return 0, false
+	}
+	return n, base
 }
 
 // UnconvertedDisk returns the first disk (by key) of a template's config
@@ -211,7 +231,7 @@ func volumeFile(vol string) string {
 func UnconvertedDisk(cfg map[string]string) (key, vol string) {
 	disks := DiskVolumes(cfg)
 	for _, k := range slices.Sorted(maps.Keys(disks)) {
-		if !strings.HasPrefix(volumeFile(disks[k]), "base-") {
+		if !strings.HasPrefix(VolumeFile(disks[k]), "base-") {
 			return k, disks[k]
 		}
 	}
