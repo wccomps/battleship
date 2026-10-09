@@ -86,9 +86,11 @@ func statusNode(code int, text string) http.HandlerFunc {
 }
 
 // hangNode reads the whole request, so a write has certainly arrived, then
-// never answers.
+// never answers. Once the client gives up it drops the connection: returning
+// would send an empty 200, which a client that just timed out can still read.
 func hangNode(w http.ResponseWriter, r *http.Request) {
 	<-r.Context().Done()
+	panic(http.ErrAbortHandler)
 }
 
 // refusedURL is an https URL nothing listens on.
