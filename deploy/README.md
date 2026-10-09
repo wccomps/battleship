@@ -10,7 +10,7 @@ services:
   battleship:
     image: battleship:<tag>          # docker build -t battleship:<tag> .
     command: ["serve", "-log-format", "json"]
-    env_file: .env                   # BATTLESHIP_SEAL_KEY, BATTLESHIP_OIDC_CLIENT_ID/SECRET
+    env_file: .env                   # BATTLESHIP_SEAL_KEY, BATTLESHIP_OIDC_ISSUER/CLIENT_ID/SECRET
     environment:
       BATTLESHIP_DATABASE_URL: postgres://battleship:${POSTGRES_PASSWORD}@db:5432/battleship?sslmode=disable
     volumes:

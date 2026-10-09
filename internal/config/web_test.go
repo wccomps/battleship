@@ -110,6 +110,16 @@ groups_claim = "roles"
 	if cfg.OIDC.ClientID != "id-from-env" {
 		t.Errorf("ClientID = %q, want BATTLESHIP_OIDC_CLIENT_ID's value", cfg.OIDC.ClientID)
 	}
+
+	// And the issuer, so all of [oidc]'s per-site values can sit together.
+	t.Setenv("BATTLESHIP_OIDC_ISSUER", "https://sso.example.net/o/battleship/")
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OIDC.Issuer != "https://sso.example.net/o/battleship/" {
+		t.Errorf("Issuer = %q, want BATTLESHIP_OIDC_ISSUER's value", cfg.OIDC.Issuer)
+	}
 	prefixes, err := cfg.Web.TrustedProxyPrefixes()
 	want := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("fd00::/8")}
 	if err != nil || !reflect.DeepEqual(prefixes, want) {
@@ -181,7 +191,7 @@ func TestRequireWeb(t *testing.T) {
 		want string
 	}{
 		{"base_url", func(c *Config) { c.Web.BaseURL = "" }, "web.base_url is required (e.g. https://battleship.example.org)"},
-		{"issuer", func(c *Config) { c.OIDC.Issuer = "" }, "oidc.issuer is required"},
+		{"issuer", func(c *Config) { c.OIDC.Issuer = "" }, "oidc.issuer (or BATTLESHIP_OIDC_ISSUER) is required"},
 		{"client_id", func(c *Config) { c.OIDC.ClientID = " " }, "oidc.client_id (or BATTLESHIP_OIDC_CLIENT_ID) is required"},
 		{"client_secret", func(c *Config) { c.OIDC.ClientSecret = "" }, "oidc.client_secret (or BATTLESHIP_OIDC_CLIENT_SECRET) is required"},
 		{"offline_access", func(c *Config) { c.OIDC.Scopes = []string{"openid", "profile", "email", "groups"} },

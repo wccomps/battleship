@@ -53,7 +53,7 @@ func (w Web) TrustedProxyPrefixes() ([]netip.Prefix, error) {
 
 // OIDC configures login through the identity provider (Authentik).
 type OIDC struct {
-	Issuer       string   `toml:"issuer"`
+	Issuer       string   `toml:"issuer"`        // overridden by BATTLESHIP_OIDC_ISSUER
 	ClientID     string   `toml:"client_id"`     // overridden by BATTLESHIP_OIDC_CLIENT_ID
 	ClientSecret string   `toml:"client_secret"` // overridden by BATTLESHIP_OIDC_CLIENT_SECRET
 	Scopes       []string `toml:"scopes"`
@@ -167,7 +167,7 @@ func (c Config) RequireWeb() error {
 		errs = append(errs, errors.New("web.base_url is required (e.g. https://battleship.example.org)"))
 	}
 	if strings.TrimSpace(c.OIDC.Issuer) == "" {
-		errs = append(errs, errors.New("oidc.issuer is required"))
+		errs = append(errs, errors.New("oidc.issuer (or BATTLESHIP_OIDC_ISSUER) is required"))
 	}
 	if strings.TrimSpace(c.OIDC.ClientID) == "" {
 		errs = append(errs, errors.New("oidc.client_id (or BATTLESHIP_OIDC_CLIENT_ID) is required"))

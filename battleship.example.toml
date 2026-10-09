@@ -97,7 +97,7 @@ base_url = "https://battleship.example.org"  # the public URL; required for batt
 [oidc]
 client_id = "battleship"             # or the BATTLESHIP_OIDC_CLIENT_ID environment variable
 # client_secret = ""            # prefer the BATTLESHIP_OIDC_CLIENT_SECRET environment variable; changing it logs everyone out at their next refresh
-# issuer = "https://auth.example.org/application/o/battleship/"
+# issuer = "https://auth.example.org/application/o/battleship/"   # or BATTLESHIP_OIDC_ISSUER
 # scopes = ["openid", "profile", "email", "groups", "offline_access"]  # battleship serve needs openid and offline_access
 # groups_claim = "groups"
 

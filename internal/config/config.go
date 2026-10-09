@@ -317,6 +317,9 @@ func Load(path string) (Config, error) {
 	if s := os.Getenv("BATTLESHIP_SEAL_KEY"); s != "" {
 		cfg.Database.SealKey = s
 	}
+	if s := os.Getenv("BATTLESHIP_OIDC_ISSUER"); s != "" {
+		cfg.OIDC.Issuer = s
+	}
 	if s := os.Getenv("BATTLESHIP_OIDC_CLIENT_ID"); s != "" {
 		cfg.OIDC.ClientID = s
 	}

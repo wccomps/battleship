@@ -85,9 +85,9 @@ naming the missing privilege.
 ## Configuration
 
 `battleship.example.toml` documents every setting. Unknown keys are
-rejected. Secrets can come from `BATTLESHIP_DATABASE_URL`,
-`BATTLESHIP_SEAL_KEY`, `BATTLESHIP_OIDC_CLIENT_ID` and
-`BATTLESHIP_OIDC_CLIENT_SECRET`. Set `proxmox.ca_file` to the cluster's
+rejected. These environment variables override the file:
+`BATTLESHIP_DATABASE_URL`, `BATTLESHIP_SEAL_KEY`, `BATTLESHIP_OIDC_ISSUER`,
+`BATTLESHIP_OIDC_CLIENT_ID` and `BATTLESHIP_OIDC_CLIENT_SECRET`. Set `proxmox.ca_file` to the cluster's
 `/etc/pve/pve-root-ca.pem`; servers refuse to start without it (or an explicit
 `insecure_skip_verify = true`).
 
