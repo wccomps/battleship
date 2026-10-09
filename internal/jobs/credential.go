@@ -33,8 +33,8 @@ type Credentials struct {
 }
 
 // credentialPurpose is part of every job credential's key; changing it makes
-// stored credentials unreadable.
-const credentialPurpose = "rangekiln job credential v1"
+// stored credentials unreadable (see migration 010).
+const credentialPurpose = "battleship job credential v1"
 
 // NewCredentials needs database.seal_key, the same in every process that
 // submits or runs jobs.
@@ -126,8 +126,9 @@ func OpenCredentials(ctx context.Context, cfg config.Config, st *store.Store) (C
 	return c, c.CheckKey(ctx, st)
 }
 
-// keyCheckText is sealed once per database, so it can't change.
-const keyCheckText = "rangekiln seal key check v1"
+// keyCheckText is sealed once per database; changing it needs a migration
+// that clears seal_check (see 010).
+const keyCheckText = "battleship seal key check v1"
 
 // CheckKey checks this process's seal key against the database's first one,
 // so a wrong key fails at startup instead of failing every job.
