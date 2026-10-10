@@ -59,7 +59,7 @@ url = "https://192.0.2.123:8006"
 
 # [retry]
 # transient_patterns = ["file exists", "does not exist", "got no worker upid", "can't lock file", "is locked", "timeout"]
-# attempts = 6
+# attempts = 7
 # initial_backoff = "1s"
 # max_backoff = "30s"
 # rounds = 1

@@ -947,7 +947,7 @@ func TestFailedRefreshKeepsEarlierItemError(t *testing.T) {
 	f.OnRecord = func(key string) {
 		if key == "setconfig:10121" && !armed {
 			armed = true
-			for i := 0; i < 6; i++ {
+			for i := 0; i < config.Default().Retry.Attempts; i++ {
 				f.FailOn("cluster", &proxmox.APIError{Status: 500, Message: "pve is down"})
 			}
 		}
@@ -1248,7 +1248,7 @@ func TestCleanupVerifiesByConfigWhenListingFails(t *testing.T) {
 	f.CloneThenFail = map[int]error{10121: errors.New("clone failed")}
 	f.OnRecord = func(key string) {
 		if key == "clone:10121" {
-			for i := 0; i < 6; i++ {
+			for i := 0; i < config.Default().Retry.Attempts; i++ {
 				f.FailOn("cluster", &proxmox.APIError{Status: 500, Message: "pve is down"})
 			}
 		}
@@ -1273,7 +1273,7 @@ func TestCleanupReportsWhenGoneCannotBeConfirmed(t *testing.T) {
 	f.OnRecord = func(key string) {
 		if key == "setconfig:10121" {
 			if seen++; seen == 2 {
-				for i := 0; i < 6; i++ {
+				for i := 0; i < config.Default().Retry.Attempts; i++ {
 					f.FailOn("cluster", &proxmox.APIError{Status: 500, Message: "pve is down"})
 				}
 				for i := 0; i < 20; i++ {
@@ -1656,7 +1656,7 @@ func TestCleanupDoesNotRetryGoneVM(t *testing.T) {
 		case key == "setconfig:10121":
 			if seen++; seen == 2 {
 				delete(f.VMs, 10121)
-				for i := 0; i < 6; i++ {
+				for i := 0; i < config.Default().Retry.Attempts; i++ {
 					f.FailOn("cluster", &proxmox.APIError{Status: 500, Message: "pve is down"})
 				}
 				reads = 0

@@ -107,6 +107,22 @@ shutdown_timeout = "90s"
 	}
 }
 
+// A node that deleted a VM can keep seeing its disk folder as missing for up
+// to 60s (NFS attribute cache) after another node clones the VMID again, so
+// one call's retries must outlast that.
+func TestRetryDefaultsOutlastNFSCache(t *testing.T) {
+	r := Default().Retry
+	var waited time.Duration
+	delay := r.InitialBackoff
+	for i := 1; i < r.Attempts; i++ {
+		waited += delay
+		delay = min(2*delay, r.MaxBackoff)
+	}
+	if waited <= 60*time.Second {
+		t.Errorf("default retries wait %v per call, want over 60s", waited)
+	}
+}
+
 func TestLoadRejectsUnknownKeys(t *testing.T) {
 	path := writeFile(t, `
 [proxmox]

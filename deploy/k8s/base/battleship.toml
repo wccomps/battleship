@@ -62,7 +62,7 @@ shutdown_timeout = "60s"           # clean shutdown (routers release DHCP leases
 
 [retry]
 transient_patterns = ["file exists", "does not exist", "got no worker upid", "can't lock file", "is locked", "timeout"]
-attempts = 6
+attempts = 7
 initial_backoff = "1s"
 max_backoff = "30s"
 rounds = 1                         # end-of-job retry rounds for failed VMs

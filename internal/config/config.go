@@ -215,7 +215,9 @@ func Default() Config {
 				"is locked",
 				"timeout",
 			},
-			Attempts:       6,
+			// 1+2+4+8+16+30s of waits outlast the up to 60s a node can miss a
+			// disk folder another node recreated (NFS attribute cache).
+			Attempts:       7,
 			InitialBackoff: time.Second,
 			MaxBackoff:     30 * time.Second,
 			Rounds:         1,
