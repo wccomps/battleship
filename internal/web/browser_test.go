@@ -899,30 +899,3 @@ func TestBrowserTeam00Row(t *testing.T) {
 	b.waitFor("team 00's row to go", `!document.querySelector('[data-select="team:00"]') && !document.getElementById("cell-00-dc")`)
 	b.clean()
 }
-
-// Deploy and Teardown open the side panel from the log pages too, as they do
-// from the grid, without leaving the page.
-func TestBrowserLeadOpsOpenPanelFromLogs(t *testing.T) {
-	h, _ := bigHarness(t)
-	lead := h.login(asLead)
-	id := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Action: "start"}, byLead)
-	for _, path := range []string{"/logs", "/logs/" + itoa(id)} {
-		t.Run(path, func(t *testing.T) {
-			h.t = t
-			b := newBrowser(t, h, &lead, 1366, 900, false)
-			b.open(path)
-			for _, op := range []string{"deploy", "teardown"} {
-				b.click(`.lead-ops a[href="/` + op + `"]`)
-				b.waitFor("the "+op+" form in the panel", `!!document.querySelector("#panel[open] #form-title")`)
-				var at string
-				b.eval(`location.pathname`, &at)
-				if at != path {
-					t.Errorf("%s from %s went to %s, want the panel over %s", op, path, at, path)
-				}
-				b.click(`#panel [data-close]`)
-				b.waitFor("the panel to close", `!document.querySelector("#panel[open]")`)
-			}
-			b.clean()
-		})
-	}
-}

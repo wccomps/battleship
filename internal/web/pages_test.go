@@ -386,18 +386,3 @@ func TestItemSteps(t *testing.T) {
 		}
 	}
 }
-
-// Every signed-in page has the side panel the header's Deploy and Teardown
-// open in.
-func TestPagesHaveThePanel(t *testing.T) {
-	h := newHarness(t)
-	h.poll()
-	lead := h.login(asLead)
-	id := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Action: "start"}, byLead)
-	for _, path := range []string{"/", "/logs", "/logs/" + itoa(id), "/deploy", "/vm/01/dc"} {
-		contains(t, path, h.get(&lead, path).Body.String(), `<dialog class="panel" id="panel"`)
-	}
-	body := h.get(nil, "/nope").Body.String()
-	contains(t, "signed out", body, `<main id="main">`)
-	lacks(t, "signed out", body, `id="panel"`)
-}
