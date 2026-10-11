@@ -390,7 +390,7 @@ func (w *Worker) watchCredential(ctx context.Context, jobID int64, held *heldCre
 // preview.
 func staleMessage(then, now *pods.Plan) string {
 	if then.Config != now.Config {
-		return "battleship's config for what this job does to VMs changed since the preview (a config change was rolled out); nothing was changed. Preview it again."
+		return "battleship's config for what this job does to VMs changed since the preview (a config change was rolled out, or a CLI run used a battleship.toml unlike serve's); nothing was changed. Preview it again."
 	}
 	if privilegesChanged(then, now) {
 		return "your Proxmox privileges changed since the preview, so it would now do something else; nothing was changed. Preview it again."

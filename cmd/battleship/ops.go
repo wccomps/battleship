@@ -182,15 +182,12 @@ func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 		}
 	}
 
-	if *queue {
-		return queueJob(ctx, d, cfg, in, plan, token)
-	}
-	if cfg.Database.URL != "" {
+	if *queue || cfg.Database.URL != "" {
 		if err := cfg.RequireDatabase(); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		return runQueued(ctx, d, cfg, in, plan, token)
+		return runQueued(ctx, d, cfg, in, plan, token, !*queue)
 	}
 	// No database: run in-process, trusting no one else is on these teams or templates.
 	// The executor calls OnEvent from many goroutines.
@@ -210,35 +207,25 @@ func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 	return 0
 }
 
-func queueJob(ctx context.Context, d deps, cfg config.Config, in jobs.Inputs, plan *pods.Plan, token proxmox.Credential) int {
-	_, _, id, closeStore, err := submitJob(ctx, d, cfg, in, plan, token)
-	if err != nil {
-		fmt.Fprintln(d.stderr, "-queue:", err)
-		return 1
-	}
-	closeStore()
-	fmt.Fprintf(d.stdout, "Queued job %d. A worker (battleship serve) runs it; follow it with: battleship jobs show %d\n", id, id)
-	return 0
-}
-
 // submitJob stores a job for plan with the user's token sealed, and returns
-// the open store (closeStore closes it), the key and the job's ID. On an
-// error nothing is left open.
-func submitJob(ctx context.Context, d deps, cfg config.Config, in jobs.Inputs, plan *pods.Plan, token proxmox.Credential) (st *store.Store, creds jobs.Credentials, id int64, closeStore func(), err error) {
+// the open store (closeStore closes it) and the job's ID. On an error
+// nothing is left open.
+func submitJob(ctx context.Context, d deps, cfg config.Config, in jobs.Inputs, plan *pods.Plan, token proxmox.Credential) (st *store.Store, id int64, closeStore func(), err error) {
 	if err = cfg.RequireSealKey(); err != nil {
-		return nil, creds, 0, nil, err
+		return nil, 0, nil, err
 	}
 	if st, closeStore, err = d.openStore(ctx, cfg.Database); err != nil {
-		return nil, creds, 0, nil, err
+		return nil, 0, nil, err
 	}
-	if creds, err = jobs.OpenCredentials(ctx, cfg, st); err == nil {
+	creds, err := jobs.OpenCredentials(ctx, cfg, st)
+	if err == nil {
 		id, err = jobs.Submit(ctx, st, in, plan, jobs.Submitter{User: d.user, Credential: token, Seal: creds})
 	}
 	if err != nil {
 		closeStore()
-		return nil, creds, 0, nil, err
+		return nil, 0, nil, err
 	}
-	return st, creds, id, closeStore, nil
+	return st, id, closeStore, nil
 }
 
 // confirm asks the volunteer to approve the plan just printed. Teardown

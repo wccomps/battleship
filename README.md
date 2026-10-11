@@ -7,8 +7,9 @@ engine and one Postgres job queue.
 ## How it works
 
 - **Every operation is a job.** You preview a plan, confirm it, and a worker
-  runs it. The worker plans again first and refuses to run if the cluster
-  changed. Jobs on the same teams or templates run one at a time.
+  runs it (a CLI run with no database runs itself). The worker plans again
+  first and refuses to run if the cluster changed. Jobs on the same teams or
+  templates run one at a time.
 - **Battleship holds no Proxmox credential.** Every call is made as the person
   who asked (their Proxmox ticket in the web app, their API token in the
   CLI), so Proxmox's ACLs decide what each person may do.
@@ -37,8 +38,10 @@ battleship nodes                              # prints a urls = [...] line
 Every command prints its plan and asks you to confirm (`yes`; a teardown
 asks for the team range). `-yes` skips the prompt. With a database, the job
 runs on a `battleship serve` worker and the command follows it; `-queue`
-exits once it is queued. `-hosts` matches substrings; `-vms`
-names exact VMs. A blocked or failed VM makes the command exit 1.
+exits once it is queued. Keep your `battleship.toml` in step with serve's,
+or the worker's re-plan won't match and the job ends stale. `-hosts` matches
+substrings; `-vms` names exact VMs. A blocked or failed VM makes the command
+exit 1.
 
 ```sh
 battleship jobs list | show <id> | cancel <id>

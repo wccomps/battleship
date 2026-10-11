@@ -162,8 +162,8 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// startWorker runs a job worker on e's store and fake Proxmox until the
-// test ends, as battleship serve would.
+// startWorker runs a bare job worker (no hub cancels or shared limits) on
+// e's store and fake Proxmox until the test ends.
 func startWorker(t *testing.T, e *env, st *store.Store) {
 	t.Helper()
 	cfg, err := config.Load(e.cfg)
@@ -182,7 +182,7 @@ func startWorker(t *testing.T, e *env, st *store.Store) {
 	t.Cleanup(func() { cancel(); <-done })
 }
 
-func TestDirectRunFollowsQueuedJob(t *testing.T) {
+func TestRunFollowsQueuedJob(t *testing.T) {
 	e := newEnv(t, false, "", vm(10701, "team07-dc"))
 	st := withStore(t, e)
 	fastPoll(t, e)
@@ -206,7 +206,7 @@ func TestDirectRunFollowsQueuedJob(t *testing.T) {
 	}
 }
 
-func TestDirectRunReportsFailures(t *testing.T) {
+func TestRunReportsFailures(t *testing.T) {
 	e := newEnv(t, false, "", vm(10701, "team07-dc"), vm(10702, "team07-web"))
 	e.api.deleteErr[10702] = &proxmox.APIError{Status: 500, Message: "disk on fire"}
 	st := withStore(t, e)
@@ -235,7 +235,7 @@ func TestCtrlCCancelsPendingJob(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	exit := make(chan int, 1)
 	go func() { exit <- run(ctx, []string{"teardown", "-teams", "1", "-yes", "-config", e.cfg}, e.d) }()
-	waitFor(t, "the job to be queued", func() bool { return strings.Contains(out.String(), "Job 1 queued") })
+	waitFor(t, "the no-worker hint", func() bool { return strings.Contains(out.String(), "is battleship serve running?") })
 	cancel()
 	select {
 	case code := <-exit:
@@ -250,5 +250,30 @@ func TestCtrlCCancelsPendingJob(t *testing.T) {
 	}
 	if got := e.api.DeletedIDs(); len(got) != 0 {
 		t.Errorf("deleted %v", got)
+	}
+}
+
+// A follower says which jobs its pending job waits for.
+func TestFollowerNamesBlockers(t *testing.T) {
+	e := newEnv(t, false, "", vm(10101, "team01-dc"))
+	st := withStore(t, e)
+	fastPoll(t, e)
+	if code := e.run("teardown", "-teams", "1", "-yes", "-queue"); code != 0 {
+		t.Fatalf("queueing job 1: exit %d, stderr: %s", code, e.stderr.String())
+	}
+	out := &syncBuffer{}
+	e.d.stdout = out
+
+	ctx, cancel := context.WithCancel(context.Background())
+	exit := make(chan int, 1)
+	go func() { exit <- run(ctx, []string{"teardown", "-teams", "1", "-yes", "-config", e.cfg}, e.d) }()
+	waitFor(t, "the blocker message", func() bool { return strings.Contains(out.String(), "Waiting for job(s) 1,") })
+	cancel()
+	<-exit
+	if strings.Contains(out.String(), "is battleship serve running?") {
+		t.Errorf("a job waiting on another blamed a missing worker:\n%s", out.String())
+	}
+	if j, _ := st.Job(context.Background(), 2); j.Status != store.StatusCancelled {
+		t.Errorf("job 2 = %s, want cancelled", j.Status)
 	}
 }
