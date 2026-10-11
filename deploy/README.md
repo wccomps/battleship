@@ -52,7 +52,8 @@ buffering off for the event streams.
   `BATTLESHIP_SEAL_KEY`; a process with another key refuses to start.
 - **Connections.** Each process uses up to `database.max_conns` + 4.
 - **Migrations** run at startup and only forward: back up the database
-  before upgrading.
+  before upgrading. Old pods keep serving during a rolling update, so drop
+  a column one release after the code stops using it.
 - **No service token.** `battleship serve` refuses to start with
   `BATTLESHIP_PROXMOX_TOKEN_ID` set; users act with their own Proxmox
   permissions.
