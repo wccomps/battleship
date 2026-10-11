@@ -79,7 +79,7 @@ url = "https://192.0.2.123:8006"
 # poll = "2s"                    # how often an idle worker looks for jobs
 # cancel_grace = "30s"           # after a cancel, how long a step waits on a Proxmox task it started (0s-5m)
 
-# battleship serve: the volunteer web app. It runs job workers too, so battleship worker is optional.
+# battleship serve: the volunteer web app and the job workers.
 [web]
 base_url = "https://battleship.example.org"  # the public URL; required for battleship serve
 # listen = ":8080"

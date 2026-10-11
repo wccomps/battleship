@@ -116,45 +116,6 @@ func TestJobsArgErrors(t *testing.T) {
 	}
 }
 
-func TestWorkerCommandRunsQueuedJob(t *testing.T) {
-	e := newEnv(t, false, "", vm(10701, "team07-dc"))
-	st := withStore(t, e)
-	if code := e.run("teardown", "-teams", "7", "-yes", "-queue"); code != 0 {
-		t.Fatalf("queue: exit %d", code)
-	}
-
-	// The worker acts only as each job's submitter, never with its own token.
-	t.Setenv("BATTLESHIP_PROXMOX_TOKEN_ID", "")
-	t.Setenv("BATTLESHIP_PROXMOX_TOKEN_SECRET", "")
-	ctx, cancel := context.WithCancel(context.Background())
-	exit := make(chan int, 1)
-	go func() { exit <- run(ctx, []string{"worker", "-config", e.cfg}, e.d) }()
-	deadline := time.Now().Add(15 * time.Second)
-	var j store.Job
-	for time.Now().Before(deadline) {
-		var err error
-		if j, err = st.Job(context.Background(), 1); err == nil && !j.Active() {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	cancel()
-	if code := <-exit; code != 0 {
-		t.Errorf("worker exit %d, stderr: %s", code, e.stderr.String())
-	}
-	if j.Status != store.StatusSucceeded {
-		t.Fatalf("job status = %s (%s)", j.Status, j.Error)
-	}
-	if !isWorkerID(j.ClaimedBy, "worker") || !strings.Contains(e.stdout.String(), "worker "+j.ClaimedBy+" waiting for jobs") {
-		t.Errorf("claimed by %q, stdout:\n%s", j.ClaimedBy, e.stdout.String())
-	}
-	e.api.Mu.Lock()
-	defer e.api.Mu.Unlock()
-	if len(e.api.Deleted) != 1 || e.api.Deleted[0] != 10701 {
-		t.Errorf("deleted = %v", e.api.Deleted)
-	}
-}
-
 // isWorkerID reports whether id is a jobs.NewWorkerID(prefix) from this
 // process.
 func isWorkerID(id, prefix string) bool {

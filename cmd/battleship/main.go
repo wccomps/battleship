@@ -19,7 +19,6 @@
 //	battleship teardown -config battleship.toml -teams all -yes
 //	battleship reset    -config battleship.toml -teams 7 -hosts dc -yes
 //	battleship power    -config battleship.toml -teams 1-32 -action start -yes -queue
-//	battleship worker   -config battleship.toml
 //	battleship jobs list|show ID|cancel ID -config battleship.toml
 //	battleship serve    -config battleship.toml -log-format json
 //	battleship nodes    -config battleship.toml
@@ -94,7 +93,6 @@ type deps struct {
 }
 
 const usage = `usage: battleship <deploy|teardown|reset|power|snapshot> [flags]
-       battleship worker [flags]
        battleship jobs <list|show ID|cancel ID> [flags]
        battleship serve [flags]
        battleship nodes [flags]
@@ -114,7 +112,6 @@ battleship nodes lists the cluster's nodes and prints a proxmox.urls line.
   battleship reset    -config battleship.toml -teams 7 -hosts dc -yes
   battleship power    -config battleship.toml -teams 1-32 -action start -yes -queue
   battleship snapshot -config battleship.toml -teams 7 -hosts dc -name before-scoring -yes
-  battleship worker   -config battleship.toml
   battleship jobs list -config battleship.toml
   battleship serve    -config battleship.toml -log-format json
   battleship nodes    -config battleship.toml
@@ -131,8 +128,6 @@ func run(ctx context.Context, args []string, d deps) int {
 		return 0
 	case "deploy", "teardown", "reset", "power", "snapshot":
 		return runOp(ctx, args[0], args[1:], d)
-	case "worker":
-		return runWorker(ctx, args[1:], d)
 	case "jobs":
 		return runJobs(ctx, args[1:], d)
 	case "serve":

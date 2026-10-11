@@ -17,60 +17,6 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// runWorker claims and runs queued jobs until interrupted.
-func runWorker(ctx context.Context, args []string, d deps) int {
-	fs := flag.NewFlagSet("battleship worker", flag.ContinueOnError)
-	fs.SetOutput(d.stderr)
-	cfgPath := fs.String("config", "battleship.toml", "config file")
-	if code, ok := parseFlags(fs, args, 0, d); !ok {
-		return code
-	}
-	cfg, st, closeStore, code := loadWithStore(ctx, *cfgPath, d)
-	if st == nil {
-		return code
-	}
-	defer closeStore()
-	if err := errors.Join(noServiceToken("battleship worker"), cfg.RequireTLSVerify()); err != nil {
-		fmt.Fprintln(d.stderr, err)
-		return 1
-	}
-	if cfg.Proxmox.InsecureSkipVerify {
-		fmt.Fprintln(d.stderr, "warning: Proxmox's certificate is not checked (proxmox.insecure_skip_verify = true); set proxmox.ca_file to the cluster CA instead")
-	}
-	creds, err := jobs.OpenCredentials(ctx, cfg, st)
-	if err != nil {
-		fmt.Fprintln(d.stderr, err)
-		return 1
-	}
-	client := d.newAPI(cfg.Proxmox)
-	setProxmoxLogf(client, func(format string, a ...any) { fmt.Fprintf(d.stderr, format+"\n", a...) })
-	cancels, stopListening := listenForCancels(ctx, st, func(format string, a ...any) { fmt.Fprintf(d.stderr, format+"\n", a...) })
-	defer stopListening()
-	w := &jobs.Worker{
-		Store:       st,
-		Cfg:         cfg,
-		Bind:        bindAs(client),
-		Credentials: creds,
-		ID:          jobs.NewWorkerID("worker"),
-		Logf:        func(format string, a ...any) { fmt.Fprintf(d.stderr, format+"\n", a...) },
-		Cancels:     cancels,
-	}
-	// Keep the tickets of waiting and running jobs alive, as each serve
-	// replica does, so a deployment of workers alone works too.
-	if renewer, ok := client.(jobs.TicketRenewer); ok {
-		r := &jobs.Renewer{Store: st, Proxmox: renewer, Credentials: creds,
-			Logf: func(format string, a ...any) { fmt.Fprintf(d.stderr, format+"\n", a...) }}
-		go r.Run(ctx)
-	}
-	fmt.Fprintf(d.stdout, "worker %s waiting for jobs\n", w.ID)
-	if err := w.Run(ctx); err != nil {
-		fmt.Fprintln(d.stderr, err)
-		return 1
-	}
-	fmt.Fprintln(d.stdout, "worker stopped")
-	return 0
-}
-
 const jobsUsage = "usage: battleship jobs <list|show ID|cancel ID> [-config battleship.toml]\n"
 
 // runJobs lists, shows and cancels jobs.

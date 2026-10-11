@@ -41,7 +41,6 @@ exits once it is queued. `-hosts` matches substrings; `-vms`
 names exact VMs. A blocked or failed VM makes the command exit 1.
 
 ```sh
-battleship worker            # runs queued jobs
 battleship jobs list | show <id> | cancel <id>
 ```
 

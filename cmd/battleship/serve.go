@@ -298,17 +298,6 @@ func hubCancels(hub *status.Hub) func(int64) (<-chan struct{}, func()) {
 	return func(id int64) (<-chan struct{}, func()) { return hub.Wake(status.CancelTopic(id)) }
 }
 
-// listenForCancels runs a hub of its own over st's job notices, for a
-// worker outside battleship serve, and returns its Cancels; stop ends the
-// hub and its LISTEN connection.
-func listenForCancels(ctx context.Context, st *store.Store, logf func(format string, args ...any)) (cancels func(int64) (<-chan struct{}, func()), stop func()) {
-	hub := status.NewHub(st.Notifications, status.HubOptions{Logf: logf})
-	hubCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() { defer close(done); hub.Run(hubCtx) }()
-	return hubCancels(hub), func() { cancel(); <-done }
-}
-
 // startWorkers starts cfg.Web.Workers job workers sharing api and lim, and
 // returns a channel closed once they all return, which they do once ctx is
 // done and their running jobs have ended. hub tells them of cancels.
