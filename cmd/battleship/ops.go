@@ -18,7 +18,8 @@ import (
 )
 
 // runOp previews and applies (or queues) deploy, teardown, reset, power or
-// snapshot. With a database, an applied plan runs here as a job (see runAsJob).
+// snapshot. With a database, an applied plan is queued as a job and followed
+// (see runQueued).
 func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 	stdout, stderr := d.stdout, d.stderr
 	fs := flag.NewFlagSet("battleship "+cmd, flag.ContinueOnError)
@@ -28,7 +29,7 @@ func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 	hostSpec := fs.String("hosts", "", "comma-separated host filter, e.g. dc,web")
 	vmSpec := fs.String("vms", "", "comma-separated exact VM names to act on, e.g. team01-dc,team02-web (to retry just those)")
 	yes := fs.Bool("yes", false, "apply the plan without asking")
-	queue := fs.Bool("queue", false, "store the confirmed plan as a job for a worker instead of running it here")
+	queue := fs.Bool("queue", false, "queue the confirmed plan as a job and exit instead of following it")
 	in := jobs.Inputs{Kind: pods.Kind(cmd)}
 	switch cmd {
 	case "deploy":
@@ -189,7 +190,7 @@ func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		return runAsJob(ctx, d, cfg, client, in, plan, token)
+		return runQueued(ctx, d, cfg, in, plan, token)
 	}
 	// No database: run in-process, trusting no one else is on these teams or templates.
 	// The executor calls OnEvent from many goroutines.
@@ -216,7 +217,7 @@ func queueJob(ctx context.Context, d deps, cfg config.Config, in jobs.Inputs, pl
 		return 1
 	}
 	closeStore()
-	fmt.Fprintf(d.stdout, "Queued job %d. A worker (battleship worker) runs it; follow it with: battleship jobs show %d\n", id, id)
+	fmt.Fprintf(d.stdout, "Queued job %d. A worker (battleship serve) runs it; follow it with: battleship jobs show %d\n", id, id)
 	return 0
 }
 

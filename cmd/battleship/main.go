@@ -6,9 +6,9 @@
 // on stdin (even /dev/null) counts as a terminal, so automation should pass
 // -yes or redirect stdin from a file.
 //
-// -queue stores the plan as a job for battleship worker, which replans and
-// refuses to run if the cluster changed. With a database configured, direct
-// runs are jobs too and wait for older jobs on the same teams or templates.
+// With a database configured, a confirmed plan is queued as a job for a
+// worker, which replans and refuses to run if the cluster changed; the
+// command follows it, or with -queue exits once it is queued.
 //
 // battleship serve runs the volunteer web app and job workers in one process
 // per replica. On SIGTERM it fails readiness, stops running jobs cleanly and
@@ -100,8 +100,8 @@ const usage = `usage: battleship <deploy|teardown|reset|power|snapshot> [flags]
        battleship nodes [flags]
 
 Every operation prints its plan first, then asks you to confirm it (-yes
-skips the question and applies the plan; -queue stores it as a job for a
-worker to run). -teams is required; for teardown, power, reset and snapshot,
+skips the question and applies the plan; with a database it runs as a job
+on a worker, and -queue exits without following it). -teams is required; for teardown, power, reset and snapshot,
 -teams all means every team that has VMs (e.g. 0-32 with a test team 00),
 worked out from the cluster and printed with the plan. Put flags
 before any other words. Run

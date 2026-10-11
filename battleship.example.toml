@@ -66,8 +66,8 @@ url = "https://192.0.2.123:8006"
 # round_pause = "2s"
 # task_poll = "2s"
 
-# Needed by the worker, web app and -queue. When set, direct CLI runs also run
-# as jobs, so they wait for overlapping jobs.
+# Needed by the web app and workers. When set, CLI runs are queued as jobs for
+# battleship serve's workers, so they wait for overlapping jobs.
 # [database]
 # url = ""                       # prefer the BATTLESHIP_DATABASE_URL environment variable
 # max_conns = 16                 # main pool size per process (at least 4); +2 more for heartbeats and readiness, +1 for delete and storage slots, +1 to listen for job changes
