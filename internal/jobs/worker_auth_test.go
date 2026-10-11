@@ -16,7 +16,7 @@ func TestWorkerActsOnlyAsTheSubmitter(t *testing.T) {
 	st := storetest.New(t)
 	f := teamVMs()
 	id := submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
-	newWorker(st, f).RunJob(bg, claim(t, st))
+	newWorker(st, f).runJob(bg, claim(t, st))
 	if j := job(t, st, id); j.Status != store.StatusSucceeded {
 		t.Fatalf("job = %s: %s", j.Status, j.Error)
 	}
@@ -54,7 +54,7 @@ func TestWorkerPendingJobWithLapsedCredentialIsStale(t *testing.T) {
 			} else {
 				w.now = func() time.Time { return time.Now().Add(proxmox.TicketLifetime + time.Minute) }
 			}
-			w.RunJob(bg, claim(t, st))
+			w.runJob(bg, claim(t, st))
 			j := job(t, st, id)
 			if j.Status != store.StatusStale || j.Error != "authorization lapsed; preview it again" {
 				t.Fatalf("job = %s: %q", j.Status, j.Error)
@@ -75,7 +75,7 @@ func TestWorkerRunningJobStopsWhenProxmoxRefusesTheTicket(t *testing.T) {
 	w := newWorker(st, f)
 	w.Cfg.Concurrency.Workers = 1
 	done := make(chan struct{})
-	go func() { defer close(done); w.RunJob(bg, claim(t, st)) }()
+	go func() { defer close(done); w.runJob(bg, claim(t, st)) }()
 	<-f.waiting // the first VM's first task is running
 	f.Mu.Lock()
 	f.accept = func(proxmox.Credential) bool { return false } // alice is disabled in Proxmox
@@ -106,7 +106,7 @@ func TestWorkerRunningJobStopsWhenItsCredentialIsDropped(t *testing.T) {
 	w := newWorker(st, f)
 	w.Cfg.Concurrency.Workers = 1
 	done := make(chan struct{})
-	go func() { defer close(done); w.RunJob(bg, claim(t, st)) }()
+	go func() { defer close(done); w.runJob(bg, claim(t, st)) }()
 	<-f.waiting
 	r := &fakeRenewer{valid: map[string]bool{}}
 	if _, lapsed := newRenewer(st, mustCreds(), r, time.Now().Add(61*time.Minute)).RenewDue(bg); lapsed != 1 {
@@ -136,7 +136,7 @@ func TestWorkerPicksUpTheRenewedTicket(t *testing.T) {
 	w := newWorker(st, f)
 	w.Cfg.Concurrency.Workers = 1
 	done := make(chan struct{})
-	go func() { defer close(done); w.RunJob(bg, claim(t, st)) }()
+	go func() { defer close(done); w.runJob(bg, claim(t, st)) }()
 	<-f.waiting
 	r := &fakeRenewer{valid: map[string]bool{"PVE:alice:1": true}}
 	if renewed, _ := newRenewer(st, mustCreds(), r, time.Now().Add(61*time.Minute)).RenewDue(bg); renewed != 1 {
@@ -194,7 +194,7 @@ func TestWorkerPlansWithTheSubmittersPrivileges(t *testing.T) {
 			t.Fatalf("teak blocked %q", it.Blocked)
 		}
 	}
-	newWorker(st, f).RunJob(bg, claim(t, st))
+	newWorker(st, f).runJob(bg, claim(t, st))
 	j := job(t, st, id)
 	if j.Status != store.StatusCompletedWithFailures {
 		t.Fatalf("job = %s: %s", j.Status, j.Error)
@@ -215,7 +215,7 @@ func TestWorkerStaleWhenPrivilegesChanged(t *testing.T) {
 	cred := withPrivileges(t, f)
 	id, _ := submitAs(t, st, f, Inputs{Kind: pods.KindPower, Teams: "1", Action: "stop"}, cred)
 	f.pve.Revoke("alice@auth.example.org", "/vms/10105")
-	newWorker(st, f).RunJob(bg, claim(t, st))
+	newWorker(st, f).runJob(bg, claim(t, st))
 	j := job(t, st, id)
 	if j.Status != store.StatusStale || !strings.Contains(j.Error, "your Proxmox privileges changed since the preview") {
 		t.Fatalf("job = %s: %q", j.Status, j.Error)

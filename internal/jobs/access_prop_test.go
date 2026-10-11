@@ -80,7 +80,7 @@ func TestPropertyPreviewOffersOnlyWhatTheUserMayDo(t *testing.T) {
 		if err != nil || j == nil {
 			rt.Fatalf("claim: %v %v", j, err)
 		}
-		newWorker(st, f).RunJob(bg, j)
+		newWorker(st, f).runJob(bg, j)
 		if got := job(t, st, id); got.Status == store.StatusStale || got.Status == store.StatusFailed {
 			rt.Fatalf("job %s: %s", got.Status, got.Error)
 		}

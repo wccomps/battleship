@@ -116,7 +116,7 @@ func TestWorkerRunsSnapshotJobOnce(t *testing.T) {
 	second := submit(t, st, f, in)
 
 	w := newWorker(st, f)
-	w.RunJob(bg, claim(t, st))
+	w.runJob(bg, claim(t, st))
 	if j := job(t, st, first); j.Status != store.StatusSucceeded {
 		t.Fatalf("first job = %s (%s)", j.Status, j.Error)
 	}
@@ -126,7 +126,7 @@ func TestWorkerRunsSnapshotJobOnce(t *testing.T) {
 			t.Errorf("item = %+v", it)
 		}
 	}
-	w.RunJob(bg, claim(t, st))
+	w.runJob(bg, claim(t, st))
 	if j := job(t, st, second); j.Status != store.StatusStale {
 		t.Errorf("second job = %s (%s), want stale", j.Status, j.Error)
 	}

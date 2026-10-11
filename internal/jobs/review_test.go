@@ -29,7 +29,7 @@ func TestLapseInTheLastRoundIsInterrupted(t *testing.T) {
 	}
 	w := newWorker(st, f)
 	w.Cfg.Retry.Rounds = 0
-	w.RunJob(bg, claim(t, st))
+	w.runJob(bg, claim(t, st))
 	j := job(t, st, id)
 	if j.Status != store.StatusInterrupted || !strings.Contains(j.Error, "authorization lapsed") {
 		t.Fatalf("job = %s: %q %s", j.Status, j.Error, j.Summary)
@@ -58,7 +58,7 @@ func TestReapedJobIsALostClaimNotALapse(t *testing.T) {
 		return false, store.ErrLostClaim
 	}
 	done := make(chan struct{})
-	go func() { defer close(done); w.RunJob(bg, claim(t, st)) }()
+	go func() { defer close(done); w.runJob(bg, claim(t, st)) }()
 	<-f.waiting
 	time.Sleep(50 * time.Millisecond)
 	if ids, err := st.ReapStale(bg, 10*time.Millisecond); err != nil || len(ids) != 1 {
@@ -154,7 +154,7 @@ func TestWorkerWithTheWrongKeyFailsNotLapsed(t *testing.T) {
 	id := submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
 	w := newWorker(st, f)
 	w.Credentials = credsWithKey(t, otherSealKey)
-	w.RunJob(bg, claim(t, st))
+	w.runJob(bg, claim(t, st))
 	j := job(t, st, id)
 	if j.Status != store.StatusFailed || !strings.Contains(j.Error, "database.seal_key") || strings.Contains(j.Error, "lapsed") {
 		t.Fatalf("job = %s: %q", j.Status, j.Error)

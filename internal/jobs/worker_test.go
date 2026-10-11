@@ -84,7 +84,7 @@ func TestWorkerRunsJob(t *testing.T) {
 	f := teamVMs()
 	id := submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
 
-	newWorker(st, f).RunJob(bg, claim(t, st))
+	newWorker(st, f).runJob(bg, claim(t, st))
 
 	j := job(t, st, id)
 	if j.Status != store.StatusSucceeded || j.FinishedAt == nil {
@@ -118,7 +118,7 @@ func TestWorkerRefusesStalePlan(t *testing.T) {
 	f.addVM(proxmox.VM{VMID: 10107, Name: "team01-web", Node: "n1", Status: "running"})
 	f.Mu.Unlock()
 
-	newWorker(st, f).RunJob(bg, claim(t, st))
+	newWorker(st, f).runJob(bg, claim(t, st))
 
 	j := job(t, st, id)
 	if j.Status != store.StatusStale || !strings.Contains(j.Error, "changed since the preview") {
@@ -138,7 +138,7 @@ func TestWorkerStopsOnCancel(t *testing.T) {
 	j := claim(t, st)
 
 	done := make(chan struct{})
-	go func() { w.RunJob(bg, j); close(done) }()
+	go func() { w.runJob(bg, j); close(done) }()
 	time.Sleep(50 * time.Millisecond)
 	if err := st.RequestCancel(bg, id, "bob"); err != nil {
 		t.Fatal(err)
@@ -182,7 +182,7 @@ func TestWorkerStopsOnCancelBeforeItsNextHeartbeat(t *testing.T) {
 	j := claim(t, st)
 
 	done := make(chan struct{})
-	go func() { w.RunJob(bg, j); close(done) }()
+	go func() { w.runJob(bg, j); close(done) }()
 	<-subscribed
 	// The hub's first message is a resync once it listens; wait for that
 	// so the cancel's notice can't be sent before it does.
@@ -232,7 +232,7 @@ func TestWorkerKeepsOutcomeWhenStopArrivesAfterWork(t *testing.T) {
 				}
 				return cancel, err
 			}
-			w.OnEvent = func(ev apply.Event) {
+			w.onEvent = func(ev apply.Event) {
 				if !strings.HasPrefix(ev.Message, "finished:") {
 					return
 				}
@@ -250,7 +250,7 @@ func TestWorkerKeepsOutcomeWhenStopArrivesAfterWork(t *testing.T) {
 				}
 			}
 
-			w.RunJob(ctx, claim(t, st))
+			w.runJob(ctx, claim(t, st))
 
 			got := job(t, st, id)
 			if got.Status != store.StatusSucceeded || got.Error != "" {
@@ -276,7 +276,7 @@ func TestWorkerFailsJobThatCannotBePlanned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	newWorker(st, teamVMs()).RunJob(bg, claim(t, st))
+	newWorker(st, teamVMs()).runJob(bg, claim(t, st))
 	j := job(t, st, id)
 	if j.Status != store.StatusFailed || !strings.Contains(j.Error, "planning:") {
 		t.Errorf("job = %s: %s", j.Status, j.Error)
@@ -297,7 +297,7 @@ func TestWorkerStopDuringPlanning(t *testing.T) {
 			ctx, shutdown := context.WithCancel(bg)
 			defer shutdown()
 			done := make(chan struct{})
-			go func() { w.RunJob(ctx, j); close(done) }()
+			go func() { w.runJob(ctx, j); close(done) }()
 			<-f.listing // planning is reading the cluster
 			if stop == "shutdown" {
 				shutdown()
@@ -359,7 +359,7 @@ func TestWorkerStopsWhenClaimIsLost(t *testing.T) {
 	j := claim(t, st)
 
 	done := make(chan struct{})
-	go func() { w.RunJob(bg, j); close(done) }()
+	go func() { w.runJob(bg, j); close(done) }()
 	<-f.waiting // the job is waiting for a Proxmox task
 	// Another replica decides this worker went silent.
 	reapNow(t, st, id)
@@ -392,7 +392,7 @@ func TestWorkerLogsEventsItCannotRecord(t *testing.T) {
 	}
 	var unstored []apply.Event
 	stored := map[string]bool{}
-	w.OnEvent = func(ev apply.Event) {
+	w.onEvent = func(ev apply.Event) {
 		mu.Lock()
 		defer mu.Unlock()
 		unstored = append(unstored, ev)
@@ -400,7 +400,7 @@ func TestWorkerLogsEventsItCannotRecord(t *testing.T) {
 	release := holdBeats(w)
 	j := claim(t, st)
 	done := make(chan struct{})
-	go func() { w.RunJob(bg, j); close(done) }()
+	go func() { w.runJob(bg, j); close(done) }()
 	<-f.waiting
 	reapNow(t, st, id)
 	release()
@@ -438,7 +438,7 @@ func TestWorkerShutdownInterruptsJob(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(bg)
 	done := make(chan struct{})
-	go func() { w.RunJob(ctx, j); close(done) }()
+	go func() { w.runJob(ctx, j); close(done) }()
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 	<-done
@@ -486,7 +486,7 @@ func TestWorkerStopsWhenHeartbeatsKeepFailing(t *testing.T) {
 	j := claim(t, st)
 
 	done := make(chan struct{})
-	go func() { w.RunJob(bg, j); close(done) }()
+	go func() { w.runJob(bg, j); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
@@ -518,7 +518,7 @@ func TestWorkerSurvivesOneFailedHeartbeat(t *testing.T) {
 		}
 		return w.Store.Heartbeat(ctx, jobID, worker)
 	}
-	w.RunJob(bg, claim(t, st))
+	w.runJob(bg, claim(t, st))
 	if got := job(t, st, id); got.Status != store.StatusSucceeded {
 		t.Errorf("job = %s: %s", got.Status, got.Error)
 	}
@@ -540,7 +540,7 @@ func TestWorkerStopsWhenHeartbeatHangs(t *testing.T) {
 
 	start := time.Now()
 	done := make(chan struct{})
-	go func() { w.RunJob(bg, j); close(done) }()
+	go func() { w.runJob(bg, j); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
@@ -580,7 +580,7 @@ func TestWorkerStopsAfterWallClockGap(t *testing.T) {
 	j := claim(t, st)
 
 	done := make(chan struct{})
-	go func() { w.RunJob(bg, j); close(done) }()
+	go func() { w.runJob(bg, j); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
@@ -592,21 +592,21 @@ func TestWorkerStopsAfterWallClockGap(t *testing.T) {
 	}
 }
 
-func TestWorkerOnEventSeesProgress(t *testing.T) {
+func TestWorkerEventHookSeesProgress(t *testing.T) {
 	st := storetest.New(t)
 	f := teamVMs()
 	id := submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
 	w := newWorker(st, f)
 	var mu sync.Mutex
 	var seen []apply.Event
-	w.OnEvent = func(ev apply.Event) { mu.Lock(); seen = append(seen, ev); mu.Unlock() }
-	w.RunJob(bg, claim(t, st))
+	w.onEvent = func(ev apply.Event) { mu.Lock(); seen = append(seen, ev); mu.Unlock() }
+	w.runJob(bg, claim(t, st))
 
 	stored, _ := st.Events(bg, id, 0, 1000)
 	mu.Lock()
 	defer mu.Unlock()
 	if len(seen) == 0 || len(seen) != len(stored) {
-		t.Errorf("OnEvent saw %d events, store has %d", len(seen), len(stored))
+		t.Errorf("onEvent saw %d events, store has %d", len(seen), len(stored))
 	}
 }
 
@@ -638,7 +638,7 @@ func TestWorkerReportsJobsItRuns(t *testing.T) {
 		id := submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
 		w := newWorker(st, f)
 		reports := watch(w)
-		w.RunJob(bg, claim(t, st))
+		w.runJob(bg, claim(t, st))
 		want := []report{{"start", id, store.StatusRunning}, {"finish", id, store.StatusSucceeded}}
 		if got := reports(); !slices.Equal(got, want) {
 			t.Errorf("reports = %+v, want %+v", got, want)
@@ -655,7 +655,7 @@ func TestWorkerReportsJobsItRuns(t *testing.T) {
 		j := claim(t, st)
 		ctx, cancel := context.WithCancel(bg)
 		done := make(chan struct{})
-		go func() { w.RunJob(ctx, j); close(done) }()
+		go func() { w.runJob(ctx, j); close(done) }()
 		<-f.waiting // the job is waiting for a Proxmox task
 		cancel()
 		<-done
@@ -675,7 +675,7 @@ func TestWorkerReportsJobsItRuns(t *testing.T) {
 		reports := watch(w)
 		j := claim(t, st)
 		done := make(chan struct{})
-		go func() { w.RunJob(bg, j); close(done) }()
+		go func() { w.runJob(bg, j); close(done) }()
 		<-f.waiting
 		// Another replica decides this worker went silent.
 		reapNow(t, st, id)
@@ -703,7 +703,7 @@ func TestWorkerStopDuringRetryPauseIsUnfinished(t *testing.T) {
 			w.Cfg.Retry.RoundPause = time.Minute
 			ctx, shutdown := context.WithCancel(bg)
 			defer shutdown()
-			w.OnEvent = func(ev apply.Event) {
+			w.onEvent = func(ev apply.Event) {
 				if !strings.HasPrefix(ev.Message, "retry round 1") {
 					return
 				}
@@ -715,7 +715,7 @@ func TestWorkerStopDuringRetryPauseIsUnfinished(t *testing.T) {
 			}
 
 			done := make(chan struct{})
-			go func() { w.RunJob(ctx, claim(t, st)); close(done) }()
+			go func() { w.runJob(ctx, claim(t, st)); close(done) }()
 			select {
 			case <-done:
 			case <-time.After(10 * time.Second):
@@ -788,7 +788,7 @@ func TestWorkerRefusesPlanUnderOtherConfig(t *testing.T) {
 	w := newWorker(st, f)
 	w.Cfg.Teardown.ShutdownTimeout = 5 * time.Minute
 
-	w.RunJob(bg, claim(t, st))
+	w.runJob(bg, claim(t, st))
 
 	j := job(t, st, id)
 	if j.Status != store.StatusStale || !strings.Contains(j.Error, "config") {
@@ -816,7 +816,7 @@ func TestWorkerRefusesJobStoredWithoutConfigHash(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newWorker(st, f).RunJob(bg, claim(t, st))
+	newWorker(st, f).runJob(bg, claim(t, st))
 
 	j := job(t, st, id)
 	if j.Status != store.StatusStale || !strings.Contains(j.Error, "config") {

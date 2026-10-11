@@ -51,9 +51,6 @@ type Worker struct {
 	// Logf reports problems that don't fail a job, e.g. a lost database
 	// connection. Nil discards them.
 	Logf func(format string, args ...any)
-	// OnEvent, if set, also receives each progress event as it is recorded,
-	// e.g. to print it. It is called from many goroutines.
-	OnEvent func(apply.Event)
 	// OnStart, if set, is called when a claimed job starts; OnFinish after
 	// its outcome is recorded (not for a job whose claim was reaped).
 	OnStart  func(job *store.Job)
@@ -62,6 +59,9 @@ type Worker struct {
 	// have come. Nil: cancels wait for the next heartbeat.
 	Cancels func(jobID int64) (wake <-chan struct{}, stop func())
 
+	// onEvent, if set, also receives each progress event as it is recorded,
+	// from many goroutines; tests use it to act at a point in a run.
+	onEvent func(apply.Event)
 	// beat sends a heartbeat; tests replace it. Nil means Store.Heartbeat.
 	beat func(ctx context.Context, jobID int64, worker string) (bool, error)
 	// now reads the wall clock for the heartbeat deadline; tests replace it.
@@ -110,7 +110,7 @@ func (w *Worker) Run(ctx context.Context) error {
 			}
 		}
 		if job != nil {
-			w.RunJob(ctx, job)
+			w.runJob(ctx, job)
 			continue
 		}
 		if err := proxmox.SleepContext(ctx, w.Cfg.Jobs.Poll); err != nil {
@@ -120,11 +120,11 @@ func (w *Worker) Run(ctx context.Context) error {
 	return nil
 }
 
-// RunJob runs a job this worker has claimed and records how it ended. A
+// runJob runs a job this worker has claimed and records how it ended. A
 // shutdown or cancel stops it gracefully (cleanup included) and records it
 // interrupted or cancelled; a stop after every runnable VM finished changes
 // nothing.
-func (w *Worker) RunJob(ctx context.Context, job *store.Job) {
+func (w *Worker) runJob(ctx context.Context, job *store.Job) {
 	w.init()
 	if w.OnStart != nil {
 		w.OnStart(job)
@@ -267,7 +267,7 @@ func (w *Worker) execute(ctx, bg context.Context, halt <-chan struct{}, job *sto
 	plan, err := BuildPlan(ctx, pods.NewPlanner(api, w.Cfg), in)
 	if err != nil {
 		if ctx.Err() != nil {
-			// Stopped, not failed: RunJob records why.
+			// Stopped, not failed: runJob records why.
 			return store.Outcome{Status: store.StatusInterrupted, Error: "stopped before anything ran; nothing was changed"}, false
 		}
 		return store.Outcome{Status: store.StatusFailed, Error: "planning: " + proxmox.Describe(err)}, false
@@ -295,8 +295,8 @@ func (w *Worker) execute(ctx, bg context.Context, halt <-chan struct{}, job *sto
 			case err != nil:
 				w.Logf("job %d: recording event: %v", job.ID, err)
 			}
-			if w.OnEvent != nil {
-				w.OnEvent(ev)
+			if w.onEvent != nil {
+				w.onEvent(ev)
 			}
 		},
 	}
