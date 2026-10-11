@@ -86,13 +86,19 @@ func (l *slots) tryLock(ctx context.Context, key, slot int32) (gen uint64, ok bo
 			l.mu.Unlock()
 			return 0, false, nil
 		}
-		qctx, cancel := context.WithTimeout(ctx, slotQueryTimeout)
+		if err := ctx.Err(); err != nil {
+			l.mu.Unlock()
+			return 0, false, err
+		}
+		// Not ctx: a query cut off by ctx kills the session, freeing every
+		// slot this process holds while their holders still work.
+		qctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), slotQueryTimeout)
 		err := l.conn.QueryRow(qctx, `SELECT pg_try_advisory_lock($1, $2)`, key, slot).Scan(&ok)
 		cancel()
 		if err != nil {
 			l.dropLocked()
 			l.mu.Unlock()
-			if fresh || ctx.Err() != nil {
+			if fresh {
 				return 0, false, err
 			}
 			continue

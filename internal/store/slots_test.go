@@ -212,3 +212,22 @@ func TestSlotsLargestNWins(t *testing.T) {
 		t.Errorf("n = 1 took a slot while two were held: err = %v", err)
 	}
 }
+
+func TestCancelledWaiterKeepsOtherSlots(t *testing.T) {
+	a, url := storetest.NewWithURL(t)
+	b := secondProcess(t, url)
+
+	release, err := acquireWithin(a, "storage-ops", 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	done, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := a.AcquireSlot(done, "clones", 8); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled AcquireSlot: err = %v", err)
+	}
+	if _, err := acquireWithin(b, "storage-ops", 1, 300*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a cancelled waiter freed a slot its process still holds: err = %v", err)
+	}
+}
