@@ -259,7 +259,6 @@ func TestTemplatesBuildConcurrentlyUpToCap(t *testing.T) {
 	checkMasters(t, f)
 }
 
-// Template and team clones share the clone slots.
 func TestTemplateAndTeamClonesShareSlots(t *testing.T) {
 	f := sevenMasters()
 	plan := deploySeven(t, f)

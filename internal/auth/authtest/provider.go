@@ -190,7 +190,7 @@ func (p *Provider) Logins() int {
 	return p.logins
 }
 
-// Refreshes is how many refresh grants the provider has answered.
+// Refreshes is how many refresh grants the provider has accepted.
 func (p *Provider) Refreshes() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()

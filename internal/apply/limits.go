@@ -20,7 +20,7 @@ import (
 type Limits struct {
 	calls  sem
 	builds sem
-	// clones caps clone tasks: every linked clone takes the clone storage's
+	// clones caps clone tasks: every clone takes the clone storage's
 	// cluster lock, so they run about one a second whatever their nodes, and
 	// too many queued at once time out on it.
 	clones shared

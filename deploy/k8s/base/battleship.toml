@@ -72,7 +72,7 @@ task_poll = "2s"
 [database]
 # url comes from BATTLESHIP_DATABASE_URL (the Postgres operator's secret).
 # Main pool per replica; each replica uses up to max_conns + 4 = 20. Budget
-# (replicas + 1 surging) x 20 = 60, plus workers and CLI runs, under Postgres's
+# (replicas + 1 surging) x 20 = 60, plus CLI runs, under Postgres's
 # max_connections. See deploy/README.md section 4.
 max_conns = 16
 
@@ -92,7 +92,7 @@ workers = 2                        # job workers per replica
 # templates = "*.kilo.alpha"
 session_idle = "90m"                # longer than proxmox.ticket_renew_after
 session_max = "12h"                # Authentik refresh token validity must be >= this
-session_refresh = "5m"             # how often a session re-checks the user with Authentik (up to 3x while it is unreachable)
+session_refresh = "5m"             # re-check the user with Authentik this often; while it is unreachable a session lasts up to 3x this
 status_poll = "5s"
 drift_scan = "2m"
 # Keep: a stopped job's worst case (14m) < this < terminationGracePeriodSeconds (960s).

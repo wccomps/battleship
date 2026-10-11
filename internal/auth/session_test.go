@@ -670,7 +670,7 @@ func TestLogsHaveNoSecrets(t *testing.T) {
 }
 
 // rename changes u's name at the identity provider, as an admin editing
-// Authentik would.
+// Authentik would. Like any SignIn, it also makes u the next login.
 func (h *harness) rename(u authtest.User, name string) {
 	u.Name = name
 	h.idp.SignIn(u)

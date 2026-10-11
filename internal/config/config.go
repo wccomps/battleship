@@ -36,7 +36,7 @@ type Proxmox struct {
 	// URLs are several cluster nodes, used one at a time with failover.
 	// Exactly one of URL and URLs is set.
 	URLs               []string `toml:"urls"`
-	InsecureSkipVerify bool     `toml:"insecure_skip_verify"` // default false; serve and worker need ca_file or this set to true
+	InsecureSkipVerify bool     `toml:"insecure_skip_verify"` // default false; serve needs ca_file or this set to true
 	// CAFile is a PEM bundle to verify Proxmox against, e.g.
 	// /etc/pve/pve-root-ca.pem. Not allowed with insecure_skip_verify.
 	CAFile string `toml:"ca_file"`
@@ -92,8 +92,8 @@ type Concurrency struct {
 	// cluster lock, so they run about one a second; too many queued time out.
 	Clones      int `toml:"clones"`
 	ConfigCalls int `toml:"config_calls"` // concurrent API calls from jobs and the drift scan, clone POSTs included
-	// TemplateBuilds caps concurrent template builds; each also takes a clone
-	// slot.
+	// TemplateBuilds caps concurrent template builds; each also takes a
+	// clone slot.
 	TemplateBuilds int `toml:"template_builds"`
 	// Deletes caps concurrent VM destroys. Each takes Proxmox's cluster-wide
 	// user.cfg lock; too many time out on it and leave VMs half-deleted.
@@ -117,8 +117,8 @@ type Retry struct {
 	TaskPoll          time.Duration `toml:"task_poll"`   // Proxmox task status poll interval
 }
 
-// Database stores jobs. The worker, web app and -queue need it; when set,
-// direct CLI runs use it too.
+// Database stores jobs. serve and -queue need it; when set, every CLI run
+// is queued as a job.
 type Database struct {
 	URL string `toml:"url"` // postgres://...; overridden by BATTLESHIP_DATABASE_URL
 	// MaxConns caps the main connection pool (min 4, default 16). A process
@@ -279,7 +279,7 @@ var removedKeys = map[string]string{
 	"roles.operators":             removedToken,
 	"roles.leads":                 removedToken,
 	"web.teams":                   "Battleship shows the teams that have VMs; delete the line",
-	"concurrency.clones_per_node": "clones are now capped across the cluster; use concurrency.clones",
+	"concurrency.clones_per_node": "Clones are now capped across the cluster when there is a database; use concurrency.clones",
 	"oidc.groups_claim":           "Battleship doesn't use groups; delete the line",
 }
 
@@ -528,7 +528,7 @@ func httpURL(raw string) bool {
 }
 
 // RequireTLSVerify reports an error unless proxmox.ca_file is set or
-// insecure_skip_verify is explicitly on. Serve and worker send people's
+// insecure_skip_verify is explicitly on. Serve sends people's
 // credentials to proxmox.url, and Proxmox's self-signed cert fails system CAs.
 func (c Config) RequireTLSVerify() error {
 	if c.Proxmox.CAFile == "" && !c.Proxmox.InsecureSkipVerify {

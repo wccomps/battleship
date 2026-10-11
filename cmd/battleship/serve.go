@@ -250,7 +250,7 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 }
 
 // noServiceToken refuses to run what with a Proxmox token in the
-// environment: serve and worker act only as the people who asked, so a token
+// environment: serve acts only as the people who asked, so a token
 // there is a leftover (or a user's own, for their CLI only) and must not linger.
 func noServiceToken(what string) error {
 	for _, k := range []string{"BATTLESHIP_PROXMOX_TOKEN_ID", "BATTLESHIP_PROXMOX_TOKEN_SECRET"} {

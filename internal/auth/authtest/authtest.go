@@ -1,6 +1,6 @@
-// Package authtest logs test users in without an identity provider, by
-// writing sessions straight to the store, so web handler tests can use the
-// real auth middleware.
+// Package authtest logs test users in: Login writes sessions straight to the
+// store, so web handler tests can use the real auth middleware, and Provider
+// is a fake OIDC identity provider for tests of the login flow itself.
 package authtest
 
 import (
