@@ -23,8 +23,7 @@ func (s *Store) Claim(ctx context.Context, worker string) (*Job, error) {
 	return s.claim(ctx, worker, nil)
 }
 
-// ClaimJob is Claim for one job: nil while it waits, ErrNotActive once it is
-// no longer pending.
+// ClaimJob is Claim for one job: nil unless that job was claimable.
 func (s *Store) ClaimJob(ctx context.Context, id int64, worker string) (*Job, error) {
 	return s.claim(ctx, worker, &id)
 }
@@ -43,30 +42,13 @@ func (s *Store) claim(ctx context.Context, worker string, only *int64) (*Job, er
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, claimLockID); err != nil {
 		return nil, err
 	}
-	// notClaimable explains why job *only wasn't claimed: nil while it waits.
-	notClaimable := func() (*Job, error) {
-		if only == nil {
-			return nil, nil
-		}
-		var status string
-		err := tx.QueryRow(ctx, `SELECT status FROM jobs WHERE id = $1`, *only).Scan(&status)
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-			return nil, ErrNotFound
-		case err != nil:
-			return nil, err
-		case status != StatusPending:
-			return nil, fmt.Errorf("job %d is %s: %w", *only, status, ErrNotActive)
-		}
-		return nil, nil
-	}
 	var id int64
 	err = tx.QueryRow(ctx, `SELECT j.id FROM jobs j
 		WHERE j.status = 'pending' AND ($1::bigint IS NULL OR j.id = $1)
 		  AND NOT EXISTS (SELECT 1 FROM jobs o WHERE `+blocksSQL+`)
 		ORDER BY j.id LIMIT 1`, only).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return notClaimable()
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
@@ -78,7 +60,7 @@ func (s *Store) claim(ctx context.Context, worker string, only *int64) (*Job, er
 		started_at = now(), heartbeat_at = now() WHERE id = $1 AND status = 'pending' AND NOT cancel_requested RETURNING `+jobColumns, id, worker))
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			return notClaimable()
+			return nil, nil
 		}
 		return nil, err
 	}

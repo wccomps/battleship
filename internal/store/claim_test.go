@@ -341,36 +341,6 @@ func TestClaimJobDoesNotTakeOtherWork(t *testing.T) {
 	}
 }
 
-func TestClaimJobErrors(t *testing.T) {
-	s := storetest.New(t)
-	if _, err := s.ClaimJob(ctx, 999, "cli"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("missing job: err = %v, want ErrNotFound", err)
-	}
-	id := create(t, s, "team:01")
-	if err := s.RequestCancel(ctx, id, "bob"); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.ClaimJob(ctx, id, "cli"); !errors.Is(err, store.ErrNotActive) || got != nil {
-		t.Errorf("cancelled job: ClaimJob = %+v, %v; want ErrNotActive", got, err)
-	}
-}
-
-func TestClaimJobLosesToCancel(t *testing.T) {
-	s := storetest.New(t)
-	id := create(t, s, "team:01")
-	store.SetBeforeClaimUpdate(func(jobID int64) {
-		if jobID == id {
-			if err := s.RequestCancel(ctx, id, "bob"); err != nil {
-				t.Error(err)
-			}
-		}
-	})
-	t.Cleanup(func() { store.SetBeforeClaimUpdate(nil) })
-	if got, err := s.ClaimJob(ctx, id, "cli"); !errors.Is(err, store.ErrNotActive) || got != nil {
-		t.Fatalf("ClaimJob = %+v, %v; want ErrNotActive (cancelled during claim)", got, err)
-	}
-}
-
 // Finish leaves no item pending or running: unfinished ones become
 // interrupted, or not run if they never reached a step.
 func TestFinishInterruptsUnfinishedItems(t *testing.T) {
