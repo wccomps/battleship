@@ -38,10 +38,10 @@ battleship nodes                              # prints a urls = [...] line
 Every command prints its plan and asks you to confirm (`yes`; a teardown
 asks for the team range). `-yes` skips the prompt. With a database, the job
 runs on a `battleship serve` worker and the command follows it; `-queue`
-exits once it is queued. Keep your `battleship.toml` in step with serve's,
-or the worker's re-plan won't match and the job ends stale. `-hosts` matches
-substrings; `-vms` names exact VMs. A blocked or failed VM makes the command
-exit 1.
+exits once it is queued. Keep your `battleship.toml` in step with serve's:
+if its settings for what a job does to VMs differ, the job ends stale.
+`-hosts` matches substrings; `-vms` names exact VMs. A blocked or failed VM
+makes the command exit 1.
 
 ```sh
 battleship jobs list | show <id> | cancel <id>
