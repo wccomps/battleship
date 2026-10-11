@@ -46,24 +46,3 @@ func TestLogsAreCalledLogs(t *testing.T) {
 		t.Errorf("confirm redirects to %q", loc)
 	}
 }
-
-// Old links and pages open before the move keep working.
-func TestOldJobsAddressesRedirect(t *testing.T) {
-	h := newHarness(t)
-	op := h.login(asOperator)
-	for _, tc := range []struct {
-		method, from, to string
-		code             int
-	}{
-		{http.MethodGet, "/jobs", "/logs", http.StatusMovedPermanently},
-		{http.MethodGet, "/jobs?before=12", "/logs?before=12", http.StatusMovedPermanently},
-		{http.MethodGet, "/jobs/7", "/logs/7", http.StatusMovedPermanently},
-		{http.MethodPost, "/jobs/7/cancel", "/logs/7/cancel", http.StatusPermanentRedirect},
-		{http.MethodPost, "/jobs/7/retry", "/logs/7/retry", http.StatusPermanentRedirect},
-	} {
-		rec := h.do(&op, tc.method, tc.from, nil)
-		if rec.Code != tc.code || rec.Header().Get("Location") != tc.to {
-			t.Errorf("%s %s = %d to %q, want %d to %q", tc.method, tc.from, rec.Code, rec.Header().Get("Location"), tc.code, tc.to)
-		}
-	}
-}

@@ -372,22 +372,11 @@ func TestGridBusyIndicator(t *testing.T) {
 	lacks(t, "patch", ev.Data, `class="cell is-busy"`)
 }
 
-// /help redirects to the grid, and nothing links to it.
-func TestHelpRedirectsToGrid(t *testing.T) {
+// Power and reset live on the grid, not in the menu.
+func TestMenuLeavesPowerAndResetToGrid(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
-	op := h.login(asOperator)
-	for _, sess := range []*authtest.Session{&op, nil} {
-		rec := h.get(sess, "/help")
-		if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
-			t.Errorf("GET /help = %d to %q, want 303 to /", rec.Code, rec.Header().Get("Location"))
-		}
-	}
 	lead := h.login(asLead)
-	for _, path := range []string{"/", "/vm/01/dc", "/logs", "/power", "/deploy"} {
-		lacks(t, path, h.get(&lead, path).Body.String(), `href="/help`)
-	}
-	// Power and reset live on the grid, not in the menu.
 	lacks(t, "nav", h.get(&lead, "/").Body.String(), `<a href="/power">`, `<a href="/reset">`)
 }
 

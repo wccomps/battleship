@@ -26,9 +26,7 @@ func TestSecurityHeaders(t *testing.T) {
 		path string
 	}{
 		{"grid", true, "/"},
-		{"help", true, "/help"},
 		{"login redirect", false, "/"},
-		{"access page", false, "/access"},
 		{"not found", false, "/nope"},
 		{"script", false, "/static/app.js"},
 		{"health", false, "/healthz"},
@@ -76,7 +74,7 @@ func TestPagesHaveNoInlineScript(t *testing.T) {
 	h.poll()
 	lead := h.login(asLead)
 	id := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Action: "start"}, byLead)
-	for _, path := range []string{"/", "/vm/01/dc", "/help", "/access", "/nope",
+	for _, path := range []string{"/", "/vm/01/dc", "/nope",
 		"/power", "/reset?teams=1", "/deploy", "/teardown", "/logs", "/logs/" + itoa(id)} {
 		body := h.get(&lead, path).Body.String()
 		lacks(t, path, body, "<script>", "onclick=", "onload=", "style=", "javascript:")

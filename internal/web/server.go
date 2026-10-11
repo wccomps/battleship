@@ -19,7 +19,6 @@ import (
 	"net/netip"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -227,9 +226,6 @@ func (s *Server) Drain() { s.draining.Store(true) }
 // authRoutes are the login flow and the Proxmox sign-in (from auth).
 func (s *Server) authRoutes(mux *http.ServeMux) {
 	s.auth.Routes(mux)
-	// Who may use battleship is Authentik's decision; old /access links land on
-	// the grid.
-	mux.Handle("GET /access", http.RedirectHandler("/", http.StatusSeeOther))
 }
 
 // healthRoutes are the Kubernetes probes. They need no login.
@@ -245,8 +241,6 @@ func (s *Server) volunteerRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /{$}", s.require(http.HandlerFunc(s.gridPage)))
 	mux.Handle("GET /events/grid", s.require(http.HandlerFunc(s.gridEvents)))
 	mux.Handle("GET /vm/{team}/{host}", s.require(http.HandlerFunc(s.cellPage)))
-	// Old links to the removed help page land on the grid.
-	mux.Handle("GET /help", http.RedirectHandler("/", http.StatusSeeOther))
 
 	for _, op := range operations {
 		mux.Handle("GET "+op.Path, s.require(s.opForm(op)))
@@ -259,30 +253,13 @@ func (s *Server) volunteerRoutes(mux *http.ServeMux) {
 		mux.Handle("POST "+op.Path+"/confirm", s.require(s.opConfirm(op)))
 	}
 
-	// Job history lives at /logs so nobody looks there to start something; old
-	// /jobs addresses redirect permanently.
+	// Job history lives at /logs so nobody looks there to start something.
 	mux.Handle("GET /logs", s.require(http.HandlerFunc(s.jobsPage)))
 	mux.Handle("GET /logs/{id}", s.require(http.HandlerFunc(s.jobPage)))
 	mux.Handle("POST /logs/{id}/cancel", s.require(http.HandlerFunc(s.cancelJob)))
 	mux.Handle("POST /logs/{id}/retry", s.require(http.HandlerFunc(s.retryJob)))
-	mux.HandleFunc("GET /jobs", movedToLogs(http.StatusMovedPermanently))
-	mux.HandleFunc("GET /jobs/{id}", movedToLogs(http.StatusMovedPermanently))
-	mux.HandleFunc("POST /jobs/{id}/{action}", movedToLogs(http.StatusPermanentRedirect))
 	mux.Handle("GET /events/jobs", s.require(http.HandlerFunc(s.jobsEvents)))
 	mux.Handle("GET /events/jobs/{id}", s.require(http.HandlerFunc(s.jobEvents)))
-}
-
-// movedToLogs redirects an old /jobs address to /logs, query included: 301 for
-// pages, 308 for a cancel or retry posted from an old page, so the POST is
-// repeated.
-func movedToLogs(code int) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		target := logsPath + strings.TrimPrefix(r.URL.Path, "/jobs")
-		if r.URL.RawQuery != "" {
-			target += "?" + r.URL.RawQuery
-		}
-		http.Redirect(w, r, target, code)
-	}
 }
 
 // logsPath is where the jobs are listed; logHref is a job's log.

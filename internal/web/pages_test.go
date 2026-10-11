@@ -18,15 +18,6 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// /access redirects to the grid: who may use battleship is Authentik's call.
-func TestAccessPageIsGone(t *testing.T) {
-	h := newHarness(t)
-	rec := h.get(nil, "/access")
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
-		t.Fatalf("GET /access = %d to %q, want 303 to /", rec.Code, rec.Header().Get("Location"))
-	}
-}
-
 func TestAuthPagesUseTheLayout(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
