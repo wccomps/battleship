@@ -21,7 +21,7 @@ type requestAuth struct {
 	user        User
 	csrf        string
 	session     string    // the session's store ID
-	refreshedAt time.Time // the session's last successful group check
+	refreshedAt time.Time // the session's last successful refresh
 }
 
 // UserFrom returns the logged-in user RequireUser put in ctx.
@@ -43,8 +43,8 @@ func CSRFToken(ctx context.Context) string {
 	return ra.csrf
 }
 
-// SessionRefreshedAt returns when the session last checked the user's
-// groups with the identity provider, or the zero time outside RequireUser.
+// SessionRefreshedAt returns when the session last checked the user with
+// the identity provider, or the zero time outside RequireUser.
 // Long-lived responses such as event streams end around session_refresh
 // later so they pass through the check again.
 func SessionRefreshedAt(ctx context.Context) time.Time {
@@ -88,7 +88,7 @@ func noteSubject(ctx context.Context, subject string) {
 
 // RequireUser serves next only for a live session, with the User in the
 // request context. It enforces session expiry, checks CSRF before
-// refreshing (csrfProblem), re-checks groups every session_refresh
+// refreshing (csrfProblem), re-checks the user every session_refresh
 // (refreshSession), and finds or renews the Proxmox ticket
 // (sessionTicket). Without a session, see unauthenticated.
 func (s *Service) RequireUser(next http.Handler) http.Handler {
@@ -165,7 +165,7 @@ const refreshGrace = 3
 // refreshSession re-checks the session with the identity provider once
 // session_refresh has passed; ok is false once it has responded. Only the
 // request that wins the claim refreshes. A rejection ends the session; an
-// unreachable provider keeps the current groups until refreshGrace ×
+// unreachable provider keeps the session until refreshGrace ×
 // session_refresh have passed since the last success.
 func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *http.Request, sess store.Session, now time.Time) (_ store.Session, ok bool) {
 	every := s.cfg.Web.SessionRefresh
@@ -212,12 +212,12 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 			s.serverError(w, r, "recording refresh failure", rerr)
 			return sess, false
 		}
-		s.logf("auth: refresh failed: subject=%q: %v; the identity provider is unreachable, keeping the session with its current groups until %s at the latest",
+		s.logf("auth: refresh failed: subject=%q: %v; the identity provider is unreachable, keeping the session until %s at the latest",
 			sess.Subject, err, stamp(graceEnd))
 		return sess, true
 	}
-	up := store.SessionUpdate{Username: id.Username, Name: id.Name, Email: id.Email, Groups: id.Groups, RefreshToken: refreshToken, RefreshedAt: now}
-	err = s.st.UpdateSessionGroups(ctx, sess.ID, up)
+	up := store.SessionUpdate{Username: id.Username, Name: id.Name, Email: id.Email, RefreshToken: refreshToken, RefreshedAt: now}
+	err = s.st.UpdateSession(ctx, sess.ID, up)
 	if errors.Is(err, store.ErrSessionNotFound) { // logged out meanwhile
 		s.clearSessionCookie(w)
 		s.unauthenticated(w, r)
@@ -227,7 +227,7 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 		s.serverError(w, r, "saving refreshed session", err)
 		return sess, false
 	}
-	sess.Name, sess.Email, sess.Groups, sess.RefreshToken, sess.RefreshedAt = id.Name, id.Email, id.Groups, refreshToken, now
+	sess.Name, sess.Email, sess.RefreshToken, sess.RefreshedAt = id.Name, id.Email, refreshToken, now
 	sess.Username = id.Username
 	sess.RefreshRetryAt, sess.RefreshFailedAt = time.Time{}, time.Time{}
 	return sess, true

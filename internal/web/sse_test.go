@@ -470,7 +470,7 @@ func TestStreamBurstDuringGapIsOneSend(t *testing.T) {
 	}
 }
 
-// A stream ends at its session's next group check, not a full
+// A stream ends at its session's next refresh, not a full
 // web.session_refresh after opening, or a lost user could stay updated for
 // nearly two periods.
 func TestStreamEndsAtSessionsNextRefresh(t *testing.T) {

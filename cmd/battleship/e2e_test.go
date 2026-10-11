@@ -165,7 +165,7 @@ func next(t *testing.T, events <-chan sseEvent, names ...string) sseEvent {
 // in, preview and confirm a power job, and watch an embedded worker run it.
 func TestEndToEndPowerJob(t *testing.T) {
 	e := startServe(t, withLogin())
-	e.idp.SignIn(authtest.User{Subject: "sub-olive", Name: "Olive Operator", Email: "olive@example.org", Groups: []string{"volunteers"}})
+	e.idp.SignIn(authtest.User{Subject: "sub-olive", Name: "Olive Operator", Email: "olive@example.org"})
 	e.pve.AddUser("olive@auth.example.org", nil)
 	e.pve.Grant("olive@auth.example.org", "/vms", "VM.Audit", "VM.PowerMgmt")
 	e.pve.SignIn("olive@auth.example.org")

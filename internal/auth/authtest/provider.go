@@ -37,7 +37,7 @@ type Provider struct {
 
 	mu      sync.Mutex
 	current string           // subject the authorization endpoint logs in
-	users   map[string]User  // by subject, with Groups filled in
+	users   map[string]User  // by subject, with defaults filled in
 	codes   map[string]grant // authorization code -> login
 	refresh map[string]string
 	access  map[string]string
@@ -92,7 +92,6 @@ func (p *Provider) Issuer() string { return p.srv.URL + "/" }
 func (p *Provider) SignIn(u User) {
 	p.t.Helper()
 	u.defaults()
-	u.Groups = slices.Clone(u.Groups)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.users[u.Subject] = u
@@ -204,7 +203,7 @@ func (p *Provider) issue(w http.ResponseWriter, subject, nonce string, offline b
 	claims := map[string]any{
 		"iss": p.Issuer(), "sub": subject, "aud": p.clientID,
 		"iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(),
-		"name": u.Name, "email": u.Email, "groups": u.Groups, "preferred_username": u.username(),
+		"name": u.Name, "email": u.Email, "preferred_username": u.username(),
 		"at_hash": base64.RawURLEncoding.EncodeToString(atHash[:16]),
 	}
 	if nonce != "" {
@@ -252,7 +251,7 @@ func (p *Provider) userinfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := p.users[subject]
-	writeJSON(w, http.StatusOK, map[string]any{"sub": subject, "name": u.Name, "email": u.Email, "groups": u.Groups, "preferred_username": u.username()})
+	writeJSON(w, http.StatusOK, map[string]any{"sub": subject, "name": u.Name, "email": u.Email, "preferred_username": u.username()})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

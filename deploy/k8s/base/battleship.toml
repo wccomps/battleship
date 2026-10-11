@@ -92,7 +92,7 @@ workers = 2                        # job workers per replica
 # templates = "*.kilo.alpha"
 session_idle = "90m"                # longer than proxmox.ticket_renew_after
 session_max = "12h"                # Authentik refresh token validity must be >= this
-session_refresh = "5m"             # group changes take effect within this (3x while Authentik is unreachable)
+session_refresh = "5m"             # how often a session re-checks the user with Authentik (up to 3x while it is unreachable)
 status_poll = "5s"
 drift_scan = "2m"
 # Keep: a stopped job's worst case (14m) < this < terminationGracePeriodSeconds (960s).
@@ -104,8 +104,7 @@ trusted_proxies = ["10.42.0.0/16"]
 [oidc]
 issuer = "https://auth.example.org/application/o/battleship/"
 client_id = "battleship"            # the Authentik provider's client ID
-scopes = ["openid", "profile", "email", "groups", "offline_access"]
-groups_claim = "groups"
+scopes = ["openid", "profile", "email", "offline_access"]
 
 # No [roles]: Authentik policy bindings (which exclude students) decide who may
 # open battleship, Proxmox what each user may do.

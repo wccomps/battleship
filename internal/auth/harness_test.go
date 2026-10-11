@@ -27,9 +27,9 @@ var ctx = context.Background()
 
 // Users at the fake identity provider.
 var (
-	alice = idpUser{Sub: "sub-alice", Name: "Alice Operator", Email: "alice@example.org", Groups: []string{"staff", "battleship-operators"}}
-	lena  = idpUser{Sub: "sub-lena", Name: "Lena Lead", Email: "lena@example.org", Groups: []string{"battleship-leads", "battleship-operators"}}
-	nobby = idpUser{Sub: "sub-nobby", Name: "Nobby Nobody", Email: "nobby@example.org", Groups: []string{"staff"}}
+	alice = idpUser{Sub: "sub-alice", Name: "Alice Operator", Email: "alice@example.org"}
+	lena  = idpUser{Sub: "sub-lena", Name: "Lena Lead", Email: "lena@example.org"}
+	nobby = idpUser{Sub: "sub-nobby", Name: "Nobby Nobody", Email: "nobby@example.org"}
 )
 
 // logBuffer collects the service's log lines.
@@ -132,12 +132,7 @@ func (h *harness) routes() *http.ServeMux {
 			return
 		}
 		cred, _ := auth.ProxmoxCredential(r.Context())
-		sess, err := h.st.Session(r.Context(), auth.SessionID(r.Context()))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		fmt.Fprintf(w, "%s ok: user=%s groups=%s pve=%s", r.Method, u.Name, strings.Join(sess.Groups, ","), cred.User)
+		fmt.Fprintf(w, "%s ok: user=%s pve=%s", r.Method, u.Name, cred.User)
 	})))
 	mux.Handle("GET /csrf", h.svc.RequireUser(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, auth.CSRFToken(r.Context()))

@@ -44,7 +44,6 @@ func (c *clock) Advance(d time.Duration) {
 // idpUser is a person at the fake identity provider.
 type idpUser struct {
 	Sub, Name, Email string
-	Groups           []string
 }
 
 type authCode struct {
@@ -72,7 +71,6 @@ type fakeIDP struct {
 	// Knobs.
 	noRefreshToken   bool                              // token responses carry no refresh_token
 	noEndSession     bool                              // discovery lists no end_session_endpoint
-	groupsInIDToken  bool                              // ID tokens carry the groups claim
 	noIDTokenRefresh bool                              // refresh responses carry no id_token
 	mutateIDToken    func(claims map[string]any)       // edits ID token claims before signing
 	signWithOther    bool                              // sign ID tokens with a key not in the JWKS
@@ -151,7 +149,7 @@ func newFakeIDP(t *testing.T, c *clock) *fakeIDP {
 		clientID: "battleship", secret: "idp-client-secret",
 		users: map[string]*idpUser{}, codes: map[string]authCode{},
 		refresh: map[string]string{}, access: map[string]string{},
-		groupsInIDToken: true, kid: "k1",
+		kid: "k1",
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", f.discovery)
@@ -174,16 +172,15 @@ func (f *fakeIDP) setUser(u idpUser) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	cp := u
-	cp.Groups = slices.Clone(u.Groups)
 	f.users[u.Sub] = &cp
 	f.current = u.Sub
 }
 
-// setGroups changes a user's groups, as an admin editing Authentik would.
-func (f *fakeIDP) setGroups(sub string, groups ...string) {
+// rename changes a user's name, as an admin editing Authentik would.
+func (f *fakeIDP) rename(sub, name string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.users[sub].Groups = groups
+	f.users[sub].Name = name
 }
 
 // revokeAll invalidates every refresh token, as disabling a user would.
@@ -365,9 +362,6 @@ func (f *fakeIDP) issue(w http.ResponseWriter, sub, nonce string, offline, withI
 		if nonce != "" {
 			claims["nonce"] = nonce
 		}
-		if f.groupsInIDToken {
-			claims["groups"] = slices.Clone(u.Groups)
-		}
 		if f.mutateIDToken != nil {
 			f.mutateIDToken(claims)
 		}
@@ -425,7 +419,7 @@ func (f *fakeIDP) userinfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := f.users[sub]
-	info := map[string]any{"sub": sub, "name": u.Name, "email": u.Email, "groups": u.Groups, "preferred_username": strings.TrimPrefix(sub, "sub-")}
+	info := map[string]any{"sub": sub, "name": u.Name, "email": u.Email, "preferred_username": strings.TrimPrefix(sub, "sub-")}
 	if f.userinfoSub != "" {
 		info["sub"] = f.userinfoSub
 	}

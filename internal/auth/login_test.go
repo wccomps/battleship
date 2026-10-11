@@ -20,7 +20,7 @@ func TestLoginRoundTrip(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	resp := b.login(alice)
-	if want := "GET ok: user=Alice Operator groups=staff,battleship-operators pve=alice@auth.example.org"; resp.body != want {
+	if want := "GET ok: user=Alice Operator pve=alice@auth.example.org"; resp.body != want {
 		t.Errorf("body = %q, want %q", resp.body, want)
 	}
 	token := b.sessionToken()
@@ -28,9 +28,8 @@ func TestLoginRoundTrip(t *testing.T) {
 		t.Errorf("session token %q has %d characters, want 43 (32 bytes base64url)", token, len(token))
 	}
 	sess := b.session()
-	if sess.Subject != alice.Sub || sess.Name != alice.Name || sess.Email != alice.Email ||
-		!slices.Equal(sess.Groups, alice.Groups) {
-		t.Errorf("session = %+v, want alice's identity and groups", sess)
+	if sess.Subject != alice.Sub || sess.Name != alice.Name || sess.Email != alice.Email || sess.Username != "alice" {
+		t.Errorf("session = %+v, want alice's identity", sess)
 	}
 	if rt := b.refreshToken(); !slices.Contains(h.idp.refreshTokens(), rt) {
 		t.Errorf("stored refresh token %q is not one the provider issued", rt)
@@ -66,7 +65,7 @@ func TestDatabaseStoresOnlyTheTokenHash(t *testing.T) {
 	if sess.ID != auth.HashToken(token) || sess.ID == token {
 		t.Errorf("session ID = %q, want the SHA-256 hex of the token", sess.ID)
 	}
-	for _, field := range append([]string{sess.ID, sess.Subject, sess.Name, sess.Email, sess.RefreshToken, sess.CSRF}, sess.Groups...) {
+	for _, field := range []string{sess.ID, sess.Subject, sess.Name, sess.Email, sess.RefreshToken, sess.CSRF} {
 		if strings.Contains(field, token) {
 			t.Errorf("session field %q contains the raw token", field)
 		}
@@ -169,7 +168,7 @@ func TestLoginRedirectsToProvider(t *testing.T) {
 		"response_type":         "code",
 		"client_id":             "battleship",
 		"redirect_uri":          h.app.URL + "/auth/callback",
-		"scope":                 "openid profile email groups offline_access",
+		"scope":                 "openid profile email offline_access",
 		"code_challenge_method": "S256",
 	}
 	for k, want := range checks {
@@ -298,12 +297,6 @@ func TestCallbackRejects(t *testing.T) {
 			setup: mutateIDToken(func(c map[string]any) { c["at_hash"] = "AAAAAAAAAAAAAAAAAAAAAA" })},
 		{name: "signed with an unknown key", status: http.StatusForbidden, want: "be verified",
 			setup: func(h *harness) { h.idp.set(func(f *fakeIDP) { f.signWithOther = true }) }},
-		{name: "groups claim of the wrong type", status: http.StatusInternalServerError, want: "groups",
-			setup: mutateIDToken(func(c map[string]any) { c["groups"] = 42 })},
-		{name: "userinfo for another subject", status: http.StatusForbidden, want: "be verified",
-			setup: func(h *harness) {
-				h.idp.set(func(f *fakeIDP) { f.groupsInIDToken = false; f.userinfoSub = "sub-mallory" })
-			}},
 		{name: "JWKS unavailable", status: http.StatusInternalServerError, want: "Authentik",
 			setup: func(h *harness) { h.idp.set(func(f *fakeIDP) { f.jwksStatus = http.StatusServiceUnavailable }) }},
 		{name: "token endpoint down", status: http.StatusInternalServerError, want: "Authentik",
@@ -390,37 +383,13 @@ func TestLoginCookieFromAnotherLoginIsRejected(t *testing.T) {
 	}
 }
 
-// Anyone Authentik signs in gets a session, whatever their groups; Proxmox
-// decides what they may do.
-func TestAnyGroupSignsIn(t *testing.T) {
+// The ID token says who logged in; userinfo isn't needed.
+func TestLoginDoesNotNeedUserinfo(t *testing.T) {
 	h := newHarness(t)
+	h.idp.set(func(f *fakeIDP) { f.userinfoStatus = http.StatusServiceUnavailable })
 	b := h.browser()
-	stu := idpUser{Sub: "sub-stu", Name: "Stu Dent", Email: "stu@example.org", Groups: []string{"pool-07"}}
-	h.pve.AddUser(pveUser(stu), nil)
-	resp := b.login(stu)
-	if !strings.Contains(resp.body, "groups=pool-07 pve=stu@auth.example.org") {
-		t.Fatalf("body = %q", resp.body)
-	}
-}
-
-func TestGroupsFromUserinfo(t *testing.T) {
-	h := newHarness(t)
-	h.idp.set(func(f *fakeIDP) { f.groupsInIDToken = false })
-	b := h.browser()
-	resp := b.login(lena)
-	if !strings.Contains(resp.body, "groups=battleship-leads,battleship-operators") {
-		t.Errorf("body = %q, want the groups read from userinfo", resp.body)
-	}
-}
-
-func TestCustomGroupsClaim(t *testing.T) {
-	h := newHarness(t, func(c *config.Config) { c.OIDC.GroupsClaim = "roles" })
-	h.idp.set(func(f *fakeIDP) {
-		f.mutateIDToken = func(c map[string]any) { c["roles"] = c["groups"]; delete(c, "groups") }
-	})
-	b := h.browser()
-	if resp := b.login(lena); !strings.Contains(resp.body, "groups=battleship-leads,battleship-operators") {
-		t.Errorf("body = %q, want the groups from the roles claim", resp.body)
+	if resp := b.login(lena); resp.body != "GET ok: user=Lena Lead pve=lena@auth.example.org" {
+		t.Errorf("body = %q, want lena logged in", resp.body)
 	}
 }
 
@@ -507,7 +476,7 @@ func TestNewServiceChecksConfig(t *testing.T) {
 		want string
 	}{
 		"no client secret":   {func(c *config.Config) { c.OIDC.ClientSecret = "" }, "oidc.client_secret"},
-		"no offline_access":  {func(c *config.Config) { c.OIDC.Scopes = []string{"openid", "groups"} }, "offline_access"},
+		"no offline_access":  {func(c *config.Config) { c.OIDC.Scopes = []string{"openid", "profile"} }, "offline_access"},
 		"no base URL":        {func(c *config.Config) { c.Web.BaseURL = "" }, "web.base_url"},
 		"issuer unreachable": {func(c *config.Config) { c.OIDC.Issuer = "http://127.0.0.1:1/" }, "oidc.issuer"},
 		"issuer mismatch":    {func(c *config.Config) { c.OIDC.Issuer = idp.srv.URL + "/other/" }, "oidc.issuer"},

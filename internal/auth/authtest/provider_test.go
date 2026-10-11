@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -61,12 +60,7 @@ func TestProviderSignsInThroughTheRealFlow(t *testing.T) {
 	svc.Routes(mux)
 	mux.Handle("GET /whoami", svc.RequireUser(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, _ := auth.UserFrom(r.Context())
-		sess, err := st.Session(r.Context(), auth.SessionID(r.Context()))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		fmt.Fprintf(w, "%s %s %s %s", u.Subject, u.Name, u.Email, strings.Join(sess.Groups, ","))
+		fmt.Fprintf(w, "%s %s %s", u.Subject, u.Name, u.Email)
 	})))
 	h = mux
 
@@ -85,20 +79,20 @@ func TestProviderSignsInThroughTheRealFlow(t *testing.T) {
 		return resp.StatusCode, string(b)
 	}
 
-	p.SignIn(authtest.User{Subject: "sub-lena", Name: "Lena", Groups: []string{"leads"}})
-	if code, body := whoami(); code != http.StatusOK || body != "sub-lena Lena sub-lena@example.org leads" {
-		t.Fatalf("after signing in: %d %q, want Lena in leads", code, body)
+	p.SignIn(authtest.User{Subject: "sub-lena", Name: "Lena"})
+	if code, body := whoami(); code != http.StatusOK || body != "sub-lena Lena sub-lena@example.org" {
+		t.Fatalf("after signing in: %d %q, want Lena", code, body)
 	}
 	if p.Logins() != 1 {
 		t.Errorf("logins = %d, want 1", p.Logins())
 	}
 
-	// The provider refreshes sessions too: a change of groups there reaches
+	// The provider refreshes sessions too: a change of name there reaches
 	// the app at the next refresh.
-	p.SignIn(authtest.User{Subject: "sub-lena", Name: "Lena", Groups: []string{"operators"}})
+	p.SignIn(authtest.User{Subject: "sub-lena", Name: "Lena Renamed"})
 	clock.Advance(cfg.Web.SessionRefresh)
-	if code, body := whoami(); code != http.StatusOK || !strings.HasSuffix(body, " operators") {
-		t.Errorf("after a refresh: %d %q, want operators", code, body)
+	if code, body := whoami(); code != http.StatusOK || body != "sub-lena Lena Renamed sub-lena@example.org" {
+		t.Errorf("after a refresh: %d %q, want the new name", code, body)
 	}
 	if p.Logins() != 1 {
 		t.Errorf("logins = %d, want still 1 (a refresh isn't a login)", p.Logins())

@@ -602,7 +602,7 @@ var allPrivileges = []string{"VM.Audit", "VM.PowerMgmt", "VM.Snapshot", "VM.Snap
 func (h *harness) loginStudent() authtest.Session {
 	h.t.Helper()
 	cred := h.ticketWith("test-student", nil)
-	sess := authtest.Login(h.t, h.st, h.cfg, authtest.User{Subject: "test-student", Groups: []string{"pool-01"}, At: h.clock.Now(), Proxmox: cred})
+	sess := authtest.Login(h.t, h.st, h.cfg, authtest.User{Subject: "test-student", At: h.clock.Now(), Proxmox: cred})
 	h.openView(cred)
 	return sess
 }

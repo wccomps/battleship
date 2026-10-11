@@ -23,12 +23,11 @@ type Session struct {
 	Username     string
 	Name         string
 	Email        string
-	Groups       []string // identity-provider groups as of the last login or refresh
-	RefreshToken string   // opaque to the store; auth seals it (see auth's refreshtoken.go)
-	CSRF         string   // the token every state-changing request must carry
+	RefreshToken string // opaque to the store; auth seals it (see auth's refreshtoken.go)
+	CSRF         string // the token every state-changing request must carry
 	CreatedAt    time.Time
 	LastSeen     time.Time
-	RefreshedAt  time.Time // last successful group check
+	RefreshedAt  time.Time // last successful check with the identity provider
 	ExpiresAt    time.Time // the earliest of the idle and absolute expiry
 	// RefreshRetryAt, if set, is when a new refresh may start (one is running
 	// or backing off until then).
@@ -66,12 +65,11 @@ type SessionUpdate struct {
 	Username     string
 	Name         string
 	Email        string
-	Groups       []string
 	RefreshToken string // the provider may rotate it
 	RefreshedAt  time.Time
 }
 
-const sessionColumns = `id, subject, name, email, groups, refresh_token, csrf,
+const sessionColumns = `id, subject, name, email, refresh_token, csrf,
 	created_at, last_seen, refreshed_at, expires_at, refresh_retry_at, refresh_failed_at, username`
 
 const sessionPVEColumns = `pve_user, pve_ticket_sealed, pve_csrf_sealed, pve_issued_at, pve_login_at,
@@ -82,13 +80,9 @@ func (s *Store) CreateSession(ctx context.Context, sess Session) error {
 	if sess.ID == "" || sess.Subject == "" || sess.RefreshToken == "" || sess.CSRF == "" || sess.ExpiresAt.IsZero() {
 		return ErrEmptySession
 	}
-	groups := sess.Groups
-	if groups == nil {
-		groups = []string{}
-	}
 	_, err := s.pool.Exec(ctx, `INSERT INTO sessions (`+sessionColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-		sess.ID, sess.Subject, sess.Name, sess.Email, groups, sess.RefreshToken, sess.CSRF,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		sess.ID, sess.Subject, sess.Name, sess.Email, sess.RefreshToken, sess.CSRF,
 		sess.CreatedAt, sess.LastSeen, sess.RefreshedAt, sess.ExpiresAt,
 		nullTime(sess.RefreshRetryAt), nullTime(sess.RefreshFailedAt), sess.Username)
 	if err != nil {
@@ -103,7 +97,7 @@ func (s *Store) Session(ctx context.Context, id string) (Session, error) {
 	var x Session
 	var retry, failed, issued, loginAt *time.Time
 	err := s.pool.QueryRow(ctx, `SELECT `+sessionColumns+`, `+sessionPVEColumns+` FROM sessions WHERE id = $1`, id).Scan(
-		&x.ID, &x.Subject, &x.Name, &x.Email, &x.Groups, &x.RefreshToken, &x.CSRF,
+		&x.ID, &x.Subject, &x.Name, &x.Email, &x.RefreshToken, &x.CSRF,
 		&x.CreatedAt, &x.LastSeen, &x.RefreshedAt, &x.ExpiresAt, &retry, &failed, &x.Username,
 		&x.PVE.User, &x.PVE.Ticket, &x.PVE.CSRF, &issued, &loginAt, &x.PVELoginState, &x.PVELoginNext, &x.PVELoginEndpoint)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -225,20 +219,16 @@ func (s *Store) RecordSessionRefreshFailure(ctx context.Context, id, refreshToke
 	return nil
 }
 
-// UpdateSessionGroups stores what a successful refresh learned, and clears
-// any refresh claim, backoff and failure.
-func (s *Store) UpdateSessionGroups(ctx context.Context, id string, u SessionUpdate) error {
+// UpdateSession stores what a successful refresh learned, and clears any
+// refresh claim, backoff and failure.
+func (s *Store) UpdateSession(ctx context.Context, id string, u SessionUpdate) error {
 	if u.RefreshToken == "" {
 		return ErrEmptySession
 	}
-	groups := u.Groups
-	if groups == nil {
-		groups = []string{}
-	}
 	tag, err := s.pool.Exec(ctx, `UPDATE sessions
-		SET name = $2, email = $3, groups = $4, refresh_token = $5, refreshed_at = $6,
-			refresh_retry_at = NULL, refresh_failed_at = NULL, username = $7
-		WHERE id = $1`, id, u.Name, u.Email, groups, u.RefreshToken, u.RefreshedAt, u.Username)
+		SET name = $2, email = $3, refresh_token = $4, refreshed_at = $5,
+			refresh_retry_at = NULL, refresh_failed_at = NULL, username = $6
+		WHERE id = $1`, id, u.Name, u.Email, u.RefreshToken, u.RefreshedAt, u.Username)
 	if err != nil {
 		return fmt.Errorf("updating session: %w", err)
 	}

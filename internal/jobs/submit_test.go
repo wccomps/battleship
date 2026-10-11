@@ -50,7 +50,7 @@ func TestSubmitRejectsNothingToRun(t *testing.T) {
 func TestSubmitRecordsRoleAndConsumesPreview(t *testing.T) {
 	st := storetest.New(t)
 	sess := store.Session{
-		ID: "sess-1", Subject: "sub", Groups: []string{}, RefreshToken: "r", CSRF: "c",
+		ID: "sess-1", Subject: "sub", RefreshToken: "r", CSRF: "c",
 		CreatedAt: time.Now(), LastSeen: time.Now(), RefreshedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
 	}
 	if err := st.CreateSession(bg, sess); err != nil {

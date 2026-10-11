@@ -41,9 +41,8 @@ func TestWebDefaults(t *testing.T) {
 		t.Errorf("Web = %+v, want %+v", cfg.Web, want)
 	}
 	wantOIDC := OIDC{
-		Issuer:      "https://auth.example.org/application/o/battleship/",
-		Scopes:      []string{"openid", "profile", "email", "groups", "offline_access"},
-		GroupsClaim: "groups",
+		Issuer: "https://auth.example.org/application/o/battleship/",
+		Scopes: []string{"openid", "profile", "email", "offline_access"},
 	}
 	if !reflect.DeepEqual(cfg.OIDC, wantOIDC) {
 		t.Errorf("OIDC = %#v, want %#v", cfg.OIDC, wantOIDC)
@@ -75,8 +74,7 @@ templates = "*.kilo.alpha"
 issuer = "https://auth.example.org/application/o/battleship/"
 client_id = "battleship"
 client_secret = "from-file"
-scopes = ["openid", "groups", "offline_access"]
-groups_claim = "roles"
+scopes = ["openid", "profile", "offline_access"]
 `)
 	t.Setenv("BATTLESHIP_OIDC_CLIENT_SECRET", "from-env")
 	cfg, err := Load(path)
@@ -93,7 +91,7 @@ groups_claim = "roles"
 		t.Errorf("Web = %+v, want %+v", cfg.Web, wantWeb)
 	}
 	wantOIDC := OIDC{Issuer: "https://auth.example.org/application/o/battleship/", ClientID: "battleship", ClientSecret: "from-env",
-		Scopes: []string{"openid", "groups", "offline_access"}, GroupsClaim: "roles"}
+		Scopes: []string{"openid", "profile", "offline_access"}}
 	if !reflect.DeepEqual(cfg.OIDC, wantOIDC) {
 		t.Errorf("OIDC = %#v, want the env secret and file values", cfg.OIDC)
 	}
@@ -152,8 +150,7 @@ func TestWebValidation(t *testing.T) {
 		{"trusted proxy not a CIDR", func(c *Config) { c.Web.TrustedProxies = []string{"10.0.0.1"} }, `web.trusted_proxies: "10.0.0.1" is not a CIDR (for one address, use 10.0.0.1/32)`},
 		{"trusted proxy garbage", func(c *Config) { c.Web.TrustedProxies = []string{"proxy"} }, `web.trusted_proxies: "proxy" is not a CIDR`},
 		{"issuer not a url", func(c *Config) { c.OIDC.Issuer = "auth.example.org" }, "oidc.issuer must be an http(s) URL with a host"},
-		{"scopes without openid", func(c *Config) { c.OIDC.Scopes = []string{"profile", "groups"} }, `oidc.scopes must include "openid"`},
-		{"groups_claim empty", func(c *Config) { c.OIDC.GroupsClaim = " " }, "oidc.groups_claim is required"},
+		{"scopes without openid", func(c *Config) { c.OIDC.Scopes = []string{"profile", "email"} }, `oidc.scopes must include "openid"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -194,7 +191,7 @@ func TestRequireWeb(t *testing.T) {
 		{"issuer", func(c *Config) { c.OIDC.Issuer = "" }, "oidc.issuer (or BATTLESHIP_OIDC_ISSUER) is required"},
 		{"client_id", func(c *Config) { c.OIDC.ClientID = " " }, "oidc.client_id (or BATTLESHIP_OIDC_CLIENT_ID) is required"},
 		{"client_secret", func(c *Config) { c.OIDC.ClientSecret = "" }, "oidc.client_secret (or BATTLESHIP_OIDC_CLIENT_SECRET) is required"},
-		{"offline_access", func(c *Config) { c.OIDC.Scopes = []string{"openid", "profile", "email", "groups"} },
+		{"offline_access", func(c *Config) { c.OIDC.Scopes = []string{"openid", "profile", "email"} },
 			`oidc.scopes must include "offline_access"`},
 	}
 	for _, tc := range cases {

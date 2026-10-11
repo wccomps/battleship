@@ -149,3 +149,12 @@ func TestLoadRefusesWebTeams(t *testing.T) {
 		t.Errorf("error %q also calls web.teams unknown or a token setting", err)
 	}
 }
+
+// oidc.groups_claim is refused with a reason too.
+func TestLoadRefusesGroupsClaim(t *testing.T) {
+	path := writeFile(t, "[proxmox]\nurl = \"https://pve.example:8006\"\n\n[oidc]\ngroups_claim = \"groups\"\n")
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "these settings were removed: oidc.groups_claim. Battleship doesn't use groups; delete the line") {
+		t.Fatalf("Load with oidc.groups_claim = %v", err)
+	}
+}

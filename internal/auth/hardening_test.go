@@ -31,26 +31,12 @@ func checkQuotedBody(t *testing.T, logs string) {
 }
 
 func TestProviderBodiesAreQuotedAndTruncated(t *testing.T) {
-	t.Run("userinfo at login", func(t *testing.T) {
-		h := newHarness(t)
-		h.idp.set(func(f *fakeIDP) {
-			f.groupsInIDToken = false
-			f.userinfoStatus = http.StatusForbidden
-			f.failBody = hostileBody
-		})
-		b := h.browser()
-		h.idp.setUser(alice)
-		if resp := b.get("/auth/login?next=/private"); resp.StatusCode != http.StatusInternalServerError {
-			t.Errorf("login = %d, want 500", resp.StatusCode)
-		}
-		checkQuotedBody(t, h.logs.String())
-	})
 	t.Run("userinfo at refresh", func(t *testing.T) {
 		h := newHarness(t)
 		b := h.browser()
 		b.login(alice)
 		h.idp.set(func(f *fakeIDP) {
-			f.groupsInIDToken = false
+			f.noIDTokenRefresh = true
 			f.userinfoStatus = http.StatusServiceUnavailable
 			f.failBody = hostileBody
 		})
@@ -140,8 +126,8 @@ func TestSealedRefreshTokenIsBoundToItsSession(t *testing.T) {
 	if _, err := auth.OpenRefreshToken(h.svc, lenaSess.ID, aliceSealed); err == nil {
 		t.Fatal("alice's sealed token opened as lena's")
 	}
-	err := h.st.UpdateSessionGroups(ctx, lenaSess.ID, store.SessionUpdate{
-		Name: lenaSess.Name, Email: lenaSess.Email, Groups: lenaSess.Groups,
+	err := h.st.UpdateSession(ctx, lenaSess.ID, store.SessionUpdate{
+		Name: lenaSess.Name, Email: lenaSess.Email,
 		RefreshToken: aliceSealed, RefreshedAt: lenaSess.RefreshedAt,
 	})
 	if err != nil {

@@ -125,7 +125,6 @@ func (s *Service) callback(w http.ResponseWriter, r *http.Request) {
 		Username:     id.Username,
 		Name:         id.Name,
 		Email:        id.Email,
-		Groups:       id.Groups,
 		RefreshToken: sealedRT,
 		CSRF:         randomToken(),
 		CreatedAt:    now,
@@ -203,11 +202,6 @@ var (
 		Title:   "Login refused",
 		Message: "The login couldn't be verified, so battleship didn't log you in. Please try again; if it keeps failing, tell a lead.",
 		Link:    "/auth/login", LinkText: "Try logging in again",
-	}
-	groupsPage = Page{
-		Status:  http.StatusInternalServerError,
-		Title:   "Login didn't finish",
-		Message: "Authentik sent the user's groups in a form battleship can't read. An admin should check the groups scope mapping and oidc.groups_claim.",
 	}
 	noRefreshPage = Page{
 		Status: http.StatusInternalServerError,

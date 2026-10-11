@@ -141,17 +141,17 @@ func TestCookieMaxAgeNeverPassesAbsoluteExpiry(t *testing.T) {
 	}
 }
 
-func TestRefreshRereadsGroups(t *testing.T) {
+func TestRefreshRereadsIdentity(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	b.login(lena)
 	firstRT := b.refreshToken()
 
-	// An admin removes Lena from battleship-leads. Until the next refresh
-	// her session keeps the groups it had.
-	h.idp.setGroups(lena.Sub, "battleship-operators")
+	// An admin renames Lena. Until the next refresh her session keeps the
+	// name it had.
+	h.idp.rename(lena.Sub, "Lena Renamed")
 	h.clock.Advance(5*time.Minute - time.Second)
-	if resp := b.do(http.MethodGet, "/private", nil, nil); !strings.Contains(resp.body, "groups=battleship-leads,battleship-operators") {
+	if resp := b.do(http.MethodGet, "/private", nil, nil); !strings.Contains(resp.body, "user=Lena Lead pve") {
 		t.Fatalf("before the refresh: /private = %q", resp.body)
 	}
 	if n := h.idp.refreshCount(); n != 0 {
@@ -159,8 +159,8 @@ func TestRefreshRereadsGroups(t *testing.T) {
 	}
 
 	h.clock.Advance(time.Second)
-	if resp := b.do(http.MethodGet, "/private", nil, nil); !strings.Contains(resp.body, "groups=battleship-operators pve") {
-		t.Errorf("/private = %q, want the new groups", resp.body)
+	if resp := b.do(http.MethodGet, "/private", nil, nil); !strings.Contains(resp.body, "user=Lena Renamed pve") {
+		t.Errorf("/private = %q, want the new name", resp.body)
 	}
 	sess := b.session()
 	if rt := b.refreshToken(); rt == firstRT || !slices.Contains(h.idp.refreshTokens(), rt) {
@@ -179,10 +179,10 @@ func TestRefreshWithoutIDTokenUsesUserinfo(t *testing.T) {
 	h.idp.set(func(f *fakeIDP) { f.noIDTokenRefresh = true })
 	b := h.browser()
 	b.login(lena)
-	h.idp.setGroups(lena.Sub, "battleship-operators")
+	h.idp.rename(lena.Sub, "Lena Renamed")
 	h.clock.Advance(5 * time.Minute)
-	if resp := b.do(http.MethodGet, "/private", nil, nil); !strings.Contains(resp.body, "groups=battleship-operators pve") {
-		t.Errorf("/private = %d %q, want the groups from userinfo", resp.StatusCode, resp.body)
+	if resp := b.do(http.MethodGet, "/private", nil, nil); !strings.Contains(resp.body, "user=Lena Renamed pve") {
+		t.Errorf("/private = %d %q, want the name from userinfo", resp.StatusCode, resp.body)
 	}
 }
 
@@ -202,7 +202,10 @@ func TestRefreshRejectedEndsSession(t *testing.T) {
 		},
 		"ID token signed with an unknown key": func(h *harness) { h.idp.set(func(f *fakeIDP) { f.signWithOther = true }) },
 		"userinfo 401": func(h *harness) {
-			h.idp.set(func(f *fakeIDP) { f.groupsInIDToken = false; f.userinfoStatus = http.StatusUnauthorized })
+			h.idp.set(func(f *fakeIDP) { f.noIDTokenRefresh = true; f.userinfoStatus = http.StatusUnauthorized })
+		},
+		"userinfo for another user": func(h *harness) {
+			h.idp.set(func(f *fakeIDP) { f.noIDTokenRefresh = true; f.userinfoSub = "sub-mallory" })
 		},
 	}
 	for name, breakIt := range cases {
@@ -243,7 +246,7 @@ var outages = map[string]func(h *harness) (restore func()){
 		return func() { h.idp.set(func(f *fakeIDP) { f.jwksStatus = 0 }) }
 	},
 	"userinfo 503": func(h *harness) func() {
-		h.idp.set(func(f *fakeIDP) { f.groupsInIDToken = false; f.userinfoStatus = http.StatusServiceUnavailable })
+		h.idp.set(func(f *fakeIDP) { f.noIDTokenRefresh = true; f.userinfoStatus = http.StatusServiceUnavailable })
 		return func() { h.idp.set(func(f *fakeIDP) { f.userinfoStatus = 0 }) }
 	},
 	// Only a 400 or 401 carrying an OAuth error code is a rejection; other
@@ -292,12 +295,12 @@ func TestRefreshUnreachableKeepsSession(t *testing.T) {
 			b := h.browser()
 			b.login(lena)
 			refreshed := b.session().RefreshedAt
-			h.idp.setGroups(lena.Sub, "staff") // unseen until a refresh succeeds
+			h.idp.rename(lena.Sub, "Lena Renamed") // unseen until a refresh succeeds
 			outage(h)
 			h.clock.Advance(5 * time.Minute)
 			resp := b.do(http.MethodGet, "/private", nil, nil)
-			if resp.StatusCode != http.StatusOK || !strings.Contains(resp.body, "groups=battleship-leads,battleship-operators") {
-				t.Fatalf("during the outage: %d %q, want 200 with the existing groups", resp.StatusCode, resp.body)
+			if resp.StatusCode != http.StatusOK || !strings.Contains(resp.body, "user=Lena Lead pve") {
+				t.Fatalf("during the outage: %d %q, want 200 with the existing name", resp.StatusCode, resp.body)
 			}
 			sess := b.session()
 			now := h.clock.Now()
@@ -326,20 +329,20 @@ func TestRefreshRetriesAfterBackoff(t *testing.T) {
 			h.clock.Advance(5 * time.Minute)
 			b.do(http.MethodGet, "/private", nil, nil) // fails, backs off
 			restore()
-			h.idp.setGroups(lena.Sub, "battleship-operators")
+			h.idp.rename(lena.Sub, "Lena Renamed")
 			tried := h.idp.tokenRequestCount()
 
 			h.clock.Advance(time.Minute - time.Second)
-			if resp := b.do(http.MethodGet, "/private", nil, nil); !strings.Contains(resp.body, "groups=battleship-leads,battleship-operators") {
-				t.Errorf("during the backoff: %d %q, want the existing groups", resp.StatusCode, resp.body)
+			if resp := b.do(http.MethodGet, "/private", nil, nil); !strings.Contains(resp.body, "user=Lena Lead pve") {
+				t.Errorf("during the backoff: %d %q, want the existing name", resp.StatusCode, resp.body)
 			}
 			if n := h.idp.tokenRequestCount(); n != tried {
 				t.Errorf("%d token requests during the backoff, want none", n-tried)
 			}
 
 			h.clock.Advance(time.Second)
-			if resp := b.do(http.MethodGet, "/private", nil, nil); !strings.Contains(resp.body, "groups=battleship-operators pve") {
-				t.Errorf("after the backoff: %d %q, want the refreshed groups", resp.StatusCode, resp.body)
+			if resp := b.do(http.MethodGet, "/private", nil, nil); !strings.Contains(resp.body, "user=Lena Renamed pve") {
+				t.Errorf("after the backoff: %d %q, want the refreshed name", resp.StatusCode, resp.body)
 			}
 			sess := b.session()
 			if !sess.RefreshedAt.Equal(h.clock.Now()) || !sess.RefreshFailedAt.IsZero() || !sess.RefreshRetryAt.IsZero() {
@@ -605,7 +608,7 @@ func TestSessionIDIsTheStoredKey(t *testing.T) {
 	}
 }
 
-// SessionRefreshedAt is the session's last group check: its login, then
+// SessionRefreshedAt is the session's last check with the provider: its login, then
 // each refresh, including one the request itself just made.
 func TestSessionRefreshedAt(t *testing.T) {
 	h := newHarness(t)

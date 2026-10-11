@@ -150,7 +150,7 @@ func (sw *sseWriter) comment(text string) error {
 //   - CloseStreams is called (shutdown);
 //   - the hub stops; the browser reconnects from current state (the hub never
 //     drops a slow stream, it coalesces);
-//   - the session's next group check falls due (see streamLifetime), so the
+//   - the session's next refresh falls due (see streamLifetime), so the
 //     browser reconnects through the login check and someone who lost access
 //     stops getting updates;
 //   - a write exceeds sseWriteTimeout.

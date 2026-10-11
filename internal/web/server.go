@@ -276,7 +276,7 @@ const heartbeatEvery = 15 * time.Second
 const streamJitter = 0.1
 
 // minStreamLifetime is the shortest an event stream lasts when its session's
-// group check is overdue (in flight elsewhere, or the IdP is backing off);
+// refresh is overdue (in flight elsewhere, or the IdP is backing off);
 // ending at once would have the browser reconnect every few seconds.
 const minStreamLifetime = time.Minute
 

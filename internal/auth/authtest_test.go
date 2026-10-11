@@ -26,9 +26,9 @@ func TestAuthtestLogin(t *testing.T) {
 		return rec
 	}
 
-	lead := authtest.Login(t, h.st, h.cfg, authtest.User{Name: "Lena", Groups: []string{"leads"}, At: h.clock.Now()})
+	lead := authtest.Login(t, h.st, h.cfg, authtest.User{Name: "Lena", At: h.clock.Now()})
 	if rec := serve(lead, http.MethodGet, "/private", true); rec.Code != http.StatusOK ||
-		!strings.Contains(rec.Body.String(), "user=Lena groups=leads pve=test-user@auth.example.org") {
+		!strings.Contains(rec.Body.String(), "user=Lena pve=test-user@auth.example.org") {
 		t.Errorf("/private = %d %s", rec.Code, rec.Body)
 	}
 	if rec := serve(lead, http.MethodPost, "/private", true); rec.Code != http.StatusOK {

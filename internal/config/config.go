@@ -277,6 +277,7 @@ var removedKeys = map[string]string{
 	"roles.operators":      removedToken,
 	"roles.leads":          removedToken,
 	"web.teams":            "Battleship shows the teams that have VMs; delete the line",
+	"oidc.groups_claim":    "Battleship doesn't use groups; delete the line",
 }
 
 const removedToken = "Battleship holds no Proxmox token or roles of its own. " +

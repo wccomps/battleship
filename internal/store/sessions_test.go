@@ -19,7 +19,6 @@ func newSession(id string) store.Session {
 		Subject:      "sub-alice",
 		Name:         "Alice",
 		Email:        "alice@example.org",
-		Groups:       []string{"battleship-operators", "staff"},
 		RefreshToken: "refresh-1",
 		CSRF:         "csrf-1",
 		CreatedAt:    t0,
@@ -105,20 +104,6 @@ func TestCreateSessionRejects(t *testing.T) {
 	}
 }
 
-func TestSessionNilGroupsReadBackEmpty(t *testing.T) {
-	s := storetest.New(t)
-	sess := newSession("hash-1")
-	sess.Groups = nil
-	createSession(t, s, sess)
-	got, err := s.Session(ctx, "hash-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Groups == nil || len(got.Groups) != 0 {
-		t.Errorf("Groups = %#v, want empty, non-nil", got.Groups)
-	}
-}
-
 func TestTouchSession(t *testing.T) {
 	s := storetest.New(t)
 	createSession(t, s, newSession("hash-1"))
@@ -167,7 +152,7 @@ func TestClaimSessionRefreshIsExclusive(t *testing.T) {
 		t.Errorf("claim after it lapsed = %v, %v; want true", won, err)
 	}
 	// A reader that saw an older refreshed_at loses once a refresh landed.
-	if err := s.UpdateSessionGroups(ctx, "hash-1", store.SessionUpdate{RefreshToken: "r2", RefreshedAt: until}); err != nil {
+	if err := s.UpdateSession(ctx, "hash-1", store.SessionUpdate{RefreshToken: "r2", RefreshedAt: until}); err != nil {
 		t.Fatal(err)
 	}
 	if won, err := s.ClaimSessionRefresh(ctx, "hash-1", t0, until.Add(time.Hour), until.Add(2*time.Hour)); err != nil || won {
@@ -204,7 +189,7 @@ func TestRecordSessionRefreshFailure(t *testing.T) {
 		t.Errorf("refresh token = %q, want the rotated one", got.RefreshToken)
 	}
 	// A successful refresh clears both.
-	if err := s.UpdateSessionGroups(ctx, "hash-1", store.SessionUpdate{RefreshToken: "r2", RefreshedAt: retry}); err != nil {
+	if err := s.UpdateSession(ctx, "hash-1", store.SessionUpdate{RefreshToken: "r2", RefreshedAt: retry}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = s.Session(ctx, "hash-1")
@@ -216,34 +201,33 @@ func TestRecordSessionRefreshFailure(t *testing.T) {
 	}
 }
 
-func TestUpdateSessionGroups(t *testing.T) {
+func TestUpdateSession(t *testing.T) {
 	s := storetest.New(t)
 	createSession(t, s, newSession("hash-1"))
 	up := store.SessionUpdate{
 		Name:         "Alice B",
 		Email:        "ab@example.org",
-		Groups:       []string{"battleship-leads"},
 		RefreshToken: "refresh-2",
 		RefreshedAt:  t0.Add(5 * time.Minute),
 	}
-	if err := s.UpdateSessionGroups(ctx, "hash-1", up); err != nil {
+	if err := s.UpdateSession(ctx, "hash-1", up); err != nil {
 		t.Fatal(err)
 	}
 	want := newSession("hash-1")
-	want.Name, want.Email, want.Groups, want.RefreshToken, want.RefreshedAt =
-		up.Name, up.Email, up.Groups, up.RefreshToken, up.RefreshedAt
+	want.Name, want.Email, want.RefreshToken, want.RefreshedAt =
+		up.Name, up.Email, up.RefreshToken, up.RefreshedAt
 	got, err := s.Session(ctx, "hash-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	sameSession(t, got, want)
 
-	if err := s.UpdateSessionGroups(ctx, "gone", up); !errors.Is(err, store.ErrSessionNotFound) {
-		t.Errorf("UpdateSessionGroups(unknown) err = %v, want ErrSessionNotFound", err)
+	if err := s.UpdateSession(ctx, "gone", up); !errors.Is(err, store.ErrSessionNotFound) {
+		t.Errorf("UpdateSession(unknown) err = %v, want ErrSessionNotFound", err)
 	}
 	up.RefreshToken = ""
-	if err := s.UpdateSessionGroups(ctx, "hash-1", up); !errors.Is(err, store.ErrEmptySession) {
-		t.Errorf("UpdateSessionGroups without a refresh token err = %v, want ErrEmptySession", err)
+	if err := s.UpdateSession(ctx, "hash-1", up); !errors.Is(err, store.ErrEmptySession) {
+		t.Errorf("UpdateSession without a refresh token err = %v, want ErrEmptySession", err)
 	}
 }
 

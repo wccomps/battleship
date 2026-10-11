@@ -20,7 +20,7 @@ type Web struct {
 	// shows even before every team has them. Empty shows only hosts with VMs.
 	Templates string `toml:"templates"`
 	// SessionIdle and SessionMax end a session after idle time and after
-	// login. Every SessionRefresh it re-checks the user's groups with the IdP.
+	// login. Every SessionRefresh it re-checks the user with the IdP.
 	SessionIdle    time.Duration `toml:"session_idle"`
 	SessionMax     time.Duration `toml:"session_max"`
 	SessionRefresh time.Duration `toml:"session_refresh"`
@@ -57,7 +57,6 @@ type OIDC struct {
 	ClientID     string   `toml:"client_id"`     // overridden by BATTLESHIP_OIDC_CLIENT_ID
 	ClientSecret string   `toml:"client_secret"` // overridden by BATTLESHIP_OIDC_CLIENT_SECRET
 	Scopes       []string `toml:"scopes"`
-	GroupsClaim  string   `toml:"groups_claim"` // the ID token or userinfo claim that lists the user's groups
 }
 
 // String redacts the client secret so a config can be logged safely.
@@ -66,8 +65,8 @@ func (o OIDC) String() string {
 	if o.ClientSecret != "" {
 		secret = "[redacted]"
 	}
-	return fmt.Sprintf("{Issuer:%s ClientID:%s ClientSecret:%s Scopes:%v GroupsClaim:%s}",
-		o.Issuer, o.ClientID, secret, o.Scopes, o.GroupsClaim)
+	return fmt.Sprintf("{Issuer:%s ClientID:%s ClientSecret:%s Scopes:%v}",
+		o.Issuer, o.ClientID, secret, o.Scopes)
 }
 
 // GoString redacts the client secret for %#v.
@@ -88,9 +87,8 @@ func defaultWeb() Web {
 
 func defaultOIDC() OIDC {
 	return OIDC{
-		Issuer:      "https://auth.example.org/application/o/battleship/",
-		Scopes:      []string{"openid", "profile", "email", "groups", "offline_access"},
-		GroupsClaim: "groups",
+		Issuer: "https://auth.example.org/application/o/battleship/",
+		Scopes: []string{"openid", "profile", "email", "offline_access"},
 	}
 }
 
@@ -127,7 +125,7 @@ func (c Config) validateWeb() []error {
 	if w.SessionRefresh < 30*time.Second {
 		errs = append(errs, errors.New("web.session_refresh must be at least 30s"))
 	} else if w.SessionRefresh >= w.SessionMax {
-		errs = append(errs, errors.New("web.session_refresh must be shorter than web.session_max, or group changes would never apply"))
+		errs = append(errs, errors.New("web.session_refresh must be shorter than web.session_max, or sessions would never be re-checked"))
 	}
 	if w.StatusPoll < time.Second {
 		errs = append(errs, errors.New("web.status_poll must be at least 1s"))
@@ -152,10 +150,6 @@ func (c Config) validateWeb() []error {
 	if !slices.Contains(o.Scopes, "openid") {
 		errs = append(errs, errors.New(`oidc.scopes must include "openid"`))
 	}
-	if strings.TrimSpace(o.GroupsClaim) == "" {
-		errs = append(errs, errors.New("oidc.groups_claim is required"))
-	}
-
 	return errs
 }
 
@@ -176,7 +170,7 @@ func (c Config) RequireWeb() error {
 		errs = append(errs, errors.New("oidc.client_secret (or BATTLESHIP_OIDC_CLIENT_SECRET) is required"))
 	}
 	if !slices.Contains(c.OIDC.Scopes, "offline_access") {
-		errs = append(errs, errors.New(`oidc.scopes must include "offline_access": without it the identity provider issues no refresh token, and sessions can't re-check the user's groups`))
+		errs = append(errs, errors.New(`oidc.scopes must include "offline_access": without it the identity provider issues no refresh token, and sessions can't re-check the user`))
 	}
 	return errors.Join(errs...)
 }

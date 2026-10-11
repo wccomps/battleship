@@ -215,7 +215,7 @@ func TestSessionWithoutAUsernameLogsInAgain(t *testing.T) {
 	b := h.browser()
 	b.login(alice)
 	sess := b.session()
-	if err := h.st.UpdateSessionGroups(ctx, sess.ID, store.SessionUpdate{Name: sess.Name, Email: sess.Email, Groups: sess.Groups,
+	if err := h.st.UpdateSession(ctx, sess.ID, store.SessionUpdate{Name: sess.Name, Email: sess.Email,
 		RefreshToken: sess.RefreshToken, RefreshedAt: sess.RefreshedAt}); err != nil {
 		t.Fatal(err)
 	}

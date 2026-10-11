@@ -29,7 +29,6 @@ type User struct {
 	// Username is the preferred_username; default the subject without
 	// "sub-", or the Proxmox ticket's user's name.
 	Username string
-	Groups   []string
 	// At is the login time on the auth.Service clock; default time.Now().
 	// The fake refresh token isn't sealed, so the session ends at its first
 	// refresh, web.session_refresh after At.
@@ -80,7 +79,6 @@ func Login(t testing.TB, st *store.Store, cfg config.Config, u User) Session {
 		u.At = time.Now()
 	}
 	u.defaults()
-	groups := u.Groups
 	token, csrf := random(), random()
 	exp := u.At.Add(min(cfg.Web.SessionIdle, cfg.Web.SessionMax))
 	err := st.CreateSession(t.Context(), store.Session{
@@ -89,7 +87,6 @@ func Login(t testing.TB, st *store.Store, cfg config.Config, u User) Session {
 		Username:     u.username(),
 		Name:         u.Name,
 		Email:        u.Email,
-		Groups:       groups,
 		RefreshToken: "authtest-refresh-token",
 		CSRF:         csrf,
 		CreatedAt:    u.At,
@@ -148,9 +145,6 @@ func (u *User) defaults() {
 	}
 	if u.Email == "" {
 		u.Email = u.Subject + "@example.org"
-	}
-	if u.Groups == nil {
-		u.Groups = []string{}
 	}
 }
 

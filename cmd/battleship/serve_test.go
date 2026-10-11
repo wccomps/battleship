@@ -752,7 +752,7 @@ func TestServeCleansUpExpiredSessions(t *testing.T) {
 			exp = time.Now().Add(time.Hour)
 		}
 		err := st.CreateSession(context.Background(), store.Session{
-			ID: id, Subject: "sub-" + id, RefreshToken: "rt", CSRF: "c", Groups: []string{"battleship-operators"},
+			ID: id, Subject: "sub-" + id, RefreshToken: "rt", CSRF: "c",
 			CreatedAt: old, LastSeen: old, RefreshedAt: old, ExpiresAt: exp,
 		})
 		if err != nil {

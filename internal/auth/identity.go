@@ -23,7 +23,6 @@ type identity struct {
 	Username string // preferred_username
 	Name     string
 	Email    string
-	Groups   []string
 }
 
 // expect is what identify checks beyond the ID token's signature, issuer,
@@ -32,8 +31,8 @@ type expect struct {
 	// nonce, at login, must match the ID token's nonce. A login needs an
 	// ID token.
 	nonce string
-	// subject, at refresh, must match the ID token (if the response has
-	// one) and userinfo.
+	// subject, at refresh, must match the ID token, or userinfo when the
+	// response has none.
 	subject string
 }
 
@@ -83,9 +82,8 @@ func unverified(format string, args ...any) error {
 	return &loginFailure{page: unverifiedPage, err: fmt.Errorf(format, args...)}
 }
 
-// identify reads the user's identity and groups from a token response.
-// Groups fall back to userinfo when the ID token lacks the claim or is
-// absent (some refresh responses have none).
+// identify reads the user's identity from a token response, falling back
+// to userinfo when it has no ID token (some refresh responses have none).
 func (s *Service) identify(ctx context.Context, tok *oauth2.Token, want expect) (identity, error) {
 	var id identity
 	claims := map[string]json.RawMessage{}
@@ -112,19 +110,12 @@ func (s *Service) identify(ctx context.Context, tok *oauth2.Token, want expect) 
 			return id, unverified("ID token claims: %v", err)
 		}
 		id.Subject = idt.Subject
+		if want.subject != "" && id.Subject != want.subject {
+			return id, unverified("ID token is for subject %q, not %q", id.Subject, want.subject)
+		}
 	case want.nonce != "":
 		return id, unverified("the token response has no ID token")
-	}
-	if want.subject != "" && id.Subject != "" && id.Subject != want.subject {
-		return id, unverified("ID token is for subject %q, not %q", id.Subject, want.subject)
-	}
-	id.Name, id.Email, id.Username = displayName(claims), stringClaim(claims, "email"), stringClaim(claims, "preferred_username")
-
-	groups, found, err := groupsFrom(claims, s.cfg.OIDC.GroupsClaim)
-	if err != nil {
-		return id, &loginFailure{page: groupsPage, err: fmt.Errorf("ID token: %w", err)}
-	}
-	if !found {
+	default:
 		info, err := s.provider.UserInfo(ctx, oauth2.StaticTokenSource(tok))
 		if err != nil {
 			unreach := userinfoUnreachable(err)
@@ -134,41 +125,21 @@ func (s *Service) identify(ctx context.Context, tok *oauth2.Token, want expect) 
 			}
 			return id, &loginFailure{page: providerPage, err: err}
 		}
-		switch {
-		case info.Subject == "":
-			return id, unverified("userinfo has no subject")
-		case id.Subject == "":
-			id.Subject = info.Subject
-		case info.Subject != id.Subject:
-			return id, unverified("userinfo is for subject %q, not %q", info.Subject, id.Subject)
+		if info.Subject != want.subject {
+			return id, unverified("userinfo is for subject %q, not %q", info.Subject, want.subject)
 		}
-		uclaims := map[string]json.RawMessage{}
-		if err := info.Claims(&uclaims); err != nil {
+		if err := info.Claims(&claims); err != nil {
 			return id, &loginFailure{page: providerPage, err: fmt.Errorf("userinfo claims: %w", err)}
 		}
-		if groups, _, err = groupsFrom(uclaims, s.cfg.OIDC.GroupsClaim); err != nil {
-			return id, &loginFailure{page: groupsPage, err: fmt.Errorf("userinfo: %w", err)}
-		}
-		if id.Name == "" {
-			id.Name = displayName(uclaims)
-		}
-		if id.Email == "" {
-			id.Email = stringClaim(uclaims, "email")
-		}
-		if id.Username == "" {
-			id.Username = stringClaim(uclaims, "preferred_username")
-		}
+		id.Subject = info.Subject
 	}
 	if id.Subject == "" {
 		return id, unverified("no subject")
 	}
-	if want.subject != "" && id.Subject != want.subject {
-		return id, unverified("the refreshed identity is subject %q, not %q", id.Subject, want.subject)
-	}
+	id.Name, id.Email, id.Username = displayName(claims), stringClaim(claims, "email"), stringClaim(claims, "preferred_username")
 	if id.Name == "" {
 		id.Name = id.Subject
 	}
-	id.Groups = groups
 	return id, nil
 }
 
@@ -238,23 +209,6 @@ func (e *providerError) Error() string {
 	return e.what + ": " + strconv.Quote(truncate(e.err.Error(), providerTextLimit))
 }
 func (e *providerError) Unwrap() error { return e.err }
-
-// groupsFrom reads the named claim as a list of group names. A lone string
-// is one group. found is false when the claim is absent or null.
-func groupsFrom(claims map[string]json.RawMessage, name string) (groups []string, found bool, err error) {
-	raw, ok := claims[name]
-	if !ok || string(raw) == "null" {
-		return nil, false, nil
-	}
-	if err := json.Unmarshal(raw, &groups); err == nil {
-		return groups, true, nil
-	}
-	var one string
-	if err := json.Unmarshal(raw, &one); err == nil {
-		return []string{one}, true, nil
-	}
-	return nil, true, fmt.Errorf("the %q claim is not a list of group names", name)
-}
 
 func stringClaim(claims map[string]json.RawMessage, name string) string {
 	var v string
