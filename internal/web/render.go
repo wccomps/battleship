@@ -141,12 +141,12 @@ func nav(u *auth.User) []navItem {
 	return []navItem{{"grid", "Grid", "/"}, {"logs", "Logs", logsPath}}
 }
 
-// leadOps is deploy and teardown, those the user holds a privilege for
-// somewhere.
+// leadOps is the page operations (deploy and teardown) the user holds a
+// privilege for somewhere.
 func (s *Server) leadOps(ctx context.Context) []navItem {
 	var items []navItem
 	for _, op := range operations {
-		if (op.Kind == pods.KindDeploy || op.Kind == pods.KindTeardown) && s.mayRun(ctx, op.Kind) {
+		if op.page() && s.mayRun(ctx, op.Kind) {
 			items = append(items, navItem{string(op.Kind), op.Title, op.Path})
 		}
 	}

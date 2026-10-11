@@ -33,7 +33,9 @@ var operations = []operation{
 
 // page reports whether the operation opens as its own page rather than in
 // the grid's side panel: deploy and teardown act on whole teams, not on VMs
-// picked in the grid, and their previews are long.
+// picked in the grid, and their previews are long. These are the header's
+// buttons (leadOps) and keep job.html's "Preview again" out of the panel;
+// the grid's and VM page's Deploy links leave out data-panel-link for it.
 func (o operation) page() bool { return o.Kind == pods.KindDeploy || o.Kind == pods.KindTeardown }
 
 func operationFor(kind pods.Kind) (operation, bool) {
