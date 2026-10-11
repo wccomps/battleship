@@ -16,6 +16,19 @@ func fastLoops(c *config.Config, _ *Options) {
 	c.Web.DriftScan = 10 * time.Second
 }
 
+// settle waits until both of Run's loops wait for their next turn, then
+// drops any grid message left unread: the first scan can finish after the
+// test read the first poll's message, leaving its own message queued for the
+// next recv.
+func settle(t *testing.T, h *harness, sub <-chan Msg) {
+	t.Helper()
+	h.clock.BlockUntil(t, 2)
+	select {
+	case <-sub:
+	default:
+	}
+}
+
 // startRun runs the poller until the test ends.
 func startRun(t *testing.T, h *harness) {
 	t.Helper()
@@ -36,7 +49,7 @@ func TestRunPollsAndScansOnCadence(t *testing.T) {
 	// First poll, then first scan; the hub may merge their messages.
 	for recv(t, sub); h.p.Grid().ScannedAt.IsZero(); recv(t, sub) {
 	}
-	h.clock.BlockUntil(t, 2) // both loops wait for their next turn
+	settle(t, h, sub)
 	if g := h.p.Grid(); !g.ScannedAt.Equal(start) || cell(t, g, "01", "web").State != StateDrifted {
 		t.Errorf("after the first scan: scanned %v, 01/web %s", g.ScannedAt, cell(t, g, "01", "web").State)
 	}
@@ -144,7 +157,7 @@ func TestRunPollsWhenAJobChanges(t *testing.T) {
 	startRun(t, h)
 	for recv(t, sub); h.p.Grid().ScannedAt.IsZero(); recv(t, sub) {
 	}
-	h.clock.BlockUntil(t, 2)
+	settle(t, h, sub)
 
 	h.api.setStatus(10101, "stopped")
 	h.hub.Publish(Msg{Topic: TopicJobs})
