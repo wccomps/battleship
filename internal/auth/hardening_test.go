@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/wccomps/battleship/internal/auth"
+	"github.com/wccomps/battleship/internal/auth/authtest"
 	"github.com/wccomps/battleship/internal/store"
 )
 
@@ -35,10 +36,10 @@ func TestProviderBodiesAreQuotedAndTruncated(t *testing.T) {
 		h := newHarness(t)
 		b := h.browser()
 		b.login(alice)
-		h.idp.set(func(f *fakeIDP) {
-			f.noIDTokenRefresh = true
-			f.userinfoStatus = http.StatusServiceUnavailable
-			f.failBody = hostileBody
+		h.idp.Set(func(f *authtest.Behavior) {
+			f.NoIDTokenOnRefresh = true
+			f.UserinfoStatus = http.StatusServiceUnavailable
+			f.FailBody = hostileBody
 		})
 		h.clock.Advance(5 * time.Minute)
 		if resp := b.do(http.MethodGet, "/private", nil, nil); resp.StatusCode != http.StatusOK {
@@ -50,10 +51,10 @@ func TestProviderBodiesAreQuotedAndTruncated(t *testing.T) {
 		h := newHarness(t)
 		b := h.browser()
 		b.login(alice)
-		h.idp.set(func(f *fakeIDP) {
-			f.kid = "k2" // forces a key fetch
-			f.jwksStatus = http.StatusBadGateway
-			f.failBody = hostileBody
+		h.idp.Set(func(f *authtest.Behavior) {
+			f.KeyID = "k2" // forces a key fetch
+			f.JWKSStatus = http.StatusBadGateway
+			f.FailBody = hostileBody
 		})
 		h.clock.Advance(5 * time.Minute)
 		if resp := b.do(http.MethodGet, "/private", nil, nil); resp.StatusCode != http.StatusOK {
@@ -67,13 +68,13 @@ func TestProviderBodiesAreQuotedAndTruncated(t *testing.T) {
 // HTML page) is logged quoted, like the provider's other answers.
 func TestUnparsableTokenAnswerIsQuoted(t *testing.T) {
 	h := newHarness(t)
-	h.idp.set(func(f *fakeIDP) {
-		f.tokenStatus = http.StatusOK
-		f.failBody = hostileBody
-		f.failContentType = "application/json"
+	h.idp.Set(func(f *authtest.Behavior) {
+		f.TokenStatus = http.StatusOK
+		f.FailBody = hostileBody
+		f.FailContentType = "application/json"
 	})
 	b := h.browser()
-	h.idp.setUser(alice)
+	h.idp.SignIn(alice)
 	if resp := b.get("/auth/login?next=/private"); resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("login = %d, want 500", resp.StatusCode)
 	}
@@ -95,12 +96,12 @@ func TestRefreshTokenIsSealedAtRest(t *testing.T) {
 		if !strings.HasPrefix(stored, "v1:") {
 			t.Errorf("%s: stored refresh token %q has no v1: prefix", when, stored)
 		}
-		for _, rt := range h.idp.refreshTokens() {
+		for _, rt := range h.idp.RefreshTokens() {
 			if strings.Contains(stored, rt) || strings.Contains(stored, strings.TrimPrefix(rt, "rt-")) {
 				t.Errorf("%s: the stored value contains the provider's refresh token", when)
 			}
 		}
-		if rt := b.refreshToken(); !slices.Contains(h.idp.refreshTokens(), rt) {
+		if rt := b.refreshToken(); !slices.Contains(h.idp.RefreshTokens(), rt) {
 			t.Errorf("%s: the stored value opens to %q, not a live refresh token", when, rt)
 		}
 	}
@@ -109,8 +110,8 @@ func TestRefreshTokenIsSealedAtRest(t *testing.T) {
 	if resp := b.do(http.MethodGet, "/private", nil, nil); resp.StatusCode != http.StatusOK {
 		t.Fatalf("refresh: %d", resp.StatusCode)
 	}
-	if h.idp.refreshCount() != 1 {
-		t.Fatalf("refreshed %d times, want 1", h.idp.refreshCount())
+	if h.idp.Refreshes() != 1 {
+		t.Fatalf("refreshed %d times, want 1", h.idp.Refreshes())
 	}
 	check("after a rotation")
 }
@@ -137,7 +138,7 @@ func TestSealedRefreshTokenIsBoundToItsSession(t *testing.T) {
 	h.clock.Advance(5 * time.Minute)
 	wantLoginRedirect(t, bl.do(http.MethodGet, "/private", nil, nil), "/private")
 	h.sessionGone(token)
-	if n := h.idp.tokenRequestCount(); n != 2 { // the two logins
+	if n := len(h.idp.TokenRequests()); n != 2 { // the two logins
 		t.Errorf("%d token requests, want only the 2 logins", n)
 	}
 	if logs := h.logs.String(); !strings.Contains(logs, `refresh rejected: subject="sub-lena"`) {
@@ -152,7 +153,7 @@ func TestClientSecretRotationEndsSessionsAtRefresh(t *testing.T) {
 	b := h.browser()
 	b.login(alice)
 	token := b.sessionToken()
-	h.idp.set(func(f *fakeIDP) { f.secret = "rotated-secret" })
+	h.idp.Set(func(f *authtest.Behavior) { f.ClientSecret = "rotated-secret" })
 	cfg := h.cfg
 	cfg.OIDC.ClientSecret = "rotated-secret"
 	h.restart(cfg)
@@ -171,7 +172,7 @@ func TestClientSecretRotationEndsSessionsAtRefresh(t *testing.T) {
 	h.clock.Advance(time.Second)
 	wantLoginRedirect(t, b.do(http.MethodGet, "/private", nil, nil), "/private")
 	h.sessionGone(token)
-	if n := h.idp.tokenRequestCount(); n != 1 {
+	if n := len(h.idp.TokenRequests()); n != 1 {
 		t.Errorf("%d token requests, want only the login's", n)
 	}
 	logs := h.logs.String()
@@ -186,15 +187,15 @@ func TestClientSecretRotationEndsSessionsAtRefresh(t *testing.T) {
 // provider's discovery document advertises them.
 var unsafeAlgs = []string{"none", "HS256-secret", "HS256-jwk"}
 
-func advertiseUnsafe(f *fakeIDP) { f.advertiseAlgs = []string{"none", "HS256"} }
+func advertiseUnsafe(f *authtest.Behavior) { f.AdvertiseAlgs = []string{"none", "HS256"} }
 
 func TestUnsafeIDTokenAlgorithmsAreRejectedAtLogin(t *testing.T) {
 	for _, alg := range unsafeAlgs {
 		t.Run(alg, func(t *testing.T) {
 			h := newHarness(t)
-			h.idp.set(advertiseUnsafe)
+			h.idp.Set(advertiseUnsafe)
 			h.restart(h.cfg) // rediscover with the advertised algorithms
-			h.idp.set(func(f *fakeIDP) { f.signAlg = alg })
+			h.idp.Set(func(f *authtest.Behavior) { f.SignAlg = alg })
 			b := h.browser()
 			cb := b.startLogin(alice, "/private")
 			resp := b.do(http.MethodGet, cb.String(), nil, nil)
@@ -216,12 +217,12 @@ func TestUnsafeIDTokenAlgorithmsAreRejectedAtRefresh(t *testing.T) {
 	for _, alg := range unsafeAlgs {
 		t.Run(alg, func(t *testing.T) {
 			h := newHarness(t)
-			h.idp.set(advertiseUnsafe)
+			h.idp.Set(advertiseUnsafe)
 			h.restart(h.cfg)
 			b := h.browser()
 			b.login(alice)
 			token := b.sessionToken()
-			h.idp.set(func(f *fakeIDP) { f.signAlg = alg })
+			h.idp.Set(func(f *authtest.Behavior) { f.SignAlg = alg })
 			h.clock.Advance(5 * time.Minute)
 			wantLoginRedirect(t, b.do(http.MethodGet, "/private", nil, nil), "/private")
 			h.sessionGone(token)
@@ -237,7 +238,7 @@ func TestUnsafeIDTokenAlgorithmsAreRejectedAtRefresh(t *testing.T) {
 // an echoed token endpoint body.
 func checkNoLeak(t *testing.T, logs string, secrets map[string]string) {
 	t.Helper()
-	if strings.Contains(logs, echoMarker) {
+	if strings.Contains(logs, authtest.EchoMarker) {
 		t.Errorf("logs contain the token endpoint's body:\n%s", logs)
 	}
 	for name, v := range secrets {
@@ -259,7 +260,7 @@ func TestFailureLogsOmitCodeBodyAndSecret(t *testing.T) {
 			h := newHarness(t)
 			b := h.browser()
 			cb := b.startLogin(alice, "/private")
-			h.idp.set(func(f *fakeIDP) { f.tokenEcho = http.StatusBadRequest; f.tokenEchoJSON = jsonEcho })
+			h.idp.Set(func(f *authtest.Behavior) { f.TokenEcho = http.StatusBadRequest; f.TokenEchoJSON = jsonEcho })
 			resp := b.do(http.MethodGet, cb.String(), nil, nil)
 			if resp.StatusCode != http.StatusInternalServerError {
 				t.Errorf("callback = %d, want 500", resp.StatusCode)
@@ -268,10 +269,10 @@ func TestFailureLogsOmitCodeBodyAndSecret(t *testing.T) {
 			if !strings.Contains(logs, "login failed") {
 				t.Errorf("logs = %q, want the login failure", logs)
 			}
-			var verifier string
-			h.idp.set(func(f *fakeIDP) { verifier = f.tokenRequests[len(f.tokenRequests)-1].Get("code_verifier") })
+			reqs := h.idp.TokenRequests()
+			verifier := reqs[len(reqs)-1].Get("code_verifier")
 			checkNoLeak(t, logs, map[string]string{
-				"authorization code": cb.Query().Get("code"), "PKCE verifier": verifier, "client secret": h.idp.secret,
+				"authorization code": cb.Query().Get("code"), "PKCE verifier": verifier, "client secret": h.cfg.OIDC.ClientSecret,
 			})
 		})
 		t.Run("refresh/"+name, func(t *testing.T) {
@@ -279,14 +280,14 @@ func TestFailureLogsOmitCodeBodyAndSecret(t *testing.T) {
 			b := h.browser()
 			b.login(alice)
 			rt := b.refreshToken()
-			h.idp.set(func(f *fakeIDP) { f.tokenEcho = http.StatusBadRequest; f.tokenEchoJSON = jsonEcho })
+			h.idp.Set(func(f *authtest.Behavior) { f.TokenEcho = http.StatusBadRequest; f.TokenEchoJSON = jsonEcho })
 			h.clock.Advance(5 * time.Minute)
 			b.do(http.MethodGet, "/private", nil, nil)
 			logs := h.logs.String()
 			if !strings.Contains(logs, "refresh rejected") && !strings.Contains(logs, "refresh failed") {
 				t.Errorf("logs = %q, want the refresh failure", logs)
 			}
-			checkNoLeak(t, logs, map[string]string{"refresh token": rt, "client secret": h.idp.secret})
+			checkNoLeak(t, logs, map[string]string{"refresh token": rt, "client secret": h.cfg.OIDC.ClientSecret})
 		})
 	}
 }

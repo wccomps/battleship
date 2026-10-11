@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/wccomps/battleship/internal/auth"
+	"github.com/wccomps/battleship/internal/auth/authtest"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/proxmox/pvetest"
 	"github.com/wccomps/battleship/internal/store/storetest"
@@ -28,10 +29,10 @@ func TestLoginRoundTrip(t *testing.T) {
 		t.Errorf("session token %q has %d characters, want 43 (32 bytes base64url)", token, len(token))
 	}
 	sess := b.session()
-	if sess.Subject != alice.Sub || sess.Name != alice.Name || sess.Email != alice.Email || sess.Username != "alice" {
+	if sess.Subject != alice.Subject || sess.Name != alice.Name || sess.Email != alice.Email || sess.Username != "alice" {
 		t.Errorf("session = %+v, want alice's identity", sess)
 	}
-	if rt := b.refreshToken(); !slices.Contains(h.idp.refreshTokens(), rt) {
+	if rt := b.refreshToken(); !slices.Contains(h.idp.RefreshTokens(), rt) {
 		t.Errorf("stored refresh token %q is not one the provider issued", rt)
 	}
 	now := h.clock.Now()
@@ -43,7 +44,7 @@ func TestLoginRoundTrip(t *testing.T) {
 		t.Errorf("logs = %q, want a login line", h.logs.String())
 	}
 	var exchange url.Values
-	h.idp.set(func(f *fakeIDP) { exchange = f.tokenRequests[0] })
+	exchange = h.idp.TokenRequests()[0]
 	if exchange.Get("grant_type") != "authorization_code" || len(exchange.Get("code_verifier")) != 43 ||
 		exchange.Get("redirect_uri") != h.app.URL+"/auth/callback" {
 		t.Errorf("code exchange = %v, want the PKCE verifier and redirect URI", exchange)
@@ -161,12 +162,12 @@ func TestLoginRedirectsToProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := loc.Query()
-	if got := loc.Scheme + "://" + loc.Host + loc.Path; got != h.idp.srv.URL+"/authorize" {
+	if got := loc.Scheme + "://" + loc.Host + loc.Path; got != h.idp.Issuer()+"authorize" {
 		t.Errorf("redirect to %s, want the provider's authorize endpoint", got)
 	}
 	checks := map[string]string{
 		"response_type":         "code",
-		"client_id":             "battleship",
+		"client_id":             h.cfg.OIDC.ClientID,
 		"redirect_uri":          h.app.URL + "/auth/callback",
 		"scope":                 "openid profile email offline_access",
 		"code_challenge_method": "S256",
@@ -278,11 +279,11 @@ func TestCallbackRejects(t *testing.T) {
 			}},
 		{name: "code already used", status: http.StatusInternalServerError, want: "Authentik",
 			tamper: func(h *harness, b *browser, cb *url.URL) *url.URL {
-				h.idp.set(func(f *fakeIDP) { clear(f.codes) })
+				h.idp.ExpireCodes()
 				return cb
 			}},
 		{name: "provider refused", status: http.StatusForbidden, want: "access_denied",
-			setup: func(h *harness) { h.idp.set(func(f *fakeIDP) { f.authorizeError = "access_denied" }) }},
+			setup: func(h *harness) { h.idp.Set(func(f *authtest.Behavior) { f.AuthorizeError = "access_denied" }) }},
 		{name: "bad nonce", status: http.StatusForbidden, want: "be verified",
 			setup: mutateIDToken(func(c map[string]any) { c["nonce"] = "some-other-nonce" })},
 		{name: "no nonce", status: http.StatusForbidden, want: "be verified",
@@ -296,13 +297,17 @@ func TestCallbackRejects(t *testing.T) {
 		{name: "access token hash mismatch", status: http.StatusForbidden, want: "be verified",
 			setup: mutateIDToken(func(c map[string]any) { c["at_hash"] = "AAAAAAAAAAAAAAAAAAAAAA" })},
 		{name: "signed with an unknown key", status: http.StatusForbidden, want: "be verified",
-			setup: func(h *harness) { h.idp.set(func(f *fakeIDP) { f.signWithOther = true }) }},
+			setup: func(h *harness) { h.idp.Set(func(f *authtest.Behavior) { f.SignWithUnknownKey = true }) }},
 		{name: "JWKS unavailable", status: http.StatusInternalServerError, want: "Authentik",
-			setup: func(h *harness) { h.idp.set(func(f *fakeIDP) { f.jwksStatus = http.StatusServiceUnavailable }) }},
+			setup: func(h *harness) {
+				h.idp.Set(func(f *authtest.Behavior) { f.JWKSStatus = http.StatusServiceUnavailable })
+			}},
 		{name: "token endpoint down", status: http.StatusInternalServerError, want: "Authentik",
-			setup: func(h *harness) { h.idp.set(func(f *fakeIDP) { f.tokenStatus = http.StatusInternalServerError }) }},
+			setup: func(h *harness) {
+				h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = http.StatusInternalServerError })
+			}},
 		{name: "no refresh token", status: http.StatusInternalServerError, want: "offline_access",
-			setup: func(h *harness) { h.idp.set(func(f *fakeIDP) { f.noRefreshToken = true }) }},
+			setup: func(h *harness) { h.idp.Set(func(f *authtest.Behavior) { f.NoRefreshToken = true }) }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -336,7 +341,7 @@ func TestCallbackRejects(t *testing.T) {
 }
 
 func mutateIDToken(fn func(map[string]any)) func(h *harness) {
-	return func(h *harness) { h.idp.set(func(f *fakeIDP) { f.mutateIDToken = fn }) }
+	return func(h *harness) { h.idp.Set(func(f *authtest.Behavior) { f.MutateIDToken = fn }) }
 }
 
 func (b *browser) loginCookieFromJar() *http.Cookie {
@@ -386,7 +391,7 @@ func TestLoginCookieFromAnotherLoginIsRejected(t *testing.T) {
 // The ID token says who logged in; userinfo isn't needed.
 func TestLoginDoesNotNeedUserinfo(t *testing.T) {
 	h := newHarness(t)
-	h.idp.set(func(f *fakeIDP) { f.userinfoStatus = http.StatusServiceUnavailable })
+	h.idp.Set(func(f *authtest.Behavior) { f.UserinfoStatus = http.StatusServiceUnavailable })
 	b := h.browser()
 	if resp := b.login(lena); resp.body != "GET ok: user=Lena Lead pve=lena@auth.example.org" {
 		t.Errorf("body = %q, want lena logged in", resp.body)
@@ -411,7 +416,7 @@ func TestLogout(t *testing.T) {
 	b.login(alice)
 	token := b.sessionToken()
 	resp := b.postForm("/auth/logout", url.Values{"csrf": {b.csrf()}}, nil)
-	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != h.idp.srv.URL+"/end-session" {
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != h.idp.Issuer()+"end-session" {
 		t.Errorf("logout = %d to %q, want 303 to the provider's end_session_endpoint", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	if c := resp.cookie(auth.SessionCookie); c == nil || c.MaxAge >= 0 {
@@ -426,7 +431,7 @@ func TestLogout(t *testing.T) {
 
 func TestLogoutWithoutEndSessionGoesHome(t *testing.T) {
 	h := newHarness(t)
-	h.idp.set(func(f *fakeIDP) { f.noEndSession = true })
+	h.idp.Set(func(f *authtest.Behavior) { f.NoEndSession = true })
 	h.restart(h.cfg) // discovery happens in NewService
 	b := h.browser()
 	b.login(alice)
@@ -467,9 +472,8 @@ func TestLogoutWithoutSessionGoesHome(t *testing.T) {
 
 func TestNewServiceChecksConfig(t *testing.T) {
 	c := newClock()
-	idp := newFakeIDP(t, c)
+	good, idp := webConfig(t, c, "https://battleship.example.org")
 	st := storetest.New(t)
-	good := webConfig(idp.issuer(), idp.clientID, idp.secret, "https://battleship.example.org")
 	pve := pvetest.New(t).Client()
 	cases := map[string]struct {
 		mut  func(*config.Config)
@@ -479,7 +483,7 @@ func TestNewServiceChecksConfig(t *testing.T) {
 		"no offline_access":  {func(c *config.Config) { c.OIDC.Scopes = []string{"openid", "profile"} }, "offline_access"},
 		"no base URL":        {func(c *config.Config) { c.Web.BaseURL = "" }, "web.base_url"},
 		"issuer unreachable": {func(c *config.Config) { c.OIDC.Issuer = "http://127.0.0.1:1/" }, "oidc.issuer"},
-		"issuer mismatch":    {func(c *config.Config) { c.OIDC.Issuer = idp.srv.URL + "/other/" }, "oidc.issuer"},
+		"issuer mismatch":    {func(c *config.Config) { c.OIDC.Issuer = idp.Issuer() + "other/" }, "oidc.issuer"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -490,7 +494,7 @@ func TestNewServiceChecksConfig(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("NewService = %v, want an error mentioning %q", err, tc.want)
 			}
-			if err != nil && strings.Contains(err.Error(), idp.secret) {
+			if err != nil && strings.Contains(err.Error(), good.OIDC.ClientSecret) {
 				t.Errorf("error shows the client secret: %v", err)
 			}
 		})

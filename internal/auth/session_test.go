@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/wccomps/battleship/internal/auth"
+	"github.com/wccomps/battleship/internal/auth/authtest"
 )
 
 func TestAnonymousRequests(t *testing.T) {
@@ -149,12 +150,12 @@ func TestRefreshRereadsIdentity(t *testing.T) {
 
 	// An admin renames Lena. Until the next refresh her session keeps the
 	// name it had.
-	h.idp.rename(lena.Sub, "Lena Renamed")
+	h.rename(lena, "Lena Renamed")
 	h.clock.Advance(5*time.Minute - time.Second)
 	if resp := b.do(http.MethodGet, "/private", nil, nil); !strings.Contains(resp.body, "user=Lena Lead pve") {
 		t.Fatalf("before the refresh: /private = %q", resp.body)
 	}
-	if n := h.idp.refreshCount(); n != 0 {
+	if n := h.idp.Refreshes(); n != 0 {
 		t.Fatalf("refreshed %d times before session_refresh passed", n)
 	}
 
@@ -163,23 +164,23 @@ func TestRefreshRereadsIdentity(t *testing.T) {
 		t.Errorf("/private = %q, want the new name", resp.body)
 	}
 	sess := b.session()
-	if rt := b.refreshToken(); rt == firstRT || !slices.Contains(h.idp.refreshTokens(), rt) {
+	if rt := b.refreshToken(); rt == firstRT || !slices.Contains(h.idp.RefreshTokens(), rt) {
 		t.Errorf("refresh token not rotated: %q", rt)
 	}
 	if !sess.RefreshedAt.Equal(h.clock.Now()) {
 		t.Errorf("RefreshedAt = %v, want now", sess.RefreshedAt)
 	}
-	if n := h.idp.refreshCount(); n != 1 {
+	if n := h.idp.Refreshes(); n != 1 {
 		t.Errorf("refreshed %d times, want 1", n)
 	}
 }
 
 func TestRefreshWithoutIDTokenUsesUserinfo(t *testing.T) {
 	h := newHarness(t)
-	h.idp.set(func(f *fakeIDP) { f.noIDTokenRefresh = true })
+	h.idp.Set(func(f *authtest.Behavior) { f.NoIDTokenOnRefresh = true })
 	b := h.browser()
 	b.login(lena)
-	h.idp.rename(lena.Sub, "Lena Renamed")
+	h.rename(lena, "Lena Renamed")
 	h.clock.Advance(5 * time.Minute)
 	if resp := b.do(http.MethodGet, "/private", nil, nil); !strings.Contains(resp.body, "user=Lena Renamed pve") {
 		t.Errorf("/private = %d %q, want the name from userinfo", resp.StatusCode, resp.body)
@@ -190,22 +191,22 @@ func TestRefreshRejectedEndsSession(t *testing.T) {
 	// The provider (or its token) says no: the session ends at once, with
 	// no grace.
 	cases := map[string]func(h *harness){
-		"invalid_grant": func(h *harness) { h.idp.revokeAll() },
+		"invalid_grant": func(h *harness) { h.idp.RevokeAll() },
 		"client rejected": func(h *harness) {
-			h.idp.set(func(f *fakeIDP) { f.secret = "rotated" }) // 401 invalid_client
+			h.idp.Set(func(f *authtest.Behavior) { f.ClientSecret = "rotated" }) // 401 invalid_client
 		},
 		"ID token for another user": func(h *harness) {
-			h.idp.set(func(f *fakeIDP) { f.mutateIDToken = func(c map[string]any) { c["sub"] = "sub-mallory" } })
+			h.idp.Set(func(f *authtest.Behavior) { f.MutateIDToken = func(c map[string]any) { c["sub"] = "sub-mallory" } })
 		},
 		"ID token for another app": func(h *harness) {
-			h.idp.set(func(f *fakeIDP) { f.mutateIDToken = func(c map[string]any) { c["aud"] = "other" } })
+			h.idp.Set(func(f *authtest.Behavior) { f.MutateIDToken = func(c map[string]any) { c["aud"] = "other" } })
 		},
-		"ID token signed with an unknown key": func(h *harness) { h.idp.set(func(f *fakeIDP) { f.signWithOther = true }) },
+		"ID token signed with an unknown key": func(h *harness) { h.idp.Set(func(f *authtest.Behavior) { f.SignWithUnknownKey = true }) },
 		"userinfo 401": func(h *harness) {
-			h.idp.set(func(f *fakeIDP) { f.noIDTokenRefresh = true; f.userinfoStatus = http.StatusUnauthorized })
+			h.idp.Set(func(f *authtest.Behavior) { f.NoIDTokenOnRefresh = true; f.UserinfoStatus = http.StatusUnauthorized })
 		},
 		"userinfo for another user": func(h *harness) {
-			h.idp.set(func(f *fakeIDP) { f.noIDTokenRefresh = true; f.userinfoSub = "sub-mallory" })
+			h.idp.Set(func(f *authtest.Behavior) { f.NoIDTokenOnRefresh = true; f.UserinfoSubject = "sub-mallory" })
 		},
 	}
 	for name, breakIt := range cases {
@@ -234,57 +235,65 @@ func TestRefreshRejectedEndsSession(t *testing.T) {
 // refresh. Each returns a function that ends the outage.
 var outages = map[string]func(h *harness) (restore func()){
 	"token endpoint 500": func(h *harness) func() {
-		h.idp.set(func(f *fakeIDP) { f.tokenStatus = http.StatusInternalServerError })
-		return func() { h.idp.set(func(f *fakeIDP) { f.tokenStatus = 0 }) }
+		h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = http.StatusInternalServerError })
+		return func() { h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = 0 }) }
 	},
 	"token endpoint 503": func(h *harness) func() {
-		h.idp.set(func(f *fakeIDP) { f.tokenStatus = http.StatusServiceUnavailable })
-		return func() { h.idp.set(func(f *fakeIDP) { f.tokenStatus = 0 }) }
+		h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = http.StatusServiceUnavailable })
+		return func() { h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = 0 }) }
 	},
 	"JWKS down during a key rotation": func(h *harness) func() {
-		h.idp.set(func(f *fakeIDP) { f.kid = "k2"; f.jwksStatus = http.StatusInternalServerError })
-		return func() { h.idp.set(func(f *fakeIDP) { f.jwksStatus = 0 }) }
+		h.idp.Set(func(f *authtest.Behavior) { f.KeyID = "k2"; f.JWKSStatus = http.StatusInternalServerError })
+		return func() { h.idp.Set(func(f *authtest.Behavior) { f.JWKSStatus = 0 }) }
 	},
 	"userinfo 503": func(h *harness) func() {
-		h.idp.set(func(f *fakeIDP) { f.noIDTokenRefresh = true; f.userinfoStatus = http.StatusServiceUnavailable })
-		return func() { h.idp.set(func(f *fakeIDP) { f.userinfoStatus = 0 }) }
+		h.idp.Set(func(f *authtest.Behavior) {
+			f.NoIDTokenOnRefresh = true
+			f.UserinfoStatus = http.StatusServiceUnavailable
+		})
+		return func() { h.idp.Set(func(f *authtest.Behavior) { f.UserinfoStatus = 0 }) }
 	},
 	// Only a 400 or 401 carrying an OAuth error code is a rejection; other
 	// answers come from a struggling provider or a proxy in front of it.
 	"token endpoint 429": func(h *harness) func() {
-		h.idp.set(func(f *fakeIDP) { f.tokenStatus = http.StatusTooManyRequests })
-		return func() { h.idp.set(func(f *fakeIDP) { f.tokenStatus = 0 }) }
+		h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = http.StatusTooManyRequests })
+		return func() { h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = 0 }) }
 	},
 	"proxy 403 page": func(h *harness) func() {
-		h.idp.set(func(f *fakeIDP) {
-			f.tokenStatus = http.StatusForbidden
-			f.failBody = "<html><h1>403 Forbidden</h1>WAF</html>"
+		h.idp.Set(func(f *authtest.Behavior) {
+			f.TokenStatus = http.StatusForbidden
+			f.FailBody = "<html><h1>403 Forbidden</h1>WAF</html>"
 		})
-		return func() { h.idp.set(func(f *fakeIDP) { f.tokenStatus = 0; f.failBody = "" }) }
+		return func() { h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = 0; f.FailBody = "" }) }
 	},
 	"proxy 404 page": func(h *harness) func() {
-		h.idp.set(func(f *fakeIDP) { f.tokenStatus = http.StatusNotFound; f.failBody = "<html>Not Found</html>" })
-		return func() { h.idp.set(func(f *fakeIDP) { f.tokenStatus = 0; f.failBody = "" }) }
+		h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = http.StatusNotFound; f.FailBody = "<html>Not Found</html>" })
+		return func() { h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = 0; f.FailBody = "" }) }
 	},
 	"proxy 400 page without an OAuth error": func(h *harness) func() {
-		h.idp.set(func(f *fakeIDP) { f.tokenStatus = http.StatusBadRequest; f.failBody = "<html>400 Bad Request</html>" })
-		return func() { h.idp.set(func(f *fakeIDP) { f.tokenStatus = 0; f.failBody = "" }) }
+		h.idp.Set(func(f *authtest.Behavior) {
+			f.TokenStatus = http.StatusBadRequest
+			f.FailBody = "<html>400 Bad Request</html>"
+		})
+		return func() { h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = 0; f.FailBody = "" }) }
 	},
 	"token endpoint 401 plain text": func(h *harness) func() {
-		h.idp.set(func(f *fakeIDP) {
-			f.tokenStatus = http.StatusUnauthorized
-			f.failBody = "Unauthorized"
-			f.failContentType = "text/plain"
+		h.idp.Set(func(f *authtest.Behavior) {
+			f.TokenStatus = http.StatusUnauthorized
+			f.FailBody = "Unauthorized"
+			f.FailContentType = "text/plain"
 		})
-		return func() { h.idp.set(func(f *fakeIDP) { f.tokenStatus = 0; f.failBody = ""; f.failContentType = "" }) }
+		return func() {
+			h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = 0; f.FailBody = ""; f.FailContentType = "" })
+		}
 	},
 	"garbled 200": func(h *harness) func() {
-		h.idp.set(func(f *fakeIDP) { f.tokenStatus = http.StatusOK; f.failBody = "<html>maintenance</html>" })
-		return func() { h.idp.set(func(f *fakeIDP) { f.tokenStatus = 0; f.failBody = "" }) }
+		h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = http.StatusOK; f.FailBody = "<html>maintenance</html>" })
+		return func() { h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = 0; f.FailBody = "" }) }
 	},
 	"connection dropped": func(h *harness) func() {
-		h.idp.set(func(f *fakeIDP) { f.dropConnections = true })
-		return func() { h.idp.set(func(f *fakeIDP) { f.dropConnections = false }) }
+		h.idp.Set(func(f *authtest.Behavior) { f.DropConnections = true })
+		return func() { h.idp.Set(func(f *authtest.Behavior) { f.DropConnections = false }) }
 	},
 }
 
@@ -295,7 +304,7 @@ func TestRefreshUnreachableKeepsSession(t *testing.T) {
 			b := h.browser()
 			b.login(lena)
 			refreshed := b.session().RefreshedAt
-			h.idp.rename(lena.Sub, "Lena Renamed") // unseen until a refresh succeeds
+			h.rename(lena, "Lena Renamed") // unseen until a refresh succeeds
 			outage(h)
 			h.clock.Advance(5 * time.Minute)
 			resp := b.do(http.MethodGet, "/private", nil, nil)
@@ -329,14 +338,14 @@ func TestRefreshRetriesAfterBackoff(t *testing.T) {
 			h.clock.Advance(5 * time.Minute)
 			b.do(http.MethodGet, "/private", nil, nil) // fails, backs off
 			restore()
-			h.idp.rename(lena.Sub, "Lena Renamed")
-			tried := h.idp.tokenRequestCount()
+			h.rename(lena, "Lena Renamed")
+			tried := len(h.idp.TokenRequests())
 
 			h.clock.Advance(time.Minute - time.Second)
 			if resp := b.do(http.MethodGet, "/private", nil, nil); !strings.Contains(resp.body, "user=Lena Lead pve") {
 				t.Errorf("during the backoff: %d %q, want the existing name", resp.StatusCode, resp.body)
 			}
-			if n := h.idp.tokenRequestCount(); n != tried {
+			if n := len(h.idp.TokenRequests()); n != tried {
 				t.Errorf("%d token requests during the backoff, want none", n-tried)
 			}
 
@@ -379,7 +388,7 @@ func TestOutageLongerThanGraceEndsSession(t *testing.T) {
 			b.login(alice)
 			token := b.sessionToken()
 			start := h.clock.Now()
-			h.idp.set(func(f *fakeIDP) { f.tokenStatus = http.StatusInternalServerError })
+			h.idp.Set(func(f *authtest.Behavior) { f.TokenStatus = http.StatusInternalServerError })
 			for _, d := range tc.served {
 				h.clock.Advance(d)
 				if resp := b.do(http.MethodGet, "/private", nil, nil); resp.StatusCode != http.StatusOK {
@@ -409,8 +418,8 @@ func TestRefreshSurvivesClientDisconnect(t *testing.T) {
 
 	reqCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	h.idp.set(func(f *fakeIDP) {
-		f.onRefresh = func(r *http.Request) bool {
+	h.idp.Set(func(f *authtest.Behavior) {
+		f.OnRefresh = func(r *http.Request) bool {
 			cancel() // the browser goes away
 			// If the app's call to the provider was cut off with the
 			// browser, this request's context ends quickly; otherwise
@@ -425,9 +434,9 @@ func TestRefreshSurvivesClientDisconnect(t *testing.T) {
 	req := httptest.NewRequestWithContext(reqCtx, http.MethodGet, "/private", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: b.sessionToken()})
 	h.mux.Load().ServeHTTP(httptest.NewRecorder(), req)
-	h.idp.set(func(f *fakeIDP) { f.onRefresh = nil })
+	h.idp.Set(func(f *authtest.Behavior) { f.OnRefresh = nil })
 
-	if rt := b.refreshToken(); !slices.Contains(h.idp.refreshTokens(), rt) {
+	if rt := b.refreshToken(); !slices.Contains(h.idp.RefreshTokens(), rt) {
 		t.Fatalf("stored refresh token %q is no longer valid at the provider", rt)
 	}
 	h.clock.Advance(5 * time.Minute)
@@ -441,7 +450,7 @@ func TestRefreshFailureOnPostIs401(t *testing.T) {
 	b := h.browser()
 	b.login(alice)
 	csrf := b.csrf()
-	h.idp.revokeAll()
+	h.idp.RevokeAll()
 	h.clock.Advance(5 * time.Minute)
 	resp := b.postForm("/private", url.Values{"csrf": {csrf}}, nil)
 	if resp.StatusCode != http.StatusUnauthorized {
@@ -477,7 +486,7 @@ func TestConcurrentRequestsRefreshOnce(t *testing.T) {
 	}
 	// The provider rotates refresh tokens, so spending one twice would have
 	// failed a request and ended the session.
-	if n := h.idp.refreshCount(); n != 1 {
+	if n := h.idp.Refreshes(); n != 1 {
 		t.Errorf("refreshed %d times, want exactly 1", n)
 	}
 	if resp := b.do(http.MethodGet, "/private", nil, nil); resp.StatusCode != http.StatusOK {
@@ -565,7 +574,7 @@ func TestCSRFRejectedBeforeRefresh(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("forged POST = %d, want 403", resp.StatusCode)
 	}
-	if n := h.idp.refreshCount(); n != 0 {
+	if n := h.idp.Refreshes(); n != 0 {
 		t.Errorf("forged POST refreshed the session %d times", n)
 	}
 }
@@ -646,7 +655,7 @@ func TestLogsHaveNoSecrets(t *testing.T) {
 	logs := h.logs.String()
 	for name, secret := range map[string]string{
 		"session token": token, "token hash": auth.HashToken(token), "csrf": csrf,
-		"refresh token": rt1, "rotated refresh token": rt2, "client secret": h.idp.secret,
+		"refresh token": rt1, "rotated refresh token": rt2, "client secret": h.cfg.OIDC.ClientSecret,
 		"sealed refresh token": sealed1, "sealed rotated refresh token": sealed2,
 	} {
 		if strings.Contains(logs, secret) {
@@ -658,6 +667,13 @@ func TestLogsHaveNoSecrets(t *testing.T) {
 			t.Errorf("logs lack %q: %s", want, logs)
 		}
 	}
+}
+
+// rename changes u's name at the identity provider, as an admin editing
+// Authentik would.
+func (h *harness) rename(u authtest.User, name string) {
+	u.Name = name
+	h.idp.SignIn(u)
 }
 
 // flipFirst changes a token's first character, so the result always differs.
@@ -695,12 +711,12 @@ func TestTrackSubject(t *testing.T) {
 		status         int
 		subject        string
 	}{
-		{"signed in", http.MethodGet, "/private", true, "", http.StatusOK, alice.Sub},
-		{"signed-in POST", http.MethodPost, "/private", true, csrf, http.StatusOK, alice.Sub},
-		{"refused for CSRF, still attributed", http.MethodPost, "/private", true, "wrong", http.StatusForbidden, alice.Sub},
+		{"signed in", http.MethodGet, "/private", true, "", http.StatusOK, alice.Subject},
+		{"signed-in POST", http.MethodPost, "/private", true, csrf, http.StatusOK, alice.Subject},
+		{"refused for CSRF, still attributed", http.MethodPost, "/private", true, "wrong", http.StatusForbidden, alice.Subject},
 		{"anonymous", http.MethodGet, "/private", false, "", http.StatusSeeOther, ""},
 		{"route without a session check", http.MethodGet, "/auth/login", true, "", http.StatusFound, ""},
-		{"logout refused for CSRF", http.MethodPost, "/auth/logout", true, "wrong", http.StatusForbidden, alice.Sub},
+		{"logout refused for CSRF", http.MethodPost, "/auth/logout", true, "wrong", http.StatusForbidden, alice.Subject},
 		{"anonymous logout", http.MethodPost, "/auth/logout", false, "", http.StatusSeeOther, ""},
 	} {
 		status, subject := serve(c.method, c.target, c.cookie, c.csrf)

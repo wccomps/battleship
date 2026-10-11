@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/wccomps/battleship/internal/auth"
+	"github.com/wccomps/battleship/internal/auth/authtest"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/proxmox/pvetest"
 	"github.com/wccomps/battleship/internal/store"
@@ -27,9 +28,9 @@ var ctx = context.Background()
 
 // Users at the fake identity provider.
 var (
-	alice = idpUser{Sub: "sub-alice", Name: "Alice Operator", Email: "alice@example.org"}
-	lena  = idpUser{Sub: "sub-lena", Name: "Lena Lead", Email: "lena@example.org"}
-	nobby = idpUser{Sub: "sub-nobby", Name: "Nobby Nobody", Email: "nobby@example.org"}
+	alice = authtest.User{Subject: "sub-alice", Name: "Alice Operator", Email: "alice@example.org"}
+	lena  = authtest.User{Subject: "sub-lena", Name: "Lena Lead", Email: "lena@example.org"}
+	nobby = authtest.User{Subject: "sub-nobby", Name: "Nobby Nobody", Email: "nobby@example.org"}
 )
 
 // logBuffer collects the service's log lines.
@@ -50,12 +51,33 @@ func (l *logBuffer) String() string {
 	return strings.Join(l.lines, "\n")
 }
 
+// clock is the fake time shared by the app, the identity provider and
+// Proxmox.
+type clock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func newClock() *clock { return &clock{t: time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)} }
+
+func (c *clock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *clock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
 // harness is the app on httptest with the fake identity provider, the test
 // database and a shared fake clock.
 type harness struct {
 	t     *testing.T
 	clock *clock
-	idp   *fakeIDP
+	idp   *authtest.Provider
 	pve   *pvetest.Server // Proxmox: its OpenID login, tickets and their renewal
 	st    *store.Store
 	cfg   config.Config
@@ -65,23 +87,23 @@ type harness struct {
 	mux   atomic.Pointer[http.ServeMux] // what app serves
 }
 
-func webConfig(issuer, clientID, secret, baseURL string) config.Config {
+// webConfig is the tests' config, with [oidc] pointing at a new identity
+// provider on c's time.
+func webConfig(t *testing.T, c *clock, baseURL string) (config.Config, *authtest.Provider) {
 	cfg := config.Default()
 	cfg.Web.BaseURL = baseURL
 	cfg.Web.SessionIdle = 30 * time.Minute // the session tests count from 30m
-	cfg.OIDC.Issuer = issuer
-	cfg.OIDC.ClientID = clientID
-	cfg.OIDC.ClientSecret = secret
-	return cfg
+	idp := authtest.NewProvider(t, &cfg)
+	idp.Now = c.Now
+	return cfg, idp
 }
 
 func newHarness(t *testing.T, mut ...func(*config.Config)) *harness {
 	t.Helper()
 	h := &harness{t: t, clock: newClock(), logs: &logBuffer{}}
-	h.idp = newFakeIDP(t, h.clock)
 	h.pve = pvetest.New(t)
 	h.pve.SetClock(h.clock.Now)
-	for _, u := range []idpUser{alice, lena, nobby} {
+	for _, u := range []authtest.User{alice, lena, nobby} {
 		h.pve.AddUser(pveUser(u), nil)
 	}
 	h.st = storetest.New(t)
@@ -89,7 +111,7 @@ func newHarness(t *testing.T, mut ...func(*config.Config)) *harness {
 	h.app = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { h.mux.Load().ServeHTTP(w, r) }))
 	t.Cleanup(h.app.Close)
 
-	h.cfg = webConfig(h.idp.issuer(), h.idp.clientID, h.idp.secret, h.app.URL)
+	h.cfg, h.idp = webConfig(t, h.clock, h.app.URL)
 	h.cfg.Proxmox.URL = h.pve.URL()
 	for _, m := range mut {
 		m(&h.cfg)
@@ -246,22 +268,22 @@ func (b *browser) postForm(target string, form url.Values, header http.Header) r
 
 // login logs u in through the full redirect chain and checks it lands on
 // /private.
-func (b *browser) login(u idpUser) response {
+func (b *browser) login(u authtest.User) response {
 	b.h.t.Helper()
-	b.h.idp.setUser(u)
+	b.h.idp.SignIn(u)
 	b.h.pve.SignIn(pveUser(u))
 	resp := b.get("/auth/login?next=/private")
 	if resp.StatusCode != http.StatusOK || resp.Request.URL.Path != "/private" {
-		b.h.t.Fatalf("login as %s ended at %s with %d: %s", u.Sub, resp.Request.URL, resp.StatusCode, resp.body)
+		b.h.t.Fatalf("login as %s ended at %s with %d: %s", u.Subject, resp.Request.URL, resp.StatusCode, resp.body)
 	}
 	return resp
 }
 
 // startLogin goes through /auth/login and the provider's authorize step,
 // and returns the callback URL the provider sent the browser back to.
-func (b *browser) startLogin(u idpUser, next string) *url.URL {
+func (b *browser) startLogin(u authtest.User, next string) *url.URL {
 	b.h.t.Helper()
-	b.h.idp.setUser(u)
+	b.h.idp.SignIn(u)
 	resp := b.do(http.MethodGet, "/auth/login?next="+url.QueryEscape(next), nil, nil)
 	if resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusSeeOther {
 		b.h.t.Fatalf("/auth/login = %d, want a redirect", resp.StatusCode)
@@ -352,4 +374,6 @@ func (b *browser) refreshToken() string {
 }
 
 // pveUser is u's Proxmox user in the OpenID realm.
-func pveUser(u idpUser) string { return strings.TrimPrefix(u.Sub, "sub-") + "@" + pvetest.Realm }
+func pveUser(u authtest.User) string {
+	return strings.TrimPrefix(u.Subject, "sub-") + "@" + pvetest.Realm
+}
