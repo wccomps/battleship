@@ -107,14 +107,8 @@ var itemRules = map[ItemStatus]itemRule{
 
 func (s ItemStatus) rule() itemRule { return itemRules[s] }
 
-// Unfinished reports whether the item is pending or running.
-func (s ItemStatus) Unfinished() bool { return s.rule().unfinished }
-
 // Retryable reports whether a retry should run the item again.
 func (s ItemStatus) Retryable() bool { return s.rule().retry }
-
-// TouchedVM reports whether the item's job reached an outcome on its VM.
-func (s ItemStatus) TouchedVM() bool { return s.rule().touched }
 
 // SQL lists of the sets above, for queries; TestStatusSQLLists keeps them
 // in step with the tables.

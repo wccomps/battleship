@@ -53,7 +53,7 @@ func TestItemStatusRules(t *testing.T) {
 	for st, w := range want {
 		s := ItemStatus(st)
 		r := s.rule()
-		got := row{s.Unfinished(), r.notRunNoStep, s.Retryable(), s.TouchedVM(), r.keptOnEvent, r.keptOnOutcome}
+		got := row{r.unfinished, r.notRunNoStep, s.Retryable(), r.touched, r.keptOnEvent, r.keptOnOutcome}
 		if got != w {
 			t.Errorf("%s: got %+v, want %+v", st, got, w)
 		}
