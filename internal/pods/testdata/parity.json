@@ -1,0 +1,525 @@
+{
+ "cdrom": [
+  {
+   "config": {
+    "ide2": "local:iso/install.iso,media=cdrom,size=4G",
+    "scsi0": "competitions:vm-1-disk-0.qcow2,size=8G"
+   },
+   "name": "iso inserted",
+   "put": {
+    "ide2": "none,media=cdrom"
+   }
+  },
+  {
+   "config": {
+    "ide2": "none,media=cdrom"
+   },
+   "name": "already empty",
+   "put": {
+    "ide2": "none,media=cdrom"
+   }
+  },
+  {
+   "config": {
+    "ide2": "local:iso/a.iso,media=cdrom",
+    "sata1": "local:iso/b.iso,media=cdrom"
+   },
+   "name": "two drives",
+   "put": {
+    "ide2": "none,media=cdrom",
+    "sata1": "none,media=cdrom"
+   }
+  },
+  {
+   "config": {
+    "scsi0": "competitions:vm-1-disk-0.qcow2,size=8G"
+   },
+   "name": "no cd-rom",
+   "put": {}
+  }
+ ],
+ "clone": [
+  {
+   "team": "00",
+   "template_vmid": 9001,
+   "vmid": 10001
+  },
+  {
+   "team": "01",
+   "template_vmid": 9005,
+   "vmid": 10105
+  },
+  {
+   "team": "17",
+   "template_vmid": 9042,
+   "vmid": 11742
+  },
+  {
+   "team": "32",
+   "template_vmid": 9099,
+   "vmid": 13299
+  },
+  {
+   "team": "07",
+   "template_vmid": 9105,
+   "vmid": 10705
+  }
+ ],
+ "disks": [
+  {
+   "config": {
+    "scsi0": "competitions:base-9001-disk-0.qcow2,iothread=1,size=10G"
+   },
+   "name": "scsi disk",
+   "put": {
+    "scsi0": "competitions:base-9001-disk-0.qcow2,iothread=1,size=10G,mbps_rd=300,mbps_wr=300"
+   }
+  },
+  {
+   "config": {
+    "virtio0": "competitions:vm-1-disk-0.qcow2,mbps_rd=50,mbps_wr=60,size=8G"
+   },
+   "name": "old limits replaced",
+   "put": {
+    "virtio0": "competitions:vm-1-disk-0.qcow2,size=8G,mbps_rd=300,mbps_wr=300"
+   }
+  },
+  {
+   "config": {
+    "ide0": "competitions:vm-1-disk-1.qcow2,size=4G",
+    "sata0": "competitions:vm-1-disk-0.qcow2,size=8G",
+    "scsi1": "competitions:vm-1-disk-2.qcow2,cache=writeback,discard=on,size=64G"
+   },
+   "name": "several buses",
+   "put": {
+    "ide0": "competitions:vm-1-disk-1.qcow2,size=4G,mbps_rd=300,mbps_wr=300",
+    "sata0": "competitions:vm-1-disk-0.qcow2,size=8G,mbps_rd=300,mbps_wr=300",
+    "scsi1": "competitions:vm-1-disk-2.qcow2,cache=writeback,discard=on,size=64G,mbps_rd=300,mbps_wr=300"
+   }
+  },
+  {
+   "config": {
+    "efidisk0": "competitions:vm-1-disk-9.qcow2,size=4M",
+    "scsi0": "competitions:vm-1-disk-0.qcow2,size=8G",
+    "scsihw": "virtio-scsi-single"
+   },
+   "name": "non-drive keys ignored",
+   "put": {
+    "scsi0": "competitions:vm-1-disk-0.qcow2,size=8G,mbps_rd=300,mbps_wr=300"
+   }
+  },
+  {
+   "config": {
+    "ide2": "none,media=cdrom",
+    "scsi0": "competitions:vm-1-disk-0.qcow2,size=8G"
+   },
+   "name": "empty cd-rom",
+   "put": {
+    "scsi0": "competitions:vm-1-disk-0.qcow2,size=8G,mbps_rd=300,mbps_wr=300"
+   }
+  }
+ ],
+ "network": [
+  {
+   "config": {
+    "net0": "virtio=BC:24:11:00:00:01,bridge=vmbr2",
+    "scsi0": "competitions:base-9001-disk-0.qcow2,size=10G"
+   },
+   "interfaces": 1,
+   "name": "one nic team 01",
+   "put": {
+    "net0": "virtio,bridge=int01"
+   },
+   "team": "01"
+  },
+  {
+   "config": {
+    "net0": "e1000=BC:24:11:00:00:01,bridge=vmbr2,tag=5",
+    "scsi0": "competitions:base-9001-disk-0.qcow2,size=10G"
+   },
+   "interfaces": 1,
+   "name": "one nic e1000 with tag team 01",
+   "put": {
+    "net0": "e1000,bridge=int01"
+   },
+   "team": "01"
+  },
+  {
+   "config": {
+    "net0": "virtio=BC:24:11:00:00:01,bridge=vmbr2,firewall=1",
+    "scsi0": "competitions:base-9001-disk-0.qcow2,size=10G"
+   },
+   "interfaces": 1,
+   "name": "one nic firewall team 01",
+   "put": {
+    "net0": "virtio,bridge=int01"
+   },
+   "team": "01"
+  },
+  {
+   "config": {
+    "ide2": "competitions:vm-9001-cloudinit,media=cdrom",
+    "net0": "virtio=BC:24:11:00:00:01,bridge=vmbr2",
+    "scsi0": "competitions:base-9001-disk-0.qcow2,size=10G"
+   },
+   "interfaces": 1,
+   "name": "one nic cloud-init team 01",
+   "put": {
+    "cicustom": "vendor=competitions:snippets/ssh-keys.yaml",
+    "net0": "virtio,bridge=int01"
+   },
+   "team": "01"
+  },
+  {
+   "config": {
+    "net0": "virtio=BC:24:11:00:00:01,bridge=vmbr1",
+    "net1": "virtio=BC:24:11:00:00:02,bridge=vmbr2",
+    "scsi0": "competitions:base-9001-disk-0.qcow2,size=10G"
+   },
+   "interfaces": 2,
+   "name": "two nics team 01",
+   "put": {
+    "net0": "virtio,bridge=ext01",
+    "net1": "virtio,bridge=int01"
+   },
+   "team": "01"
+  },
+  {
+   "config": {
+    "ide2": "competitions:vm-9001-cloudinit,media=cdrom",
+    "net0": "virtio=BC:24:11:00:00:01,bridge=vmbr1",
+    "net1": "vmxnet3=BC:24:11:00:00:02,bridge=vmbr2,tag=9",
+    "scsi0": "competitions:base-9001-disk-0.qcow2,size=10G"
+   },
+   "interfaces": 2,
+   "name": "two nics cloud-init team 01",
+   "put": {
+    "cicustom": "vendor=competitions:snippets/ssh-keys.yaml",
+    "ipconfig0": "ip=10.50.101.2/30,gw=10.50.101.1",
+    "nameserver": "10.50.101.1",
+    "net0": "virtio,bridge=ext01",
+    "net1": "vmxnet3,bridge=int01"
+   },
+   "team": "01"
+  },
+  {
+   "config": {
+    "net0": "virtio=BC:24:11:00:00:01,bridge=vmbr1",
+    "net1": "virtio=BC:24:11:00:00:02,bridge=vmbr2",
+    "net2": "virtio=BC:24:11:00:00:03,bridge=vmbr0",
+    "scsi0": "competitions:base-9001-disk-0.qcow2,size=10G"
+   },
+   "interfaces": 3,
+   "name": "three nics team 01",
+   "put": {
+    "net0": "virtio,bridge=ext01",
+    "net1": "virtio,bridge=int01"
+   },
+   "team": "01"
+  },
+  {
+   "config": {
+    "net0": "virtio=BC:24:11:00:00:01,bridge=vmbr2",
+    "scsi0": "competitions:base-9001-disk-0.qcow2,size=10G"
+   },
+   "interfaces": 1,
+   "name": "one nic team 17",
+   "put": {
+    "net0": "virtio,bridge=int17"
+   },
+   "team": "17"
+  },
+  {
+   "config": {
+    "net0": "e1000=BC:24:11:00:00:01,bridge=vmbr2,tag=5",
+    "scsi0": "competitions:base-9001-disk-0.qcow2,size=10G"
+   },
+   "interfaces": 1,
+   "name": "one nic e1000 with tag team 17",
+   "put": {
+    "net0": "e1000,bridge=int17"
+   },
+   "team": "17"
+  },
+  {
+   "config": {
+    "net0": "virtio=BC:24:11:00:00:01,bridge=vmbr2,firewall=1",
+    "scsi0": "competitions:base-9001-disk-0.qcow2,size=10G"
+   },
+   "interfaces": 1,
+   "name": "one nic firewall team 17",
+   "put": {
+    "net0": "virtio,bridge=int17"
+   },
+   "team": "17"
+  },
+  {
+   "config": {
+    "ide2": "competitions:vm-9001-cloudinit,media=cdrom",
+    "net0": "virtio=BC:24:11:00:00:01,bridge=vmbr2",
+    "scsi0": "competitions:base-9001-disk-0.qcow2,size=10G"
+   },
+   "interfaces": 1,
+   "name": "one nic cloud-init team 17",
+   "put": {
+    "cicustom": "vendor=competitions:snippets/ssh-keys.yaml",
+    "net0": "virtio,bridge=int17"
+   },
+   "team": "17"
+  },
+  {
+   "config": {
+    "net0": "virtio=BC:24:11:00:00:01,bridge=vmbr1",
+    "net1": "virtio=BC:24:11:00:00:02,bridge=vmbr2",
+    "scsi0": "competitions:base-9001-disk-0.qcow2,size=10G"
+   },
+   "interfaces": 2,
+   "name": "two nics team 17",
+   "put": {
+    "net0": "virtio,bridge=ext17",
+    "net1": "virtio,bridge=int17"
+   },
+   "team": "17"
+  },
+  {
+   "config": {
+    "ide2": "competitions:vm-9001-cloudinit,media=cdrom",
+    "net0": "virtio=BC:24:11:00:00:01,bridge=vmbr1",
+    "net1": "vmxnet3=BC:24:11:00:00:02,bridge=vmbr2,tag=9",
+    "scsi0": "competitions:base-9001-disk-0.qcow2,size=10G"
+   },
+   "interfaces": 2,
+   "name": "two nics cloud-init team 17",
+   "put": {
+    "cicustom": "vendor=competitions:snippets/ssh-keys.yaml",
+    "ipconfig0": "ip=10.50.117.2/30,gw=10.50.117.1",
+    "nameserver": "10.50.117.1",
+    "net0": "virtio,bridge=ext17",
+    "net1": "vmxnet3,bridge=int17"
+   },
+   "team": "17"
+  },
+  {
+   "config": {
+    "net0": "virtio=BC:24:11:00:00:01,bridge=vmbr1",
+    "net1": "virtio=BC:24:11:00:00:02,bridge=vmbr2",
+    "net2": "virtio=BC:24:11:00:00:03,bridge=vmbr0",
+    "scsi0": "competitions:base-9001-disk-0.qcow2,size=10G"
+   },
+   "interfaces": 3,
+   "name": "three nics team 17",
+   "put": {
+    "net0": "virtio,bridge=ext17",
+    "net1": "virtio,bridge=int17"
+   },
+   "team": "17"
+  }
+ ],
+ "nodes": [
+  {
+   "assigned": {
+    "01": "alder",
+    "02": "birch",
+    "03": "cedar",
+    "04": "alder"
+   },
+   "name": "empty cluster",
+   "nodes": [
+    "alder",
+    "birch",
+    "cedar"
+   ],
+   "teams": [
+    "01",
+    "02",
+    "03",
+    "04"
+   ],
+   "vm_nodes": []
+  },
+  {
+   "assigned": {
+    "01": "birch",
+    "02": "cedar",
+    "03": "alder",
+    "04": "birch",
+    "05": "cedar"
+   },
+   "name": "uneven load",
+   "nodes": [
+    "alder",
+    "birch",
+    "cedar"
+   ],
+   "teams": [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05"
+   ],
+   "vm_nodes": [
+    "alder",
+    "alder",
+    "alder",
+    "alder",
+    "alder",
+    "alder",
+    "alder",
+    "alder",
+    "alder",
+    "alder",
+    "alder",
+    "alder",
+    "birch",
+    "birch",
+    "birch",
+    "cedar",
+    "cedar",
+    "cedar",
+    "cedar",
+    "cedar",
+    "cedar",
+    "cedar"
+   ]
+  },
+  {
+   "assigned": {
+    "01": "alder",
+    "02": "birch",
+    "03": "alder"
+   },
+   "name": "ties go to the first node",
+   "nodes": [
+    "alder",
+    "birch"
+   ],
+   "teams": [
+    "01",
+    "02",
+    "03"
+   ],
+   "vm_nodes": [
+    "alder",
+    "birch"
+   ]
+  },
+  {
+   "assigned": {
+    "05": "alder",
+    "06": "birch"
+   },
+   "name": "vms on other nodes ignored",
+   "nodes": [
+    "alder",
+    "birch"
+   ],
+   "teams": [
+    "05",
+    "06"
+   ],
+   "vm_nodes": [
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "gone",
+    "birch"
+   ]
+  }
+ ],
+ "teams": [
+  {
+   "spec": "7",
+   "teams": [
+    "07"
+   ]
+  },
+  {
+   "spec": "0",
+   "teams": [
+    "00"
+   ]
+  },
+  {
+   "spec": "1-5",
+   "teams": [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05"
+   ]
+  },
+  {
+   "spec": "9-12",
+   "teams": [
+    "09",
+    "10",
+    "11",
+    "12"
+   ]
+  },
+  {
+   "spec": "1,3,5",
+   "teams": [
+    "01",
+    "03",
+    "05"
+   ]
+  },
+  {
+   "spec": "00-02",
+   "teams": [
+    "00",
+    "01",
+    "02"
+   ]
+  }
+ ]
+}
