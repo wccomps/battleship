@@ -196,7 +196,7 @@ func TestGridSelectionPrivilegeGating(t *testing.T) {
 	lacks(t, "operator's grid", body, `lead-ops`, `href="/deploy"`, `href="/teardown"`, `data-lacks`, `data-lead-all`)
 
 	body = h.get(&lead, "/").Body.String()
-	contains(t, "lead's grid", body, `<nav class="lead-ops" aria-label="Team operations">`, `<a class="btn" href="/deploy" data-panel-link>`, `<a class="btn bad" href="/teardown" data-panel-link>`)
+	contains(t, "lead's grid", body, `<nav class="lead-ops" aria-label="Team operations">`, `<a class="btn" href="/deploy">`, `<a class="btn bad" href="/teardown">`)
 
 	// Someone who may only power team 01's dc: every other box says so.
 	cred := h.ticketWith("test-powerer", []string{"VM.Audit"})

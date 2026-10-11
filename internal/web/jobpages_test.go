@@ -928,3 +928,19 @@ func TestUnreadableJobOffersNoLeadOnlyRetry(t *testing.T) {
 	body := h.get(&op, "/logs/"+itoa(id)).Body.String()
 	lacks(t, "operator's page of a job with an unreadable plan", body, "lead only")
 }
+
+// Deploy and teardown open as pages, not in the side panel: the header's
+// buttons and a job's "Preview again" link to them plainly.
+func TestDeployAndTeardownOpenAsPages(t *testing.T) {
+	h := newHarness(t)
+	h.poll()
+	lead := h.login(asLead)
+	body := h.get(&lead, "/").Body.String()
+	contains(t, "header", body, `<a class="btn" href="/deploy">`, `<a class="btn bad" href="/teardown">`)
+
+	failed := h.submitJob(jobs.Inputs{Kind: pods.KindTeardown, Teams: "1"}, byLead)
+	h.start(failed)
+	h.finish(failed, store.Outcome{Status: store.StatusFailed, Error: "planning failed"})
+	body = h.get(&lead, "/logs/"+itoa(failed)).Body.String()
+	contains(t, "failed teardown", body, `<a class="btn pri" href="/teardown?teams=1">`, "Preview again</a>")
+}

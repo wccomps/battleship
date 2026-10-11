@@ -31,6 +31,11 @@ var operations = []operation{
 	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Noun: "teardown"},
 }
 
+// page reports whether the operation opens as its own page rather than in
+// the grid's side panel: deploy and teardown act on whole teams, not on VMs
+// picked in the grid, and their previews are long.
+func (o operation) page() bool { return o.Kind == pods.KindDeploy || o.Kind == pods.KindTeardown }
+
 func operationFor(kind pods.Kind) (operation, bool) {
 	for _, op := range operations {
 		if op.Kind == kind {

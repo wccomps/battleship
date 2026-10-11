@@ -73,7 +73,7 @@
 <div class="sets">
 {{- range .Sets}}
 <article class="card">
-<div class="row"><h3>{{.Name}}</h3>{{with .Deploy}}<span class="sp"></span><a class="btn set-deploy" href="{{.}}" data-panel-link>{{icon "deploy"}}Deploy</a>{{end}}</div>
+<div class="row"><h3>{{.Name}}</h3>{{with .Deploy}}<span class="sp"></span><a class="btn set-deploy" href="{{.}}">{{icon "deploy"}}Deploy</a>{{end}}</div>
 <ul class="hosts" aria-label="Hosts">{{range .Hosts}}<li>{{.}}</li>{{end}}</ul>
 <div class="masters" aria-label="{{.Running}} of {{.Masters}} master VMs running">
 {{- with .RunDots}}<span class="is-running dots" aria-hidden="true">{{range .}}<i class="g"></i>{{end}}</span>{{end}}

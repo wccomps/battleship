@@ -33,7 +33,7 @@
 {{- end}}
 {{- if .Lead}}
 <nav class="lead-ops" aria-label="Team operations">
-{{- range .Lead}}<a class="btn{{if eq .Key "teardown"}} bad{{end}}" href="{{.Href}}" data-panel-link{{if eq .Key $.Active}} aria-current="page"{{end}}>{{opIcon .Key}}{{.Label}}</a>{{end -}}
+{{- range .Lead}}<a class="btn{{if eq .Key "teardown"}} bad{{end}}" href="{{.Href}}"{{if eq .Key $.Active}} aria-current="page"{{end}}>{{opIcon .Key}}{{.Label}}</a>{{end -}}
 </nav>
 {{- end}}
 {{- with .User}}

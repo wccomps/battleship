@@ -94,7 +94,7 @@ func TestCellPageMissingVM(t *testing.T) {
 	contains(t, "missing cell page", body,
 		`<span class="vm">team02-ftp</span></h1>`,
 		`<span class="chip is-missing">`,
-		`<a class="btn" href="/deploy?baseline=yes&amp;hosts=ftp&amp;pattern=&amp;teams=02" data-panel-link>`,
+		`<a class="btn" href="/deploy?baseline=yes&amp;hosts=ftp&amp;pattern=&amp;teams=02">`,
 	)
 	lacks(t, "missing cell page", body, `action="/reset"`, `action="/power/preview"`, "<dt>VMID</dt>")
 

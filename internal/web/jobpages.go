@@ -278,6 +278,7 @@ type jobView struct {
 	RetryLock  string // why this viewer can't retry it: they lack its privilege
 	RetryFault string // why the job can't be retried at all, when its stored job can't be read
 	StartAgain string // a stale, failed or cancelled job: its form, filled in, if the user may use it
+	AgainPage  bool   // StartAgain opens as its own page, not in the side panel
 	AgainLock  string // why this viewer can't start it again: they lack its privilege
 	Events     []eventView
 	EventsHref string
@@ -538,7 +539,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	if store.JobStatus(j.Status).StartAgain() {
 		if op, ok := operationFor(pods.Kind(j.Kind)); ok {
 			if mayOp {
-				v.StartAgain = formQuery(op, in)
+				v.StartAgain, v.AgainPage = formQuery(op, in), op.page()
 			} else {
 				v.AgainLock = notPermitted(j.Kind)
 			}

@@ -708,38 +708,38 @@ func TestBrowserEmptyGridAndDeploy(t *testing.T) {
 			b.noSideways("lead's empty grid")
 			b.shot("empty-lead-" + size.name)
 			b.click(`#grid-start .set-deploy`)
-			b.waitFor("the deploy form", `!!document.querySelector("#panel[open] #form-title")`)
-			if !b.is(`document.querySelector('#panel input[name=pattern][value="*.kilo.alpha"]').checked`) {
+			b.waitFor("the deploy page", `location.pathname === "/deploy" && document.readyState === "complete"`)
+			if !b.is(`document.querySelector('main input[name=pattern][value="*.kilo.alpha"]').checked`) {
 				t.Error("the card's set isn't chosen")
 			}
-			if got := b.is(`[...document.querySelectorAll('#panel input[name=hosts]')].every(b => b.checked) && document.querySelectorAll('#panel input[name=hosts]').length === 12`); !got {
+			if got := b.is(`[...document.querySelectorAll('main input[name=hosts]')].every(b => b.checked) && document.querySelectorAll('main input[name=hosts]').length === 12`); !got {
 				t.Error("the set's 12 hosts aren't all ticked")
 			}
 			b.shot("deploy-form-" + size.name)
 			// Another set shows its own hosts.
-			b.click(`#panel label.opt input[value="*.kilo.bravo"] + span`)
-			if !b.is(`document.querySelectorAll('#panel input[name=hosts]').length === 6`) {
+			b.click(`main label.opt input[value="*.kilo.bravo"] + span`)
+			if !b.is(`document.querySelectorAll('main input[name=hosts]').length === 6`) {
 				t.Error("choosing kilo.bravo doesn't show its 6 hosts")
 			}
-			b.click(`#panel label.opt input[value="*.kilo.alpha"] + span`)
+			b.click(`main label.opt input[value="*.kilo.alpha"] + span`)
 			// No team has VMs yet: the teams are typed.
-			if !b.is(`(function(){var t=document.querySelector('#panel #teams');return t.value===""&&t.required&&!t.checkValidity()})()`) {
+			if !b.is(`(function(){var t=document.querySelector('main #teams');return t.value===""&&t.required&&!t.checkValidity()})()`) {
 				t.Error("the teams field isn't empty and required")
 			}
-			b.run("typing the teams", chromedp.SendKeys(`#panel #teams`, "1-32", chromedp.ByQuery))
-			b.click(`#panel button.pri`)
-			b.waitFor("the deploy preview", `!!document.querySelector("#panel[open] #pv-title")`)
+			b.run("typing the teams", chromedp.SendKeys(`main #teams`, "1-32", chromedp.ByQuery))
+			b.click(`main button.pri`)
+			b.waitFor("the deploy preview page", `location.pathname === "/deploy/preview" && document.readyState === "complete"`)
 			if got := b.text("#pv-title"); got != "Deploy kilo.alpha" {
 				t.Errorf("preview title = %q", got)
 			}
-			if !b.is(`document.querySelector('#panel .kv').textContent.includes("all")`) {
-				t.Errorf("recap = %q (want all hosts: none sent)", b.text("#panel .kv"))
+			if !b.is(`document.querySelector('main .kv').textContent.includes("all")`) {
+				t.Errorf("recap = %q (want all hosts: none sent)", b.text("main .kv"))
 			}
 			// Only a teardown is typed (pods.Kind.TypedConfirm).
-			if b.is(`!!document.querySelector('#typed')`) || b.is(`document.querySelector('#panel button.pri').disabled`) {
+			if b.is(`!!document.querySelector('#typed')`) || b.is(`document.querySelector('main button.pri').disabled`) {
 				t.Error("the deploy asks for the range typed, or its button is off")
 			}
-			if got := b.text(`#panel button.pri`); got != "Deploy 384 VMs" {
+			if got := b.text(`main button.pri`); got != "Deploy 384 VMs" {
 				t.Errorf("deploy button = %q", got)
 			}
 			b.noSideways("deploy preview")
@@ -789,7 +789,7 @@ func TestBrowserTeardownForm(t *testing.T) {
 			b := newBrowser(t, h, &lead, size.width, size.height, size.dark)
 			b.open("/")
 			b.click(`.lead-ops a[href="/teardown"]`)
-			b.waitFor("the teardown form", `!!document.querySelector("#panel[open] #form-title")`)
+			b.waitFor("the teardown page", `location.pathname === "/teardown" && document.readyState === "complete"`)
 			if got := b.text("#host-field legend"); got != "Hosts · none = all" {
 				t.Errorf("hosts legend = %q", got)
 			}

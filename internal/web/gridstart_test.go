@@ -29,7 +29,7 @@ func emptyWithMasters(t *testing.T, mut ...func(*config.Config)) *harness {
 	return h
 }
 
-var setDeployRE = regexp.MustCompile(`<a class="btn set-deploy" href="([^"]+)" data-panel-link>`)
+var setDeployRE = regexp.MustCompile(`<a class="btn set-deploy" href="([^"]+)">`)
 
 // deployLinks returns the template sets' deploy links in a page, parsed.
 func deployLinks(t *testing.T, body string) []*url.URL {
@@ -96,7 +96,7 @@ func TestGridEmptyWithoutMasters(t *testing.T) {
 	h.poll()
 	lead := h.login(asLead)
 	body := h.get(&lead, "/").Body.String()
-	contains(t, "lead's empty grid", body, "No master VM is tagged <code>dev</code>.", `<a class="btn" href="/deploy" data-panel-link>`)
+	contains(t, "lead's empty grid", body, "No master VM is tagged <code>dev</code>.", `<a class="btn" href="/deploy">`)
 	lacks(t, "lead's empty grid", body, "set-deploy", "Not in a set", `class="card"`)
 	op := h.login(asOperator)
 	body = h.get(&op, "/").Body.String()

@@ -96,7 +96,7 @@
 <button type="submit" class="btn pri" title="{{.RetryTip}}">{{icon "reboot"}}Retry {{.RetryN}} failed {{if eq .RetryN 1}}VM{{else}}VMs{{end}}</button>
 </form>
 {{- else if .StartAgain}}
-<a class="btn pri" href="{{.StartAgain}}" data-panel-link>{{icon "reboot"}}Preview again</a>
+<a class="btn pri" href="{{.StartAgain}}"{{if not .AgainPage}} data-panel-link{{end}}>{{icon "reboot"}}Preview again</a>
 {{- else if .RetryLock}}
 <span class="lock" title="{{.RetryLock}}">{{icon "lock"}}Retry · not permitted</span>
 {{- else if .RetryFault}}
