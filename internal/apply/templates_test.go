@@ -259,13 +259,13 @@ func TestTemplatesBuildConcurrentlyUpToCap(t *testing.T) {
 	checkMasters(t, f)
 }
 
-// Template and team clones from one node share its clone slots.
-func TestTemplateAndTeamClonesShareNodeSlots(t *testing.T) {
+// Template and team clones share the clone slots.
+func TestTemplateAndTeamClonesShareSlots(t *testing.T) {
 	f := sevenMasters()
 	plan := deploySeven(t, f)
 	ex := testExecutor(f, &recorder{})
 	ex.Cfg.Concurrency.TemplateBuilds = 4
-	ex.Cfg.Concurrency.ClonesPerNode = 2
+	ex.Cfg.Concurrency.Clones = 2
 	ex.Limits = NewLimits(ex.Cfg.Concurrency) // shared with any other executor
 	g := newCloneGate(t, f, 2, func(string) bool { return true })
 	_, done := runAsync(t, ex, plan)

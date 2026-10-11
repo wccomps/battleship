@@ -101,7 +101,7 @@ func TestBlockedItemsEmitBlockedEvents(t *testing.T) {
 }
 
 func TestLimitsCallHoldsOneSlot(t *testing.T) {
-	lim := NewLimits(config.Concurrency{ConfigCalls: 2, ClonesPerNode: 1})
+	lim := NewLimits(config.Concurrency{ConfigCalls: 2, Clones: 1})
 	// Inside a call one slot is taken, so exactly one more call fits.
 	err := lim.Call(context.Background(), func() error {
 		if got := len(lim.calls); got != 1 {
@@ -125,7 +125,7 @@ func TestLimitsCallHoldsOneSlot(t *testing.T) {
 }
 
 func TestLimitsCallWaitsForASlot(t *testing.T) {
-	lim := NewLimits(config.Concurrency{ConfigCalls: 1, ClonesPerNode: 1})
+	lim := NewLimits(config.Concurrency{ConfigCalls: 1, Clones: 1})
 	holding, release := make(chan struct{}), make(chan struct{})
 	done := make(chan error)
 	go func() {
@@ -261,5 +261,35 @@ func TestDeletesTakeClusterSlots(t *testing.T) {
 	}
 	if want := []string{fmt.Sprintf("deletes/%d", ex.Cfg.Concurrency.Deletes)}; !slices.Equal(slots.taken, want) {
 		t.Errorf("slots taken = %v, want %v", slots.taken, want)
+	}
+}
+
+// Template copies and team clones each take a cluster-wide clone slot.
+func TestClonesTakeClusterSlots(t *testing.T) {
+	f := newCluster()
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01", "02"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := testExecutor(f, &recorder{})
+	slots := &recordingSlots{}
+	ex.Limits = NewClusterLimits(ex.Cfg.Concurrency, slots)
+
+	if res := ex.Run(context.Background(), plan); len(res.Failed) != 0 {
+		t.Fatalf("failed: %v", res.Failed)
+	}
+	clone := fmt.Sprintf("clones/%d", ex.Cfg.Concurrency.Clones)
+	// One template copy, then a clone per team.
+	if n := slices.IndexFunc(slots.taken, func(s string) bool { return s != clone && s != "storage-ops/1" }); n >= 0 {
+		t.Errorf("unexpected slot %s in %v", slots.taken[n], slots.taken)
+	}
+	var clones int
+	for _, s := range slots.taken {
+		if s == clone {
+			clones++
+		}
+	}
+	if clones != 3 {
+		t.Errorf("clone slots taken %d times (%v), want 3", clones, slots.taken)
 	}
 }

@@ -3,24 +3,27 @@ package apply
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/wccomps/battleship/internal/config"
 )
 
-// Limits caps concurrent Proxmox work: config calls, clones per source
-// node, template builds, deletes and storage operations. Concurrent
-// Executors in one process should share one. With Slots (a database),
-// deletes and storage operations are capped cluster-wide across processes;
-// the rest are per process.
+// Limits caps concurrent Proxmox work: config calls, clones, template
+// builds, deletes and storage operations. Concurrent Executors in one
+// process should share one. With Slots (a database), clones, deletes and
+// storage operations are capped cluster-wide across processes; the rest are
+// per process.
 //
-// Lock order: builds, clone slots, deletes, storageOps, config calls; never
+// Lock order: builds, clones, deletes, storageOps, config calls; never
 // wait for an earlier one while holding a later one. Clone slots are never
 // held with deletes or storageOps. A config-call slot covers one try of one
 // call (e.g. a read and its POST), never a task wait.
 type Limits struct {
 	calls  sem
 	builds sem
+	// clones caps clone tasks: every linked clone takes the clone storage's
+	// cluster lock, so they run about one a second whatever their nodes, and
+	// too many queued at once time out on it.
+	clones shared
 	// deletes caps destroy tasks: each takes Proxmox's cluster-wide user.cfg
 	// lock, and too many at once time out on it, leaving VMs half-deleted.
 	deletes shared
@@ -30,10 +33,6 @@ type Limits struct {
 	// timeout"), which can leave a template half-converted or a disk behind.
 	// Held around those tasks and their config calls, never across a clone.
 	storageOps shared
-	perNode    int
-
-	mu     sync.Mutex
-	clones map[string]sem
 }
 
 // Slots are counting semaphores shared by every process that uses the same
@@ -48,17 +47,16 @@ type Slots interface {
 // without a database.
 func NewLimits(c config.Concurrency) *Limits { return NewClusterLimits(c, nil) }
 
-// NewClusterLimits is NewLimits, but caps deletes and storage operations
-// across every process sharing slots.
+// NewClusterLimits is NewLimits, but caps clones, deletes and storage
+// operations across every process sharing slots.
 func NewClusterLimits(c config.Concurrency, slots Slots) *Limits {
-	deletes := max(1, c.Deletes)
+	clones, deletes := max(1, c.Clones), max(1, c.Deletes)
 	return &Limits{
 		calls:      make(sem, c.ConfigCalls),
 		builds:     make(sem, max(1, c.TemplateBuilds)),
+		clones:     shared{local: make(sem, clones), slots: slots, name: "clones", n: clones},
 		deletes:    shared{local: make(sem, deletes), slots: slots, name: "deletes", n: deletes},
 		storageOps: shared{local: make(sem, 1), slots: slots, name: "storage-ops", n: 1},
-		perNode:    c.ClonesPerNode,
-		clones:     map[string]sem{},
 	}
 }
 
@@ -66,18 +64,6 @@ func NewClusterLimits(c config.Concurrency, slots Slots) *Limits {
 // the drift scan take one per API call try; planning, the grid listing and
 // task/VM polling don't.
 func (l *Limits) Call(ctx context.Context, fn func() error) error { return l.calls.do(ctx, fn) }
-
-// cloneSlot returns the semaphore for clones from node.
-func (l *Limits) cloneSlot(node string) sem {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	s, ok := l.clones[node]
-	if !ok {
-		s = make(sem, l.perNode)
-		l.clones[node] = s
-	}
-	return s
-}
 
 // sem is a counting semaphore with one slot per unit of capacity.
 type sem chan struct{}

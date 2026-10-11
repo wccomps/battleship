@@ -44,11 +44,11 @@ url = "https://192.0.2.123:8006"
 # baseline_patterns = ["fresh_clone_*"]
 # gpu_vga = "virtio-gl"
 
-# clones_per_node, config_calls and template_builds are per process; workers is
-# per job. With a database, deletes is shared by all processes: keep it the same everywhere.
+# config_calls and template_builds are per process; workers is per job. With a
+# database, clones and deletes are shared by all processes: keep them the same everywhere.
 # [concurrency]
 # workers = 20                   # VMs processed at once, per job
-# clones_per_node = 10           # clone tasks at once per source node
+# clones = 8                     # clone tasks at once; each takes the clone storage's cluster lock, more time out on it
 # config_calls = 5               # Proxmox API calls at once, task-starting POSTs included
 # template_builds = 4            # templates built at once; each copy also takes a clone slot
 # deletes = 4                    # VM deletes at once; more time out on Proxmox's user.cfg lock and leave VMs half-deleted

@@ -117,7 +117,7 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		if exists {
 			return false, nil
 		}
-		err := e.lim.cloneSlot(tpl.node).do(ctx, func() error {
+		err := e.lim.clones.do(ctx, func() error {
 			_, err := e.taskUPID(ctx, it.VMID, func() (string, error) {
 				return e.startClone(ctx, false, proxmox.CloneRequest{
 					SourceNode: tpl.node, SourceVMID: tpl.spec.VMID, NewVMID: it.VMID, Name: it.Name,

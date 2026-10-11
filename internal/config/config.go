@@ -83,15 +83,17 @@ type Deploy struct {
 	GPUVGA           string   `toml:"gpu_vga"` // templates with this vga value are pinned to their node
 }
 
-// Concurrency limits Proxmox work. Workers is per job; ClonesPerNode,
-// ConfigCalls and TemplateBuilds are per process. With a database, Deletes
-// and serialized storage operations are capped across processes.
+// Concurrency limits Proxmox work. Workers is per job; ConfigCalls and
+// TemplateBuilds are per process. With a database, Clones, Deletes and
+// serialized storage operations are capped across processes.
 type Concurrency struct {
-	Workers       int `toml:"workers"`         // VMs processed at once
-	ClonesPerNode int `toml:"clones_per_node"` // concurrent clone tasks per source node
-	ConfigCalls   int `toml:"config_calls"`    // concurrent API calls from jobs and the drift scan, clone POSTs included
+	Workers int `toml:"workers"` // VMs processed at once
+	// Clones caps concurrent clone tasks. Each takes the clone storage's
+	// cluster lock, so they run about one a second; too many queued time out.
+	Clones      int `toml:"clones"`
+	ConfigCalls int `toml:"config_calls"` // concurrent API calls from jobs and the drift scan, clone POSTs included
 	// TemplateBuilds caps concurrent template builds; each also takes a clone
-	// slot on its master's node.
+	// slot.
 	TemplateBuilds int `toml:"template_builds"`
 	// Deletes caps concurrent VM destroys. Each takes Proxmox's cluster-wide
 	// user.cfg lock; too many time out on it and leave VMs half-deleted.
@@ -202,7 +204,7 @@ func Default() Config {
 			BaselinePatterns: []string{"fresh_clone_*"},
 			GPUVGA:           "virtio-gl",
 		},
-		Concurrency: Concurrency{Workers: 20, ClonesPerNode: 10, ConfigCalls: 5, TemplateBuilds: 4, Deletes: 4},
+		Concurrency: Concurrency{Workers: 20, Clones: 8, ConfigCalls: 5, TemplateBuilds: 4, Deletes: 4},
 		Teardown:    Teardown{ShutdownTimeout: 60 * time.Second},
 		Jobs:        Jobs{Heartbeat: 10 * time.Second, StaleAfter: 60 * time.Second, Poll: 2 * time.Second, CancelGrace: 30 * time.Second},
 		Database:    Database{MaxConns: 16},
@@ -272,12 +274,13 @@ func (p Proxmox) GoString() string { return "config.Proxmox" + p.String() }
 // removedKeys are retired settings, with why. A config that sets one fails
 // to load, so an old config can't silently keep e.g. a service token.
 var removedKeys = map[string]string{
-	"proxmox.token_id":     removedToken,
-	"proxmox.token_secret": removedToken,
-	"roles.operators":      removedToken,
-	"roles.leads":          removedToken,
-	"web.teams":            "Battleship shows the teams that have VMs; delete the line",
-	"oidc.groups_claim":    "Battleship doesn't use groups; delete the line",
+	"proxmox.token_id":            removedToken,
+	"proxmox.token_secret":        removedToken,
+	"roles.operators":             removedToken,
+	"roles.leads":                 removedToken,
+	"web.teams":                   "Battleship shows the teams that have VMs; delete the line",
+	"concurrency.clones_per_node": "clones are now capped across the cluster; use concurrency.clones",
+	"oidc.groups_claim":           "Battleship doesn't use groups; delete the line",
 }
 
 const removedToken = "Battleship holds no Proxmox token or roles of its own. " +
@@ -452,8 +455,8 @@ func (c Config) Validate() error {
 	if c.Concurrency.Workers < 1 {
 		errs = append(errs, errors.New("concurrency.workers must be at least 1"))
 	}
-	if c.Concurrency.ClonesPerNode < 1 {
-		errs = append(errs, errors.New("concurrency.clones_per_node must be at least 1"))
+	if c.Concurrency.Clones < 1 {
+		errs = append(errs, errors.New("concurrency.clones must be at least 1"))
 	}
 	if c.Concurrency.ConfigCalls < 1 {
 		errs = append(errs, errors.New("concurrency.config_calls must be at least 1"))

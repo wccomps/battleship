@@ -146,9 +146,9 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 		return fmt.Errorf("VMID %d is now used by %s", spec.VMID, other.Name)
 	}
 
-	// The copy takes a master-node clone slot like team clones. It is taken
+	// The copy takes a clone slot like team clones. It is taken
 	// before stopping the master so the master isn't down while waiting.
-	if err := e.lim.cloneSlot(spec.MasterNode).do(ctx, func() error { return e.copyMaster(ctx, spec) }); err != nil {
+	if err := e.lim.clones.do(ctx, func() error { return e.copyMaster(ctx, spec) }); err != nil {
 		return err
 	}
 	e.setPresent(proxmox.VM{VMID: spec.VMID, Name: name, Node: spec.MasterNode}, true)

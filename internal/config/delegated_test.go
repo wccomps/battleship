@@ -158,3 +158,11 @@ func TestLoadRefusesGroupsClaim(t *testing.T) {
 		t.Fatalf("Load with oidc.groups_claim = %v", err)
 	}
 }
+
+// concurrency.clones_per_node points to the cluster-wide concurrency.clones.
+func TestLoadRefusesClonesPerNode(t *testing.T) {
+	path := writeFile(t, "[proxmox]\nurl = \"https://pve.example:8006\"\n\n[concurrency]\nclones_per_node = 5\n")
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "concurrency.clones_per_node. clones are now capped across the cluster; use concurrency.clones") {
+		t.Fatalf("Load with clones_per_node = %v", err)
+	}
+}

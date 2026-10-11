@@ -10,11 +10,11 @@ url = "https://proxmox.example.invalid:8006" # CHANGE ME
 # The cluster CA from the ConfigMap (see kustomization.yaml and the base's note).
 ca_file = "/config/pve-root-ca.pem"
 
-# Clone, config-call and build limits are per replica; workers is per job;
-# deletes is shared by every process.
+# Config-call and build limits are per replica; workers is per job; clones
+# and deletes are shared by every process.
 [concurrency]
 workers = 10
-clones_per_node = 5
+clones = 8
 config_calls = 3
 template_builds = 2
 deletes = 2                            # avoids Proxmox user.cfg lock timeouts

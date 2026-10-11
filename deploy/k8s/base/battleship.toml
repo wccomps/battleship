@@ -47,12 +47,12 @@ snapshot_name = "initial"          # the baseline a deploy takes
 baseline_patterns = ["fresh_clone_*"]  # old-tool baselines; reset uses the newest if no snapshot_name
 gpu_vga = "virtio-gl"
 
-# clones_per_node, config_calls and template_builds are PER REPLICA, so roughly
-# half the single-process defaults. deletes is shared through the database by
+# config_calls and template_builds are PER REPLICA, so roughly half the
+# single-process defaults. clones and deletes are shared through the database by
 # every process: give them all the same value.
 [concurrency]
 workers = 10                       # VMs processed at once, per job
-clones_per_node = 5                # clone tasks at once per source node, per replica
+clones = 8                         # clone tasks at once, across all replicas; more time out on the storage lock
 config_calls = 3                   # executor and drift-scan API calls at once, per replica
 template_builds = 2                # templates built at once, per replica
 deletes = 2                        # VM deletes at once, across all replicas; more time out on Proxmox's user.cfg lock

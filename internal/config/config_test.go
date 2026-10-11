@@ -129,15 +129,15 @@ func TestLoadRejectsUnknownKeys(t *testing.T) {
 url = "https://pve.example:8006"
 
 [concurrency]
-clones_per_nodes = 5
+clone = 5
 `)
 
 	_, err := Load(path)
 	if err == nil {
 		t.Fatal("Load succeeded, want error for unknown keys")
 	}
-	if !strings.Contains(err.Error(), "concurrency.clones_per_nodes") {
-		t.Errorf("error %q missing 'concurrency.clones_per_nodes'", err)
+	if !strings.Contains(err.Error(), "concurrency.clone") {
+		t.Errorf("error %q missing 'concurrency.clone'", err)
 	}
 }
 
@@ -205,11 +205,11 @@ func TestValidateRanges(t *testing.T) {
 			wantErr: "concurrency.workers must be at least 1",
 		},
 		{
-			name: "clones_per_node zero",
+			name: "clones zero",
 			mutate: func(c *Config) {
-				c.Concurrency.ClonesPerNode = 0
+				c.Concurrency.Clones = 0
 			},
-			wantErr: "concurrency.clones_per_node must be at least 1",
+			wantErr: "concurrency.clones must be at least 1",
 		},
 		{
 			name: "config_calls zero",
