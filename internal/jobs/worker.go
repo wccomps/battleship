@@ -13,6 +13,7 @@ import (
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
+	"github.com/wccomps/battleship/internal/status"
 	"github.com/wccomps/battleship/internal/store"
 )
 
@@ -55,9 +56,10 @@ type Worker struct {
 	// its outcome is recorded (not for a job whose claim was reaped).
 	OnStart  func(job *store.Job)
 	OnFinish func(job *store.Job, out store.Outcome)
-	// Cancels, if set, subscribes to cancel requests: wake fires when one may
-	// have come. Nil: cancels wait for the next heartbeat.
-	Cancels func(jobID int64) (wake <-chan struct{}, stop func())
+	// Hub, if set, wakes the worker when jobs change and when its job's
+	// cancel is requested. Nil: an idle worker looks for jobs every
+	// Jobs.Poll, and cancels wait for the next heartbeat.
+	Hub *status.Hub
 
 	// onEvent, if set, also receives each progress event as it is recorded,
 	// from many goroutines; tests use it to act at a point in a run.
@@ -91,6 +93,16 @@ func (w *Worker) init() {
 // workers went silent each pass.
 func (w *Worker) Run(ctx context.Context) error {
 	w.init()
+	idle := w.Cfg.Jobs.Poll
+	var changed <-chan struct{}
+	if w.Hub != nil {
+		var stop func()
+		changed, stop = w.Hub.Wake(status.TopicJobs)
+		defer stop()
+		// The hub announces every change that can free a job, and resyncs
+		// after reconnecting, so the timer is only for reaping.
+		idle = w.Cfg.Jobs.StaleAfter
+	}
 	for ctx.Err() == nil {
 		reapCtx, stopReap := context.WithTimeout(ctx, DBCallTimeout)
 		ids, err := w.Store.ReapStale(reapCtx, w.Cfg.Jobs.StaleAfter)
@@ -113,9 +125,16 @@ func (w *Worker) Run(ctx context.Context) error {
 			w.runJob(ctx, job)
 			continue
 		}
-		if err := proxmox.SleepContext(ctx, w.Cfg.Jobs.Poll); err != nil {
-			break
+		t := time.NewTimer(idle)
+		select {
+		case <-ctx.Done():
+		case <-t.C:
+		case _, ok := <-changed:
+			if !ok { // the hub stopped: poll instead
+				changed, idle = nil, w.Cfg.Jobs.Poll
+			}
 		}
+		t.Stop()
 	}
 	return nil
 }
@@ -126,6 +145,12 @@ func (w *Worker) Run(ctx context.Context) error {
 // nothing.
 func (w *Worker) runJob(ctx context.Context, job *store.Job) {
 	w.init()
+	var wake <-chan struct{}
+	if w.Hub != nil {
+		var unsubscribe func()
+		wake, unsubscribe = w.Hub.Wake(status.CancelTopic(job.ID))
+		defer unsubscribe()
+	}
 	if w.OnStart != nil {
 		w.OnStart(job)
 	}
@@ -135,12 +160,6 @@ func (w *Worker) runJob(ctx context.Context, job *store.Job) {
 	defer cancel(nil)
 
 	hbDone := make(chan struct{})
-	var wake <-chan struct{}
-	if w.Cancels != nil {
-		var unsubscribe func()
-		wake, unsubscribe = w.Cancels(job.ID)
-		defer unsubscribe()
-	}
 	go w.heartbeat(bg, job.ID, cancel, wake, hbDone)
 	stopHeartbeat := func() { close(hbDone) }
 

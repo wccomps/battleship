@@ -292,15 +292,9 @@ func connectAuth(ctx context.Context, cfg config.Config, st *store.Store, login 
 	}
 }
 
-// hubCancels is a jobs.Worker's Cancels that wakes on hub's messages
-// about a job's cancel requests (status.CancelTopic).
-func hubCancels(hub *status.Hub) func(int64) (<-chan struct{}, func()) {
-	return func(id int64) (<-chan struct{}, func()) { return hub.Wake(status.CancelTopic(id)) }
-}
-
 // startWorkers starts cfg.Web.Workers job workers sharing api and lim, and
 // returns a channel closed once they all return, which they do once ctx is
-// done and their running jobs have ended. hub tells them of cancels.
+// done and their running jobs have ended. hub tells them of job changes and cancels.
 func startWorkers(ctx context.Context, cfg config.Config, st *store.Store, client pods.API, creds jobs.Credentials, lim *apply.Limits, hub *status.Hub, log *slog.Logger) <-chan struct{} {
 	var wg sync.WaitGroup
 	for range cfg.Web.Workers {
@@ -308,9 +302,9 @@ func startWorkers(ctx context.Context, cfg config.Config, st *store.Store, clien
 		wl := log.With("component", "worker", "worker", id)
 		w := &jobs.Worker{
 			Store: st, Cfg: cfg, ID: id, Limits: lim, Credentials: creds,
-			Bind:    bindAs(client),
-			Logf:    func(format string, args ...any) { wl.Warn(fmt.Sprintf(format, args...)) },
-			Cancels: hubCancels(hub),
+			Bind: bindAs(client),
+			Logf: func(format string, args ...any) { wl.Warn(fmt.Sprintf(format, args...)) },
+			Hub:  hub,
 			OnStart: func(j *store.Job) {
 				wl.Info("job started", "job", j.ID, "kind", j.Kind, "created_by", j.CreatedBy)
 			},

@@ -76,7 +76,7 @@ url = "https://192.0.2.123:8006"
 # [jobs]
 # heartbeat = "10s"              # how often a running job proves it's alive
 # stale_after = "60s"            # a running job silent this long is marked interrupted (>= 5 x heartbeat)
-# poll = "2s"                    # how often an idle worker looks for jobs
+# poll = "2s"                    # how often the CLI checks a job it follows
 # cancel_grace = "30s"           # after a cancel, how long a step waits on a Proxmox task it started (0s-5m)
 
 # battleship serve: the volunteer web app and the job workers.

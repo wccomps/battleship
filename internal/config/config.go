@@ -170,7 +170,7 @@ func redactURL(raw string) string {
 type Jobs struct {
 	Heartbeat  time.Duration `toml:"heartbeat"`   // how often a running job proves it's alive
 	StaleAfter time.Duration `toml:"stale_after"` // a running job silent this long is marked interrupted
-	Poll       time.Duration `toml:"poll"`        // how often an idle worker looks for jobs
+	Poll       time.Duration `toml:"poll"`        // how often the CLI checks a job it follows
 	// CancelGrace is how long a canceled step waits for a Proxmox task it
 	// already started, so the job records what it did.
 	CancelGrace time.Duration `toml:"cancel_grace"`

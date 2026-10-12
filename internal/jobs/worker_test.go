@@ -174,11 +174,9 @@ func TestWorkerStopsOnCancelBeforeItsNextHeartbeat(t *testing.T) {
 	defer stopHub()
 	hub := status.NewHub(st.Notifications, status.HubOptions{Logf: t.Logf})
 	go hub.Run(hubCtx)
+	w.Hub = hub
 	subscribed := make(chan struct{})
-	w.Cancels = func(id int64) (<-chan struct{}, func()) {
-		defer close(subscribed)
-		return hub.Wake(status.CancelTopic(id))
-	}
+	w.OnStart = func(*store.Job) { close(subscribed) } // after the cancel subscription
 	j := claim(t, st)
 
 	done := make(chan struct{})
@@ -833,5 +831,35 @@ func TestLeftConfigRecordsTheVerdict(t *testing.T) {
 		if got := leftConfig(l); got != want {
 			t.Errorf("leftConfig(%v) = %q, want %q", l, got, want)
 		}
+	}
+}
+
+// An idle worker with a hub starts a new job when it's created, not on its
+// next poll.
+func TestIdleWorkerWakesForNewJob(t *testing.T) {
+	st := storetest.New(t)
+	f := teamVMs()
+	w := newWorker(st, f)
+	w.Cfg.Jobs.Poll = time.Hour
+	w.Cfg.Jobs.StaleAfter = time.Hour
+	ctx, stop := context.WithCancel(bg)
+	hub := status.NewHub(st.Notifications, status.HubOptions{Logf: t.Logf})
+	go hub.Run(ctx)
+	for hub.Seq() == 0 { // listening
+		time.Sleep(5 * time.Millisecond)
+	}
+	w.Hub = hub
+	done := make(chan struct{})
+	go func() { defer close(done); w.Run(ctx) }() //nolint:errcheck
+	t.Cleanup(func() { stop(); <-done })
+	time.Sleep(200 * time.Millisecond) // past its first look for jobs
+
+	id := submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
+	deadline := time.Now().Add(10 * time.Second)
+	for job(t, st, id).Status != store.StatusSucceeded {
+		if time.Now().After(deadline) {
+			t.Fatalf("job = %s 10s after it was created", job(t, st, id).Status)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
