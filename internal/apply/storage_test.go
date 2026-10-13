@@ -720,9 +720,9 @@ func TestOrphanedDisksListSharedStorageOnce(t *testing.T) {
 	}
 }
 
-// A few teams' teardown asks about each candidate VMID; many teams list
-// the storage whole, which also finds disks of VMs whose template is gone.
-func TestOrphanedDisksAskFewVMIDsOrListWhole(t *testing.T) {
+// A teardown asks about each candidate VMID and never lists the storage
+// whole, however many teams it covers.
+func TestOrphanedDisksAskEachVMID(t *testing.T) {
 	f := orphanedSetup(t)
 	few := f.Called("content:competitions:")
 	if _, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil); err != nil {
@@ -743,8 +743,8 @@ func TestOrphanedDisksAskFewVMIDsOrListWhole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := f.Called("content:competitions:0"); n == 0 {
-		t.Error("50 teams didn't list the storage whole")
+	if n := f.Called("content:competitions:0"); n != 0 {
+		t.Errorf("50 teams listed the storage whole %d times", n)
 	}
 	if len(plan.Items) != 1 || plan.Items[0].VMID != 10121 {
 		t.Errorf("items = %+v, want the orphan of VMID 10121", plan.Items)

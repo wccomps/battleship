@@ -496,13 +496,10 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	if err != nil {
 		return err
 	}
-	// A whole listing takes seconds per node (Proxmox reads every image); one
-	// VMID takes a moment. So few candidates are asked one by one, many list the
-	// storage whole; either way the listings run concurrently.
+	// Each candidate is asked about on its own: one VMID takes a moment, while
+	// a whole listing runs qemu-img on every disk on the storage and outgrows
+	// Proxmox's proxy timeout once a few hundred VMs are deployed.
 	candidates := p.orphanCandidates(plan.Teams, vms, held)
-	if len(candidates) > maxOrphanCandidates {
-		candidates = []int{0} // 0: the whole storage
-	}
 	listed := make([][]string, len(nodes))
 	var mu sync.Mutex
 	var g errgroup.Group
@@ -550,13 +547,8 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	return nil
 }
 
-const (
-	// maxOrphanCandidates is the most VMIDs asked about one by one before
-	// listing the whole storage instead.
-	maxOrphanCandidates = 40
-	// orphanListings is how many storage listings run at once.
-	orphanListings = 8
-)
+// orphanListings is how many storage listings run at once.
+const orphanListings = 8
 
 // orphanCandidates are the free VMIDs team VMs get when cloned from current
 // templates (CloneVMID), where a gone VM's disks would be. Disks of VMs
