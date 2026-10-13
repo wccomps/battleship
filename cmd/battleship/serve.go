@@ -25,8 +25,9 @@ import (
 
 const (
 	// drainDelay is how long readiness fails before the HTTP server stops,
-	// so Kubernetes and the ingress take the replica out of rotation first.
-	drainDelay = 5 * time.Second
+	// so Kubernetes and the ingress take the replica out of rotation first:
+	// two failed probes 5s apart (deploy/k8s), then the gateway's update.
+	drainDelay = 15 * time.Second
 	// httpShutdownTimeout bounds the wait for requests in flight once the
 	// HTTP server stops; event streams end at once.
 	httpShutdownTimeout = 10 * time.Second
