@@ -88,8 +88,9 @@ type Deploy struct {
 // serialized storage operations are capped across processes.
 type Concurrency struct {
 	Workers int `toml:"workers"` // VMs processed at once
-	// Clones caps concurrent clone tasks. Each takes the clone storage's
-	// cluster lock, so they run about one a second; too many queued time out.
+	// Clones caps concurrent clone tasks; 0 means no cap. Stock Proxmox takes
+	// the clone storage's cluster lock for every clone, so they run about one
+	// a second and too many queued time out: set 8 there.
 	Clones      int `toml:"clones"`
 	ConfigCalls int `toml:"config_calls"` // concurrent API calls from jobs and the drift scan, clone POSTs included
 	// TemplateBuilds caps concurrent template builds; each also takes a
@@ -204,7 +205,7 @@ func Default() Config {
 			BaselinePatterns: []string{"fresh_clone_*"},
 			GPUVGA:           "virtio-gl",
 		},
-		Concurrency: Concurrency{Workers: 20, Clones: 8, ConfigCalls: 5, TemplateBuilds: 4, Deletes: 4},
+		Concurrency: Concurrency{Workers: 20, ConfigCalls: 5, TemplateBuilds: 4, Deletes: 4},
 		Teardown:    Teardown{ShutdownTimeout: 60 * time.Second},
 		Jobs:        Jobs{Heartbeat: 10 * time.Second, StaleAfter: 60 * time.Second, Poll: 2 * time.Second, CancelGrace: 30 * time.Second},
 		Database:    Database{MaxConns: 16},
@@ -455,8 +456,8 @@ func (c Config) Validate() error {
 	if c.Concurrency.Workers < 1 {
 		errs = append(errs, errors.New("concurrency.workers must be at least 1"))
 	}
-	if c.Concurrency.Clones < 1 {
-		errs = append(errs, errors.New("concurrency.clones must be at least 1"))
+	if c.Concurrency.Clones < 0 {
+		errs = append(errs, errors.New("concurrency.clones must be 0 (no cap) or more"))
 	}
 	if c.Concurrency.ConfigCalls < 1 {
 		errs = append(errs, errors.New("concurrency.config_calls must be at least 1"))

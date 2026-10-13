@@ -52,7 +52,7 @@ gpu_vga = "virtio-gl"
 # every process: give them all the same value.
 [concurrency]
 workers = 10                       # VMs processed at once, per job
-clones = 8                         # clone tasks at once, across all replicas; more time out on the storage lock
+clones = 0                         # clone tasks at once across all replicas, 0 = no cap; stock Proxmox locks storage per clone, set 8 there
 config_calls = 3                   # executor and drift-scan API calls at once, per replica
 template_builds = 2                # templates built at once, per replica
 deletes = 2                        # VM deletes at once, across all replicas; more time out on Proxmox's user.cfg lock

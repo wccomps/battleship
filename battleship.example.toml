@@ -48,7 +48,7 @@ url = "https://192.0.2.123:8006"
 # database, clones and deletes are shared by all processes: keep them the same everywhere.
 # [concurrency]
 # workers = 20                   # VMs processed at once, per job
-# clones = 8                     # clone tasks at once; each takes the clone storage's cluster lock, more time out on it
+# clones = 0                     # clone tasks at once, 0 = no cap; stock Proxmox takes a storage lock per clone, set 8 there
 # config_calls = 5               # Proxmox API calls at once, task-starting POSTs included
 # template_builds = 4            # templates built at once; each copy also takes a clone slot
 # deletes = 4                    # VM deletes at once; more time out on Proxmox's user.cfg lock and leave VMs half-deleted

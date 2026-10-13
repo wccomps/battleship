@@ -205,11 +205,11 @@ func TestValidateRanges(t *testing.T) {
 			wantErr: "concurrency.workers must be at least 1",
 		},
 		{
-			name: "clones zero",
+			name: "clones negative",
 			mutate: func(c *Config) {
-				c.Concurrency.Clones = 0
+				c.Concurrency.Clones = -1
 			},
-			wantErr: "concurrency.clones must be at least 1",
+			wantErr: "concurrency.clones must be 0 (no cap) or more",
 		},
 		{
 			name: "config_calls zero",

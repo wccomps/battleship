@@ -264,7 +264,28 @@ func TestDeletesTakeClusterSlots(t *testing.T) {
 	}
 }
 
-// Template copies and team clones each take a cluster-wide clone slot.
+// With no clone cap (the default), template copies and team clones take no
+// slot; only the template conversion serializes on storage-ops.
+func TestClonesUncappedTakeNoSlots(t *testing.T) {
+	f := newCluster()
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01", "02"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := testExecutor(f, &recorder{})
+	slots := &recordingSlots{}
+	ex.Limits = NewClusterLimits(ex.Cfg.Concurrency, slots)
+
+	if res := ex.Run(context.Background(), plan); len(res.Failed) != 0 {
+		t.Fatalf("failed: %v", res.Failed)
+	}
+	if !slices.Equal(slots.taken, []string{"storage-ops/1"}) {
+		t.Errorf("slots taken = %v, want only the conversion's storage-ops/1", slots.taken)
+	}
+}
+
+// With a clone cap, template copies and team clones each take a
+// cluster-wide clone slot.
 func TestClonesTakeClusterSlots(t *testing.T) {
 	f := newCluster()
 	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01", "02"}})
@@ -272,6 +293,7 @@ func TestClonesTakeClusterSlots(t *testing.T) {
 		t.Fatal(err)
 	}
 	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Concurrency.Clones = 8
 	slots := &recordingSlots{}
 	ex.Limits = NewClusterLimits(ex.Cfg.Concurrency, slots)
 

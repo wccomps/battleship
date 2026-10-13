@@ -20,9 +20,8 @@ import (
 type Limits struct {
 	calls  sem
 	builds sem
-	// clones caps clone tasks: every clone takes the clone storage's
-	// cluster lock, so they run about one a second whatever their nodes, and
-	// too many queued at once time out on it.
+	// clones caps clone tasks when config sets it (see Concurrency.Clones);
+	// without a cap, do runs fn at once.
 	clones shared
 	// deletes caps destroy tasks: each takes Proxmox's cluster-wide user.cfg
 	// lock, and too many at once time out on it, leaving VMs half-deleted.
@@ -50,7 +49,7 @@ func NewLimits(c config.Concurrency) *Limits { return NewClusterLimits(c, nil) }
 // NewClusterLimits is NewLimits, but caps clones, deletes and storage
 // operations across every process sharing slots.
 func NewClusterLimits(c config.Concurrency, slots Slots) *Limits {
-	clones, deletes := max(1, c.Clones), max(1, c.Deletes)
+	clones, deletes := c.Clones, max(1, c.Deletes)
 	return &Limits{
 		calls:      make(sem, c.ConfigCalls),
 		builds:     make(sem, max(1, c.TemplateBuilds)),
@@ -93,6 +92,9 @@ type shared struct {
 }
 
 func (s shared) do(ctx context.Context, fn func() error) error {
+	if s.n == 0 {
+		return fn() // no cap
+	}
 	return s.local.do(ctx, func() error {
 		if s.slots == nil {
 			return fn()
