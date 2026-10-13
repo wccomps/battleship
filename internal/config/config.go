@@ -115,7 +115,7 @@ type Retry struct {
 	MaxBackoff        time.Duration `toml:"max_backoff"`
 	Rounds            int           `toml:"rounds"`      // end-of-job retry rounds
 	RoundPause        time.Duration `toml:"round_pause"` // pause before each round
-	TaskPoll          time.Duration `toml:"task_poll"`   // Proxmox task status poll interval
+	TaskPoll          time.Duration `toml:"task_poll"`   // longest wait between task status polls; they start at 100ms and double
 }
 
 // Database stores jobs. serve and -queue need it; when set, every CLI run

@@ -171,6 +171,41 @@ func TestWaitTaskSuccess(t *testing.T) {
 	}
 }
 
+// A short task is seen soon after it ends, not a whole poll later, and the
+// wait between polls doubles from firstTaskPoll up to poll.
+func TestWaitTaskBacksOffToPoll(t *testing.T) {
+	f, c := newFake(t)
+	upid := "UPID:cedar:1:2:3:qmclone:9005:battleship@pve!app:"
+	var mu sync.Mutex
+	var at []time.Time
+	f.routes["GET /nodes/cedar/tasks/"+upid+"/status"] = func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		at = append(at, time.Now())
+		n := len(at)
+		mu.Unlock()
+		if n < 6 {
+			jsonData(`{"status":"running"}`)(w, r)
+			return
+		}
+		jsonData(`{"status":"stopped","exitstatus":"OK"}`)(w, r)
+	}
+
+	if err := c.WaitTask(context.Background(), upid, 400*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(at) != 6 {
+		t.Fatalf("polled %d times, want 6", len(at))
+	}
+	for i, want := range []time.Duration{100, 200, 400, 400, 400} {
+		want *= time.Millisecond
+		if gap := at[i+1].Sub(at[i]); gap < want || gap > want+200*time.Millisecond {
+			t.Errorf("wait before poll %d = %v, want %v", i+2, gap, want)
+		}
+	}
+}
+
 func TestWaitTaskFailureIncludesLogTail(t *testing.T) {
 	f, c := newFake(t)
 	upid := "UPID:cedar:1:2:3:qmclone:9005:battleship@pve!app:"

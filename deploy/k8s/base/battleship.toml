@@ -67,7 +67,7 @@ initial_backoff = "1s"
 max_backoff = "30s"
 rounds = 1                         # end-of-job retry rounds for failed VMs
 round_pause = "2s"
-task_poll = "2s"
+task_poll = "2s"                   # longest wait between task status polls; they start at 100ms and double
 
 [database]
 # url comes from BATTLESHIP_DATABASE_URL (the Postgres operator's secret).

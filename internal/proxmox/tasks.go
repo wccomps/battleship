@@ -14,6 +14,11 @@ import (
 
 const maxPollFailures = 10
 
+// firstTaskPoll is WaitTask's first wait between status polls. It doubles
+// up to the caller's poll, so a short task is seen soon after it ends and a
+// long one costs a poll per interval.
+const firstTaskPoll = 100 * time.Millisecond
+
 // UPID is what a task's ID says about it:
 // "UPID:node:pid:pstart:starttime:type:id:user:".
 type UPID struct {
@@ -36,7 +41,8 @@ func ParseUPID(s string) (UPID, error) {
 }
 
 // WaitTask polls a task until it stops, returning a *TaskError with the log
-// tail unless it ended OK or with warnings. An empty upid returns nil.
+// tail unless it ended OK or with warnings. It polls again after
+// firstTaskPoll, doubling the wait up to poll. An empty upid returns nil.
 func (c *Client) WaitTask(ctx context.Context, upid string, poll time.Duration) error {
 	if upid == "" {
 		return nil
@@ -47,6 +53,7 @@ func (c *Client) WaitTask(ctx context.Context, upid string, poll time.Duration) 
 	}
 	path := fmt.Sprintf("/nodes/%s/tasks/%s", url.PathEscape(u.Node), url.PathEscape(upid))
 	failures := 0
+	wait := min(firstTaskPoll, poll)
 	for {
 		var st struct {
 			Status     string `json:"status"`
@@ -73,9 +80,10 @@ func (c *Client) WaitTask(ctx context.Context, upid string, poll time.Duration) 
 				return &TaskError{UPID: upid, ExitStatus: st.ExitStatus, LogTail: c.taskLogTail(ctx, path, 5)}
 			}
 		}
-		if err := SleepContext(ctx, poll); err != nil {
+		if err := SleepContext(ctx, wait); err != nil {
 			return err
 		}
+		wait = min(2*wait, poll)
 	}
 }
 

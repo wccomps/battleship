@@ -64,7 +64,7 @@ url = "https://192.0.2.123:8006"
 # max_backoff = "30s"
 # rounds = 1
 # round_pause = "2s"
-# task_poll = "2s"
+# task_poll = "2s"              # longest wait between task status polls; they start at 100ms and double
 
 # Needed by battleship serve and -queue. When set, CLI runs are queued as jobs
 # for serve's workers, so they wait for overlapping jobs.
