@@ -31,6 +31,17 @@ type Inputs struct {
 	// VMs, if set, narrows the plan to these team VMs (e.g. a retry's
 	// failures). Each must belong to one of Teams.
 	VMs []string `json:"vms,omitempty"`
+
+	// Environments.
+	Domain   string   `json:"domain,omitempty"`
+	Router   string   `json:"router,omitempty"`    // create: "name=family"
+	EnvHosts []string `json:"env_hosts,omitempty"` // create, add: "name=family[:octet]" each
+	DNS      string   `json:"dns,omitempty"`       // env-dns: "router" or a host name
+	// Base images.
+	VMID      int    `json:"vmid,omitempty"`       // register: the VM to copy
+	Family    string `json:"family,omitempty"`     // register, edit
+	ImageKind string `json:"image_kind,omitempty"` // register a new family
+	Image     string `json:"image,omitempty"`      // deprecate, delete
 }
 
 // MaxSnapshotDescription is the longest snapshot description, in characters.
@@ -38,6 +49,9 @@ const MaxSnapshotDescription = 500
 
 // Validate checks the inputs without contacting Proxmox.
 func (in Inputs) Validate() error {
+	if in.Kind.Teamless() {
+		return errors.Join(in.validateTeamless()...)
+	}
 	var errs []error
 	switch in.Kind {
 	case pods.KindDeploy:
@@ -83,9 +97,12 @@ func BuildPlan(ctx context.Context, p pods.Planner, in Inputs) (*pods.Plan, erro
 	if err := in.Validate(); err != nil {
 		return nil, err
 	}
-	teams, _ := pods.ParseTeams(in.Teams)
-	if err := checkVMs(in, teams, p.Naming); err != nil {
-		return nil, err
+	var teams []string
+	if !in.Kind.Teamless() {
+		teams, _ = pods.ParseTeams(in.Teams)
+		if err := checkVMs(in, teams, p.Naming); err != nil {
+			return nil, err
+		}
 	}
 	plan, err := planFor(ctx, p, in, teams)
 	if err != nil {
@@ -164,6 +181,26 @@ func planFor(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*p
 		return p.Snapshot(ctx, pods.SnapshotRequest{
 			Teams: teams, Hosts: in.Hosts, Name: in.Snapshot, Description: in.Description, VMState: in.VMState,
 		})
+	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS:
+		req, err := in.EnvRequest()
+		if err != nil {
+			return nil, err
+		}
+		switch in.Kind {
+		case pods.KindEnvCreate:
+			return p.EnvCreate(ctx, req)
+		case pods.KindEnvAdd:
+			return p.EnvAdd(ctx, req)
+		}
+		return p.EnvDNS(ctx, req)
+	case pods.KindImageRegister:
+		return p.ImageRegister(ctx, pods.ImageRequest{VMID: in.VMID, Family: in.Family, Kind: in.ImageKind})
+	case pods.KindImageEdit:
+		return p.ImageEdit(ctx, pods.ImageRequest{Family: in.Family})
+	case pods.KindImageDeprecate:
+		return p.ImageDeprecate(ctx, pods.ImageRequest{Image: in.Image})
+	case pods.KindImageDelete:
+		return p.ImageDelete(ctx, pods.ImageRequest{Image: in.Image})
 	default: // KindPower; Validate rejected anything else
 		return p.Power(ctx, teams, in.Hosts, in.Action)
 	}
@@ -179,4 +216,73 @@ func SplitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// EnvRequest parses an environment job's inputs.
+func (in Inputs) EnvRequest() (pods.EnvRequest, error) {
+	req := pods.EnvRequest{Domain: strings.TrimSpace(in.Domain), DNS: strings.TrimSpace(in.DNS)}
+	var errs []error
+	if strings.TrimSpace(in.Router) != "" {
+		r, err := pods.ParseHostSpec(in.Router)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("router: %w", err))
+		}
+		req.Router = r
+	}
+	for _, line := range in.EnvHosts {
+		h, err := pods.ParseHostSpec(line)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		req.Hosts = append(req.Hosts, h)
+	}
+	return req, errors.Join(errs...)
+}
+
+// validateTeamless checks the inputs of image and environment kinds.
+func (in Inputs) validateTeamless() []error {
+	var errs []error
+	if in.Teams != "" || len(in.Hosts) > 0 || len(in.VMs) > 0 {
+		errs = append(errs, errors.New("teams, hosts and VMs don't apply to images and environments"))
+	}
+	switch in.Kind {
+	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS:
+		if err := pods.CheckDomain(strings.TrimSpace(in.Domain)); err != nil {
+			errs = append(errs, err)
+		}
+		req, err := in.EnvRequest()
+		if err != nil {
+			errs = append(errs, err)
+		}
+		switch {
+		case in.Kind == pods.KindEnvCreate && req.Router.Host == "":
+			errs = append(errs, errors.New("a new environment needs a router, e.g. gw=opnsense"))
+		case in.Kind == pods.KindEnvAdd && req.Router.Host == "" && len(in.EnvHosts) == 0:
+			errs = append(errs, errors.New("name at least one host to add"))
+		case in.Kind == pods.KindEnvDNS && req.DNS != "" && req.DNS != pods.DNSRouter:
+			if err := pods.CheckHostname(req.DNS); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	case pods.KindImageRegister:
+		if in.VMID < 100 {
+			errs = append(errs, errors.New("name the VM to register by its VMID"))
+		}
+		if err := pods.CheckFamily(in.Family); err != nil {
+			errs = append(errs, err)
+		}
+		if in.ImageKind != "" && !slices.Contains(pods.ImageKinds, in.ImageKind) {
+			errs = append(errs, fmt.Errorf("image kind must be one of %s", strings.Join(pods.ImageKinds, ", ")))
+		}
+	case pods.KindImageEdit:
+		if err := pods.CheckFamily(in.Family); err != nil {
+			errs = append(errs, err)
+		}
+	case pods.KindImageDeprecate, pods.KindImageDelete:
+		if _, _, ok := pods.ParseImageName(in.Image); !ok {
+			errs = append(errs, fmt.Errorf("%q isn't a base image name like debian-12-v1", in.Image))
+		}
+	}
+	return errs
 }

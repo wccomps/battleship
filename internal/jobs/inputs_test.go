@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
+	"github.com/wccomps/battleship/internal/store"
 )
 
 var bg = context.Background()
@@ -176,5 +178,50 @@ func TestSplitList(t *testing.T) {
 	got := SplitList(" dc, web ,,")
 	if len(got) != 2 || got[0] != "dc" || got[1] != "web" {
 		t.Errorf("SplitList = %q", got)
+	}
+}
+
+func TestTeamlessInputsValidate(t *testing.T) {
+	good := []Inputs{
+		{Kind: pods.KindEnvCreate, Domain: "kilo.alpha", Router: "gw=opnsense", EnvHosts: []string{"teak=debian-12:10"}},
+		{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"oak=win2022"}},
+		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"},
+		{Kind: pods.KindImageRegister, VMID: 150, Family: "debian-12", ImageKind: "linux"},
+		{Kind: pods.KindImageEdit, Family: "debian-12"},
+		{Kind: pods.KindImageDelete, Image: "debian-12-v1"},
+	}
+	for _, in := range good {
+		if err := in.Validate(); err != nil {
+			t.Errorf("%s: %v", in.Kind, err)
+		}
+	}
+	bad := []Inputs{
+		{Kind: pods.KindEnvCreate, Domain: "kilo.alpha"},
+		{Kind: pods.KindEnvCreate, Domain: "kilo", Router: "gw=x"},
+		{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"teak"}},
+		{Kind: pods.KindEnvAdd, Domain: "kilo.alpha"},
+		{Kind: pods.KindImageRegister, Family: "debian-12"},
+		{Kind: pods.KindImageDeprecate, Image: "debian-12"},
+		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", Teams: "1"},
+	}
+	for _, in := range bad {
+		if in.Validate() == nil {
+			t.Errorf("%+v validated", in)
+		}
+	}
+}
+
+func TestTeamlessLockKeys(t *testing.T) {
+	plan := &pods.Plan{Kind: pods.KindEnvCreate, Locks: []string{"slot:05", "domain:kilo.alpha", "vmid:2500"}}
+	keys := LockKeys(plan)
+	if !slices.Equal(keys, []string{"domain:kilo.alpha", "slot:05", "vmid:2500"}) {
+		t.Errorf("LockKeys = %v", keys)
+	}
+}
+
+func TestRetryInputsRefusesTeamless(t *testing.T) {
+	job := store.Job{ID: 7, Kind: string(pods.KindEnvCreate), Status: string(store.StatusCompletedWithFailures)}
+	if _, err := RetryInputs(job, nil); !errors.Is(err, ErrNotRetryable) {
+		t.Errorf("err = %v", err)
 	}
 }
