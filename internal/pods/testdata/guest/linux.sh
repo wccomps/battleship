@@ -16,6 +16,9 @@ if [ -d /etc/cloud/cloud.cfg.d ]; then
 fi
 if command -v netplan >/dev/null 2>&1 && [ -d /etc/netplan ]; then
 	umask 077
+	for f in /etc/netplan/*.yaml; do
+		if [ -e "$f" ] && [ "$f" != /etc/netplan/99-battleship.yaml ]; then mv "$f" "$f.battleship-off"; fi
+	done
 	cat > /etc/netplan/99-battleship.yaml <<EOF
 network:
   version: 2
@@ -38,6 +41,12 @@ elif command -v nmcli >/dev/null 2>&1 && nmcli -t general status >/dev/null 2>&1
 		ipv4.dns "$DNS" ipv4.dns-search "$DOMAIN" ipv4.ignore-auto-dns yes ipv6.method disabled
 	nmcli connection up "$con" >/dev/null
 elif [ -f /etc/network/interfaces ]; then
+	ifdown "$iface" 2>/dev/null || true
+	mkdir -p /etc/network/interfaces.d /etc/network/battleship-off
+	for f in /etc/network/interfaces.d/*; do
+		[ -f "$f" ] && [ "$f" != /etc/network/interfaces.d/battleship ] || continue
+		if grep -Eq "^[[:space:]]*(iface|auto|allow-hotplug)[[:space:]]+$iface([[:space:]]|$)" "$f"; then mv "$f" /etc/network/battleship-off/; fi
+	done
 	awk -v d="$iface" '
 		($1 == "auto" || $1 == "allow-hotplug") && $2 == d && NF == 2 { next }
 		$1 == "iface" { skip = ($2 == d) }
@@ -45,16 +54,16 @@ elif [ -f /etc/network/interfaces ]; then
 		!skip { print }' /etc/network/interfaces > /etc/network/interfaces.battleship
 	mv /etc/network/interfaces.battleship /etc/network/interfaces
 	grep -q '^source /etc/network/interfaces.d/\*' /etc/network/interfaces || echo 'source /etc/network/interfaces.d/*' >> /etc/network/interfaces
-	mkdir -p /etc/network/interfaces.d
 	cat > /etc/network/interfaces.d/battleship <<EOF
 auto $iface
 iface $iface inet static
 	address $IP/$PREFIX
 	gateway $GW
+	dns-nameservers $DNS
+	dns-search $DOMAIN
 EOF
-	printf 'search %s\nnameserver %s\n' "$DOMAIN" "$DNS" > /etc/resolv.conf
-	ip addr flush dev "$iface"
-	ifup "$iface" 2>/dev/null || ifup --force "$iface"
+	[ -L /etc/resolv.conf ] || printf 'search %s\nnameserver %s\n' "$DOMAIN" "$DNS" > /etc/resolv.conf
+	ifup "$iface"
 else
 	echo "found no netplan, NetworkManager or /etc/network/interfaces to configure" >&2
 	exit 3

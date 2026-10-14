@@ -10,12 +10,15 @@ $nic = Get-NetAdapter | Where-Object { $_.MacAddress -eq $mac } | Select-Object 
 if (-not $nic) { [Console]::Error.WriteLine("no network adapter has MAC $mac"); exit 2 }
 $i = $nic.ifIndex
 Set-NetIPInterface -InterfaceIndex $i -Dhcp Disabled
-Get-NetIPAddress -InterfaceIndex $i -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -ne $ip } | Remove-NetIPAddress -Confirm:$false
-Get-NetRoute -InterfaceIndex $i -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false
-if (Get-NetIPAddress -InterfaceIndex $i -IPAddress $ip -ErrorAction SilentlyContinue) {
+foreach ($store in 'ActiveStore', 'PersistentStore') {
+	Get-NetIPAddress -InterfaceIndex $i -AddressFamily IPv4 -PolicyStore $store -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -ne $ip -or $_.PrefixLength -ne $prefix } | Remove-NetIPAddress -PolicyStore $store -Confirm:$false -ErrorAction SilentlyContinue
+	Get-NetRoute -InterfaceIndex $i -DestinationPrefix '0.0.0.0/0' -PolicyStore $store -ErrorAction SilentlyContinue | Where-Object { $_.NextHop -ne $gw } | Remove-NetRoute -PolicyStore $store -Confirm:$false -ErrorAction SilentlyContinue
+}
+if (-not (Get-NetIPAddress -InterfaceIndex $i -IPAddress $ip -ErrorAction SilentlyContinue)) {
+	New-NetIPAddress -InterfaceIndex $i -IPAddress $ip -PrefixLength $prefix | Out-Null
+}
+if (-not (Get-NetRoute -InterfaceIndex $i -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Where-Object { $_.NextHop -eq $gw })) {
 	New-NetRoute -InterfaceIndex $i -DestinationPrefix '0.0.0.0/0' -NextHop $gw | Out-Null
-} else {
-	New-NetIPAddress -InterfaceIndex $i -IPAddress $ip -PrefixLength $prefix -DefaultGateway $gw | Out-Null
 }
 Set-DnsClientServerAddress -InterfaceIndex $i -ServerAddresses $dns
 Set-DnsClient -InterfaceIndex $i -ConnectionSpecificSuffix $domain
