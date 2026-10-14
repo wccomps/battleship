@@ -593,3 +593,44 @@ baseline_patterns = `+patterns+"\n")
 		}
 	}
 }
+
+func TestParseRange(t *testing.T) {
+	for in, want := range map[string][2]int{"8000-8999": {8000, 8999}, "1-10": {1, 10}, " 7 - 7 ": {7, 7}} {
+		lo, hi, err := ParseRange(in)
+		if err != nil || lo != want[0] || hi != want[1] {
+			t.Errorf("ParseRange(%q) = %d, %d, %v; want %v", in, lo, hi, err, want)
+		}
+	}
+	for _, bad := range []string{"", "5", "9-3", "a-b", "1-2-3", "-1-4"} {
+		if _, _, err := ParseRange(bad); err == nil {
+			t.Errorf("ParseRange(%q) accepted", bad)
+		}
+	}
+}
+
+func TestEnvironmentAndImageValidation(t *testing.T) {
+	cases := map[string]func(*Config){
+		"images.pool":                func(c *Config) { c.Images.Pool = " " },
+		"images.vmid_range":          func(c *Config) { c.Images.VMIDRange = "9000-9100" }, // overlaps templates
+		"images.edit_bridge":         func(c *Config) { c.Images.EditBridge = "" },
+		"environments.slots":         func(c *Config) { c.Environments.Slots = "0-3" },
+		"environments.pool":          func(c *Config) { c.Environments.Pool = "dev" },
+		"environments.int_bridge":    func(c *Config) { c.Environments.IntBridge = "devint" },
+		"environments.ext_bridge":    func(c *Config) { c.Environments.ExtBridge = "devext" },
+		"environments.sdn_zone":      func(c *Config) { c.Environments.SDNZone = "" },
+		"environments.vmid_base":     func(c *Config) { c.Environments.VMIDBase = 7000 }, // slot 10 reaches 8099, inside images
+		"environments.subnet":        func(c *Config) { c.Environments.Subnet = "192.168.300" },
+		"environments.agent_timeout": func(c *Config) { c.Environments.AgentTimeout = 10 * time.Second },
+	}
+	for key, mut := range cases {
+		c := validConfig()
+		mut(&c)
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), key) {
+			t.Errorf("%s: Validate() = %v, want an error naming it", key, err)
+		}
+	}
+	if err := validConfig().Validate(); err != nil {
+		t.Fatalf("defaults: %v", err)
+	}
+}

@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,17 +20,19 @@ import (
 )
 
 type Config struct {
-	Proxmox     Proxmox     `toml:"proxmox"`
-	Naming      Naming      `toml:"naming"`
-	Network     Network     `toml:"network"`
-	Deploy      Deploy      `toml:"deploy"`
-	Teardown    Teardown    `toml:"teardown"`
-	Concurrency Concurrency `toml:"concurrency"`
-	Retry       Retry       `toml:"retry"`
-	Database    Database    `toml:"database"`
-	Jobs        Jobs        `toml:"jobs"`
-	Web         Web         `toml:"web"`
-	OIDC        OIDC        `toml:"oidc"`
+	Proxmox      Proxmox      `toml:"proxmox"`
+	Naming       Naming       `toml:"naming"`
+	Network      Network      `toml:"network"`
+	Deploy       Deploy       `toml:"deploy"`
+	Teardown     Teardown     `toml:"teardown"`
+	Images       Images       `toml:"images"`
+	Environments Environments `toml:"environments"`
+	Concurrency  Concurrency  `toml:"concurrency"`
+	Retry        Retry        `toml:"retry"`
+	Database     Database     `toml:"database"`
+	Jobs         Jobs         `toml:"jobs"`
+	Web          Web          `toml:"web"`
+	OIDC         OIDC         `toml:"oidc"`
 }
 
 type Proxmox struct {
@@ -99,6 +103,47 @@ type Concurrency struct {
 	// Deletes caps concurrent VM destroys. Each takes Proxmox's cluster-wide
 	// user.cfg lock; too many time out on it and leave VMs half-deleted.
 	Deletes int `toml:"deletes"`
+}
+
+// Images configures base images: templates environments are cloned from.
+type Images struct {
+	Pool      string `toml:"pool"`       // where base images live; an admin creates it
+	VMIDRange string `toml:"vmid_range"` // e.g. "8000-8999"
+	// EditBridge is the net0 bridge of a working copy opened for editing,
+	// which needs a network with internet access to patch. EditZone is its SDN
+	// zone, or "" if it isn't an SDN vnet.
+	EditBridge string `toml:"edit_bridge"`
+	EditZone   string `toml:"edit_zone"`
+}
+
+// Environments configures the dev slots scenarios are built in. Patterns
+// use {slot}, the slot number as two digits.
+type Environments struct {
+	Slots     string `toml:"slots"` // e.g. "1-10"
+	Pool      string `toml:"pool"`
+	IntBridge string `toml:"int_bridge"`
+	ExtBridge string `toml:"ext_bridge"`
+	SDNZone   string `toml:"sdn_zone"` // the zone of the slot bridges
+	// VMIDBase: slot NN's VMs get VMIDs VMIDBase+NN*100 to +99.
+	VMIDBase int `toml:"vmid_base"`
+	// Subnet is the first three octets of every environment's LAN.
+	Subnet       string        `toml:"subnet"`
+	AgentTimeout time.Duration `toml:"agent_timeout"`
+}
+
+// ParseRange reads "lo-hi" with 0 <= lo <= hi.
+func ParseRange(s string) (lo, hi int, err error) {
+	a, b, ok := strings.Cut(s, "-")
+	if ok {
+		lo, err = strconv.Atoi(strings.TrimSpace(a))
+		if err == nil {
+			hi, err = strconv.Atoi(strings.TrimSpace(b))
+		}
+	}
+	if !ok || err != nil || lo < 0 || hi < lo {
+		return 0, 0, fmt.Errorf("%q is not a range like 1-10", s)
+	}
+	return lo, hi, nil
 }
 
 // Teardown configures how team VMs are taken down before they are deleted.
@@ -204,6 +249,11 @@ func Default() Config {
 			SnapshotName:     "initial",
 			BaselinePatterns: []string{"fresh_clone_*"},
 			GPUVGA:           "virtio-gl",
+		},
+		Images: Images{Pool: "base-images", VMIDRange: "8000-8999", EditBridge: "vmbr0"},
+		Environments: Environments{
+			Slots: "1-10", Pool: "dev-{slot}", IntBridge: "devint{slot}", ExtBridge: "devext{slot}",
+			SDNZone: "devnet", VMIDBase: 2000, Subnet: "192.168.100", AgentTimeout: 15 * time.Minute,
 		},
 		Concurrency: Concurrency{Workers: 20, ConfigCalls: 5, TemplateBuilds: 4, Deletes: 4},
 		Teardown:    Teardown{ShutdownTimeout: 60 * time.Second},
@@ -516,9 +566,70 @@ func (c Config) Validate() error {
 		errs = append(errs, errors.New("database.max_conns must be at least 4"))
 	}
 
+	errs = append(errs, c.validateCatalog()...)
 	errs = append(errs, c.validateWeb()...)
 	return errors.Join(errs...)
 }
+
+// validateCatalog checks [images] and [environments]: their VMID blocks
+// must not overlap each other, the templates' or the team clones'.
+func (c Config) validateCatalog() []error {
+	var errs []error
+	if strings.TrimSpace(c.Images.Pool) == "" {
+		errs = append(errs, errors.New("images.pool is required (the pool base images live in)"))
+	}
+	if strings.TrimSpace(c.Images.EditBridge) == "" {
+		errs = append(errs, errors.New("images.edit_bridge is required (the bridge working copies are patched on)"))
+	}
+	imgLo, imgHi, err := ParseRange(c.Images.VMIDRange)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("images.vmid_range: %w", err))
+	}
+	slotLo, slotHi, serr := ParseRange(c.Environments.Slots)
+	switch {
+	case serr != nil:
+		errs = append(errs, fmt.Errorf("environments.slots: %w", serr))
+	case slotLo < 1 || slotHi > 99:
+		errs = append(errs, errors.New("environments.slots must be within 1-99"))
+	}
+	for _, p := range []struct{ name, val string }{
+		{"environments.pool", c.Environments.Pool},
+		{"environments.int_bridge", c.Environments.IntBridge},
+		{"environments.ext_bridge", c.Environments.ExtBridge},
+	} {
+		if !strings.Contains(p.val, "{slot}") {
+			errs = append(errs, fmt.Errorf("%s must contain {slot}", p.name))
+		}
+	}
+	if strings.TrimSpace(c.Environments.SDNZone) == "" {
+		errs = append(errs, errors.New("environments.sdn_zone is required (the SDN zone of the slot bridges)"))
+	}
+	if !subnetRE.MatchString(c.Environments.Subnet) {
+		errs = append(errs, errors.New("environments.subnet must be three octets, e.g. 192.168.100"))
+	}
+	if c.Environments.AgentTimeout < time.Minute {
+		errs = append(errs, errors.New("environments.agent_timeout must be at least 1m (Windows takes minutes to boot after sysprep)"))
+	}
+	if c.Environments.VMIDBase < 100 {
+		errs = append(errs, errors.New("environments.vmid_base must be at least 100"))
+	} else if err == nil && serr == nil {
+		envLo, envHi := c.Environments.VMIDBase+slotLo*100, c.Environments.VMIDBase+slotHi*100+99
+		tplLo, tplHi := c.Naming.TemplateVMIDBase, c.Naming.TemplateVMIDBase+99
+		if overlapsRange(envLo, envHi, imgLo, imgHi) || overlapsRange(envLo, envHi, tplLo, tplHi) || envHi >= c.Naming.CloneVMIDBase {
+			errs = append(errs, fmt.Errorf("environments.vmid_base gives slots VMIDs %d-%d, which overlap images.vmid_range, the templates (%d-%d) or team clones (from %d)",
+				envLo, envHi, tplLo, tplHi, c.Naming.CloneVMIDBase))
+		}
+	}
+	if err == nil && (overlapsRange(imgLo, imgHi, c.Naming.TemplateVMIDBase, c.Naming.TemplateVMIDBase+99) || imgHi >= c.Naming.CloneVMIDBase) {
+		errs = append(errs, fmt.Errorf("images.vmid_range %s overlaps the templates (%d-%d) or team clones (from %d)",
+			c.Images.VMIDRange, c.Naming.TemplateVMIDBase, c.Naming.TemplateVMIDBase+99, c.Naming.CloneVMIDBase))
+	}
+	return errs
+}
+
+func overlapsRange(a, b, x, y int) bool { return a <= y && x <= b }
+
+var subnetRE = regexp.MustCompile(`^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){2}$`)
 
 // httpURL reports whether raw is an http(s) URL with a host and no path;
 // the client adds /api2/json itself.

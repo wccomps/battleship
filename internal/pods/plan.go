@@ -28,7 +28,26 @@ const (
 	KindReset    Kind = "reset"
 	KindPower    Kind = "power"
 	KindSnapshot Kind = "snapshot"
+
+	// Base images and environments: no teams.
+	KindImageRegister  Kind = "image-register"
+	KindImageEdit      Kind = "image-edit"
+	KindImageDeprecate Kind = "image-deprecate"
+	KindImageDelete    Kind = "image-delete"
+	KindEnvCreate      Kind = "env-create"
+	KindEnvAdd         Kind = "env-add"
+	KindEnvDNS         Kind = "env-dns"
 )
+
+// Teamless reports whether kind acts on base images or environments rather
+// than team VMs.
+func (k Kind) Teamless() bool {
+	switch k {
+	case KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete, KindEnvCreate, KindEnvAdd, KindEnvDNS:
+		return true
+	}
+	return false
+}
 
 type Step string
 
@@ -142,6 +161,17 @@ func ConfigHash(kind Kind, c config.Config) string {
 			c.Deploy.SnapshotName, c.Deploy.BaselinePatterns, c.Naming.Pool}
 	case KindTeardown:
 		v = c.Teardown.ShutdownTimeout
+	case KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete:
+		v = struct {
+			Images  config.Images
+			Storage string
+		}{c.Images, c.Deploy.Storage}
+	case KindEnvCreate, KindEnvAdd, KindEnvDNS:
+		v = struct {
+			Environments config.Environments
+			Storage      string
+			MasterTag    string
+		}{c.Environments, c.Deploy.Storage, c.Deploy.MasterTag}
 	default:
 		return ""
 	}
