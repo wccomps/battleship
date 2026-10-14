@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -148,6 +150,14 @@ var offerPrivileges = map[Kind][]string{
 	KindSnapshot: {"VM.Snapshot"},
 	KindDeploy:   {"VM.Clone"},
 	KindTeardown: {"VM.Allocate"},
+
+	KindImageRegister:  {"VM.Clone"},
+	KindImageEdit:      {"VM.Clone"},
+	KindImageDeprecate: {"VM.Config.Options"},
+	KindImageDelete:    {"VM.Allocate"},
+	KindEnvCreate:      {"VM.Clone"},
+	KindEnvAdd:         {"VM.Clone"},
+	KindEnvDNS:         {"VM.GuestAgent.Unrestricted"},
 }
 
 // OfferPrivileges is offerPrivileges[k].
@@ -209,20 +219,39 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config) []need {
 	pool := ""
 	if slices.Contains(it.Steps, StepClone) {
 		pool = NewNaming(cfg.Naming).Pool(it.Team)
+		if it.Source != nil {
+			pool = it.Pool
+		}
 	}
 	var ns []need
 	for _, st := range it.Steps {
 		switch st {
 		case StepClone:
+			src := 0
+			if it.Source != nil {
+				src = it.Source.VMID
+			} else if tpl != nil {
+				src = tpl.VMID
+			}
 			ns = append(ns,
-				one(VMPath(tpl.VMID), "VM.Clone"),
+				one(VMPath(src), "VM.Clone"),
 				on(it.VMID, pool, "VM.Allocate"),
 				one("/storage/"+cfg.Deploy.Storage, "Datastore.AllocateSpace"))
-			if m := cpuMapping(tpl.CPU); m != "" {
-				ns = append(ns, one(m, "Mapping.Use"))
+			if tpl != nil {
+				if m := cpuMapping(tpl.CPU); m != "" {
+					ns = append(ns, one(m, "Mapping.Use"))
+				}
 			}
 		case StepNetwork:
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Network"))
+			if it.NICs != nil {
+				for _, b := range slices.Sorted(maps.Values(it.NICs)) {
+					if zone := catalogZone(cfg, b); zone != "" {
+						ns = append(ns, one("/sdn/zones/"+zone+"/"+b, "SDN.Use"))
+					}
+				}
+				continue
+			}
 			if tpl != nil && tpl.CloudInit {
 				ns = append(ns, on(it.VMID, pool, "VM.Config.Cloudinit")) // regenerating the drive
 			}
@@ -260,9 +289,39 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config) []need {
 			ns = append(ns, one(VMPath(it.VMID), "VM.Allocate"))
 		case StepFreeDisks:
 			ns = append(ns, one("/storage/"+cfg.Deploy.Storage, "Datastore.Allocate"))
+		case StepLabel:
+			ns = append(ns, on(it.VMID, pool, "VM.Config.Options"))
+		case StepConvert:
+			ns = append(ns, one(VMPath(it.VMID), "VM.Allocate"))
+		case StepRetire:
+			if it.Supersedes != nil {
+				ns = append(ns, one(VMPath(it.Supersedes.VMID), "VM.Config.Options"))
+			}
+		case StepWaitAgent, StepVerify:
+			ns = append(ns, on(it.VMID, pool, "VM.GuestAgent.Audit"))
+		case StepGuest:
+			ns = append(ns, on(it.VMID, pool, "VM.GuestAgent.Unrestricted"))
+			if it.Guest != nil && it.Guest.OS == ImageWindows {
+				ns = append(ns, on(it.VMID, pool, "VM.PowerMgmt")) // the reboot
+			}
 		}
 	}
 	return ns
+}
+
+// catalogZone is the SDN zone of a slot or edit bridge, or "" when it isn't
+// a known vnet.
+func catalogZone(cfg config.Config, bridge string) string {
+	slotRE := func(p string) *regexp.Regexp {
+		return regexp.MustCompile("^" + strings.ReplaceAll(regexp.QuoteMeta(p), `\{slot\}`, `\d{2}`) + "$")
+	}
+	switch {
+	case slotRE(cfg.Environments.IntBridge).MatchString(bridge), slotRE(cfg.Environments.ExtBridge).MatchString(bridge):
+		return cfg.Environments.SDNZone
+	case bridge == cfg.Images.EditBridge:
+		return cfg.Images.EditZone
+	}
+	return ""
 }
 
 // isTeamBridge reports whether bridge is some team's ext or int bridge (a
@@ -322,7 +381,7 @@ func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Co
 			it.Blocked, it.Unpermitted = "template "+tpl.Name+": "+tpl.Blocked, unpermitted[tpl.Name]
 			continue
 		}
-		if tpl == nil && slices.Contains(it.Steps, StepClone) {
+		if tpl == nil && it.Source == nil && slices.Contains(it.Steps, StepClone) {
 			continue // the planner blocks a clone without a template
 		}
 		why, err := missing(ctx, acc, itemNeeds(*it, tpl, cfg))
