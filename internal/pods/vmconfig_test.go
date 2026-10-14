@@ -240,3 +240,25 @@ func TestUnconvertedDisk(t *testing.T) {
 		}
 	}
 }
+
+func TestNICChanges(t *testing.T) {
+	cur := map[string]string{"net0": "virtio=BC:24:11:00:00:01,bridge=vmbr0,tag=5", "net1": "virtio=BC:24:11:00:00:02,bridge=devint01"}
+	got := NICChanges(cur, map[string]string{"net0": "devext02", "net1": "devint01"})
+	if len(got) != 1 || got["net0"] != "virtio=BC:24:11:00:00:01,bridge=devext02" {
+		t.Errorf("NICChanges = %v", got)
+	}
+}
+
+func TestLabelChanges(t *testing.T) {
+	cur := map[string]string{"tags": "kilo.alpha;dev", "description": "hi"}
+	if got := LabelChanges(cur, "dev;kilo.alpha", nil); len(got) != 0 {
+		t.Errorf("same tags in another order changed: %v", got)
+	}
+	got := LabelChanges(cur, "", &Notes{DNS: "router"})
+	if got["delete"] != "tags" || got["description"] != "hi\nbattleship: dns=router" {
+		t.Errorf("LabelChanges = %v", got)
+	}
+	if AddTag("base;linux", "deprecated") != "base;linux;deprecated" || AddTag("base;deprecated", "deprecated") != "base;deprecated" {
+		t.Error("AddTag")
+	}
+}

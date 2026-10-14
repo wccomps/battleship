@@ -65,6 +65,14 @@ const (
 	// StepFreeDisks frees disks a gone VM left on deploy.storage
 	// (see Planner.orphanedDisks).
 	StepFreeDisks Step = "free-disks"
+
+	// Base images and environments.
+	StepLabel     Step = "label"              // set tags and the notes line
+	StepConvert   Step = "convert"            // make the VM a template
+	StepRetire    Step = "deprecate-previous" // tag the version this one replaces deprecated
+	StepWaitAgent Step = "wait-agent"
+	StepGuest     Step = "configure-guest"
+	StepVerify    Step = "verify"
 )
 
 // TypedConfirm reports whether kind k needs the team range typed to
@@ -72,9 +80,20 @@ const (
 func (k Kind) TypedConfirm() bool { return k == KindTeardown }
 
 // ChangesConfig reports whether the step can change the VM's config (its
-// disks, NICs, pool or snapshots); the power steps can't.
+// disks, NICs, pool or snapshots); the power and guest steps can't.
 func (s Step) ChangesConfig() bool {
-	return s != StepStart && s != StepStop && s != StepPower
+	switch s {
+	case StepStart, StepStop, StepPower, StepWaitAgent, StepGuest, StepVerify:
+		return false
+	}
+	return true
+}
+
+// Source is the VM a base-image or environment clone copies.
+type Source struct {
+	VMID int    `json:"vmid"`
+	Node string `json:"node"`
+	Name string `json:"name"`
 }
 
 // TemplateSpec is a .tpl template a deploy clones from.
@@ -126,6 +145,20 @@ type Item struct {
 	// whether it saves a running VM's RAM.
 	Description string `json:"description,omitempty"`
 	VMState     bool   `json:"vmstate,omitempty"`
+
+	// Base-image and environment items (Team is ""): Source is cloned instead
+	// of a template, into Pool. Tags is the whole tag list the label step sets
+	// ("" clears them); Notes, if set, is the notes line it writes. NICs maps
+	// NIC keys to the bridge the network step puts them on. Guest is what
+	// configure-guest sets inside the VM. Supersedes is the version a
+	// registered image replaces, tagged deprecated once it is a template.
+	Source     *Source           `json:"source,omitempty"`
+	Pool       string            `json:"pool,omitempty"`
+	Tags       string            `json:"tags,omitempty"`
+	Notes      *Notes            `json:"notes,omitempty"`
+	NICs       map[string]string `json:"nics,omitempty"`
+	Guest      *Guest            `json:"guest,omitempty"`
+	Supersedes *Source           `json:"supersedes,omitempty"`
 }
 
 // Plan is what an operation will do: the templates a deploy needs and one
@@ -139,6 +172,9 @@ type Plan struct {
 	// Config is the ConfigHash the plan was made under; plans stored without
 	// it are stale.
 	Config string `json:"config,omitempty"`
+	// Locks are lock keys beyond teams and templates (slot:NN, domain:…,
+	// family:…, vmid:N), so jobs over the same slot, family or VMIDs wait.
+	Locks []string `json:"locks,omitempty"`
 }
 
 // ConfigHash identifies the settings that change what a plan of kind does

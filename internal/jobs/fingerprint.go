@@ -26,6 +26,14 @@ func Fingerprint(plan *pods.Plan) string {
 		// omitempty keeps other kinds' fingerprints unchanged.
 		Description string `json:",omitempty"`
 		VMState     bool   `json:",omitempty"`
+
+		Source     *pods.Source      `json:",omitempty"`
+		Pool       string            `json:",omitempty"`
+		Tags       string            `json:",omitempty"`
+		Notes      *pods.Notes       `json:",omitempty"`
+		NICs       map[string]string `json:",omitempty"`
+		Guest      *pods.Guest       `json:",omitempty"`
+		Supersedes *pods.Source      `json:",omitempty"`
 	}
 	type fpTemplate struct {
 		Name           string
@@ -44,7 +52,8 @@ func Fingerprint(plan *pods.Plan) string {
 		Templates []fpTemplate
 		Items     []fpItem
 		Config    string
-	}{Kind: plan.Kind, Teams: plan.Teams, Config: plan.Config}
+		Locks     []string `json:",omitempty"`
+	}{Kind: plan.Kind, Teams: plan.Teams, Config: plan.Config, Locks: plan.Locks}
 	for _, t := range plan.Templates {
 		fp.Templates = append(fp.Templates, fpTemplate{
 			Name:           t.Name,
@@ -70,6 +79,9 @@ func Fingerprint(plan *pods.Plan) string {
 
 			Description: it.Description,
 			VMState:     it.VMState,
+
+			Source: it.Source, Pool: it.Pool, Tags: it.Tags, Notes: it.Notes,
+			NICs: it.NICs, Guest: it.Guest, Supersedes: it.Supersedes,
 		})
 	}
 	b, _ := json.Marshal(fp) // plain structs of strings, ints and bools can't fail
@@ -90,6 +102,9 @@ func LockKeys(plan *pods.Plan) []string {
 		if t.VMID != 0 {
 			seen["vmid:"+strconv.Itoa(t.VMID)] = true
 		}
+	}
+	for _, k := range plan.Locks {
+		seen[k] = true
 	}
 	return slices.Sorted(maps.Keys(seen))
 }

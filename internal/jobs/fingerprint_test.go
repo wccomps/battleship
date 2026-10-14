@@ -15,7 +15,7 @@ import (
 // field not listed.
 var fingerprinted = map[string]map[string]bool{
 	"Plan": {
-		"Kind": true, "Teams": true, "Templates": true, "Items": true, "Config": true,
+		"Kind": true, "Teams": true, "Templates": true, "Items": true, "Config": true, "Locks": true,
 	},
 	"TemplateSpec": {
 		"Name": true, "VMID": true, "Exists": true, "Rebuild": true, "Blocked": true,
@@ -28,6 +28,8 @@ var fingerprinted = map[string]map[string]bool{
 	"Item": {
 		"Name": true, "VMID": true, "Steps": true, "Blocked": true, "Snapshot": true, "Action": true, "Template": true,
 		"Description": true, "VMState": true, // what a snapshot job writes to Proxmox
+		// What base-image and environment steps do.
+		"Source": true, "Pool": true, "Tags": true, "Notes": true, "NICs": true, "Guest": true, "Supersedes": true,
 		// Derived from Name or Snapshot, or where the VM runs.
 		"Team": false, "Host": false, "Node": false, "Baseline": false,
 		// Says why Blocked is set, which Blocked already covers.
@@ -65,6 +67,14 @@ func changed(t *testing.T, v reflect.Value) reflect.Value {
 	case reflect.Slice:
 		out = reflect.Append(reflect.MakeSlice(v.Type(), 0, v.Len()+1), reflect.New(v.Type().Elem()).Elem())
 		out = reflect.AppendSlice(out, v)
+	case reflect.Pointer:
+		if v.IsNil() {
+			return reflect.New(v.Type().Elem())
+		}
+		return reflect.Zero(v.Type())
+	case reflect.Map:
+		out = reflect.MakeMap(v.Type())
+		out.SetMapIndex(reflect.ValueOf("x"), reflect.ValueOf("x"))
 	default:
 		t.Fatalf("no way to change a %s", v.Type())
 	}
