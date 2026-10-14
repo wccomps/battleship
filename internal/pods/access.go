@@ -237,6 +237,18 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config) []need {
 				one(VMPath(src), "VM.Clone"),
 				on(it.VMID, pool, "VM.Allocate"),
 				one("/storage/"+cfg.Deploy.Storage, "Datastore.AllocateSpace"))
+			// Proxmox checks SDN.Use on the source's bridges, as for a template's.
+			if it.Source != nil {
+				for _, b := range it.Source.Bridges {
+					zone := catalogZone(cfg, b)
+					if zone == "" && isTeamBridge(cfg.Network, b) {
+						zone = cfg.Proxmox.SDNZone
+					}
+					if zone != "" {
+						ns = append(ns, one("/sdn/zones/"+zone+"/"+b, "SDN.Use"))
+					}
+				}
+			}
 			if tpl != nil {
 				if m := cpuMapping(tpl.CPU); m != "" {
 					ns = append(ns, one(m, "Mapping.Use"))

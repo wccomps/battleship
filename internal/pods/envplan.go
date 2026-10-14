@@ -182,6 +182,7 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		if err != nil {
 			return nil, err
 		}
+		ip.Source.Bridges = sourceBridges(cfg)
 		tags := p.Cfg.Deploy.MasterTag + ";" + env.Domain
 		notes := Notes{Base: im.Name, DNS: dnsChoice}
 		if resumed {

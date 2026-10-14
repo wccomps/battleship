@@ -35,10 +35,15 @@ var fingerprinted = map[string]map[string]bool{
 		// Says why Blocked is set, which Blocked already covers.
 		"Unpermitted": false,
 	},
+	"Source": {
+		"VMID": true, "Node": true, "Name": true,
+		// Only decide the privileges needed, as TemplateSpec.Bridges.
+		"Bridges": false,
+	},
 }
 
 func TestEveryPlanFieldIsClassified(t *testing.T) {
-	for _, typ := range []reflect.Type{reflect.TypeFor[pods.Plan](), reflect.TypeFor[pods.TemplateSpec](), reflect.TypeFor[pods.Item]()} {
+	for _, typ := range []reflect.Type{reflect.TypeFor[pods.Plan](), reflect.TypeFor[pods.TemplateSpec](), reflect.TypeFor[pods.Item](), reflect.TypeFor[pods.Source]()} {
 		classes := fingerprinted[typ.Name()]
 		for i := range typ.NumField() {
 			f := typ.Field(i)
@@ -116,6 +121,19 @@ func TestFingerprintFollowsClassification(t *testing.T) {
 			f := reflect.ValueOf(&p.Items[0]).Elem().FieldByName(field)
 			f.Set(changed(t, f))
 		})
+	}
+	withSource := func(p *pods.Plan) *pods.Source {
+		p.Items[0].Source = &pods.Source{VMID: 8001, Node: "n1", Name: "debian-12-v1", Bridges: []string{"vmbr0"}}
+		return p.Items[0].Source
+	}
+	fpSrc := func() string { p := base(); withSource(p); return Fingerprint(p) }()
+	for field := range fingerprinted["Source"] {
+		p := base()
+		f := reflect.ValueOf(withSource(p)).Elem().FieldByName(field)
+		f.Set(changed(t, f))
+		if got := Fingerprint(p) != fpSrc; got != fingerprinted["Source"][field] {
+			t.Errorf("changing Source.%s changed the fingerprint: %v, want %v", field, got, fingerprinted["Source"][field])
+		}
 	}
 }
 

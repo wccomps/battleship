@@ -94,6 +94,9 @@ type Source struct {
 	VMID int    `json:"vmid"`
 	Node string `json:"node"`
 	Name string `json:"name"`
+	// Bridges are its NICs' bridges: Proxmox checks SDN.Use on them for a
+	// clone.
+	Bridges []string `json:"bridges,omitempty"`
 }
 
 // TemplateSpec is a .tpl template a deploy clones from.

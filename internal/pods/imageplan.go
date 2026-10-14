@@ -65,6 +65,11 @@ func vmsNamed(vms []proxmox.VM, name string) []proxmox.VM {
 	return out
 }
 
+// sourceBridges are the distinct bridges of a clone source's NICs.
+func sourceBridges(cfg map[string]string) []string {
+	return slices.Compact(slices.Sorted(slices.Values(nicBridgesAll(cfg))))
+}
+
 // ImageRegister plans copying a VM in as its family's next version.
 func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, error) {
 	if err := CheckFamily(req.Family); err != nil {
@@ -117,12 +122,13 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 	case len(vmsNamed(vms, it.Name)) > 0:
 		it.Blocked = "a VM named " + it.Name + " already exists"
 	}
-	if it.Blocked == "" && (kind == ImageWindows || kind == ImageLinux) {
+	if it.Blocked == "" {
 		cfg, err := p.API.VMConfig(ctx, src.Node, src.VMID)
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", src.Name, err)
 		}
-		if !agentEnabled(cfg["agent"]) {
+		it.Source.Bridges = sourceBridges(cfg)
+		if (kind == ImageWindows || kind == ImageLinux) && !agentEnabled(cfg["agent"]) {
 			it.Blocked = src.Name + " has no QEMU guest agent enabled (Options, QEMU Guest Agent); environments set hostname and address through it"
 		}
 	}
@@ -152,6 +158,12 @@ func (p Planner) ImageEdit(ctx context.Context, req ImageRequest) (*Plan, error)
 		Steps:  []Step{StepClone, StepLabel, StepNetwork}}
 	if len(vmsNamed(vms, it.Name)) > 0 {
 		it.Blocked = it.Name + " already exists: register it as the next version, or delete it in Proxmox, first"
+	} else {
+		cfg, err := p.API.VMConfig(ctx, newest.Node, newest.VMID)
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", newest.Name, err)
+		}
+		it.Source.Bridges = sourceBridges(cfg)
 	}
 	return &Plan{Kind: KindImageEdit, Config: ConfigHash(KindImageEdit, p.Cfg), Items: []Item{it},
 		Locks: []string{"family:" + req.Family, "vmid:" + strconv.Itoa(vmid)}}, nil

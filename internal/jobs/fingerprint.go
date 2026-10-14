@@ -27,13 +27,13 @@ func Fingerprint(plan *pods.Plan) string {
 		Description string `json:",omitempty"`
 		VMState     bool   `json:",omitempty"`
 
-		Source     *pods.Source      `json:",omitempty"`
+		Source     *fpSource         `json:",omitempty"`
 		Pool       string            `json:",omitempty"`
 		Tags       string            `json:",omitempty"`
 		Notes      *pods.Notes       `json:",omitempty"`
 		NICs       map[string]string `json:",omitempty"`
 		Guest      *pods.Guest       `json:",omitempty"`
-		Supersedes *pods.Source      `json:",omitempty"`
+		Supersedes *fpSource         `json:",omitempty"`
 	}
 	type fpTemplate struct {
 		Name           string
@@ -80,13 +80,28 @@ func Fingerprint(plan *pods.Plan) string {
 			Description: it.Description,
 			VMState:     it.VMState,
 
-			Source: it.Source, Pool: it.Pool, Tags: it.Tags, Notes: it.Notes,
-			NICs: it.NICs, Guest: it.Guest, Supersedes: it.Supersedes,
+			Source: sourceFP(it.Source), Pool: it.Pool, Tags: it.Tags, Notes: it.Notes,
+			NICs: it.NICs, Guest: it.Guest, Supersedes: sourceFP(it.Supersedes),
 		})
 	}
 	b, _ := json.Marshal(fp) // plain structs of strings, ints and bools can't fail
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// fpSource is a Source without Bridges, which only decide the privileges
+// needed, as a template's do.
+type fpSource struct {
+	VMID int    `json:"vmid"`
+	Node string `json:"node"`
+	Name string `json:"name"`
+}
+
+func sourceFP(s *pods.Source) *fpSource {
+	if s == nil {
+		return nil
+	}
+	return &fpSource{VMID: s.VMID, Node: s.Node, Name: s.Name}
 }
 
 // LockKeys names what a plan touches, so overlapping jobs serialize. VMIDs

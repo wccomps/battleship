@@ -15,7 +15,8 @@ func imageFake() *podstest.Fake {
 	f.Add(proxmox.VM{VMID: 150, Name: "fresh-debian", Node: "birch"}, map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:01:50,bridge=vmbr0",
 		"ide2": "local:iso/debian.iso,media=cdrom"})
 	f.Add(proxmox.VM{VMID: 151, Name: "fresh-win", Node: "birch"}, map[string]string{"net0": "virtio=BC:24:11:00:01:51,bridge=vmbr0"})
-	f.Add(proxmox.VM{VMID: 8000, Name: "debian-12-v1", Node: "alder", Template: true, Tags: "base;linux"}, map[string]string{"agent": "1"})
+	f.Add(proxmox.VM{VMID: 8000, Name: "debian-12-v1", Node: "alder", Template: true, Tags: "base;linux"},
+		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:80:00,bridge=vmbr1"})
 	return f
 }
 
@@ -31,7 +32,7 @@ func TestImageRegisterNewVersionRetiresPrevious(t *testing.T) {
 	it := plan.Items[0]
 	want := []Step{StepClone, StepLabel, StepCDROM, StepConvert, StepRetire}
 	if it.Name != "debian-12-v2" || it.VMID != 8001 || it.Blocked != "" || !slices.Equal(it.Steps, want) ||
-		it.Source.VMID != 150 || it.Pool != "dev-templates" || it.Tags != "base;linux" || it.Supersedes.VMID != 8000 {
+		it.Source.VMID != 150 || !slices.Equal(it.Source.Bridges, []string{"vmbr0"}) || it.Pool != "dev-templates" || it.Tags != "base;linux" || it.Supersedes.VMID != 8000 {
 		t.Errorf("item = %+v", it)
 	}
 	if !slices.Contains(plan.Locks, "family:debian-12") || !slices.Contains(plan.Locks, "vmid:8001") {
@@ -67,7 +68,7 @@ func TestImageEditMakesWorkingCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	it := plan.Items[0]
-	if it.Name != "debian-12-edit" || it.Tags != "" || it.NICs["net0"] != "vmbr0" || it.Source.VMID != 8000 ||
+	if it.Name != "debian-12-edit" || it.Tags != "" || it.NICs["net0"] != "vmbr0" || it.Source.VMID != 8000 || !slices.Equal(it.Source.Bridges, []string{"vmbr1"}) ||
 		!slices.Equal(it.Steps, []Step{StepClone, StepLabel, StepNetwork}) {
 		t.Errorf("item = %+v", it)
 	}

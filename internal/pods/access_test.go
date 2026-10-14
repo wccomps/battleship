@@ -3,6 +3,7 @@ package pods
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -361,5 +362,38 @@ func TestEnvItemNeeds(t *testing.T) {
 	_ = BlockUnpermitted(context.Background(), plan, full(pool[:5]), cfg)
 	if !strings.Contains(plan.Items[0].Blocked, "VM.GuestAgent.Unrestricted") {
 		t.Errorf("blocked = %q", plan.Items[0].Blocked)
+	}
+}
+
+// After an edit and register, a base image sits on the edit bridge, and
+// Proxmox checks SDN.Use on a clone source's bridges.
+func TestCloneNeedsSDNUseOnSourceBridges(t *testing.T) {
+	cfg := envConfig()
+	cfg.Images.EditBridge, cfg.Images.EditZone = "devedit", "edits"
+	f := envFake()
+	f.Add(proxmox.VM{VMID: 8003, Name: "debian-13-v1", Node: "alder", Template: true, Tags: "base;linux"},
+		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:80:04,bridge=devedit"})
+	plan := create(t, NewPlanner(f, cfg), "teak=debian-13")
+	teak := plan.Items[1]
+	if !slices.Equal(teak.Source.Bridges, []string{"devedit"}) {
+		t.Fatalf("source = %+v", teak.Source)
+	}
+	g := grants{
+		"/vms/8003":                      {"VM.Clone"},
+		"/pool/dev-01":                   {"VM.Allocate", "VM.Config.Options", "VM.Config.Network", "VM.PowerMgmt", "VM.GuestAgent.Audit", "VM.GuestAgent.Unrestricted"},
+		"/storage/" + cfg.Deploy.Storage: {"Datastore.AllocateSpace"},
+		"/sdn/zones/" + cfg.Environments.SDNZone + "/devint01": {"SDN.Use"},
+	}
+	p := &Plan{Kind: KindEnvCreate, Items: []Item{teak}}
+	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if b := p.Items[0].Blocked; !strings.Contains(b, "SDN.Use on /sdn/zones/edits/devedit") {
+		t.Errorf("blocked = %q", b)
+	}
+	g["/sdn/zones/edits/devedit"] = []string{"SDN.Use"}
+	p = &Plan{Kind: KindEnvCreate, Items: []Item{teak}}
+	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "" {
+		t.Errorf("with SDN.Use on the edit bridge: %q, %v", p.Items[0].Blocked, err)
 	}
 }
