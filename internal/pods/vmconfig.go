@@ -228,3 +228,14 @@ func UnconvertedDisk(cfg map[string]string) (key, vol string) {
 	}
 	return "", ""
 }
+
+// NICMAC is a NIC's MAC address, lower case, from its config value
+// ("virtio=BC:24:11:…,bridge=…").
+func NICMAC(nic string) (string, bool) {
+	head, _ := splitOptions(nic)
+	_, mac, ok := strings.Cut(head, "=")
+	if !ok || len(mac) != 17 {
+		return "", false
+	}
+	return strings.ToLower(mac), true
+}
