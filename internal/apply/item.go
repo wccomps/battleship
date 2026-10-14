@@ -117,23 +117,13 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		if exists {
 			return false, nil
 		}
+		req := proxmox.CloneRequest{NewVMID: it.VMID, Name: it.Name, TargetNode: it.Node, Storage: e.Cfg.Deploy.Storage}
 		if it.Source != nil {
-			return e.cloneSource(ctx, it)
+			req.SourceNode, req.SourceVMID, req.Pool, req.Full = it.Source.Node, it.Source.VMID, it.Pool, true
+		} else {
+			req.SourceNode, req.SourceVMID, req.Pool, req.Full = tpl.node, tpl.spec.VMID, e.naming.Pool(it.Team), !e.Cfg.Deploy.Linked
 		}
-		err := e.lim.clones.do(ctx, func() error {
-			_, err := e.taskUPID(ctx, it.VMID, func() (string, error) {
-				return e.startClone(ctx, false, proxmox.CloneRequest{
-					SourceNode: tpl.node, SourceVMID: tpl.spec.VMID, NewVMID: it.VMID, Name: it.Name,
-					TargetNode: it.Node, Pool: e.naming.Pool(it.Team),
-					Full: !e.Cfg.Deploy.Linked, Storage: e.Cfg.Deploy.Storage,
-				})
-			}, e.restartable)
-			return err
-		})
-		if err == nil {
-			e.setPresent(proxmox.VM{VMID: it.VMID, Name: it.Name, Node: it.Node}, true)
-		}
-		return err == nil, err
+		return e.cloneVM(ctx, it, req)
 
 	case pods.StepNetwork:
 		if it.NICs != nil {
@@ -183,15 +173,39 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		if gone {
 			return false, errVanished
 		}
-		if cfg["template"] == "1" {
-			return false, nil
+		changed := cfg["template"] != "1"
+		if changed {
+			if err := e.convert(ctx, it.Node, it.VMID); err != nil {
+				return true, err
+			}
+			if cfg, gone, err = e.readVM(ctx, it.Node, it.VMID); err != nil {
+				return true, err
+			} else if gone {
+				return true, errVanished
+			}
 		}
-		return true, e.convert(ctx, it.Node, it.VMID)
+		if key, vol := pods.UnconvertedDisk(cfg); key != "" {
+			return changed, &unconvertedError{name: it.Name, vmid: it.VMID, key: key, vol: vol}
+		}
+		// A converted image is finished work; a later failure mustn't make cleanup delete it.
+		e.mu.Lock()
+		delete(e.owned, it.VMID)
+		e.mu.Unlock()
+		return changed, nil
 	case pods.StepRetire:
 		prev := pods.Item{Name: it.Supersedes.Name, VMID: it.Supersedes.VMID, Node: it.Supersedes.Node}
-		return e.applyConfig(ctx, &prev, false, func(cur map[string]string) map[string]string {
+		e.mu.Lock()
+		if vm, ok := e.present[prev.VMID]; ok && vm.Name == prev.Name && vm.Node != "" {
+			prev.Node = vm.Node
+		}
+		e.mu.Unlock()
+		changed, err := e.applyConfig(ctx, &prev, false, func(cur map[string]string) map[string]string {
 			return pods.LabelChanges(cur, pods.AddTag(cur["tags"], pods.DeprecatedTag), nil)
 		})
+		if err != nil {
+			err = fmt.Errorf("%s is registered as a template but the previous version %s (%d) was not marked deprecated: %w", it.Name, prev.Name, prev.VMID, err)
+		}
+		return changed, err
 	case pods.StepWaitAgent:
 		return e.waitAgent(ctx, it)
 	case pods.StepGuest:
@@ -383,17 +397,11 @@ func (e *Executor) power(ctx context.Context, it *pods.Item, action string) (boo
 	return true, e.taskOnce(ctx, func() (string, error) { return e.api.Power(ctx, it.Node, it.VMID, action) })
 }
 
-// cloneSource full-clones a base image or VM into it.VMID in it.Pool. Like
-// a team clone, the new VM is this run's, so cleanup removes it if the item
-// doesn't finish.
-func (e *Executor) cloneSource(ctx context.Context, it *pods.Item) (bool, error) {
+// cloneVM runs req as it.VMID's clone. The new VM is this run's, so cleanup
+// removes it if the item doesn't finish.
+func (e *Executor) cloneVM(ctx context.Context, it *pods.Item, req proxmox.CloneRequest) (bool, error) {
 	err := e.lim.clones.do(ctx, func() error {
-		_, err := e.taskUPID(ctx, it.VMID, func() (string, error) {
-			return e.startClone(ctx, false, proxmox.CloneRequest{
-				SourceNode: it.Source.Node, SourceVMID: it.Source.VMID, NewVMID: it.VMID, Name: it.Name,
-				TargetNode: it.Node, Pool: it.Pool, Full: true, Storage: e.Cfg.Deploy.Storage,
-			})
-		}, e.restartable)
+		_, err := e.taskUPID(ctx, it.VMID, func() (string, error) { return e.startClone(ctx, false, req) }, e.restartable)
 		return err
 	})
 	if err == nil {

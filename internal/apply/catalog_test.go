@@ -69,3 +69,41 @@ func TestEnvHostIsWiredAndLabelled(t *testing.T) {
 		t.Errorf("res %+v vm %+v %v", res, v.VM, v.Config)
 	}
 }
+
+func registerPlan(steps ...pods.Step) *pods.Plan {
+	return &pods.Plan{Kind: pods.KindImageRegister, Items: []pods.Item{{
+		Name: "deb-v2", VMID: 8001, Node: "alder", Pool: "base-images", Tags: "base;linux",
+		Source: &pods.Source{VMID: 150, Node: "alder", Name: "fresh"}, Supersedes: &pods.Source{VMID: 8000, Node: "alder", Name: "deb-v1"},
+		Steps: steps}}}
+}
+
+func registerFake() *podstest.Fake {
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 150, Name: "fresh", Node: "alder"}, map[string]string{"scsi0": "competitions:150/vm-150-disk-0.qcow2"})
+	f.Add(proxmox.VM{VMID: 8000, Name: "deb-v1", Node: "alder", Template: true, Tags: "base;linux"}, map[string]string{"tags": "base;linux"})
+	return f
+}
+
+func TestRegisterFailsOnHalfConvertedImage(t *testing.T) {
+	f := registerFake()
+	f.ConvertLeavesDisk = map[int]bool{8001: true}
+	res := catalogExec(f).Run(context.Background(), registerPlan(pods.StepClone, pods.StepConvert, pods.StepRetire))
+	if len(res.Failed) != 1 || len(res.Succeeded) != 0 || f.VMs[8001] != nil {
+		t.Errorf("result = %+v; a half-converted copy must fail and be removed", res)
+	}
+	if strings.Contains(f.VMs[8000].Config["tags"], "deprecated") {
+		t.Errorf("previous version was retired despite the failure")
+	}
+}
+
+func TestRegisterKeepsConvertedImageWhenRetireFails(t *testing.T) {
+	f := registerFake()
+	f.FailOn("setconfig:8000", &proxmox.APIError{Status: 403, Message: "Permission check failed"})
+	res := catalogExec(f).Run(context.Background(), registerPlan(pods.StepClone, pods.StepConvert, pods.StepRetire))
+	if len(res.Failed) != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	if v := f.VMs[8001]; v == nil || !v.Template {
+		t.Errorf("converted image must survive a failed retire: %+v", v)
+	}
+}
