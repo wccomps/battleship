@@ -596,7 +596,8 @@ func (h *harness) ticketWith(subject string, privs []string) proxmox.Credential 
 // allPrivileges are the privileges an administrator holds.
 var allPrivileges = []string{"VM.Audit", "VM.PowerMgmt", "VM.Snapshot", "VM.Snapshot.Rollback", "VM.Clone", "VM.Allocate",
 	"VM.Config.Network", "VM.Config.Disk", "VM.Config.Cloudinit", "VM.Config.CDROM", "VM.Config.Options", "Datastore.AllocateSpace",
-	"Datastore.Allocate", "Datastore.Audit", "Pool.Audit", "Pool.Allocate", "Sys.Audit", "Sys.Modify", "SDN.Use", "Mapping.Use"}
+	"Datastore.Allocate", "Datastore.Audit", "Pool.Audit", "Pool.Allocate", "Sys.Audit", "Sys.Modify", "SDN.Use", "Mapping.Use",
+	"VM.GuestAgent.Audit", "VM.GuestAgent.Unrestricted"}
 
 // loginStudent stores a session for a team 01 member (no role).
 func (h *harness) loginStudent() authtest.Session {

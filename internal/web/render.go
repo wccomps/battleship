@@ -48,7 +48,8 @@ func parsePages() map[string]*template.Template {
 
 // funcs are the template helpers. Times are formatted in Go against the
 // server's clock before they reach a template.
-var funcs = template.FuncMap{"asset": assetURL, "names": keepNames, "icon": icon, "opIcon": opIcon, "needs": needs}
+var funcs = template.FuncMap{"asset": assetURL, "names": keepNames, "icon": icon, "opIcon": opIcon, "needs": needs,
+	"hasPrefix": strings.HasPrefix}
 
 // nameRE matches a name in prose: letter/digit/_/* runs joined by '-' or '.'
 // (team03-web, dc.kilo.alpha.tpl, *.kilo.alpha). keepNames skips matches
@@ -133,22 +134,22 @@ type navItem struct {
 	Key, Label, Href string
 }
 
-// nav is the main navigation: the grid and the logs. The power and reset forms
+// nav is the main navigation: the grid, environments, images and the logs. The power and reset forms
 // keep their addresses for prefilled links (a job's "start again") but aren't
 // in the menu.
 func nav(u *auth.User) []navItem {
 	if u == nil {
 		return nil
 	}
-	return []navItem{{"grid", "Grid", "/"}, {"logs", "Logs", logsPath}}
+	return []navItem{{"grid", "Grid", "/"}, {"environments", "Environments", "/environments"}, {"images", "Images", "/images"}, {"logs", "Logs", logsPath}}
 }
 
-// leadOps is the page operations (deploy and teardown) the user holds a
-// privilege for somewhere.
+// leadOps is the team page operations (deploy and teardown) the user holds a
+// privilege for somewhere; image and environment ones start from their pages.
 func (s *Server) leadOps(ctx context.Context) []navItem {
 	var items []navItem
 	for _, op := range operations {
-		if op.page() && s.mayRun(ctx, op.Kind) {
+		if op.page() && !op.Kind.Teamless() && s.mayRun(ctx, op.Kind) {
 			items = append(items, navItem{string(op.Kind), op.Title, op.Path})
 		}
 	}
@@ -278,6 +279,13 @@ func opIcon(kind string) template.HTML {
 		return icon(kind)
 	case kind == string(pods.KindPower):
 		return icon("shutdown")
+	case kind == string(pods.KindEnvCreate), kind == string(pods.KindEnvAdd),
+		kind == string(pods.KindImageRegister), kind == string(pods.KindImageEdit):
+		return icon("deploy")
+	case kind == string(pods.KindImageDelete):
+		return icon("teardown")
+	case kind == string(pods.KindEnvDNS), kind == string(pods.KindImageDeprecate):
+		return icon("reset")
 	}
 	return icon("reboot")
 }

@@ -109,7 +109,8 @@ type confirmForm struct {
 // destructive reports whether in destroys or discards something, so the
 // confirm button says so.
 func destructive(in jobs.Inputs) bool {
-	return in.Kind == pods.KindTeardown || in.Kind == pods.KindReset || (in.Kind == pods.KindPower && in.Action == "stop")
+	return in.Kind == pods.KindTeardown || in.Kind == pods.KindReset || (in.Kind == pods.KindPower && in.Action == "stop") ||
+		in.Kind == pods.KindImageDelete
 }
 
 // previewOptions are the extras of a preview beyond the plan.
@@ -142,7 +143,7 @@ func (s *Server) opPreview(op operation) http.Handler {
 			s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, "Couldn't make a plan: "+sentence(proxmox.Describe(err)))
 			return
 		}
-		allTeams := s.coversAllTeams(r.Context(), plan.Teams)
+		allTeams := !op.Kind.Teamless() && s.coversAllTeams(r.Context(), plan.Teams)
 		s.showPreview(w, r, http.StatusOK, op, in, plan, allTeams, previewOptions{fromGrid: fromGrid(form)})
 	})
 }
@@ -323,6 +324,9 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 	switch {
 	case len(plan.Items) == 0:
 		p.Nothing = "No team VMs match these teams and hosts."
+		if op.Kind.Teamless() {
+			p.Nothing = "Nothing to do."
+		}
 		if op.Kind == pods.KindDeploy {
 			p.Nothing = "No masters match this template set and these hosts."
 		}
@@ -345,7 +349,10 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 // previewFacts are the inputs a preview recaps that the title and table don't.
 func previewFacts(in jobs.Inputs, fromGrid bool, retryOf int64) []fact {
 	var fs []fact
-	if !fromGrid {
+	switch {
+	case in.Kind.Teamless():
+		fs = teamlessFacts(in)
+	case !fromGrid:
 		fs = append(fs, fact{"Teams", teamsText(in.Teams)})
 		if len(in.Hosts) > 0 || in.Kind == pods.KindDeploy || in.Kind == pods.KindTeardown {
 			fs = append(fs, fact{"Hosts", hostsText(in.Hosts)})
@@ -358,6 +365,27 @@ func previewFacts(in jobs.Inputs, fromGrid bool, retryOf int64) []fact {
 	if retryOf > 0 {
 		fs = append(fs, fact{"Retry of", "#" + strconv.FormatInt(retryOf, 10)})
 	}
+	return fs
+}
+
+// teamlessFacts are an image or environment operation's inputs.
+func teamlessFacts(in jobs.Inputs) []fact {
+	var fs []fact
+	add := func(k, v string) {
+		if v != "" {
+			fs = append(fs, fact{k, v})
+		}
+	}
+	add("Domain", in.Domain)
+	add("Router", in.Router)
+	add("Hosts", strings.Join(in.EnvHosts, ", "))
+	add("DNS server", in.DNS)
+	if in.VMID != 0 {
+		add("VM", strconv.Itoa(in.VMID))
+	}
+	add("Family", in.Family)
+	add("Kind", in.ImageKind)
+	add("Image", in.Image)
 	return fs
 }
 
@@ -516,8 +544,39 @@ func consequence(kind pods.Kind, in jobs.Inputs, items []pods.Item) string {
 			msg += pick(" Their RAM is saved too if they are running, which takes longer.", " Its RAM is saved too if it is running, which takes longer.")
 		}
 		return msg
+	case pods.KindEnvCreate, pods.KindEnvAdd:
+		return vms + " will be cloned into " + poolOf(items) + ", wired to its networks, started, and given " +
+			pick("their names and addresses.", "its name and address.")
+	case pods.KindEnvDNS:
+		return vms + " will point at DNS server " + in.DNS + "."
+	case pods.KindImageRegister:
+		return "The VM will be copied in as " + itemNames(items) + " and made a template; the VM itself is left as it is."
+	case pods.KindImageEdit:
+		return itemNames(items) + " will be made from the newest version, for you to patch and register as the next one."
+	case pods.KindImageDeprecate:
+		return itemNames(items) + " will no longer be offered for new hosts. Hosts made from it keep working."
+	case pods.KindImageDelete:
+		return itemNames(items) + " will be deleted. Hosts made from it keep working: they are full copies. This can't be undone."
 	}
 	return ""
+}
+
+// poolOf is the pool new environment VMs go into.
+func poolOf(items []pods.Item) string {
+	for _, it := range items {
+		if it.Pool != "" {
+			return it.Pool
+		}
+	}
+	return "the slot"
+}
+
+func itemNames(items []pods.Item) string {
+	var n []string
+	for _, it := range items {
+		n = append(n, it.Name)
+	}
+	return strings.Join(n, ", ")
 }
 
 // powerLabels are the power actions' names on the forms.

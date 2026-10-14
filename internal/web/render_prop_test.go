@@ -101,6 +101,14 @@ func pageData(t *rapid.T, page string) any {
 		return p
 	case "message":
 		return drawHostile[message](t, "message")
+	case "catalog":
+		p := drawHostile[catalogView](t, "catalog")
+		p.Show = rapid.SampledFrom([]string{"images", "environments"}).Draw(t, "show")
+		return p
+	case "teamless":
+		p := drawHostile[catalogPage](t, "teamless")
+		p.Op = rapid.SampledFrom(slices.DeleteFunc(slices.Clone(operations), func(o operation) bool { return !o.Kind.Teamless() })).Draw(t, "op")
+		return p
 	}
 	t.Fatalf("no data for page %q", page)
 	return nil

@@ -74,6 +74,20 @@ func opLabelOf(kind string, in jobs.Inputs) opLabel {
 		return opLabel{Icon: "deploy", Label: "Deploy", Detail: strings.TrimPrefix(in.Pattern, "*.")}
 	case pods.KindTeardown:
 		return opLabel{Icon: "teardown", Label: "Teardown"}
+	case pods.KindEnvCreate:
+		return opLabel{Icon: "deploy", Label: "Create environment", Detail: in.Domain}
+	case pods.KindEnvAdd:
+		return opLabel{Icon: "deploy", Label: "Add hosts", Detail: in.Domain}
+	case pods.KindEnvDNS:
+		return opLabel{Icon: "reset", Label: "Set DNS", Detail: in.Domain + " → " + in.DNS}
+	case pods.KindImageRegister:
+		return opLabel{Icon: "deploy", Label: "Register base image", Detail: in.Family}
+	case pods.KindImageEdit:
+		return opLabel{Icon: "deploy", Label: "Open for editing", Detail: in.Family}
+	case pods.KindImageDeprecate:
+		return opLabel{Icon: "reset", Label: "Deprecate", Detail: in.Image}
+	case pods.KindImageDelete:
+		return opLabel{Icon: "teardown", Label: "Delete base image", Detail: in.Image}
 	}
 	return opLabel{Icon: kind, Label: kind}
 }
@@ -100,6 +114,23 @@ type jobRow struct {
 	Took  string // how long a finished job ran, e.g. "22 min"; "" otherwise
 	// Note is the line under the status, e.g. "after #423" or "cancel requested".
 	Note string
+}
+
+// jobTeams is a job's teams, e.g. "01-03", or for an image or environment
+// job what it acts on: the domain, family, image or VM.
+func jobTeams(in jobs.Inputs) string {
+	if !in.Kind.Teamless() {
+		return teamsText(in.Teams)
+	}
+	for _, v := range []string{in.Domain, in.Family, in.Image} {
+		if v != "" {
+			return v
+		}
+	}
+	if in.VMID != 0 {
+		return strconv.Itoa(in.VMID)
+	}
+	return ""
 }
 
 // whoShort is the local part of an actor's email: "sean" of "sean@example.org".
@@ -187,7 +218,7 @@ func (s *Server) jobsList(ctx context.Context, before int64) (jobsList, error) {
 			ID:    j.ID,
 			Look:  lookOf(jobLooks, j.Status),
 			Op:    opLabelOf(j.Kind, in),
-			Teams: teamsText(in.Teams),
+			Teams: jobTeams(in),
 			Who:   whoShort(j.CreatedBy),
 			By:    j.CreatedBy,
 			Role:  actsAs(j),
@@ -257,8 +288,11 @@ type jobView struct {
 	Who   string // the name part of who started it
 	By    string // in full
 	Role  string
-	Teams string // e.g. "01-03"
+	Teams string // e.g. "01-03"; what an image or environment job acts on
 	Hosts string // e.g. "dc, web", or "all"
+	// Teamless is an image or environment job, whose facts (Asked) say what
+	// it acts on.
+	Teamless bool
 	// Ran is when it ran ("13:12–13:34"), or when it was made if not started;
 	// RanAt is the full time, for a title.
 	Ran, RanAt string
@@ -507,7 +541,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 		Who:        whoShort(j.CreatedBy),
 		By:         j.CreatedBy,
 		Role:       actsAs(j),
-		Teams:      teamsText(in.Teams),
+		Teams:      jobTeams(in),
 		Hosts:      hostsText(in.Hosts),
 		Error:      j.Error,
 		Live:       j.Active(),
@@ -518,6 +552,9 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 		v.Hosts = "all" // the table names the VMs
 	}
 	v.Asked = askedFacts(in)
+	if in.Kind.Teamless() {
+		v.Teamless, v.Asked = true, teamlessFacts(in)
+	}
 	v.Ran, v.RanAt = minuteTime(now, j.CreatedAt), "made "+clockTime(now, j.CreatedAt)
 	if j.StartedAt != nil {
 		v.Ran, v.RanAt = minuteTime(now, *j.StartedAt), "started "+clockTime(now, *j.StartedAt)
@@ -905,7 +942,7 @@ func (s *Server) retryJob(w http.ResponseWriter, r *http.Request) {
 		s.renderForm(w, r, http.StatusUnprocessableEntity, op, retry, "Couldn't make a plan: "+sentence(proxmox.Describe(err)))
 		return
 	}
-	s.showPreview(w, r, http.StatusOK, op, retry, plan, s.coversAllTeams(ctx, plan.Teams), previewOptions{retryOf: id})
+	s.showPreview(w, r, http.StatusOK, op, retry, plan, !op.Kind.Teamless() && s.coversAllTeams(ctx, plan.Teams), previewOptions{retryOf: id})
 }
 
 // jobSnapTimeout bounds a shared job read.

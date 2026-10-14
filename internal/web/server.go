@@ -253,6 +253,9 @@ func (s *Server) volunteerRoutes(mux *http.ServeMux) {
 		mux.Handle("POST "+op.Path+"/confirm", s.require(s.opConfirm(op)))
 	}
 
+	mux.Handle("GET /environments", s.require(http.HandlerFunc(s.environmentsPage)))
+	mux.Handle("GET /images", s.require(http.HandlerFunc(s.imagesPage)))
+
 	// Job history lives at /logs so nobody looks there to start something.
 	mux.Handle("GET /logs", s.require(http.HandlerFunc(s.jobsPage)))
 	mux.Handle("GET /logs/{id}", s.require(http.HandlerFunc(s.jobPage)))

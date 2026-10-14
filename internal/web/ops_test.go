@@ -33,7 +33,7 @@ func (h *harness) post(sess *authtest.Session, target string, form url.Values) *
 }
 
 var (
-	confirmFormRE = regexp.MustCompile(`(?s)<form class="sheet" method="post" action="(/[a-z]+/confirm)"[^>]*>(.*?)</form>`)
+	confirmFormRE = regexp.MustCompile(`(?s)<form class="sheet" method="post" action="(/[a-z/]+/confirm)"[^>]*>(.*?)</form>`)
 	hiddenRE      = regexp.MustCompile(`<input type="hidden" name="([a-z_]+)" value="([^"]*)">`)
 )
 

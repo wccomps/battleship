@@ -43,7 +43,7 @@ func (s *Server) opConfirm(op operation) http.Handler {
 				formQuery(op, in), "Back to "+op.Title)
 			return
 		}
-		allTeams := s.coversAllTeams(ctx, plan.Teams)
+		allTeams := !op.Kind.Teamless() && s.coversAllTeams(ctx, plan.Teams)
 
 		// A re-shown retry preview still names the job it retries (display only).
 		var retryOf int64
@@ -193,6 +193,9 @@ func (s *Server) serverError(w http.ResponseWriter, r *http.Request, what string
 // summaryOf describes a submitted job briefly, e.g. "reset of team 01 to
 // initial (2 VMs)".
 func summaryOf(op operation, in jobs.Inputs, plan *pods.Plan) string {
+	if op.Kind.Teamless() {
+		return op.Noun + " " + strings.TrimSpace(in.Domain+" "+in.Family+" "+in.Image) + " (" + countVMs(len(plan.Runnable())) + ")"
+	}
 	teams := "team " + strings.Join(plan.Teams, ", ")
 	if len(plan.Teams) != 1 {
 		teams = "teams " + strings.Join(plan.Teams, ", ")
