@@ -3,6 +3,8 @@ package pods
 import (
 	"encoding/base64"
 	"fmt"
+	"net/netip"
+	"regexp"
 	"strings"
 	"unicode/utf16"
 )
@@ -24,10 +26,43 @@ const RebootMarker = "battleship: reboot"
 
 func NeedsReboot(out string) bool { return strings.Contains(out, RebootMarker) }
 
+var macRE = regexp.MustCompile(`^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$`)
+
+func isIPv4(s string) bool {
+	a, err := netip.ParseAddr(s)
+	return err == nil && a.Is4() && a.String() == s
+}
+
+// Check validates every value the scripts embed. They run as root or SYSTEM,
+// and the values come partly from VM notes, which users can edit.
+func (g Guest) Check() error {
+	if g.OS != ImageWindows && g.OS != ImageLinux {
+		return fmt.Errorf("guest OS %q is neither %s nor %s", g.OS, ImageWindows, ImageLinux)
+	}
+	if err := CheckHostname(g.Hostname); err != nil {
+		return err
+	}
+	if err := CheckDomain(g.Domain); err != nil {
+		return err
+	}
+	if g.Prefix < 1 || g.Prefix > 32 {
+		return fmt.Errorf("prefix length %d isn't 1-32", g.Prefix)
+	}
+	for _, a := range [][2]string{{"address", g.IP}, {"gateway", g.Gateway}, {"DNS server", g.DNS}} {
+		if !isIPv4(a[1]) {
+			return fmt.Errorf("%s %q isn't an IPv4 address", a[0], a[1])
+		}
+	}
+	return nil
+}
+
 // GuestCommand is the agent command, and its stdin, that applies g to the
 // NIC with mac.
-func GuestCommand(g Guest, mac string) (command []string, input string) {
-	script := GuestScript(g, mac)
+func GuestCommand(g Guest, mac string) (command []string, input string, err error) {
+	script, err := GuestScript(g, mac)
+	if err != nil {
+		return nil, "", err
+	}
 	if g.OS == ImageWindows {
 		u := utf16.Encode([]rune(script))
 		b := make([]byte, 2*len(u))
@@ -35,28 +70,29 @@ func GuestCommand(g Guest, mac string) (command []string, input string) {
 			b[2*i], b[2*i+1] = byte(c), byte(c>>8)
 		}
 		return []string{"powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-			"-EncodedCommand", base64.StdEncoding.EncodeToString(b)}, ""
+			"-EncodedCommand", base64.StdEncoding.EncodeToString(b)}, "", nil
 	}
-	return []string{"/bin/sh", "-s"}, script
+	return []string{"/bin/sh", "-s"}, script, nil
 }
 
-// quote single-quotes v for sh and PowerShell; values are validated names
-// and addresses, so a quote inside is a bug.
-func quote(v string) string {
-	if strings.Contains(v, "'") {
-		panic(fmt.Sprintf("guest script value %q contains a quote", v))
-	}
-	return "'" + v + "'"
-}
+// quote single-quotes v for sh and PowerShell; Check has limited every
+// value to names and addresses.
+func quote(v string) string { return "'" + v + "'" }
 
 // GuestScript is the script GuestCommand runs.
-func GuestScript(g Guest, mac string) string {
+func GuestScript(g Guest, mac string) (string, error) {
+	if err := g.Check(); err != nil {
+		return "", err
+	}
+	if !macRE.MatchString(mac) {
+		return "", fmt.Errorf("net0's MAC address %q isn't six hex pairs", mac)
+	}
 	if g.OS == ImageWindows {
 		return fmt.Sprintf(windowsScript, quote(strings.ToUpper(strings.ReplaceAll(mac, ":", "-"))), quote(g.IP), g.Prefix,
-			quote(g.Gateway), quote(g.DNS), quote(g.Domain), quote(g.Hostname), RebootMarker)
+			quote(g.Gateway), quote(g.DNS), quote(g.Domain), quote(g.Hostname), RebootMarker), nil
 	}
 	return fmt.Sprintf("MAC=%s\nIP=%s\nPREFIX=%d\nGW=%s\nDNS=%s\nHOST=%s\nDOMAIN=%s\n",
-		quote(strings.ToLower(mac)), quote(g.IP), g.Prefix, quote(g.Gateway), quote(g.DNS), quote(g.Hostname), quote(g.Domain)) + linuxScript
+		quote(strings.ToLower(mac)), quote(g.IP), g.Prefix, quote(g.Gateway), quote(g.DNS), quote(g.Hostname), quote(g.Domain)) + linuxScript, nil
 }
 
 // linuxScript sets a static address on the NIC with $MAC through whichever

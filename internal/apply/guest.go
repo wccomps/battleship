@@ -61,7 +61,10 @@ func (e *Executor) configureGuest(ctx context.Context, it *pods.Item) (bool, err
 	if err != nil {
 		return false, err
 	}
-	cmd, input := pods.GuestCommand(*it.Guest, mac)
+	cmd, input, err := pods.GuestCommand(*it.Guest, mac)
+	if err != nil {
+		return false, err
+	}
 	out, err := e.exec(ctx, it, cmd, input)
 	if err != nil {
 		return true, err

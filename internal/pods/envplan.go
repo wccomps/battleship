@@ -235,6 +235,10 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 			addr := p.Cfg.Environments.Subnet + "." + strconv.Itoa(octet)
 			notes.IP, notes.OS = addr, im.Kind
 			ip.Guest = &Guest{OS: im.Kind, Hostname: h.Host, Domain: env.Domain, IP: addr, Prefix: HostPrefix, Gateway: p.gateway(), DNS: dnsAddr}
+			if err := ip.Guest.Check(); err != nil {
+				ip.Blocked = err.Error()
+				continue
+			}
 			ip.Steps = append(ip.Steps, StepWaitAgent, StepGuest, StepVerify)
 		}
 		ip.Notes = &notes
@@ -289,8 +293,11 @@ func (p Planner) EnvDNS(ctx context.Context, req EnvRequest) (*Plan, error) {
 		if h.Notes.IP != "" && (h.Notes.OS == ImageWindows || h.Notes.OS == ImageLinux) {
 			it.Guest = &Guest{OS: h.Notes.OS, Hostname: h.Host, Domain: env.Domain, IP: h.Notes.IP, Prefix: HostPrefix,
 				Gateway: p.gateway(), DNS: addr}
+			if err := it.Guest.Check(); err != nil {
+				it.Blocked = err.Error()
+			}
 			it.Steps = []Step{StepGuest, StepVerify, StepLabel}
-			if h.Status != "running" {
+			if it.Blocked == "" && h.Status != "running" {
 				it.Blocked = h.Name + " is " + h.Status + "; start it first so its DNS can be set"
 			}
 		}

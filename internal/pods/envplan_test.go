@@ -178,3 +178,37 @@ func TestEnvCreatePlanIsDeterministic(t *testing.T) {
 		t.Errorf("plans differ:\n%+v\n%+v", a, b)
 	}
 }
+
+// Notes are user-editable: an address that isn't a host of the subnet,
+// quoted or not, leaves the host without one rather than reaching a script.
+func TestEnvDNSIgnoresBadNoteAddresses(t *testing.T) {
+	for _, ip := range []string{"192.168.100.20'", "192.168.100.20\u2019;x", "10.50.1.20", "192.168.100.3", "192.168.100.020"} {
+		f := podstest.New("alder")
+		f.Add(proxmox.VM{VMID: 2101, Name: "oak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "running"},
+			map[string]string{"description": "battleship: ip=" + ip + " os=windows base=win2022-v1 dns=router"})
+		p := NewPlanner(f, envConfig())
+		if _, err := p.EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha", DNS: "oak"}); err == nil {
+			t.Errorf("%q: oak was accepted as a DNS server", ip)
+		}
+		plan, err := p.EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha", DNS: "router"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if it := plan.Items[0]; it.Guest != nil || !slices.Equal(it.Steps, []Step{StepLabel}) {
+			t.Errorf("%q: oak = %+v guest %+v", ip, it, it.Guest)
+		}
+	}
+}
+
+func TestEnvDNSBlocksAHostNameScriptsCantTake(t *testing.T) {
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 2101, Name: "Oak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "running"},
+		map[string]string{"description": "battleship: ip=192.168.100.20 os=windows base=win2022-v1 dns=router"})
+	plan, err := NewPlanner(f, envConfig()).EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := plan.Items[0].Blocked; !strings.Contains(b, "Oak") {
+		t.Errorf("blocked = %q", b)
+	}
+}

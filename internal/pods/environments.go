@@ -162,6 +162,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 		}
 		if si, ok := byPool[vm.Pool]; ok {
 			n, has := ParseNotes(cfg["description"])
+			n = n.Checked(p.Cfg.Environments.Subnet)
 			envs[si].Hosts = append(envs[si].Hosts, EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node,
 				Status: vm.Status, Tags: vm.Tags, Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has})
 			continue
