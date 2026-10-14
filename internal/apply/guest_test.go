@@ -41,8 +41,8 @@ func TestWindowsGuestRenamesAndReboots(t *testing.T) {
 	if len(res.Succeeded) != 1 {
 		t.Fatalf("result = %+v", res)
 	}
-	if f.Called("power:2101:reboot") != 1 {
-		t.Errorf("want one reboot after a rename; calls %v", f.Calls)
+	if f.Called("shutdown:2101:10m0s:false") != 1 || f.Called("power:2101:start") != 1 || f.Called("power:2101:reboot") != 0 {
+		t.Errorf("want one patient shutdown and one start after a rename; calls %v", f.Calls)
 	}
 	if len(f.Execs) != 1 || f.Execs[0].Command[0] != "powershell.exe" {
 		t.Errorf("execs = %+v", f.Execs)
@@ -74,5 +74,32 @@ func TestWaitAgentGivesUp(t *testing.T) {
 	res := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{guestItem(pods.ImageLinux)}})
 	if err := res.Failed["oak.kilo.alpha"]; err == nil || !strings.Contains(err.Error(), "guest agent") {
 		t.Errorf("failed = %v", err)
+	}
+}
+
+func TestGuestExecIsSentOnce(t *testing.T) {
+	f := guestFake(t)
+	f.FailOn("agent-exec:2101", &proxmox.APIError{Status: 500, Message: "connection reset"})
+	f.ExecHook = applied(f, "")
+	res := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{guestItem(pods.ImageLinux)}})
+	if res.Failed["oak.kilo.alpha"] == nil {
+		t.Fatalf("result = %+v", res)
+	}
+	if n := f.Called("agent-exec:2101"); n != 1 {
+		t.Errorf("exec was sent %d times; calls %v", n, f.Calls)
+	}
+}
+
+func TestVerifyStopsOnForbidden(t *testing.T) {
+	f := guestFake(t)
+	f.ExecHook = applied(f, "")
+	f.FailOn("agent-nics:2101", &proxmox.APIError{Status: 403, Message: "Permission check failed (VM.GuestAgent.Audit)"})
+	res := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{guestItem(pods.ImageLinux)}})
+	err := res.Failed["oak.kilo.alpha"]
+	if err == nil || !strings.Contains(err.Error(), "VM.GuestAgent.Audit") {
+		t.Fatalf("failed = %v", err)
+	}
+	if n := f.Called("agent-nics:2101"); n != 1 {
+		t.Errorf("verify read the interfaces %d times; want 1", n)
 	}
 }

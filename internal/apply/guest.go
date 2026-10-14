@@ -2,6 +2,7 @@ package apply
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -16,6 +17,8 @@ const (
 	execPoll    = 2 * time.Second
 	execLimit   = 5 * time.Minute // the setup scripts take seconds
 	verifyTries = 24              // two minutes at agentPoll: Windows applies an address with a delay
+	// A Windows guest can take minutes to finish a rename before it powers off.
+	restartShutdown = 10 * time.Minute
 )
 
 // waitAgent waits for the guest agent to answer, up to
@@ -65,7 +68,7 @@ func (e *Executor) configureGuest(ctx context.Context, it *pods.Item) (bool, err
 	}
 	if pods.NeedsReboot(out) {
 		e.emit(it.Name, pods.StepGuest, EventInfo, "restarting it to apply the new host name")
-		if err := e.taskOnce(ctx, func() (string, error) { return e.api.Power(ctx, it.Node, it.VMID, "reboot") }); err != nil {
+		if err := e.restart(ctx, it); err != nil {
 			return true, fmt.Errorf("restarting after the rename: %w", err)
 		}
 		if _, err := e.waitAgent(ctx, it); err != nil {
@@ -75,10 +78,28 @@ func (e *Executor) configureGuest(ctx context.Context, it *pods.Item) (bool, err
 	return true, nil
 }
 
+// restart shuts the guest down, waiting for it to finish applying the
+// rename, and starts it again.
+func (e *Executor) restart(ctx context.Context, it *pods.Item) error {
+	if err := e.taskOnce(ctx, func() (string, error) { return e.api.Shutdown(ctx, it.Node, it.VMID, restartShutdown, false) }); err != nil {
+		return err
+	}
+	var status string
+	if err := e.call(ctx, func() (err error) { status, err = e.api.CurrentStatus(ctx, it.Node, it.VMID); return }); err != nil {
+		return err
+	}
+	if status == "running" {
+		return nil
+	}
+	return e.taskOnce(ctx, func() (string, error) { return e.api.Power(ctx, it.Node, it.VMID, "start") })
+}
+
 // exec runs a command through the agent and waits for it to exit 0.
 func (e *Executor) exec(ctx context.Context, it *pods.Item, cmd []string, input string) (string, error) {
 	var pid int
-	if err := e.call(ctx, func() (err error) { pid, err = e.api.AgentExec(ctx, it.Node, it.VMID, cmd, input); return }); err != nil {
+	// Sent once: a retry after a lost answer would run a second copy of the
+	// script alongside the first. The round retry reruns it instead.
+	if err := e.lim.Call(ctx, func() (err error) { pid, err = e.api.AgentExec(ctx, it.Node, it.VMID, cmd, input); return }); err != nil {
 		return "", err
 	}
 	for range int(execLimit / execPoll) {
@@ -119,6 +140,9 @@ func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error)
 	for range verifyTries {
 		nics, nerr := e.api.AgentInterfaces(ctx, it.Node, it.VMID)
 		host, herr := e.api.AgentHostname(ctx, it.Node, it.VMID)
+		if proxmox.IsForbidden(nerr) || proxmox.IsForbidden(herr) {
+			return false, errors.Join(nerr, herr)
+		}
 		if nerr == nil && herr == nil {
 			var ips []string
 			for _, n := range nics {
@@ -131,8 +155,11 @@ func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error)
 				return false, nil
 			}
 			saw = fmt.Sprintf("host name %q with %s", host, strings.Join(ips, ", "))
-		} else if ctx.Err() != nil {
-			return false, ctx.Err()
+		} else {
+			if ctx.Err() != nil {
+				return false, ctx.Err()
+			}
+			saw = "an error: " + proxmox.Describe(errors.Join(nerr, herr))
 		}
 		if err := e.Sleep(ctx, agentPoll); err != nil {
 			return false, err
