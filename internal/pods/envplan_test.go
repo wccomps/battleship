@@ -212,3 +212,27 @@ func TestEnvDNSBlocksAHostNameScriptsCantTake(t *testing.T) {
 		t.Errorf("blocked = %q", b)
 	}
 }
+
+// Re-running a partly failed create through Add hosts names the existing
+// router again: it is resumed, not refused.
+func TestEnvAddResumesTheExistingRouter(t *testing.T) {
+	f := envFake()
+	f.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;router"},
+		map[string]string{"description": "battleship: base=gw-v1 dns=router"})
+	hs, _ := ParseHostSpec("oak=win2022")
+	plan, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(),
+		EnvRequest{Domain: "kilo.alpha", Router: HostSpec{Host: "gw", Family: "gw"}, Hosts: []HostSpec{hs}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Items) != 2 {
+		t.Fatalf("items = %+v", plan.Items)
+	}
+	gw, oak := plan.Items[0], plan.Items[1]
+	if gw.VMID != 2100 || gw.Blocked != "" || slices.Contains(gw.Steps, StepClone) {
+		t.Errorf("router = %+v", gw)
+	}
+	if oak.Blocked != "" || oak.VMID == 2100 || !slices.Contains(oak.Steps, StepClone) || oak.Guest == nil {
+		t.Errorf("oak = %+v", oak)
+	}
+}

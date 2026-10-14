@@ -73,7 +73,8 @@ func (p Planner) EnvAdd(ctx context.Context, req EnvRequest) (*Plan, error) {
 	}
 	hosts := req.Hosts
 	if req.Router.Host != "" {
-		if env.HasRouter() {
+		// The existing router may be named again, to resume a failed create.
+		if _, exists := env.Host(req.Router.Host + "." + env.Domain); env.HasRouter() && !exists {
 			return nil, fmt.Errorf("%s already has a router", req.Domain)
 		}
 		hosts = append([]HostSpec{req.Router}, hosts...)
