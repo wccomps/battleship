@@ -65,7 +65,11 @@ func printFailures(w io.Writer, failed map[string]string) {
 }
 
 func printPlan(w io.Writer, naming pods.Naming, plan *pods.Plan) {
-	fmt.Fprintf(w, "Plan: %s, teams %s\n", plan.Kind, strings.Join(plan.Teams, ","))
+	if plan.Kind.Teamless() {
+		fmt.Fprintf(w, "Plan: %s\n", plan.Kind)
+	} else {
+		fmt.Fprintf(w, "Plan: %s, teams %s\n", plan.Kind, strings.Join(plan.Teams, ","))
+	}
 	if len(plan.Templates) > 0 {
 		fmt.Fprintln(w, "\nTemplates:")
 		tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)

@@ -94,6 +94,8 @@ type deps struct {
 
 const usage = `usage: battleship <deploy|teardown|reset|power|snapshot> [flags]
        battleship jobs <list|show ID|cancel ID> [flags]
+       battleship image <register|edit|deprecate|delete> [flags]
+       battleship env <create|add|dns> [flags]
        battleship serve [flags]
        battleship nodes [flags]
 
@@ -113,6 +115,8 @@ proxmox.urls line.
   battleship reset    -config battleship.toml -teams 7 -hosts dc -yes
   battleship power    -config battleship.toml -teams 1-32 -action start -yes -queue
   battleship snapshot -config battleship.toml -teams 7 -hosts dc -name before-scoring -yes
+  battleship image register -config battleship.toml -vm 101 -family win11 -kind windows
+  battleship env create -config battleship.toml -domain kilo.alpha -router gw=opnsense -host dc=win2022:10
   battleship jobs list -config battleship.toml
   battleship serve    -config battleship.toml -log-format json
   battleship nodes    -config battleship.toml
@@ -129,6 +133,10 @@ func run(ctx context.Context, args []string, d deps) int {
 		return 0
 	case "deploy", "teardown", "reset", "power", "snapshot":
 		return runOp(ctx, args[0], args[1:], d)
+	case "image":
+		return runImage(ctx, args[1:], d)
+	case "env":
+		return runEnv(ctx, args[1:], d)
 	case "jobs":
 		return runJobs(ctx, args[1:], d)
 	case "serve":

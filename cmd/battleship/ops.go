@@ -21,7 +21,7 @@ import (
 // snapshot. With a database, an applied plan is queued as a job and followed
 // (see runQueued).
 func runOp(ctx context.Context, cmd string, args []string, d deps) int {
-	stdout, stderr := d.stdout, d.stderr
+	stderr := d.stderr
 	fs := flag.NewFlagSet("battleship "+cmd, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	cfgPath := fs.String("config", "battleship.toml", "config file")
@@ -106,12 +106,18 @@ func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 		}
 	}
 
-	cfg, err := config.Load(*cfgPath)
+	return runPlanned(ctx, d, cmd, *cfgPath, in, all, *yes, *queue)
+}
+
+// runPlanned plans in, prints the plan, asks, then queues or runs it.
+func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs, all, yes, queue bool) int {
+	stdout, stderr := d.stdout, d.stderr
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if *queue {
+	if queue {
 		if err := cfg.RequireDatabase(); err != nil {
 			fmt.Fprintln(stderr, "-queue:", err)
 			return 1
@@ -171,7 +177,7 @@ func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 		fmt.Fprintln(stdout, "\nNothing can run.")
 		return 1
 	}
-	if !*yes {
+	if !yes {
 		if !d.interactive {
 			fmt.Fprintln(stdout, "\nNothing changed. Re-run with -yes to re-plan and apply.")
 			return 0
@@ -182,12 +188,12 @@ func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 		}
 	}
 
-	if *queue || cfg.Database.URL != "" {
+	if queue || cfg.Database.URL != "" {
 		if err := cfg.RequireDatabase(); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		return runQueued(ctx, d, cfg, in, plan, token, !*queue)
+		return runQueued(ctx, d, cfg, in, plan, token, !queue)
 	}
 	// No database: run in-process, trusting no one else is on these teams or templates.
 	// The executor calls OnEvent from many goroutines.

@@ -122,6 +122,9 @@ func describeInputs(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return "?"
 	}
+	if in.Kind.Teamless() {
+		return strings.TrimSpace(strings.Join([]string{in.Domain, in.Family, in.Image}, " "))
+	}
 	s := "teams " + in.Teams
 	if len(in.Hosts) > 0 {
 		s += " hosts " + strings.Join(in.Hosts, ",")
