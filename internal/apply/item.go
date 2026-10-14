@@ -117,6 +117,9 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		if exists {
 			return false, nil
 		}
+		if it.Source != nil {
+			return e.cloneSource(ctx, it)
+		}
 		err := e.lim.clones.do(ctx, func() error {
 			_, err := e.taskUPID(ctx, it.VMID, func() (string, error) {
 				return e.startClone(ctx, false, proxmox.CloneRequest{
@@ -133,6 +136,9 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		return err == nil, err
 
 	case pods.StepNetwork:
+		if it.NICs != nil {
+			return e.applyConfig(ctx, it, false, func(cur map[string]string) map[string]string { return pods.NICChanges(cur, it.NICs) })
+		}
 		return e.applyConfig(ctx, it, true, func(cur map[string]string) map[string]string {
 			return pods.NetworkChanges(e.Cfg.Network, cur, it.Team, tpl.spec.Interfaces)
 		})
@@ -164,6 +170,34 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 			return false, fmt.Errorf("VM is running and has %s; stop it first so the baseline is clean", pods.NoBaseline(e.Cfg.Deploy))
 		}
 		return true, e.createSnapshot(ctx, it.Node, it.VMID, proxmox.SnapshotRequest{Name: e.Cfg.Deploy.SnapshotName, Description: "baseline from battleship deploy"})
+
+	case pods.StepLabel:
+		return e.applyConfig(ctx, it, false, func(cur map[string]string) map[string]string {
+			return pods.LabelChanges(cur, it.Tags, it.Notes)
+		})
+	case pods.StepConvert:
+		cfg, gone, err := e.readVM(ctx, it.Node, it.VMID)
+		if err != nil {
+			return false, err
+		}
+		if gone {
+			return false, errVanished
+		}
+		if cfg["template"] == "1" {
+			return false, nil
+		}
+		return true, e.convert(ctx, it.Node, it.VMID)
+	case pods.StepRetire:
+		prev := pods.Item{Name: it.Supersedes.Name, VMID: it.Supersedes.VMID, Node: it.Supersedes.Node}
+		return e.applyConfig(ctx, &prev, false, func(cur map[string]string) map[string]string {
+			return pods.LabelChanges(cur, pods.AddTag(cur["tags"], pods.DeprecatedTag), nil)
+		})
+	case pods.StepWaitAgent:
+		return e.waitAgent(ctx, it)
+	case pods.StepGuest:
+		return e.configureGuest(ctx, it)
+	case pods.StepVerify:
+		return e.verifyGuest(ctx, it)
 
 	case pods.StepStart:
 		return e.power(ctx, it, "start")
@@ -347,4 +381,23 @@ func (e *Executor) power(ctx context.Context, it *pods.Item, action string) (boo
 		action = "start"
 	}
 	return true, e.taskOnce(ctx, func() (string, error) { return e.api.Power(ctx, it.Node, it.VMID, action) })
+}
+
+// cloneSource full-clones a base image or VM into it.VMID in it.Pool. Like
+// a team clone, the new VM is this run's, so cleanup removes it if the item
+// doesn't finish.
+func (e *Executor) cloneSource(ctx context.Context, it *pods.Item) (bool, error) {
+	err := e.lim.clones.do(ctx, func() error {
+		_, err := e.taskUPID(ctx, it.VMID, func() (string, error) {
+			return e.startClone(ctx, false, proxmox.CloneRequest{
+				SourceNode: it.Source.Node, SourceVMID: it.Source.VMID, NewVMID: it.VMID, Name: it.Name,
+				TargetNode: it.Node, Pool: it.Pool, Full: true, Storage: e.Cfg.Deploy.Storage,
+			})
+		}, e.restartable)
+		return err
+	})
+	if err == nil {
+		e.setPresent(proxmox.VM{VMID: it.VMID, Name: it.Name, Node: it.Node}, true)
+	}
+	return err == nil, err
 }
