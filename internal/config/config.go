@@ -250,7 +250,7 @@ func Default() Config {
 			BaselinePatterns: []string{"fresh_clone_*"},
 			GPUVGA:           "virtio-gl",
 		},
-		Images: Images{Pool: "base-images", VMIDRange: "8000-8999", EditBridge: "vmbr0"},
+		Images: Images{Pool: "dev-templates", VMIDRange: "8000-8999", EditBridge: "vmbr0"},
 		Environments: Environments{
 			Slots: "1-10", Pool: "dev-{slot}", IntBridge: "devint{slot}", ExtBridge: "devext{slot}",
 			SDNZone: "devnet", VMIDBase: 2000, Subnet: "192.168.100", AgentTimeout: 15 * time.Minute,

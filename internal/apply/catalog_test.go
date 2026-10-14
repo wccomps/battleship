@@ -24,7 +24,7 @@ func TestRegisterCopiesConvertsAndRetires(t *testing.T) {
 		"scsi0": "competitions:150/vm-150-disk-0.qcow2"})
 	f.Add(proxmox.VM{VMID: 8000, Name: "deb-v1", Node: "alder", Template: true, Tags: "base;linux"}, map[string]string{"tags": "base;linux"})
 	plan := &pods.Plan{Kind: pods.KindImageRegister, Items: []pods.Item{{
-		Name: "deb-v2", VMID: 8001, Node: "alder", Pool: "base-images", Tags: "base;linux",
+		Name: "deb-v2", VMID: 8001, Node: "alder", Pool: "dev-templates", Tags: "base;linux",
 		Source: &pods.Source{VMID: 150, Node: "alder", Name: "fresh"}, Supersedes: &pods.Source{VMID: 8000, Node: "alder", Name: "deb-v1"},
 		Steps: []pods.Step{pods.StepClone, pods.StepLabel, pods.StepCDROM, pods.StepConvert, pods.StepRetire}}}}
 	res := catalogExec(f).Run(context.Background(), plan)
@@ -32,7 +32,7 @@ func TestRegisterCopiesConvertsAndRetires(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 	v := f.VMs[8001]
-	if !v.Template || v.Pool != "base-images" || v.Config["tags"] != "base;linux" || v.Config["ide2"] != "none,media=cdrom" {
+	if !v.Template || v.Pool != "dev-templates" || v.Config["tags"] != "base;linux" || v.Config["ide2"] != "none,media=cdrom" {
 		t.Errorf("new version = %+v %v", v.VM, v.Config)
 	}
 	if f.VMs[8000].Config["tags"] != "base;linux;deprecated" {
@@ -61,7 +61,7 @@ func TestEnvHostIsWiredAndLabelled(t *testing.T) {
 		Name: "teak.kilo.alpha", Host: "teak", VMID: 2101, Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha",
 		Notes:  &pods.Notes{IP: "192.168.100.10", OS: "linux", Base: "deb-v1", DNS: "router"},
 		Source: &pods.Source{VMID: 8001, Node: "alder", Name: "deb-v1"}, NICs: map[string]string{"net0": "devint01"},
-		Steps:  []pods.Step{pods.StepClone, pods.StepLabel, pods.StepNetwork, pods.StepStart}}}}
+		Steps: []pods.Step{pods.StepClone, pods.StepLabel, pods.StepNetwork, pods.StepStart}}}}
 	res := catalogExec(f).Run(context.Background(), plan)
 	v := f.VMs[2101]
 	if len(res.Succeeded) != 1 || v.Config["tags"] != "dev;kilo.alpha" || !strings.Contains(v.Config["net0"], "bridge=devint01") ||
@@ -72,7 +72,7 @@ func TestEnvHostIsWiredAndLabelled(t *testing.T) {
 
 func registerPlan(steps ...pods.Step) *pods.Plan {
 	return &pods.Plan{Kind: pods.KindImageRegister, Items: []pods.Item{{
-		Name: "deb-v2", VMID: 8001, Node: "alder", Pool: "base-images", Tags: "base;linux",
+		Name: "deb-v2", VMID: 8001, Node: "alder", Pool: "dev-templates", Tags: "base;linux",
 		Source: &pods.Source{VMID: 150, Node: "alder", Name: "fresh"}, Supersedes: &pods.Source{VMID: 8000, Node: "alder", Name: "deb-v1"},
 		Steps: steps}}}
 }

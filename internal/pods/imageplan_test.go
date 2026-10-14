@@ -31,7 +31,7 @@ func TestImageRegisterNewVersionRetiresPrevious(t *testing.T) {
 	it := plan.Items[0]
 	want := []Step{StepClone, StepLabel, StepCDROM, StepConvert, StepRetire}
 	if it.Name != "debian-12-v2" || it.VMID != 8001 || it.Blocked != "" || !slices.Equal(it.Steps, want) ||
-		it.Source.VMID != 150 || it.Pool != "base-images" || it.Tags != "base;linux" || it.Supersedes.VMID != 8000 {
+		it.Source.VMID != 150 || it.Pool != "dev-templates" || it.Tags != "base;linux" || it.Supersedes.VMID != 8000 {
 		t.Errorf("item = %+v", it)
 	}
 	if !slices.Contains(plan.Locks, "family:debian-12") || !slices.Contains(plan.Locks, "vmid:8001") {

@@ -51,7 +51,9 @@ func TestWindowsGuestRenamesAndReboots(t *testing.T) {
 
 func TestLinuxGuestScriptFailureFailsTheItem(t *testing.T) {
 	f := guestFake(t)
-	f.ExecHook = func(int, []string, string) (int, string, string) { return 3, "", "found no netplan, NetworkManager or /etc/network/interfaces" }
+	f.ExecHook = func(int, []string, string) (int, string, string) {
+		return 3, "", "found no netplan, NetworkManager or /etc/network/interfaces"
+	}
 	res := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{guestItem(pods.ImageLinux)}})
 	err := res.Failed["oak.kilo.alpha"]
 	if err == nil || !strings.Contains(err.Error(), "netplan") || !strings.Contains(err.Error(), "exited 3") {
