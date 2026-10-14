@@ -1,0 +1,151 @@
+package pods
+
+import (
+	"encoding/base64"
+	"fmt"
+	"strings"
+	"unicode/utf16"
+)
+
+// Guest is what configure-guest sets inside an environment host.
+type Guest struct {
+	OS       string `json:"os"` // ImageWindows or ImageLinux
+	Hostname string `json:"hostname"`
+	Domain   string `json:"domain"`
+	IP       string `json:"ip"`
+	Prefix   int    `json:"prefix"`
+	Gateway  string `json:"gateway"`
+	DNS      string `json:"dns"`
+}
+
+// RebootMarker is what a script prints when the change needs a restart
+// (a Windows rename).
+const RebootMarker = "battleship: reboot"
+
+func NeedsReboot(out string) bool { return strings.Contains(out, RebootMarker) }
+
+// GuestCommand is the agent command, and its stdin, that applies g to the
+// NIC with mac.
+func GuestCommand(g Guest, mac string) (command []string, input string) {
+	script := GuestScript(g, mac)
+	if g.OS == ImageWindows {
+		u := utf16.Encode([]rune(script))
+		b := make([]byte, 2*len(u))
+		for i, c := range u {
+			b[2*i], b[2*i+1] = byte(c), byte(c>>8)
+		}
+		return []string{"powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+			"-EncodedCommand", base64.StdEncoding.EncodeToString(b)}, ""
+	}
+	return []string{"/bin/sh", "-s"}, script
+}
+
+// quote single-quotes v for sh and PowerShell; values are validated names
+// and addresses, so a quote inside is a bug.
+func quote(v string) string {
+	if strings.Contains(v, "'") {
+		panic(fmt.Sprintf("guest script value %q contains a quote", v))
+	}
+	return "'" + v + "'"
+}
+
+// GuestScript is the script GuestCommand runs.
+func GuestScript(g Guest, mac string) string {
+	if g.OS == ImageWindows {
+		return fmt.Sprintf(windowsScript, quote(strings.ToUpper(strings.ReplaceAll(mac, ":", "-"))), quote(g.IP), g.Prefix,
+			quote(g.Gateway), quote(g.DNS), quote(g.Domain), quote(g.Hostname), RebootMarker)
+	}
+	return fmt.Sprintf("MAC=%s\nIP=%s\nPREFIX=%d\nGW=%s\nDNS=%s\nHOST=%s\nDOMAIN=%s\n",
+		quote(strings.ToLower(mac)), quote(g.IP), g.Prefix, quote(g.Gateway), quote(g.DNS), quote(g.Hostname), quote(g.Domain)) + linuxScript
+}
+
+// linuxScript sets a static address on the NIC with $MAC through whichever
+// of netplan, NetworkManager or ifupdown the image uses, then the host name.
+// cloud-init is told to leave both alone from now on.
+const linuxScript = `set -eu
+iface=
+for d in /sys/class/net/*; do
+	if [ "$(cat "$d/address" 2>/dev/null)" = "$MAC" ]; then iface=${d##*/}; fi
+done
+if [ -z "$iface" ]; then echo "no network interface has MAC $MAC" >&2; exit 2; fi
+if [ -d /etc/cloud/cloud.cfg.d ]; then
+	printf 'network: {config: disabled}\npreserve_hostname: true\n' > /etc/cloud/cloud.cfg.d/99-battleship.cfg
+fi
+if command -v netplan >/dev/null 2>&1 && [ -d /etc/netplan ]; then
+	umask 077
+	cat > /etc/netplan/99-battleship.yaml <<EOF
+network:
+  version: 2
+  ethernets:
+    $iface:
+      dhcp4: false
+      dhcp6: false
+      addresses: [$IP/$PREFIX]
+      routes: [{to: default, via: $GW}]
+      nameservers: {addresses: [$DNS], search: [$DOMAIN]}
+EOF
+	netplan apply
+elif command -v nmcli >/dev/null 2>&1 && nmcli -t general status >/dev/null 2>&1; then
+	con=$(nmcli -t -f NAME,DEVICE connection show | awk -F: -v d="$iface" '$2 == d { print $1; exit }')
+	if [ -z "$con" ]; then
+		con=$iface
+		nmcli connection add type ethernet ifname "$iface" con-name "$con" >/dev/null
+	fi
+	nmcli connection modify "$con" ipv4.method manual ipv4.addresses "$IP/$PREFIX" ipv4.gateway "$GW" \
+		ipv4.dns "$DNS" ipv4.dns-search "$DOMAIN" ipv4.ignore-auto-dns yes ipv6.method disabled
+	nmcli connection up "$con" >/dev/null
+elif [ -f /etc/network/interfaces ]; then
+	awk -v d="$iface" '
+		($1 == "auto" || $1 == "allow-hotplug") && $2 == d && NF == 2 { next }
+		$1 == "iface" { skip = ($2 == d) }
+		$1 == "auto" || $1 == "allow-hotplug" || $1 == "source" || $1 == "mapping" { skip = 0 }
+		!skip { print }' /etc/network/interfaces > /etc/network/interfaces.battleship
+	mv /etc/network/interfaces.battleship /etc/network/interfaces
+	grep -q '^source /etc/network/interfaces.d/\*' /etc/network/interfaces || echo 'source /etc/network/interfaces.d/*' >> /etc/network/interfaces
+	mkdir -p /etc/network/interfaces.d
+	cat > /etc/network/interfaces.d/battleship <<EOF
+auto $iface
+iface $iface inet static
+	address $IP/$PREFIX
+	gateway $GW
+EOF
+	printf 'search %s\nnameserver %s\n' "$DOMAIN" "$DNS" > /etc/resolv.conf
+	ip addr flush dev "$iface"
+	ifup "$iface" 2>/dev/null || ifup --force "$iface"
+else
+	echo "found no netplan, NetworkManager or /etc/network/interfaces to configure" >&2
+	exit 3
+fi
+if command -v hostnamectl >/dev/null 2>&1; then hostnamectl set-hostname "$HOST"; else echo "$HOST" > /etc/hostname; hostname "$HOST"; fi
+sed -i '/^127\.0\.1\.1[[:space:]]/d' /etc/hosts
+echo "127.0.1.1 $HOST.$DOMAIN $HOST" >> /etc/hosts
+`
+
+// windowsScript sets a static address on the adapter with the MAC, its DNS
+// and suffix, and renames the computer; a rename prints RebootMarker.
+const windowsScript = `$ErrorActionPreference = 'Stop'
+$mac = %s
+$ip = %s
+$prefix = %d
+$gw = %s
+$dns = %s
+$domain = %s
+$hostname = %s
+$nic = Get-NetAdapter | Where-Object { $_.MacAddress -eq $mac } | Select-Object -First 1
+if (-not $nic) { [Console]::Error.WriteLine("no network adapter has MAC $mac"); exit 2 }
+$i = $nic.ifIndex
+Set-NetIPInterface -InterfaceIndex $i -Dhcp Disabled
+Get-NetIPAddress -InterfaceIndex $i -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -ne $ip } | Remove-NetIPAddress -Confirm:$false
+Get-NetRoute -InterfaceIndex $i -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false
+if (Get-NetIPAddress -InterfaceIndex $i -IPAddress $ip -ErrorAction SilentlyContinue) {
+	New-NetRoute -InterfaceIndex $i -DestinationPrefix '0.0.0.0/0' -NextHop $gw | Out-Null
+} else {
+	New-NetIPAddress -InterfaceIndex $i -IPAddress $ip -PrefixLength $prefix -DefaultGateway $gw | Out-Null
+}
+Set-DnsClientServerAddress -InterfaceIndex $i -ServerAddresses $dns
+Set-DnsClient -InterfaceIndex $i -ConnectionSpecificSuffix $domain
+if ($env:COMPUTERNAME -ne $hostname.ToUpper()) {
+	Rename-Computer -NewName $hostname -Force | Out-Null
+	Write-Output '%s'
+}
+`
