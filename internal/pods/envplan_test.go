@@ -50,7 +50,7 @@ func TestEnvCreatePlansSlotOne(t *testing.T) {
 		!slices.Equal(gw.Steps, []Step{StepClone, StepLabel, StepNetwork, StepStart}) {
 		t.Errorf("router = %+v", gw)
 	}
-	if teak.Guest == nil || teak.Guest.IP != "192.168.100.10" || teak.Guest.Gateway != "192.168.100.2" || teak.Guest.DNS != "192.168.100.2" ||
+	if teak.Guest == nil || teak.Guest.DNSOnly || teak.Guest.IP != "192.168.100.10" || teak.Guest.Gateway != "192.168.100.2" || teak.Guest.DNS != "192.168.100.2" ||
 		teak.Notes.IP != "192.168.100.10" || teak.Notes.OS != "linux" || teak.Notes.Base != "debian-12-v1" || teak.Notes.DNS != "router" ||
 		teak.NICs["net0"] != "devint01" || !slices.Equal(teak.Steps, []Step{StepClone, StepLabel, StepNetwork, StepStart, StepWaitAgent, StepGuest, StepVerify}) {
 		t.Errorf("teak = %+v guest %+v notes %+v", teak, teak.Guest, teak.Notes)
@@ -140,7 +140,7 @@ func TestEnvDNSWorksWithoutImages(t *testing.T) {
 	if gw := byHost["gw"]; !slices.Equal(gw.Steps, []Step{StepLabel}) || gw.Notes.DNS != "oak" || gw.Tags != "dev;kilo.alpha;router" {
 		t.Errorf("gw = %+v", gw)
 	}
-	if oak := byHost["oak"]; oak.Guest.DNS != "192.168.100.20" || oak.Guest.OS != ImageWindows ||
+	if oak := byHost["oak"]; oak.Guest.DNS != "192.168.100.20" || oak.Guest.OS != ImageWindows || !oak.Guest.DNSOnly ||
 		!slices.Equal(oak.Steps, []Step{StepGuest, StepVerify, StepLabel}) {
 		t.Errorf("oak = %+v", oak)
 	}

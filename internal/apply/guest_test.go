@@ -119,3 +119,18 @@ func TestGuestWithABadValueFailsTheItem(t *testing.T) {
 		t.Errorf("execs = %+v", f.Execs)
 	}
 }
+
+func TestSetDNSRunsOnlyTheDNSScript(t *testing.T) {
+	f := guestFake(t)
+	f.ExecHook = applied(f, "")
+	it := guestItem(pods.ImageLinux)
+	it.Guest.DNSOnly = true
+	it.Steps = []pods.Step{pods.StepGuest, pods.StepVerify}
+	res := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindEnvDNS, Items: []pods.Item{it}})
+	if len(res.Succeeded) != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	if len(f.Execs) != 1 || strings.Contains(f.Execs[0].Input, "addresses: [$IP") || !strings.Contains(f.Execs[0].Input, "dns-nameservers") {
+		t.Errorf("execs = %+v", f.Execs)
+	}
+}

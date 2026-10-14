@@ -292,7 +292,7 @@ func (p Planner) EnvDNS(ctx context.Context, req EnvRequest) (*Plan, error) {
 		it := Item{Name: h.Name, Host: h.Host, VMID: h.VMID, Node: h.Node, Tags: h.Tags, Notes: &notes, Steps: []Step{StepLabel}}
 		if h.Notes.IP != "" && (h.Notes.OS == ImageWindows || h.Notes.OS == ImageLinux) {
 			it.Guest = &Guest{OS: h.Notes.OS, Hostname: h.Host, Domain: env.Domain, IP: h.Notes.IP, Prefix: HostPrefix,
-				Gateway: p.gateway(), DNS: addr}
+				Gateway: p.gateway(), DNS: addr, DNSOnly: true}
 			if err := it.Guest.Check(); err != nil {
 				it.Blocked = err.Error()
 			}
