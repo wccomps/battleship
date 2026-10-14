@@ -85,6 +85,19 @@ naming the missing privilege.
 | Free leftover disks | `Datastore.Allocate` | `/storage/<deploy.storage>` |
 | Capacity check, others' tasks | `Sys.Audit` | `/nodes/<node>` |
 
+## Base images and environments
+
+Base images are templates tagged `base` plus `router`, `windows`, `linux` or `other`, named `<family>-v<N>`.
+Install and generalize an OS on a VM in Proxmox, shut it down, then **Images → Register**
+(`battleship image register -vm 101 -family win2022 -kind windows`). A new version deprecates the previous one;
+**Open for editing** (`image edit -family`) makes a working copy to patch and register as the next version.
+
+**Environments → Create** takes the first free dev slot and clones a router and hosts into it
+(`battleship env create -domain kilo.alpha -router gw=opnsense -host dc=win2022:10 -host web=debian-12`).
+Windows and Linux hosts get their name, a static address on the slot's LAN (`.2` is the gateway) and DNS through
+the QEMU guest agent. **Set DNS** (`env dns -domain kilo.alpha -server dc`) points them at a domain controller once it is promoted.
+Proxmox privileges decide who may do each step, including `VM.GuestAgent.Unrestricted` for the setup.
+
 ## Configuration
 
 `battleship.example.toml` documents every setting. Unknown keys are
