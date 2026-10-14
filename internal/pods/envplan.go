@@ -162,6 +162,10 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		switch {
 		case resumed:
 			ip.VMID, ip.Node = existing.VMID, existing.Node
+			if why := resumeMismatch(existing, im, h.Family); why != "" {
+				ip.Blocked = name + " already exists " + why
+				continue
+			}
 		case len(vmsNamed(vms, name)) > 0:
 			ip.Blocked = "a VM named " + name + " already exists outside " + env.Slot.Pool
 			continue
@@ -236,6 +240,22 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		ip.Notes = &notes
 	}
 	return plan, nil
+}
+
+// resumeMismatch says how an existing host differs from the requested image,
+// or "" when it can be resumed.
+func resumeMismatch(existing EnvHost, im BaseImage, family string) string {
+	kind := existing.Notes.OS
+	if existing.Router {
+		kind = ImageRouter
+	}
+	if kind != "" && kind != im.Kind || kind == "" && im.Kind != ImageOther {
+		return "as a different kind of host than " + family + " (" + im.Kind + ")"
+	}
+	if f, _, ok := ParseImageName(existing.Notes.Base); ok && f != family {
+		return "from image family " + f + ", not " + family
+	}
+	return ""
 }
 
 func orString(a, b string) string {

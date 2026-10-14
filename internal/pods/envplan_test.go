@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -148,5 +149,32 @@ func TestEnvDNSWorksWithoutImages(t *testing.T) {
 	}
 	if _, err := NewPlanner(f, envConfig()).EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha", DNS: "gw"}); err == nil {
 		t.Error("the router host was accepted as a DNS server (use router)")
+	}
+}
+
+func TestEnvAddBlocksResumeOfAnotherKind(t *testing.T) {
+	f := envFake()
+	f.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;router"},
+		map[string]string{"description": "battleship: base=gw-v1 dns=router"})
+	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha"},
+		map[string]string{"net0": "virtio=BC:24:11:00:21:01,bridge=vmbr0", "description": "battleship: ip=192.168.100.77 os=linux base=debian-12-v1 dns=router"})
+	for _, spec := range []string{"teak=win2022", "teak=gw"} {
+		hs, _ := ParseHostSpec(spec)
+		plan, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(), EnvRequest{Domain: "kilo.alpha", Hosts: []HostSpec{hs}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if it := plan.Items[0]; it.Blocked == "" || it.Guest != nil && it.Guest.OS == ImageWindows {
+			t.Errorf("%s: resumed as another kind: %+v", spec, it)
+		}
+	}
+}
+
+func TestEnvCreatePlanIsDeterministic(t *testing.T) {
+	f := envFake()
+	a := create(t, NewPlanner(f, envConfig()), "teak=debian-12:10", "oak=win2022")
+	b := create(t, NewPlanner(f, envConfig()), "teak=debian-12:10", "oak=win2022")
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("plans differ:\n%+v\n%+v", a, b)
 	}
 }
