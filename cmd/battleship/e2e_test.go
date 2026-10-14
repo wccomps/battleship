@@ -57,9 +57,19 @@ func (b *browser) read(resp *http.Response, err error) page {
 	return page{status: resp.StatusCode, path: resp.Request.URL.RequestURI(), body: string(body)}
 }
 
+// get fetches path, following redirects and, like a browser, the sign-in
+// interstitial's refresh.
 func (b *browser) get(path string) page {
 	b.t.Helper()
-	return b.read(b.c.Get(b.base + path))
+	p := b.read(b.c.Get(b.base + path))
+	for range 5 {
+		m := refreshRe.FindStringSubmatch(p.body)
+		if m == nil {
+			break
+		}
+		p = b.read(b.c.Get(b.base + html.UnescapeString(m[1])))
+	}
+	return p
 }
 
 func (b *browser) post(path string, form url.Values) page {
@@ -68,8 +78,9 @@ func (b *browser) post(path string, form url.Values) page {
 }
 
 var (
-	formRe   = regexp.MustCompile(`(?s)<form [^>]*?method="post" action="([^"]+)"[^>]*>(.*?)</form>`)
-	hiddenRe = regexp.MustCompile(`<input type="hidden" name="([^"]+)" value="([^"]*)">`)
+	refreshRe = regexp.MustCompile(`<meta http-equiv="refresh" content="0;url=([^"]+)">`)
+	formRe    = regexp.MustCompile(`(?s)<form [^>]*?method="post" action="([^"]+)"[^>]*>(.*?)</form>`)
+	hiddenRe  = regexp.MustCompile(`<input type="hidden" name="([^"]+)" value="([^"]*)">`)
 )
 
 // form returns the fields of the page's POST form to action, as the

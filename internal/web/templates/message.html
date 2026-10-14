@@ -19,7 +19,7 @@
 {{- else}}
 <div class="deny">
 <div>
-{{icon (or (and (or (eq .Status 401) (eq .Status 403)) "lock") "blocked") "big"}}
+{{if .Waiting}}<span class="spin big" aria-hidden="true"></span>{{else}}{{icon (or (and (or (eq .Status 401) (eq .Status 403)) "lock") "blocked") "big"}}{{end}}
 <h1>{{$.Title}}</h1>
 <p>{{names .Message}}</p>
 {{- if .Link}}

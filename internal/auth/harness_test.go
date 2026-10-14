@@ -10,6 +10,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -133,11 +134,14 @@ func (h *harness) restart(cfg config.Config) {
 	h.mux.Store(h.routes())
 }
 
-// renderPage draws auth's pages for the tests: status, title, message and
-// link, escaped.
+// renderPage draws auth's pages for the tests: refresh, status, title,
+// message and link, escaped.
 func renderPage(w http.ResponseWriter, _ *http.Request, p auth.Page) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(p.Status)
+	if p.Refresh != "" {
+		fmt.Fprintf(w, "<meta http-equiv=\"refresh\" content=\"0;url=%s\">\n", html.EscapeString(p.Refresh))
+	}
 	fmt.Fprintf(w, "<h1>%s</h1>\n<p>%s</p>\n", html.EscapeString(p.Title), html.EscapeString(p.Message))
 	if p.Link != "" {
 		fmt.Fprintf(w, "<p><a href=\"%s\">%s</a></p>\n", html.EscapeString(p.Link), html.EscapeString(p.LinkText))
@@ -233,14 +237,36 @@ func (b *browser) abs(target string) string {
 	return b.h.app.URL + target
 }
 
-// get fetches target, following redirects.
+// get fetches target, following redirects and, like a browser, pages'
+// refreshes.
 func (b *browser) get(target string) response {
 	b.h.t.Helper()
-	req, err := http.NewRequest(http.MethodGet, b.abs(target), nil)
-	if err != nil {
-		b.h.t.Fatal(err)
+	for range 10 {
+		req, err := http.NewRequest(http.MethodGet, b.abs(target), nil)
+		if err != nil {
+			b.h.t.Fatal(err)
+		}
+		resp := b.send(b.follow, req)
+		to := refreshOf(resp.body)
+		if to == "" {
+			return resp
+		}
+		target = to
 	}
-	return b.send(b.follow, req)
+	b.h.t.Fatalf("%s: too many refreshes", target)
+	return response{}
+}
+
+// refreshTag is the refresh renderPage writes.
+var refreshTag = regexp.MustCompile(`<meta http-equiv="refresh" content="0;url=([^"]*)">`)
+
+// refreshOf is the URL body's page refreshes to, or "".
+func refreshOf(body string) string {
+	m := refreshTag.FindStringSubmatch(body)
+	if m == nil {
+		return ""
+	}
+	return html.UnescapeString(m[1])
 }
 
 // do sends one request without following redirects.

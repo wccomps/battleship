@@ -4,6 +4,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+{{- with .Refresh}}
+<meta http-equiv="refresh" content="0;url={{.}}">
+{{- end}}
 <title>{{.Title}} · battleship</title>
 <link rel="icon" type="image/svg+xml" href="{{asset "favicon.svg"}}">
 <link rel="stylesheet" href="{{asset "app.css"}}">

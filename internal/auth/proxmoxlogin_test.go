@@ -90,7 +90,7 @@ func TestProxmoxCallbackChecksState(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.pve.SignIn(pveUser(alice))
-	start := b.do(http.MethodGet, "/auth/proxmox?next=/private", nil, nil)
+	start := b.pastInterstitial("/auth/proxmox?next=/private")
 	if start.StatusCode != http.StatusFound {
 		t.Fatalf("/auth/proxmox = %d %s", start.StatusCode, start.body)
 	}
@@ -98,6 +98,7 @@ func TestProxmoxCallbackChecksState(t *testing.T) {
 	cb, _ := url.Parse(idp.Header.Get("Location"))
 	q := cb.Query()
 	q.Set("state", "forged"+q.Get("state"))
+	q.Set("finish", "1") // past the interstitial
 	cb.RawQuery = q.Encode()
 	resp := b.do(http.MethodGet, cb.String(), nil, nil)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -230,5 +231,113 @@ func TestSessionWithoutAUsernameLogsInAgain(t *testing.T) {
 	b.login(alice)
 	if resp := b.get("/private"); resp.StatusCode != http.StatusOK || !strings.Contains(resp.body, "pve=alice") {
 		t.Fatalf("after logging in again: %d %q\nlogs: %s", resp.StatusCode, resp.body, h.logs)
+	}
+}
+
+// The callback's first request only shows the interstitial: nothing is
+// signed in until it goes on with finish=1, so reloading it is harmless.
+func TestProxmoxCallbackShowsInterstitialFirst(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	if err := h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	h.pve.SignIn(pveUser(alice))
+	start := b.pastInterstitial("/auth/proxmox?next=/private")
+	idp := b.do(http.MethodGet, start.Header.Get("Location"), nil, nil)
+	cb := idp.Header.Get("Location")
+	var to string
+	for range 2 { // shown, then reloaded
+		page := b.do(http.MethodGet, cb, nil, nil)
+		to = refreshOf(page.body)
+		if page.StatusCode != http.StatusOK || !strings.Contains(page.body, "Signing in to Proxmox") {
+			t.Fatalf("callback = %d: %s", page.StatusCode, page.body)
+		}
+		if _, ok := b.pveTicket(); ok {
+			t.Fatal("the interstitial signed in to Proxmox")
+		}
+	}
+	u, err := url.Parse(to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, orig := u.Query(), mustQuery(t, cb)
+	if u.Path != "/auth/proxmox/callback" || q.Get("finish") != "1" || q.Get("code") != orig.Get("code") || q.Get("state") != orig.Get("state") {
+		t.Fatalf("interstitial goes on to %q, want the callback with its code, state and finish=1", to)
+	}
+	resp := b.do(http.MethodGet, to, nil, nil)
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/private" {
+		t.Fatalf("finish = %d to %q: %s", resp.StatusCode, resp.Header.Get("Location"), resp.body)
+	}
+	if _, ok := b.pveTicket(); !ok {
+		t.Fatal("finishing stored no ticket")
+	}
+}
+
+// An error from the identity provider has no code, so it skips the
+// interstitial and says what happened at once.
+func TestProxmoxCallbackErrorSkipsInterstitial(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	if err := h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	start := b.pastInterstitial("/auth/proxmox?next=/private")
+	u, err := url.Parse(start.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := b.do(http.MethodGet, "/auth/proxmox/callback?error=access_denied&state="+url.QueryEscape(u.Query().Get("state")), nil, nil)
+	if resp.StatusCode != http.StatusForbidden || refreshOf(resp.body) != "" {
+		t.Fatalf("error callback = %d: %s", resp.StatusCode, resp.body)
+	}
+}
+
+func mustQuery(t *testing.T, raw string) url.Values {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Query()
+}
+
+// /auth/proxmox's first request only shows the interstitial: it asks
+// Proxmox for nothing until it goes on with finish=1.
+func TestProxmoxStartShowsInterstitialFirst(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	if err := h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	page := b.do(http.MethodGet, "/auth/proxmox?next=/private", nil, nil)
+	if page.StatusCode != http.StatusOK || refreshOf(page.body) != "/auth/proxmox?finish=1&next=%2Fprivate" {
+		t.Fatalf("/auth/proxmox = %d refreshing to %q", page.StatusCode, refreshOf(page.body))
+	}
+	if b.session().PVELoginState != "" {
+		t.Fatal("the interstitial started a Proxmox sign-in")
+	}
+	start := b.do(http.MethodGet, refreshOf(page.body), nil, nil)
+	if start.StatusCode != http.StatusFound || b.session().PVELoginState == "" {
+		t.Fatalf("finish = %d: %s", start.StatusCode, start.body)
+	}
+}
+
+// A script's request can't show a page, so it skips the interstitial.
+func TestScriptRequestsSkipInterstitial(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	if err := h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	for mode, want := range map[string]int{"cors": http.StatusFound, "same-origin": http.StatusFound, "navigate": http.StatusOK} {
+		resp := b.do(http.MethodGet, "/auth/proxmox?next=/private", nil, http.Header{"Sec-Fetch-Mode": {mode}})
+		if resp.StatusCode != want {
+			t.Errorf("Sec-Fetch-Mode %s: /auth/proxmox = %d, want %d", mode, resp.StatusCode, want)
+		}
 	}
 }

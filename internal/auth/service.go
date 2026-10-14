@@ -79,7 +79,11 @@ func (s *Service) SetRender(render func(w http.ResponseWriter, r *http.Request, 
 }
 
 // plainPage is the render a service has until SetRender.
-func plainPage(w http.ResponseWriter, _ *http.Request, p Page) {
+func plainPage(w http.ResponseWriter, r *http.Request, p Page) {
+	if p.Refresh != "" {
+		http.Redirect(w, r, p.Refresh, http.StatusSeeOther)
+		return
+	}
 	http.Error(w, p.Title+": "+p.Message, p.Status)
 }
 

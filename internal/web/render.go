@@ -124,6 +124,8 @@ type view struct {
 	Live string
 	// Initial is the user's initial, for the account button.
 	Initial string
+	// Refresh, if set, is a local URL the page goes on to at once.
+	Refresh string
 }
 
 // navItem is an entry of the top navigation.
@@ -231,12 +233,14 @@ type message struct {
 	Message  string
 	Link     string
 	LinkText string
+	Waiting  bool // a spinner instead of an icon: the page goes on by itself
 }
 
 // AuthPage renders auth's own pages (login and sign-in errors, 401/403) in
 // this app's layout. New makes it the auth service's.
 func (s *Server) AuthPage(w http.ResponseWriter, r *http.Request, p auth.Page) {
-	v := s.newView(w, r, p.Title, "", message{Status: p.Status, Message: sentence(p.Message), Link: p.Link, LinkText: p.LinkText})
+	v := s.newView(w, r, p.Title, "", message{Status: p.Status, Message: sentence(p.Message), Link: p.Link, LinkText: p.LinkText, Waiting: p.Refresh != ""})
+	v.Refresh = p.Refresh
 	s.render(w, r, p.Status, "message", v)
 }
 

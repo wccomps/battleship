@@ -8,16 +8,34 @@ import (
 	"time"
 )
 
+// pastInterstitial gets target, which must answer with the interstitial,
+// then what the interstitial goes on to, without following redirects.
+func (b *browser) pastInterstitial(target string) response {
+	b.h.t.Helper()
+	page := b.do(http.MethodGet, target, nil, nil)
+	to := refreshOf(page.body)
+	if page.StatusCode != http.StatusOK || !strings.Contains(to, "finish=1") {
+		b.h.t.Fatalf("%s = %d refreshing to %q, want the interstitial", target, page.StatusCode, to)
+	}
+	return b.do(http.MethodGet, to, nil, nil)
+}
+
 // proxmoxCallback walks one tab through /auth/proxmox and the identity
-// provider, and returns the callback URL it would come back to.
+// provider, and returns the callback URL its interstitial goes on to.
 func (b *browser) proxmoxCallback(next string) *url.URL {
 	b.h.t.Helper()
-	start := b.do(http.MethodGet, "/auth/proxmox?next="+url.QueryEscape(next), nil, nil)
+	start := b.pastInterstitial("/auth/proxmox?next=" + url.QueryEscape(next))
 	if start.StatusCode != http.StatusFound {
 		b.h.t.Fatalf("/auth/proxmox = %d %s", start.StatusCode, start.body)
 	}
 	idp := b.do(http.MethodGet, start.Header.Get("Location"), nil, nil)
-	cb, err := url.Parse(idp.Header.Get("Location"))
+	// The callback first shows the interstitial, which goes on to it again.
+	page := b.do(http.MethodGet, idp.Header.Get("Location"), nil, nil)
+	to := refreshOf(page.body)
+	if page.StatusCode != http.StatusOK || !strings.HasPrefix(to, "/auth/proxmox/callback?") {
+		b.h.t.Fatalf("callback = %d refreshing to %q, want the interstitial", page.StatusCode, to)
+	}
+	cb, err := url.Parse(to)
 	if err != nil {
 		b.h.t.Fatal(err)
 	}

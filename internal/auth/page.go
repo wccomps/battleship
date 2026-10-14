@@ -8,4 +8,7 @@ type Page struct {
 	Message  string // plain text for the user: what happened and what to do
 	Link     string // a local link to offer, e.g. "/auth/login"; may be empty
 	LinkText string
+	// Refresh, if set, is a local URL the page goes on to at once. The page
+	// stays up while that request runs, so a slow step shows as progress.
+	Refresh string
 }

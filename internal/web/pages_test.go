@@ -48,6 +48,16 @@ func TestAuthPagesUseTheLayout(t *testing.T) {
 	}
 	contains(t, "AuthPage", w.Body.String(), "<h1>Authentik didn&#39;t answer</h1>", "Try again &lt;soon&gt;.", `<a class="btn" href="/auth/login">Try again</a>`)
 
+	// An interstitial goes on by itself, with a spinner instead of an icon.
+	w = httptest.NewRecorder()
+	h.srv.AuthPage(w, r, auth.Page{Status: http.StatusOK, Title: "Signing in to Proxmox", Message: "This takes a few seconds.",
+		Link: "/auth/proxmox/callback?code=a&state=b", LinkText: "Continue", Refresh: "/auth/proxmox/callback?code=a&state=b"})
+	contains(t, "interstitial", w.Body.String(), `<meta http-equiv="refresh" content="0;url=/auth/proxmox/callback?code=a&amp;state=b">`,
+		`<span class="spin big" aria-hidden="true"></span>`, "<h1>Signing in to Proxmox</h1>")
+	w = httptest.NewRecorder()
+	h.srv.AuthPage(w, r, auth.Page{Status: http.StatusBadGateway, Title: "x"})
+	lacks(t, "error page", w.Body.String(), `http-equiv="refresh"`, `class="spin big"`)
+
 	// HEAD gets headers only.
 	w = httptest.NewRecorder()
 	h.srv.AuthPage(w, httptest.NewRequest(http.MethodHead, "/", nil), auth.Page{Status: http.StatusUnauthorized, Title: "x"})

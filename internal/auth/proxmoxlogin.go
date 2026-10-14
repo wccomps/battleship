@@ -22,6 +22,9 @@ import (
 //  2. GET /auth/proxmox/callback checks the state and sends the code to
 //     the same endpoint (Proxmox keeps login state on that node's disk
 //     only); the returned ticket is sealed into the session.
+//
+// Each step waits seconds on Proxmox and Authentik, so a browser's first
+// request to it gets an interstitial that loads it again with finish=1.
 
 // proxmoxCallbackPath is where the identity provider sends the browser
 // back; the Authentik provider behind the Proxmox realm must list it.
@@ -45,6 +48,9 @@ func (s *Service) proxmoxStart(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, Page{Status: http.StatusForbidden, Title: "Log in again",
 			Message: "Battleship doesn't know your Authentik username, so it can't check the Proxmox sign-in is yours. Log in again; if this page comes back, Authentik isn't sending preferred_username.",
 			Link:    "/auth/login?next=" + url.QueryEscape(next), LinkText: "Log in again"})
+		return
+	}
+	if s.interstitialFirst(w, r) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), providerTimeout)
@@ -82,6 +88,9 @@ func (s *Service) proxmoxCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	noteSubject(r.Context(), sess.Subject)
 	q := r.URL.Query()
+	if q.Get("code") != "" && s.interstitialFirst(w, r) {
+		return
+	}
 	next := safeNext(sess.PVELoginNext)
 	if sess.PVELoginState == "" || subtle.ConstantTimeCompare([]byte(HashToken(q.Get("state"))), []byte(sess.PVELoginState)) != 1 {
 		if _, ok := s.usableTicket(sess, s.now()); ok {
@@ -165,6 +174,22 @@ func orUnknown(s string) string {
 		return "an unknown user (Authentik sent no preferred_username)"
 	}
 	return s
+}
+
+// interstitialFirst answers a browser's first request to a slow step with
+// "Signing in to Proxmox", which loads the step again with finish=1, and
+// reports whether it did. Script requests (Sec-Fetch-Mode other than
+// navigate) go straight on: they can't show a page.
+func (s *Service) interstitialFirst(w http.ResponseWriter, r *http.Request) bool {
+	q := r.URL.Query()
+	if mode := r.Header.Get("Sec-Fetch-Mode"); q.Get("finish") != "" || (mode != "" && mode != "navigate") {
+		return false
+	}
+	q.Set("finish", "1")
+	to := r.URL.Path + "?" + q.Encode()
+	s.render(w, r, Page{Status: http.StatusOK, Title: "Signing in to Proxmox",
+		Message: "This takes a few seconds.", Link: to, LinkText: "Continue", Refresh: to})
+	return true
 }
 
 func proxmoxFailedPage(next string) Page {
