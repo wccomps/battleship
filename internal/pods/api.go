@@ -12,6 +12,11 @@ import (
 type API interface {
 	ClusterVMs(ctx context.Context) ([]proxmox.VM, error)
 	OnlineNodes(ctx context.Context) ([]string, error)
+	AgentPing(ctx context.Context, node string, vmid int) error
+	AgentExec(ctx context.Context, node string, vmid int, command []string, input string) (int, error)
+	AgentExecStatus(ctx context.Context, node string, vmid, pid int) (proxmox.ExecStatus, error)
+	AgentInterfaces(ctx context.Context, node string, vmid int) ([]proxmox.GuestNIC, error)
+	AgentHostname(ctx context.Context, node string, vmid int) (string, error)
 	VMConfig(ctx context.Context, node string, vmid int) (map[string]string, error)
 	SetVMConfig(ctx context.Context, node string, vmid int, changes map[string]string) error
 	Clone(ctx context.Context, r proxmox.CloneRequest) (string, error)

@@ -17,6 +17,7 @@ import (
 var notChanges = map[string]bool{
 	"ClusterVMs": true, "OnlineNodes": true, "VMConfig": true, "Snapshots": true,
 	"CurrentStatus": true, "StorageContent": true, "VMIDHeld": true, "WaitTask": true, "StopTask": true,
+	"AgentPing": true, "AgentExecStatus": true, "AgentInterfaces": true, "AgentHostname": true,
 }
 
 // countingAPI counts the calls that reach it.

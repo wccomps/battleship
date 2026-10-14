@@ -86,6 +86,13 @@ func (g guardedAPI) SetVMConfig(ctx context.Context, node string, vmid int, chan
 	return g.API.SetVMConfig(ctx, node, vmid, changes)
 }
 
+func (g guardedAPI) AgentExec(ctx context.Context, node string, vmid int, command []string, input string) (int, error) {
+	if err := mayChange(ctx); err != nil {
+		return 0, err
+	}
+	return g.API.AgentExec(ctx, node, vmid, command, input)
+}
+
 func (g guardedAPI) Clone(ctx context.Context, r proxmox.CloneRequest) (string, error) {
 	if err := mayChange(ctx); err != nil {
 		return "", err

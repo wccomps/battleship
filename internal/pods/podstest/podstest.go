@@ -125,6 +125,15 @@ type Fake struct {
 	SnapshotLeaves map[int]string
 	// SnapshotReqs are the snapshot requests made, in order.
 	SnapshotReqs []proxmox.SnapshotRequest
+	// Guests are the VMs' guest agents, by VMID (see SetGuest).
+	Guests map[int]*Guest
+	// ExecHook, if set, runs each guest command, with Mu held, and gives its
+	// exit code and output; unset, commands exit 0 with no output.
+	ExecHook func(vmid int, command []string, input string) (code int, out, errOut string)
+	// Execs are the guest commands run, in order.
+	Execs   []ExecCall
+	execs   map[int]proxmox.ExecStatus // by PID
+	nextPID int
 }
 
 // New returns an empty cluster whose online nodes are nodes.
@@ -140,6 +149,9 @@ func (f *Fake) Add(vm proxmox.VM, cfg map[string]string, snaps ...string) {
 	}
 	if vm.Status == "" {
 		vm.Status = "stopped"
+	}
+	if vm.Tags != "" && cfg["tags"] == "" {
+		cfg["tags"] = vm.Tags
 	}
 	f.VMs[vm.VMID] = &VM{VM: vm, Config: cfg, Snapshots: snaps}
 	f.addVolumes(vm.VMID, cfg)
@@ -280,6 +292,9 @@ func (f *Fake) ClusterVMs(ctx context.Context) ([]proxmox.VM, error) {
 	for _, vm := range f.VMs {
 		v := vm.VM
 		v.Lock = vm.Config["lock"] // /cluster/resources lists the config's lock
+		if t, ok := vm.Config["tags"]; ok {
+			v.Tags = t
+		}
 		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].VMID < out[j].VMID })
@@ -357,7 +372,15 @@ func (f *Fake) SetVMConfig(ctx context.Context, node string, vmid int, changes m
 	if err != nil {
 		return err
 	}
-	maps.Copy(vm.Config, changes)
+	for k, v := range changes {
+		if k == "delete" {
+			for _, d := range strings.Split(v, ",") {
+				delete(vm.Config, strings.TrimSpace(d))
+			}
+			continue
+		}
+		vm.Config[k] = v
+	}
 	return nil
 }
 
