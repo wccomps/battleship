@@ -26,7 +26,7 @@
 </dl>
 {{- end}}
 {{- if .Nothing}}
-<p class="warn note">{{icon "blocked"}}<span>{{.Nothing}}</span></p>
+<p class="say">{{icon "blocked"}}<span>{{.Nothing}}</span></p>
 {{- end}}
 {{- if .Items}}
 <div class="chips">
@@ -37,13 +37,13 @@
 {{- end}}
 {{- with .Consequence}}
 {{- if $.Data.Calm}}
-<p class="warn note">{{opIcon $.Data.Title.Icon}}<span>{{names .}}</span></p>
+<p class="say">{{opIcon $.Data.Title.Icon}}<span>{{names .}}</span></p>
 {{- else}}
-<p class="warn">{{icon "warn"}}<span>{{names .}}</span></p>
+<p class="say bad">{{icon "warn"}}<span>{{names .}}</span></p>
 {{- end}}
 {{- end}}
 {{- with .Warnings}}
-<div class="warn stale">{{icon "warn"}}<ul>{{range .}}<li>{{names .}}</li>{{end}}</ul></div>
+<div class="say caution">{{icon "warn"}}<ul>{{range .}}<li>{{names .}}</li>{{end}}</ul></div>
 {{- end}}
 {{- with .Capacity}}
 <div class="sec">

@@ -293,7 +293,7 @@ func TestPreviewWithNothingToRun(t *testing.T) {
 	}
 	body := rec.Body.String()
 	contains(t, "empty preview", body, "No team VMs match these teams and hosts.")
-	lacks(t, "empty preview", body, `name="nonce"`, "Something went wrong", `class="warn stale"`)
+	lacks(t, "empty preview", body, `name="nonce"`, "Something went wrong", `class="say caution"`)
 
 	h.api.setSnapshots(10101)
 	h.api.setSnapshots(10102)

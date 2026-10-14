@@ -436,7 +436,7 @@ func TestBrowserPreviewAndJob(t *testing.T) {
 			if got := b.text("#panel .chips"); got != "3 will run1 already stopped" {
 				t.Errorf("chips = %q", got)
 			}
-			if got := b.text("#panel .warn"); got != "3 VMs lose power at once. Unsaved work is lost." {
+			if got := b.text("#panel .say.bad"); got != "3 VMs lose power at once. Unsaved work is lost." {
 				t.Errorf("consequence = %q", got)
 			}
 			if got := b.text(`#panel button.pri.bad`); got != "Force stop 3 VMs" {

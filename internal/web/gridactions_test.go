@@ -397,7 +397,7 @@ func TestGuidanceInPlace(t *testing.T) {
 	h.api.setSnapshots(10102, "other")
 	_, _, body = h.preview(&op, "/reset", url.Values{"teams": {"1"}})
 	contains(t, "reset preview", body,
-		`<p class="warn">`, "1 VM rolls back to its baseline snapshot and starts. Work since then is lost.",
+		`<p class="say bad">`, "1 VM rolls back to its baseline snapshot and starts. Work since then is lost.",
 		`<span class="chip">`, "1 blocked</span>", `<tr class="blk">`)
 	_, _, body = h.preview(&op, "/power", url.Values{"teams": {"2"}, "action": {"stop"}})
 	contains(t, "force stop preview", body, "2 VMs lose power at once. Unsaved work is lost.",

@@ -72,7 +72,7 @@ func TestSnapshotPreviewAndConfirm(t *testing.T) {
 		`<tr class="blk"><td><span class="vm">team01-web</span></td>`,
 		"already has a snapshot named &#34;round2&#34;; choose another name",
 		"<td>snapshot with RAM</td>",
-		`<p class="warn note">`, "1 VM gets a new snapshot, round2. Its RAM is saved too if it is running, which takes longer.",
+		`<p class="say">`, "1 VM gets a new snapshot, round2. Its RAM is saved too if it is running, which takes longer.",
 		`<button type="submit" class="btn first" formaction="/snapshot" formnovalidate>Change</button>`,
 		`<button type="submit" class="btn pri">`, "Snapshot 1 VM</button>")
 	lacks(t, "snapshot preview", body, `btn pri bad`, `name="typed"`)

@@ -84,7 +84,7 @@
 {{- end}}
 </div>
 {{- else}}
-<p class="warn note">{{icon "blocked"}}<span>No master VM is tagged <code>{{.MasterTag}}</code>.</span></p>
+<p class="say">{{icon "blocked"}}<span>No master VM is tagged <code>{{.MasterTag}}</code>.</span></p>
 {{- end}}
 {{- with .Others}}
 <p class="muted others">Not in a set: {{range $i, $m := .}}{{if $i}}, {{end}}<span class="vm">{{$m}}</span>{{end}}</p>
