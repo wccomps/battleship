@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"slices"
@@ -118,4 +119,139 @@ func TestValidateBoundsRefusedText(t *testing.T) {
 	if err := in.Validate(); err == nil || len(err.Error()) > 200 {
 		t.Errorf("Validate = %d bytes: %v", len(fmt.Sprint(err)), err)
 	}
+}
+
+// spoil is a value for one field and whether the kinds that read the field
+// accept it.
+type spoil struct {
+	value any
+	ok    bool
+}
+
+// spoils are near misses for each field a kind reads, labeled by hand.
+var spoils = map[string][]spoil{
+	"Teams": {{"1", true}, {" 01 - 02 ", true}, {"0", true}, {"1,2", true}, {"99", true}, {"100", false}, {"", false}, {" ", false},
+		{"1-", false}, {"2-1", false}, {"1,,2", false}, {"a", false}, {"-1", false}, {"1\n", false}, {"\u0661", false}},
+	"Hosts": {{[]string{"dc"}, true}, {[]string{"dc", "web"}, true}, {[]string(nil), true}, {[]string{""}, false}, {[]string{" "}, false},
+		{[]string{"dc", ""}, false}, {[]string{"\x1b[2J"}, false}, {[]string{"d\xffc"}, false}},
+	"VMs": {{[]string{"team01-dc"}, true}, {[]string(nil), true}, {[]string{""}, false}, {[]string{" "}, false}, {[]string{"team01-dc\n"}, false}},
+	"Pattern": {{"*.kilo.alpha", true}, {"*", true}, {"(", true}, {"[a-", true}, {`\`, true}, {"", false}, {" ", false}, {"\xff", false},
+		{"*\x00", false}},
+	"Snapshot": {{"round2", true}, {"Ab", true}, {"a_b-c", true}, {strings.Repeat("a", 40), true}, {"", false}, {"a", false}, {"1abc", false},
+		{"a b", false}, {strings.Repeat("a", 41), false}, {"current", false}, {"PENDING", false}, {"r\u00e9union", false}, {"ab\n", false}},
+	"Description": {{"", true}, {"before round 2", true}, {strings.Repeat("\u00e9", 500), true}, {strings.Repeat("x", 501), false},
+		{"a\r\nb", false}, {"a\x00", false}},
+	"Rebuild": {{true, true}, {false, true}}, "NoSnapshot": {{true, true}, {false, true}}, "VMState": {{true, true}, {false, true}},
+	"Action": {{"start", true}, {"shutdown", true}, {"stop", true}, {"reboot", true}, {"Start", false}, {" stop", false}, {"kill", false},
+		{"", false}},
+	"Domain": {{"kilo.alpha", true}, {" kilo.alpha ", true}, {"a.b.c", true}, {"kilo", false}, {"Kilo.alpha", false}, {"kilo..alpha", false},
+		{"kilo.alpha.", false}, {"", false}, {"ki_lo.alpha", false}},
+	"Router": {{"gw=gw", true}, {"gw=opnsense:10", true}, {" gw = gw ", true}, {"gw=WIN 2022", false}, {"gw", false}, {"=gw", false},
+		{"gw=gw:3", false}, {"gw=", false}, {"Gw=gw", false}, {"gw=gw-v1", false}},
+	"EnvHosts": {{[]string{"dc=debian-12"}, true}, {[]string{"dc=debian-12:20", "web=win2022"}, true}, {[]string{"dc=WIN 2022"}, false},
+		{[]string{"dc"}, false}, {[]string{""}, false}, {[]string{"dc=debian-12:255"}, false}, {[]string{"Dc=x"}, false},
+		{[]string{"dc=debian-12", "x"}, false}},
+	"DNS":  {{"router", true}, {"dc", true}, {"", true}, {" dc ", true}, {"Dc", false}, {"-x", false}, {"a b", false}, {"dc.kilo", false}},
+	"VMID": {{100, true}, {150, true}, {1 << 40, true}, {99, false}, {0, false}, {-1, false}},
+	"Family": {{"debian-12", true}, {"x-v0", true}, {"WIN 2022", false}, {"debian-12-v1", false}, {"", false}, {" debian-12", false},
+		{"Debian-12", false}, {strings.Repeat("a", 41), false}},
+	"ImageKind": {{"linux", true}, {"", true}, {"router", true}, {"Linux", false}, {"toaster", false}, {" linux", false}},
+	"Image": {{"debian-12-v1", true}, {"x-v9999", true}, {"debian-12-v0", false}, {"debian-12", false}, {"debian-12-v10000", false},
+		{" debian-12-v1", false}, {"debian-12-v01", false}, {"Debian-12-v1", false}},
+}
+
+// readsFields are the fields each kind reads, beyond a team kind's Teams,
+// Hosts and VMs. Some are optional for a kind and labeled for another: a
+// reset's snapshot, an env-add's router.
+var readsFields = map[pods.Kind][]string{
+	pods.KindDeploy: {"Pattern", "Rebuild", "NoSnapshot"}, pods.KindPower: {"Action"}, pods.KindSnapshot: {"Snapshot", "Description", "VMState"},
+	pods.KindTeardown: {}, pods.KindReset: {},
+	pods.KindEnvCreate: {"Domain", "Router", "EnvHosts"}, pods.KindEnvAdd: {"Domain", "EnvHosts"}, pods.KindEnvDNS: {"Domain", "DNS"},
+	pods.KindImageRegister: {"VMID", "Family", "ImageKind"}, pods.KindImageEdit: {"Family"},
+	pods.KindImageDeprecate: {"Image"}, pods.KindImageDelete: {"Image"},
+}
+
+// gateCluster has two teams, a master to deploy, a VM to register and base
+// images to build environments from.
+func gateCluster() pods.Planner {
+	f := twoTeams()
+	f.addVM(proxmox.VM{VMID: 5001, Name: "dc.kilo.alpha", Node: "n1", Status: "stopped", Tags: "dev"})
+	f.Add(proxmox.VM{VMID: 150, Name: "fresh", Node: "n1", Status: "stopped"}, map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:01:50,bridge=vmbr0"})
+	f.Add(proxmox.VM{VMID: 8000, Name: "debian-12-v1", Node: "n1", Template: true, Tags: "base;linux"}, map[string]string{"agent": "1"})
+	f.Add(proxmox.VM{VMID: 8001, Name: "gw-v1", Node: "n1", Template: true, Tags: "base;router"}, nil)
+	return pods.NewPlanner(f, testCfg())
+}
+
+func checkGate(t interface{ Fatalf(string, ...any) }, p pods.Planner, in Inputs, wantOK bool) {
+	err := in.Validate()
+	if (err == nil) != wantOK {
+		t.Fatalf("Validate(%#v) = %v, want ok %v", in, err, wantOK)
+	}
+	if err != nil {
+		return
+	}
+	data, merr := json.Marshal(in)
+	var back Inputs
+	if uerr := json.Unmarshal(data, &back); merr != nil || uerr != nil || !reflect.DeepEqual(back, in) || back.Validate() != nil {
+		t.Fatalf("%#v reads back from its job as %#v (%v, %v)", in, back, merr, uerr)
+	}
+	if in.Kind == pods.KindEnvCreate || in.Kind == pods.KindEnvAdd || in.Kind == pods.KindEnvDNS {
+		if _, err := in.EnvRequest(); err != nil {
+			t.Fatalf("EnvRequest(%#v): %v", in, err)
+		}
+	}
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("BuildPlan(%#v) panicked: %v", in, r)
+			}
+		}()
+		_, _ = BuildPlan(bg, p, in)
+	}()
+}
+
+// setField sets in's field to v, cloning slices.
+func setField(in *Inputs, field string, v any) {
+	f := reflect.ValueOf(in).Elem().FieldByName(field)
+	if s, ok := v.([]string); ok {
+		v = slices.Clone(s)
+	}
+	f.Set(reflect.ValueOf(v))
+}
+
+// Validate is the gate: a valid job of any kind with one field spoilt is
+// refused just when the spoilt value is, and what passes reads back from
+// the job record the same and plans without panicking.
+func TestPropValidateIsTheGate(t *testing.T) {
+	p := gateCluster()
+	fieldsOf := func(kind pods.Kind) []string {
+		if kind.Teamless() {
+			return readsFields[kind]
+		}
+		return append([]string{"Teams", "Hosts", "VMs"}, readsFields[kind]...)
+	}
+	for _, base := range validInputs {
+		for _, field := range fieldsOf(base.Kind) {
+			for _, s := range spoils[field] {
+				in := base
+				setField(&in, field, s.value)
+				checkGate(t, p, in, s.ok)
+			}
+		}
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		in := rapid.SampledFrom(validInputs).Draw(t, "inputs")
+		field := rapid.SampledFrom(fieldsOf(in.Kind)).Draw(t, "field")
+		s := rapid.SampledFrom(spoils[field]).Draw(t, "spoil")
+		setField(&in, field, s.value)
+		// Any text around a valid value, in one string field.
+		if str, ok := s.value.(string); ok && rapid.IntRange(0, 3).Draw(t, "wrap") == 0 {
+			setField(&in, field, textPiece.Draw(t, "before")+str+textPiece.Draw(t, "after"))
+			if err := in.Validate(); err == nil {
+				checkGate(t, p, in, true)
+			}
+			return
+		}
+		checkGate(t, p, in, s.ok)
+	})
 }
