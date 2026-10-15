@@ -134,7 +134,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	if all {
 		spec, says, err := resolveAllTeams(ctx, api, cfg)
 		if err != nil {
-			fmt.Fprintln(stderr, "-teams all:", proxmox.Describe(err))
+			fmt.Fprintln(stderr, "-teams all:", cleanLines(proxmox.Describe(err), ""))
 			return 1
 		}
 		fmt.Fprintln(stdout, says)
@@ -143,7 +143,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	}
 	plan, err := jobs.BuildPlan(ctx, pods.NewPlanner(api, cfg), in)
 	if err != nil {
-		fmt.Fprintln(stderr, "planning:", cleanJoin(strings.Split(proxmox.Describe(err), "\n"), "\n"))
+		fmt.Fprintln(stderr, "planning:", cleanLines(proxmox.Describe(err), ""))
 		return 1
 	}
 
@@ -151,7 +151,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	if pods.NeedsCapacity(plan) {
 		// Advice only: overcommit may be deliberate, so it never stops the plan.
 		if c, err := pods.ReadCapacity(ctx, api, plan, cfg); err != nil {
-			fmt.Fprintln(stdout, "\nCapacity: couldn't read the cluster's resources:", proxmox.Describe(err))
+			fmt.Fprintln(stdout, "\nCapacity: couldn't read the cluster's resources:", cleanLines(proxmox.Describe(err), "  "))
 		} else {
 			printCapacity(stdout, c)
 		}

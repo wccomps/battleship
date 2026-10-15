@@ -122,8 +122,10 @@ func TestPropPrintersEscapeUntrustedText(t *testing.T) {
 				Message: untrusted(t, "message")}
 			printEvent(&buf, e)
 			if e.Status != apply.EventSkipped || e.Message != "" {
-				lines = 1
-				fields = append(fields, e.Item, e.Message)
+				// A message's own lines are indented under it.
+				lines = 1 + strings.Count(e.Message, "\n")
+				fields = append(fields, e.Item)
+				fields = append(fields, strings.Split(e.Message, "\n")...)
 			}
 		case "summary":
 			sum := jobs.Summary{Failed: map[string]string{}, CleanupFailed: map[string]string{},
@@ -143,9 +145,7 @@ func TestPropPrintersEscapeUntrustedText(t *testing.T) {
 			for name, msg := range sum.Failed {
 				lines += 1 + strings.Count(msg, "\n")
 				fields = append(fields, name)
-				for _, l := range strings.Split(msg, "\n") {
-					fields = append(fields, clean(l))
-				}
+				fields = append(fields, strings.Split(msg, "\n")...)
 			}
 			for _, list := range [][]string{sum.Interrupted, sum.Completed, sum.Removed, sum.AlreadyGone} {
 				if len(list) > 0 {
@@ -209,12 +209,16 @@ func TestPropJobsCommandsEscapeStoredText(t *testing.T) {
 		if _, err := st.ClaimJob(ctx, id, worker); err != nil {
 			t.Fatal(err)
 		}
+		// Errors and messages keep their lines: count them.
 		events := rapid.IntRange(0, 3).Draw(t, "events")
+		breaks, itemErr := 0, ""
 		for range events {
 			ev := store.Event{At: time.Now(), Item: name, Step: storable(t, "step"), Status: "failed", Message: storable(t, "message")}
 			if err := st.AddEvent(ctx, id, ev); err != nil {
 				t.Fatal(err)
 			}
+			breaks += strings.Count(ev.Message, "\n")
+			itemErr = ev.Message // a failed event's message is its item's error
 		}
 		jobErr := storable(t, "error")
 		if err := st.Finish(ctx, id, worker, store.Outcome{Status: store.StatusFailed, Error: jobErr}); err != nil {
@@ -239,15 +243,25 @@ func TestPropJobsCommandsEscapeStoredText(t *testing.T) {
 			t.Fatalf("jobs show %s:\n%q", why, out.String())
 		}
 		// Job, created, error if any, blank, VMs header, one VM; then the events.
-		want := 5
+		want := 5 + strings.Count(itemErr, "\n")
 		if jobErr != "" {
-			want++
+			want += 1 + strings.Count(jobErr, "\n")
 		}
 		if events > 0 {
-			want += 2 + events
+			want += 2 + events + breaks
 		}
 		if got := strings.Count(out.String(), "\n"); got != want {
 			t.Fatalf("jobs show printed %d lines, want %d:\n%s", got, want, out.String())
+		}
+		out.Reset()
+		if code := reportJob(ctx, d, st, id); code != 1 {
+			t.Fatalf("report: exit %d: %s", code, out.String())
+		}
+		if why := terminalSafe(out.String()); why != "" {
+			t.Fatalf("job report %s:\n%q", why, out.String())
+		}
+		if got, want := strings.Count(out.String(), "\n"), 2+strings.Count(jobErr, "\n"); got != want {
+			t.Fatalf("job report printed %d lines, want %d:\n%s", got, want, out.String())
 		}
 	})
 }

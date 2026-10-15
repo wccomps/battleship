@@ -63,7 +63,7 @@ func printFailures(w io.Writer, failed map[string]string) {
 	fmt.Fprintf(w, "\n%d failed:\n", len(failed))
 	for _, name := range slices.Sorted(maps.Keys(failed)) {
 		// A failure's own lines are indented under it.
-		fmt.Fprintf(w, "  %s: %s\n", clean(name), cleanJoin(strings.Split(failed[name], "\n"), "\n      "))
+		fmt.Fprintf(w, "  %s: %s\n", clean(name), cleanLines(failed[name], "      "))
 	}
 }
 
@@ -190,7 +190,7 @@ func printEvent(w io.Writer, e apply.Event) {
 		line += " " + clean(string(e.Step))
 	}
 	if e.Message != "" {
-		line += ": " + clean(e.Message)
+		line += ": " + cleanLines(e.Message, "    ")
 	}
 	fmt.Fprintln(w, line)
 }
@@ -223,6 +223,13 @@ func clean(s string) string {
 func notGraphic(r rune) bool { return !unicode.IsGraphic(r) }
 
 // cleanJoin joins untrusted texts, each cleaned.
+// cleanLines cleans each line of multi-line text (a task's log tail, a
+// wrapped error), keeping its line breaks and indenting the lines after the
+// first.
+func cleanLines(s, indent string) string {
+	return cleanJoin(strings.Split(s, "\n"), "\n"+indent)
+}
+
 func cleanJoin(ss []string, sep string) string {
 	out := make([]string, len(ss))
 	for i, s := range ss {

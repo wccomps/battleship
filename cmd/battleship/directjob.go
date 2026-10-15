@@ -130,7 +130,7 @@ func reportJob(ctx context.Context, d deps, st *store.Store, id int64) int {
 	}
 	line := fmt.Sprintf("\nJob %d %s", id, clean(strings.ReplaceAll(j.Status, "_", " ")))
 	if j.Error != "" {
-		line += ": " + clean(j.Error)
+		line += ": " + cleanLines(j.Error, "  ")
 	}
 	fmt.Fprintln(d.stdout, line+".")
 	if j.Status != store.StatusSucceeded {

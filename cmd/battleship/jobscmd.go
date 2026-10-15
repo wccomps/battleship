@@ -189,7 +189,7 @@ func showJob(ctx context.Context, d deps, st *store.Store, id int64) int {
 		fmt.Fprintf(w, "Cancel requested by %s came too late to stop anything.\n", clean(j.CancelledBy))
 	}
 	if j.Error != "" {
-		fmt.Fprintf(w, "Error: %s\n", clean(j.Error))
+		fmt.Fprintf(w, "Error: %s\n", cleanLines(j.Error, "  "))
 	}
 	items, err := st.Items(ctx, id)
 	if err != nil {
@@ -199,7 +199,7 @@ func showJob(ctx context.Context, d deps, st *store.Store, id int64) int {
 	fmt.Fprintf(w, "\nVMs (%d):\n", len(items))
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	for _, it := range items {
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n", clean(it.Name), orDash(it.VMID), clean(it.Status), clean(orDashStr(it.Step)), clean(it.Error))
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n", clean(it.Name), orDash(it.VMID), clean(it.Status), clean(orDashStr(it.Step)), cleanLines(it.Error, "      "))
 	}
 	tw.Flush()
 	events, err := st.Events(ctx, id, 0, 100000)
@@ -224,7 +224,7 @@ func showJob(ctx context.Context, d deps, st *store.Store, id int64) int {
 			line += " " + clean(ev.Step)
 		}
 		if ev.Message != "" {
-			line += ": " + clean(ev.Message)
+			line += ": " + cleanLines(ev.Message, "      ")
 		}
 		fmt.Fprintln(w, line)
 	}
