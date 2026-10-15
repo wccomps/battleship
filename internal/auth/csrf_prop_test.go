@@ -45,6 +45,41 @@ var siteOrigins = []originCase{
 	{"battleship.example.org", false},
 }
 
+// csrfRequest is a form request to /private carrying token in its body or
+// query, with an Origin header if origin isn't nil.
+func csrfRequest(method, token string, inBody bool, origin *string) *http.Request {
+	form := url.Values{CSRFField: {token}}.Encode()
+	target := "/private"
+	var body *strings.Reader
+	if inBody {
+		body = strings.NewReader(form)
+	} else {
+		target += "?" + form
+		body = strings.NewReader("")
+	}
+	r := httptest.NewRequest(method, target, body)
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if origin != nil {
+		r.Header.Set("Origin", *origin)
+	}
+	return r
+}
+
+// With the session's token in the body of a request Go reads a form from,
+// the Origin alone decides.
+func TestCSRFOrigins(t *testing.T) {
+	base, _ := url.Parse("https://battleship.example.org")
+	s := &Service{origin: normalOrigin(base)}
+	const session = "c2Vzc2lvbi1jc3JmLXRva2VuLWZvci10ZXN0cw"
+	for _, o := range siteOrigins {
+		for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch} {
+			if got := s.csrfProblem(csrfRequest(method, session, true, &o.header), session) == ""; got != o.same {
+				t.Errorf("%s with Origin %q: passed %v, want %v", method, o.header, got, o.same)
+			}
+		}
+	}
+}
+
 // A request passes the CSRF check exactly when its method is safe, or its
 // form body carries the session's token and any Origin is the site's own.
 func TestPropCSRFModel(t *testing.T) {
@@ -70,20 +105,11 @@ func TestPropCSRFModel(t *testing.T) {
 			origin = rapid.SampledFrom(siteOrigins).Draw(t, "origin")
 		}
 
-		form := url.Values{CSRFField: {token}}.Encode()
-		target := "/private"
-		var body *strings.Reader
-		if inBody {
-			body = strings.NewReader(form)
-		} else {
-			target += "?" + form
-			body = strings.NewReader("")
-		}
-		r := httptest.NewRequest(method, target, body)
-		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		var header *string
 		if !absent {
-			r.Header.Set("Origin", origin.header)
+			header = &origin.header
 		}
+		r := csrfRequest(method, token, inBody, header)
 		got := s.csrfProblem(r, want) == ""
 
 		safe := method == http.MethodGet || method == http.MethodHead
