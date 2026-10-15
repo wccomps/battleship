@@ -17,6 +17,14 @@ const confirmSpace = " \t\r\v\f 　"
 // confirm approves only a first line that, trimmed, is exactly what it
 // asked for: yes, or the team range for a teardown, and never an empty one.
 func TestPropConfirm(t *testing.T) {
+	// Nothing typed never confirms a teardown with no team range.
+	for _, input := range []string{"", "\n", " \n", "\r\n", "\t"} {
+		for _, spec := range []string{"", " ", "\t"} {
+			if confirm(deps{in: strings.NewReader(input), stdout: &bytes.Buffer{}}, string(pods.KindTeardown), spec) {
+				t.Errorf("teardown with team range %q confirmed by %q", spec, input)
+			}
+		}
+	}
 	typed := []string{"yes", "YES", "Yes", "y", "ye", "yess", "yes yes", "no", "", " ", "1-32", "1-3", "1-32 ", "1,2", "01-32", "all", "ALL", "уes", "yes\x00"}
 	rapid.Check(t, func(t *rapid.T) {
 		cmd := rapid.SampledFrom([]string{"power", "reset", "deploy", "snapshot", "teardown"}).Draw(t, "cmd")

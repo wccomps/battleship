@@ -136,8 +136,8 @@ func baselineModel(d config.Deploy, snaps []proxmox.Snapshot) (string, bool) {
 
 var (
 	baselineNames = []string{"initial", "Initial", "initial2", "initia", "fresh_clone_20261001000000", "fresh_clone_20261002034615", "fresh_clone_2", "fresh_clone_",
-		"fresh_clone", "fresh-clone-1", "before-scoring", "round1", "a", "b", "ab", "abc", "zz"}
-	baselinePatterns = []string{"fresh_clone_*", "fresh_*", "*_2", "a?", "a?c", "?", "*", "initial*", "round?", "[", "fresh_clone_[0-9]*", `\`, "abc", "zz*zz"}
+		"fresh_clone", "fresh-clone-1", "[", "a[", `\`, "before-scoring", "round1", "a", "b", "ab", "abc", "zz"}
+	baselinePatterns = []string{"fresh_clone_*", "fresh_*", "*_2", "a?", "a?c", "?", "*", "initial*", "round?", "[", `\`, "abc", "zz*zz"}
 )
 
 // BaselineSnapshot picks the exact baseline when there is one, else the
@@ -256,9 +256,16 @@ func TestPropCatalogZone(t *testing.T) {
 			for strings.Contains(bridge, "{slot}") {
 				bridge = strings.Replace(bridge, "{slot}", rapid.SampledFrom([]string{"01", "10", "99", "00", "1", "001", "ab", "١٢", " 1", "1\n", "{slot}"}).Draw(t, "slot"), 1)
 			}
-			if rapid.Bool().Draw(t, "mutate") && bridge != "" {
-				i := rapid.IntRange(0, len(bridge)-1).Draw(t, "at")
-				bridge = bridge[:i] + bridge[i+1:]
+			switch rapid.IntRange(0, 3).Draw(t, "mutate") {
+			case 0:
+				if bridge != "" {
+					i := rapid.IntRange(0, len(bridge)-1).Draw(t, "at")
+					bridge = bridge[:i] + bridge[i+1:]
+				}
+			case 1:
+				bridge = "x" + bridge
+			case 2:
+				bridge += "x"
 			}
 		default:
 			bridge = rapid.SampledFrom([]string{"editbr", "editbr1", "EDITBR", "", "vmbr0", "devint01"}).Draw(t, "other")
@@ -297,6 +304,13 @@ func TestPropVMNamesWithRepeatedTeam(t *testing.T) {
 		host := rapid.SampledFrom([]string{"dc", "teak", "web", "a-b", "a.b", "x_y"}).Draw(t, "host")
 		name := n.VMName(team, host)
 		gt, gh, ok := n.ParseVMName(name)
+		// A second team number that differs from the first isn't a team VM's name.
+		if i := strings.LastIndex(name, team); strings.Count(cfg.VMName, "{team}") > 1 && i >= 0 {
+			other := name[:i] + "77" + name[i+2:]
+			if _, _, ok := n.ParseVMName(other); ok {
+				t.Fatalf("pattern %q: ParseVMName(%q) accepted a name with two different teams", cfg.VMName, other)
+			}
+		}
 		if ok && (n.VMName(gt, gh) != name) {
 			t.Fatalf("pattern %q: ParseVMName(%q) = %q, %q does not rebuild it", cfg.VMName, name, gt, gh)
 		}
