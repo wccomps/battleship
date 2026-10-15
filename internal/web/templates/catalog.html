@@ -23,7 +23,7 @@
 <div class="chips"><span class="chip">{{.Kind}}</span></div>
 <div class="meta">VMID {{.VMID}} · {{.Node}}</div></td>
 <td>{{with .Notes}}<div class="notes">{{.}}</div>{{else}}<span class="meta">none</span>{{end}}</td>
-<td><div class="acts">
+<td class="act"><div class="acts">
 <a class="btn sm" href="/images/register?family={{.Family}}{{with .Source}}&amp;vmid={{.}}{{end}}" title="{{with .Source}}Copy VM {{.}} in again as the next version{{else}}Register the next version{{end}}">New version</a>
 <a class="btn sm" href="/images/edit?family={{.Family}}">Open for editing</a>
 <a class="btn sm" href="/images/deprecate?image={{.Name}}">Deprecate</a>
@@ -37,7 +37,7 @@
 {{- end}}
 {{- with .DeprecatedImages}}
 <details class="olds">
-<summary>Deprecated versions ({{len .}})</summary>
+<summary class="disc">Deprecated versions ({{len .}})</summary>
 <ul>
 {{- range .}}
 <li><span>{{names .Name}} <span class="meta">· {{.Kind}} · VMID {{.VMID}} · {{.Node}}</span></span><a class="btn sm bad" href="/images/delete?image={{.Name}}">Delete</a></li>
@@ -50,20 +50,20 @@
 {{- end}}
 {{- else if .Envs}}
 <div class="tscroll">
-<table class="tbl">
+<table class="tbl cards">
 <thead><tr><th scope="col">Slot</th><th scope="col">Domain</th><th scope="col">Hosts</th><th scope="col">DNS</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
 <tbody>
 {{- range .Envs}}
-<tr>
+<tr{{if .Free}} class="free"{{end}}>
 <td>{{names .Slot.Pool}}</td>
 {{- if .Free}}
 <td colspan="3" class="muted">free</td><td></td>
 {{- else}}
-<td>{{if .Mixed}}<span class="muted">mixed</span>{{else}}{{names .Domain}}{{end}}{{with .Users}} <span class="muted">· also on its networks: {{range $i, $u := .}}{{if $i}}, {{end}}{{names $u}}{{end}}</span>{{end}}</td>
-<td>{{range .Hosts}}<div>{{names .Name}} <span class="muted">{{.Status}}{{with .Notes.IP}} · {{.}}{{end}}</span>
-{{- with .UserNotes}}<details class="notes-d"><summary class="muted">notes</summary><div class="notes">{{.}}</div></details>{{end}}</div>{{end}}</td>
-<td>{{.DNS}}</td>
-<td>{{if and .Domain (not .Mixed)}}<a href="/environments/add?domain={{.Domain}}">Add hosts</a> · <a href="/environments/dns?domain={{.Domain}}">Set DNS</a>{{end}}</td>
+<td data-label="Domain">{{if .Mixed}}<span class="muted">mixed</span>{{else}}{{names .Domain}}{{end}}{{with .Users}} <span class="muted">· also on its networks: {{range $i, $u := .}}{{if $i}}, {{end}}{{names $u}}{{end}}</span>{{end}}</td>
+<td data-label="Hosts">{{range .Hosts}}<div>{{names .Name}} <span class="muted">{{.Status}}{{with .Notes.IP}} · {{.}}{{end}}</span>
+{{- with .UserNotes}}<details class="notes-d"><summary class="disc">notes</summary><div class="notes">{{.}}</div></details>{{end}}</div>{{end}}</td>
+<td data-label="DNS">{{.DNS}}</td>
+<td class="act">{{if and .Domain (not .Mixed)}}<div class="acts"><a class="btn sm" href="/environments/add?domain={{.Domain}}">Add hosts</a><a class="btn sm" href="/environments/dns?domain={{.Domain}}">Set DNS</a></div>{{end}}</td>
 {{- end}}
 </tr>
 {{- end}}
