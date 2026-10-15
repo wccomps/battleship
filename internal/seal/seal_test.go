@@ -83,3 +83,27 @@ func TestPropOpenRefusesAllButTheBox(t *testing.T) {
 		}
 	})
 }
+
+// Every other last character of a box is refused, including the ones that
+// decode to the same bytes without Strict, and so are line breaks.
+func TestOpenHasOneSpellingPerBox(t *testing.T) {
+	k := NewKey("a long enough secret for tests", "job credential v1")
+	alphabet := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	for n := 0; n < 6; n++ { // each length leaves other spare bits in the last character
+		box := k.Seal("job:7", make([]byte, n))
+		for _, c := range alphabet {
+			other := box[:len(box)-1] + string(c)
+			_, err := k.Open("job:7", other)
+			if (err == nil) != (other == box) {
+				t.Errorf("plain %d bytes: Open(...%c) err = %v, original ends %c", n, c, err, box[len(box)-1])
+			}
+		}
+		for _, lb := range []string{"\n", "\r\n", "\r"} {
+			for _, other := range []string{box + lb, box[:5] + lb + box[5:], lb + box} {
+				if _, err := k.Open("job:7", other); err == nil {
+					t.Errorf("Open(%q) accepted a line break", other)
+				}
+			}
+		}
+	}
+}
