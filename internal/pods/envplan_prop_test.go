@@ -3,12 +3,15 @@ package pods
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
 	"pgregory.net/rapid"
 
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -20,15 +23,27 @@ var noteValues = []string{
 	"dc", "teak", "oak$(id)", "\u202eoak", "debian-12-v1", "", "=", "'",
 }
 
+// noteIP draws an address at or near the edge of subnet's host range,
+// sometimes spoilt the way a hand edit might.
+func noteIP(t *rapid.T, subnet string) string {
+	o := rapid.OneOf(rapid.IntRange(-1, 300), rapid.SampledFrom([]int{-1, 0, 3, FirstHostOctet, LastHostOctet, 255, 256})).Draw(t, "octet")
+	octet := strconv.Itoa(o)
+	return subnet + "." + rapid.SampledFrom([]string{octet, octet, octet, "0" + octet, "+" + octet, octet + " ", octet + "'", octet + ".1", "\u0661" + octet}).Draw(t, "spoilt octet")
+}
+
 // drawNotes draws a VM description holding battleship lines with hostile
 // values among user text.
-func drawNotes(t *rapid.T, label string) string {
+func drawNotes(t *rapid.T, subnet, label string) string {
 	value := rapid.OneOf(rapid.SampledFrom(noteValues), rapid.String())
 	line := rapid.Custom(func(t *rapid.T) string {
 		var b strings.Builder
 		b.WriteString(rapid.SampledFrom([]string{"", " ", "\u200b", "\ufeff"}).Draw(t, "indent") + notesPrefix)
 		for _, k := range rapid.SliceOfN(rapid.SampledFrom([]string{"ip", "os", "base", "dns", "x"}), 0, 5).Draw(t, "keys") {
-			b.WriteString(" " + k + "=" + value.Draw(t, k))
+			v := value
+			if k == "ip" {
+				v = rapid.OneOf(value, rapid.Custom(func(t *rapid.T) string { return noteIP(t, subnet) }))
+			}
+			b.WriteString(" " + k + "=" + v.Draw(t, k))
 		}
 		return b.String()
 	})
@@ -41,7 +56,18 @@ func drawNotes(t *rapid.T, label string) string {
 func inSubnet(ip, subnet string) bool {
 	rest, ok := strings.CutPrefix(ip, subnet+".")
 	o, err := strconv.Atoi(rest)
-	return ok && err == nil && isIPv4(ip) && strconv.Itoa(o) == rest && o >= FirstHostOctet && o <= LastHostOctet
+	return ok && err == nil && safeIPv4(ip) && strconv.Itoa(o) == rest && o >= FirstHostOctet && o <= LastHostOctet
+}
+
+// Checked keeps an address of the subnet exactly when its last octet is a
+// host octet.
+func TestCheckedNotesOctets(t *testing.T) {
+	for o := -1; o <= 300; o++ {
+		ip := "192.168.100." + strconv.Itoa(o)
+		if got, want := (Notes{IP: ip}).Checked("192.168.100").IP != "", o >= 4 && o <= 254; got != want {
+			t.Errorf("Checked kept %s: %v, want %v", ip, got, want)
+		}
+	}
 }
 
 // Checked keeps from notes only an address of the subnet, a known OS and a
@@ -50,7 +76,10 @@ func inSubnet(ip, subnet string) bool {
 func TestPropCheckedNotes(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		subnet := rapid.SampledFrom([]string{"192.168.100", "10.0.0", "172.16.5"}).Draw(t, "subnet")
-		n, _ := ParseNotes(drawNotes(t, "notes"))
+		n, _ := ParseNotes(drawNotes(t, subnet, "notes"))
+		if rapid.Bool().Draw(t, "near ip") {
+			n.IP = noteIP(t, subnet)
+		}
 		c := n.Checked(subnet)
 		if c.IP != "" && !inSubnet(c.IP, subnet) {
 			t.Fatalf("kept address %q outside %s", c.IP, subnet)
@@ -67,29 +96,104 @@ func TestPropCheckedNotes(t *testing.T) {
 	})
 }
 
+// checkEnvPlan checks that every guest plan would configure passes Check,
+// makes a script, keeps a Windows rename to 15 characters and has an address
+// in subnet. It returns how many it checked.
+func checkEnvPlan(t interface{ Fatalf(string, ...any) }, plan *Plan, subnet string) int {
+	n := 0
+	for _, it := range plan.Items {
+		if it.Blocked != "" || it.Guest == nil {
+			continue
+		}
+		n++
+		g := *it.Guest
+		if err := g.Check(); err != nil {
+			t.Fatalf("%s: guest %+v: %v", it.Name, g, err)
+		}
+		if _, err := GuestScript(g, "BC:24:11:00:21:01"); err != nil {
+			t.Fatalf("%s: %v", it.Name, err)
+		}
+		if g.OS == ImageWindows && !g.DNSOnly && len(g.Hostname) > MaxWindowsHostname {
+			t.Fatalf("%s: renames Windows to %q", it.Name, g.Hostname)
+		}
+		if !inSubnet(g.IP, subnet) {
+			t.Fatalf("%s: address %q outside %s", it.Name, g.IP, subnet)
+		}
+	}
+	return n
+}
+
+// slotFake is envFake with kilo.alpha in slot 1: its router and the given
+// host, running, with notes.
+func slotFake(name, notes string) *podstest.Fake {
+	f := envFake()
+	f.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;router", Status: "running"},
+		map[string]string{"net0": "virtio=BC:24:11:00:21:00,bridge=devext01", "net1": "virtio=BC:24:11:00:21:01,bridge=devint01",
+			"description": "battleship: base=gw-v1 dns=router"})
+	f.Add(proxmox.VM{VMID: 2101, Name: name, Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "running"},
+		map[string]string{"net0": "virtio=BC:24:11:00:21:02,bridge=devint01", "description": notes})
+	return f
+}
+
+// Hostile notes or names on a well-formed host of a slot give an env-dns
+// guest that is blocked or passes every check; valid ones give a guest.
+func TestEnvDNSHostileNotes(t *testing.T) {
+	const subnet = "192.168.100"
+	valid := map[string]string{"ip": "192.168.100.10", "os": ImageLinux, "dns": "router"}
+	for _, key := range []string{"ip", "os", "dns"} {
+		for _, v := range append(slices.Clone(noteValues), "192.168.100.255", "192.168.100.3", " 192.168.100.10", "192.168.100.10 os=windows") {
+			fields := maps.Clone(valid)
+			fields[key] = v
+			notes := fmt.Sprintf("battleship: ip=%s os=%s base=debian-12-v1 dns=%s", fields["ip"], fields["os"], fields["dns"])
+			plan, err := NewPlanner(slotFake("teak.kilo.alpha", notes), envConfig()).EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha", DNS: DNSRouter})
+			if err != nil {
+				t.Fatalf("%s=%q: %v", key, v, err)
+			}
+			checkEnvPlan(t, plan, subnet)
+		}
+	}
+	for _, host := range []string{"teak", "Oak", "a'b", "x$(id)", "te\u0430k", "averyveryverylongname"} {
+		plan, err := NewPlanner(slotFake(host+".kilo.alpha", "battleship: ip=192.168.100.10 os=windows base=win2022-v1 dns=router"), envConfig()).
+			EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha", DNS: DNSRouter})
+		if err != nil {
+			t.Fatalf("%s: %v", host, err)
+		}
+		if n := checkEnvPlan(t, plan, subnet); host == "teak" && n != 1 {
+			t.Errorf("teak with valid notes: %d guests, want 1", n)
+		}
+	}
+}
+
 // However slot VMs are named, tagged and noted, every guest an environment
 // plan would configure passes Check, makes a script, keeps a Windows rename
 // to 15 characters and has an address in the subnet.
 func TestPropEnvPlansConfigureOnlyCheckedGuests(t *testing.T) {
 	const subnet = "192.168.100"
-	host := rapid.OneOf(rapid.SampledFrom([]string{"teak", "oak", "dc", "gw", "Oak", "averyveryverylongname", "a'b", "x$(id)", ""}), rapid.String())
+	host := rapid.OneOf(rapid.SampledFrom([]string{"teak", "oak", "dc", "averyveryverylongname"}),
+		rapid.SampledFrom([]string{"Oak", "a'b", "x$(id)", "te\u0430k", "", "-x"}),
+		rapid.Map(rapid.String(), func(s string) string { return strings.ReplaceAll(s, ".", "") }))
 	rapid.Check(t, func(t *rapid.T) {
-		f := envFake()
-		for i := range rapid.IntRange(0, 5).Draw(t, "vms") {
-			// Some hosts are as battleship left them, the rest anything.
-			name, tags := "", "dev;kilo.alpha"
-			notes := fmt.Sprintf("battleship: ip=%s.%d os=%s base=debian-12-v1 dns=router", subnet, rapid.IntRange(0, 300).Draw(t, "octet"),
-				rapid.SampledFrom([]string{ImageWindows, ImageLinux}).Draw(t, "os"))
-			if rapid.Bool().Draw(t, "proper") {
-				name = rapid.SampledFrom([]string{"teak", "oak", "dc", "averyveryverylongname"}).Draw(t, "host") + ".kilo.alpha"
-			} else {
-				name = host.Draw(t, "host") + "." + rapid.SampledFrom([]string{"kilo.alpha", "kilo.alpha", "kilo.alpha", "kilo.alpha", "Kilo.alpha", "other.env"}).Draw(t, "domain")
-				tags = rapid.SampledFrom([]string{"dev;kilo.alpha", "dev;kilo.alpha;router", "dev", "router;x"}).Draw(t, "tags")
-				notes = drawNotes(t, "notes")
+		// kilo.alpha always holds slot 1, with its router.
+		f := slotFake("teak.kilo.alpha", "battleship: ip=192.168.100.10 os=linux base=debian-12-v1 dns=router")
+		// Sometimes the last VM is of another domain, so no slot holds kilo.alpha.
+		// (A middle value: rapid favours the ends of a range.)
+		mixed := rapid.IntRange(0, 9).Draw(t, "mixed") == 5
+		vms := rapid.IntRange(0, 5).Draw(t, "vms")
+		for i := range vms {
+			domain := "kilo.alpha"
+			if mixed && i == vms-1 {
+				domain = rapid.SampledFrom([]string{"Kilo.alpha", "other.env"}).Draw(t, "domain")
 			}
-			status := rapid.SampledFrom([]string{"running", "stopped"}).Draw(t, "status")
-			f.Add(proxmox.VM{VMID: 2101 + i, Name: name, Node: "alder", Pool: "dev-01", Tags: tags, Status: status},
-				map[string]string{"net0": fmt.Sprintf("virtio=BC:24:11:00:21:%02x,bridge=devint01", i), "description": notes})
+			// Names, tags and notes vary apart: mostly as battleship left them, the rest anything.
+			tags := rapid.SampledFrom([]string{"dev;kilo.alpha", "dev;kilo.alpha", "dev;kilo.alpha", "dev;kilo.alpha;router", "dev", "router;x"}).Draw(t, "tags")
+			notes := fmt.Sprintf("battleship: ip=%s os=%s base=debian-12-v1 dns=router", noteIP(t, subnet),
+				rapid.SampledFrom([]string{ImageWindows, ImageLinux}).Draw(t, "os"))
+			if rapid.Bool().Draw(t, "hostile notes") {
+				notes = drawNotes(t, subnet, "notes")
+			}
+			status := rapid.SampledFrom([]string{"running", "running", "stopped"}).Draw(t, "status")
+			f.Add(proxmox.VM{VMID: 2102 + i, Name: host.Draw(t, "host") + "." + domain, Node: "alder", Pool: "dev-01", Tags: tags, Status: status},
+				map[string]string{"net0": fmt.Sprintf("virtio=BC:24:11:00:21:%02x,bridge=devint01", i+3), "description": notes})
 		}
 		p := NewPlanner(f, envConfig())
 		var specs []HostSpec
@@ -115,23 +219,6 @@ func TestPropEnvPlansConfigureOnlyCheckedGuests(t *testing.T) {
 		if err != nil {
 			return
 		}
-		for _, it := range plan.Items {
-			if it.Blocked != "" || it.Guest == nil {
-				continue
-			}
-			g := *it.Guest
-			if err := g.Check(); err != nil {
-				t.Fatalf("%s: guest %+v: %v", it.Name, g, err)
-			}
-			if _, err := GuestScript(g, "BC:24:11:00:21:01"); err != nil {
-				t.Fatalf("%s: %v", it.Name, err)
-			}
-			if g.OS == ImageWindows && !g.DNSOnly && len(g.Hostname) > MaxWindowsHostname {
-				t.Fatalf("%s: renames Windows to %q", it.Name, g.Hostname)
-			}
-			if !inSubnet(g.IP, subnet) {
-				t.Fatalf("%s: address %q outside %s", it.Name, g.IP, subnet)
-			}
-		}
+		checkEnvPlan(t, plan, subnet)
 	})
 }
