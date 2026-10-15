@@ -467,8 +467,10 @@ func (c Config) Validate() error {
 		}
 	}
 
-	if !strings.Contains(c.Naming.VMName, "{host}") {
-		errs = append(errs, errors.New("naming.vm_name must contain {host}"))
+	// A second {host} could not be told from part of the first when a name is
+	// read back, so such VMs would vanish from the grid.
+	if strings.Count(c.Naming.VMName, "{host}") != 1 {
+		errs = append(errs, errors.New("naming.vm_name must contain {host} once"))
 	}
 
 	if c.Naming.TemplateSuffix == "" {
