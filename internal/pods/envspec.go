@@ -133,19 +133,19 @@ const maxUserNotes = 4000
 // characters (bidi overrides, zero widths) are dropped so notes can't
 // disguise what they say.
 func UserNotes(desc string) string {
+	desc = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, desc)
 	var keep []string
 	for _, line := range strings.Split(desc, "\n") {
 		if !strings.HasPrefix(strings.TrimSpace(line), notesPrefix) {
 			keep = append(keep, strings.TrimRight(line, " \t\r"))
 		}
 	}
-	s := strings.Map(func(r rune) rune {
-		if unicode.Is(unicode.Cf, r) {
-			return -1
-		}
-		return r
-	}, strings.Join(keep, "\n"))
-	s = strings.TrimSpace(s)
+	s := strings.TrimSpace(strings.Join(keep, "\n"))
 	if r := []rune(s); len(r) > maxUserNotes {
 		s = string(r[:maxUserNotes]) + "…"
 	}

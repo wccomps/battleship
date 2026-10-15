@@ -3,6 +3,9 @@ package pods
 import (
 	"strings"
 	"testing"
+	"unicode"
+
+	"pgregory.net/rapid"
 )
 
 func TestParseHostSpec(t *testing.T) {
@@ -99,4 +102,30 @@ func TestUserNotes(t *testing.T) {
 	if got := []rune(UserNotes(long)); len(got) != maxUserNotes+1 || got[maxUserNotes] != '…' {
 		t.Errorf("long notes keep %d runes, want %d and an ellipsis", len(got), maxUserNotes+1)
 	}
+}
+
+// UserNotes never keeps battleship's lines or format characters, stays within
+// its cap, and cleaning cleaned notes changes nothing.
+func TestPropUserNotes(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		piece := rapid.OneOf(rapid.String(), rapid.SampledFrom([]string{
+			"battleship: ip=192.168.100.10", "  battleship: reboot", "\n", "\r\n", "\u202e", "\u200b", "\ufeff", "Login: root",
+		}))
+		desc := strings.Join(rapid.SliceOfN(piece, 0, 40).Draw(t, "pieces"), "")
+		got := UserNotes(desc)
+		for _, line := range strings.Split(got, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), notesPrefix) {
+				t.Fatalf("kept a battleship line: %q", line)
+			}
+		}
+		if strings.ContainsFunc(got, func(r rune) bool { return unicode.Is(unicode.Cf, r) }) {
+			t.Fatalf("kept a format character: %q", got)
+		}
+		if n := len([]rune(got)); n > maxUserNotes+1 {
+			t.Fatalf("kept %d runes", n)
+		}
+		if len([]rune(got)) <= maxUserNotes && UserNotes(got) != got {
+			t.Fatalf("not idempotent: %q -> %q", got, UserNotes(got))
+		}
+	})
 }
