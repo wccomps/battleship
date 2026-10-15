@@ -12,22 +12,21 @@
 {{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
 {{- if eq .Show "images"}}
 {{- if .Images}}
+{{- with .CurrentImages}}
 <div class="tscroll">
 <table class="tbl cards">
 <thead><tr><th scope="col">Image</th><th scope="col">Notes</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
 <tbody>
-{{- range .Images}}
-<tr{{if .Deprecated}} class="muted"{{end}}>
+{{- range .}}
+<tr>
 <td class="img"><div class="iname">{{names .Name}}</div>
-<div class="chips"><span class="chip">{{.Kind}}</span>{{if .Deprecated}}<span class="chip">deprecated</span>{{end}}</div>
+<div class="chips"><span class="chip">{{.Kind}}</span></div>
 <div class="meta">VMID {{.VMID}} · {{.Node}}</div></td>
 <td>{{with .Notes}}<div class="notes">{{.}}</div>{{else}}<span class="meta">none</span>{{end}}</td>
 <td><div class="acts">
-{{- if not .Deprecated}}
-<a class="btn sm" href="/images/register?family={{.Family}}{{with .Source}}&amp;vmid={{.}}{{end}}" title="{{with .Source}}Copy VM {{.}} in again as the next version{{else}}Register the next version{{end}}">New version</a>{{end}}
+<a class="btn sm" href="/images/register?family={{.Family}}{{with .Source}}&amp;vmid={{.}}{{end}}" title="{{with .Source}}Copy VM {{.}} in again as the next version{{else}}Register the next version{{end}}">New version</a>
 <a class="btn sm" href="/images/edit?family={{.Family}}">Open for editing</a>
-{{- if not .Deprecated}}
-<a class="btn sm" href="/images/deprecate?image={{.Name}}">Deprecate</a>{{end}}
+<a class="btn sm" href="/images/deprecate?image={{.Name}}">Deprecate</a>
 <a class="btn sm bad" href="/images/delete?image={{.Name}}">Delete</a>
 </div></td>
 </tr>
@@ -35,6 +34,17 @@
 </tbody>
 </table>
 </div>
+{{- end}}
+{{- with .DeprecatedImages}}
+<details class="olds">
+<summary>Deprecated versions ({{len .}})</summary>
+<ul>
+{{- range .}}
+<li><span>{{names .Name}} <span class="meta">· {{.Kind}} · VMID {{.VMID}} · {{.Node}}</span></span><a class="btn sm bad" href="/images/delete?image={{.Name}}">Delete</a></li>
+{{- end}}
+</ul>
+</details>
+{{- end}}
 {{- else if not .ReadErr}}
 <p class="say">No base images yet. Install an OS on a VM in Proxmox, generalize it, shut it down, then register it here.</p>
 {{- end}}

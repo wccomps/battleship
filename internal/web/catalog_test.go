@@ -223,3 +223,26 @@ func TestImagesPageOffersNewVersionFromSource(t *testing.T) {
 		t.Errorf("family gw listed %d times, want once", n)
 	}
 }
+
+// Deprecated versions are folded away under the current ones, offering only
+// Delete.
+func TestImagesPageFoldsDeprecated(t *testing.T) {
+	h := newHarness(t)
+	h.api.Add(proxmox.VM{VMID: 8000, Name: "gw-v1", Node: "n1", Template: true, Tags: "base;router;deprecated"},
+		map[string]string{"description": "old login", "net0": "virtio=BC:24:11:00:80:00,bridge=vmbr0"})
+	h.api.Add(proxmox.VM{VMID: 8001, Name: "gw-v2", Node: "n1", Template: true, Tags: "base;router"},
+		map[string]string{"description": "new login", "net0": "virtio=BC:24:11:00:80:01,bridge=vmbr0"})
+	sess := h.login(asLead)
+	body := h.get(&sess, "/images").Body.String()
+	table, folded, ok := strings.Cut(body, `<details class="olds">`)
+	if !ok {
+		t.Fatalf("no deprecated section:\n%s", body)
+	}
+	if strings.Contains(table, "gw-v1") || !strings.Contains(table, "gw-v2") {
+		t.Errorf("the table should list gw-v2 only")
+	}
+	if !strings.Contains(folded, "Deprecated versions (1)") || !strings.Contains(folded, `/images/delete?image=gw-v1`) ||
+		strings.Contains(folded, "old login") || strings.Contains(folded, "/images/deprecate") {
+		t.Errorf("deprecated section = %s", folded)
+	}
+}

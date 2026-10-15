@@ -45,6 +45,17 @@ func (s *Server) newCatalogPage(ctx context.Context) catalogPage {
 	return p
 }
 
+// CurrentImages are the versions that aren't deprecated.
+func (p catalogPage) CurrentImages() []pods.BaseImage {
+	return slices.DeleteFunc(slices.Clone(p.Images), func(im pods.BaseImage) bool { return im.Deprecated })
+}
+
+// DeprecatedImages are the deprecated versions, which the images page folds
+// away.
+func (p catalogPage) DeprecatedImages() []pods.BaseImage {
+	return slices.DeleteFunc(slices.Clone(p.Images), func(im pods.BaseImage) bool { return !im.Deprecated })
+}
+
 // catalogView is a catalog page showing "images" or "environments".
 type catalogView struct {
 	catalogPage
