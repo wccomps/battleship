@@ -13,19 +13,21 @@
 {{- if eq .Show "images"}}
 {{- if .Images}}
 <div class="tscroll">
-<table class="tbl">
-<thead><tr><th scope="col">Image</th><th scope="col">Kind</th><th scope="col">VMID</th><th scope="col">Node</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
+<table class="tbl cards">
+<thead><tr><th scope="col">Image</th><th scope="col">Notes</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
 <tbody>
 {{- range .Images}}
 <tr{{if .Deprecated}} class="muted"{{end}}>
-<td>{{names .Name}}{{if .Deprecated}} <span class="muted">· deprecated</span>{{end}}
-{{- if .Notes}}{{if .Deprecated}}<details class="notes-d"><summary class="muted">notes</summary><div class="notes">{{.Notes}}</div></details>{{else}}<div class="notes">{{.Notes}}</div>{{end}}{{end}}</td>
-<td>{{.Kind}}</td><td>{{.VMID}}</td><td>{{.Node}}</td>
-<td>
-<a href="/images/edit?family={{.Family}}">Open for editing</a>
-{{- if not .Deprecated}} · <a href="/images/deprecate?image={{.Name}}">Deprecate</a>{{end}}
- · <a href="/images/delete?image={{.Name}}">Delete</a>
-</td>
+<td class="img"><div class="iname">{{names .Name}}</div>
+<div class="chips"><span class="chip">{{.Kind}}</span>{{if .Deprecated}}<span class="chip">deprecated</span>{{end}}</div>
+<div class="meta">VMID {{.VMID}} · {{.Node}}</div></td>
+<td>{{with .Notes}}<div class="notes">{{.}}</div>{{else}}<span class="meta">none</span>{{end}}</td>
+<td><div class="acts">
+<a class="btn sm" href="/images/edit?family={{.Family}}">Open for editing</a>
+{{- if not .Deprecated}}
+<a class="btn sm" href="/images/deprecate?image={{.Name}}">Deprecate</a>{{end}}
+<a class="btn sm bad" href="/images/delete?image={{.Name}}">Delete</a>
+</div></td>
 </tr>
 {{- end}}
 </tbody>
