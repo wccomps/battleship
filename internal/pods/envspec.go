@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Every environment's LAN: the router is .2, .3 is the team VPN endpoint,
@@ -128,7 +129,9 @@ func ParseNotes(desc string) (Notes, bool) {
 const maxUserNotes = 4000
 
 // UserNotes is desc without battleship's lines: what people wrote, such as
-// logins. It is text for people; pages escape it like any other text.
+// logins. It is text for people; pages escape it like any other text. Format
+// characters (bidi overrides, zero widths) are dropped so notes can't
+// disguise what they say.
 func UserNotes(desc string) string {
 	var keep []string
 	for _, line := range strings.Split(desc, "\n") {
@@ -136,7 +139,13 @@ func UserNotes(desc string) string {
 			keep = append(keep, strings.TrimRight(line, " \t\r"))
 		}
 	}
-	s := strings.TrimSpace(strings.Join(keep, "\n"))
+	s := strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, strings.Join(keep, "\n"))
+	s = strings.TrimSpace(s)
 	if r := []rune(s); len(r) > maxUserNotes {
 		s = string(r[:maxUserNotes]) + "…"
 	}

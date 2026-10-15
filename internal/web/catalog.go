@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"net/http"
+	"slices"
 
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
@@ -24,7 +25,8 @@ type catalogPage struct {
 	ReadErr string // why the cluster couldn't be read
 }
 
-// newCatalogPage reads environments and images as the user.
+// newCatalogPage reads environments and images as the user, without the
+// images' notes: only the pages that show them read them (withNotes).
 func (s *Server) newCatalogPage(ctx context.Context) catalogPage {
 	p := catalogPage{Kinds: pods.ImageKinds, Subnet: s.cfg.Environments.Subnet}
 	envs, vms, err := s.planner(ctx).Environments(ctx)
@@ -33,7 +35,7 @@ func (s *Server) newCatalogPage(ctx context.Context) catalogPage {
 		return p
 	}
 	p.Envs = envs
-	p.Images = s.planner(ctx).ReadNotes(ctx, pods.BaseImages(vms))
+	p.Images = pods.BaseImages(vms)
 	p.Routers = pods.Families(p.Images, pods.ImageRouter)
 	for _, k := range []string{pods.ImageWindows, pods.ImageLinux, pods.ImageOther} {
 		p.Others = append(p.Others, pods.Families(p.Images, k)...)
@@ -53,14 +55,25 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) imagesPage(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, http.StatusOK, "catalog", s.newView(w, r, "Images", "images",
-		catalogView{s.newCatalogPage(r.Context()), "images"}))
+	p := s.newCatalogPage(r.Context())
+	p.Images = s.planner(r.Context()).ReadNotes(r.Context(), p.Images)
+	s.render(w, r, http.StatusOK, "catalog", s.newView(w, r, "Images", "images", catalogView{p, "images"}))
+}
+
+// withNotes reads the notes of the images an environment form lists.
+func (s *Server) withNotes(ctx context.Context, p catalogPage) catalogPage {
+	both := s.planner(ctx).ReadNotes(ctx, append(slices.Clone(p.Routers), p.Others...))
+	p.Routers, p.Others = both[:len(p.Routers)], both[len(p.Routers):]
+	return p
 }
 
 // teamlessForm serves an image or environment form, prefilled from the
 // query (the pages' links) or the inputs a preview refused.
 func (s *Server) teamlessForm(w http.ResponseWriter, r *http.Request, status int, op operation, in jobs.Inputs, problem string) {
 	p := s.newCatalogPage(r.Context())
+	if op.Kind == pods.KindEnvCreate || op.Kind == pods.KindEnvAdd {
+		p = s.withNotes(r.Context(), p)
+	}
 	p.Op, p.In, p.Error = op, in, problem
 	s.render(w, r, status, "teamless", s.newView(w, r, op.Title, string(op.Kind), p))
 }

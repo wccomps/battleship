@@ -89,6 +89,7 @@ func TestUserNotes(t *testing.T) {
 		{"Login: root / pw\nbattleship: ip=192.168.100.10\n", "Login: root / pw"},
 		{"  battleship: reboot\nDebian 13\r\n\nLogin: root  \n", "Debian 13\n\nLogin: root"},
 		{"<script>alert(1)</script>", "<script>alert(1)</script>"}, // pages escape it
+		{"Login: \u202eroot\u200b / pw\ufeff", "Login: root / pw"}, // format characters dropped
 	} {
 		if got := UserNotes(c.desc); got != c.want {
 			t.Errorf("UserNotes(%q) = %q, want %q", c.desc, got, c.want)
