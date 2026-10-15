@@ -2,9 +2,12 @@ package web
 
 import (
 	"encoding/base64"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -293,6 +296,58 @@ func TestPropCellPageOnlyForGridCells(t *testing.T) {
 			if after != before {
 				t.Fatalf("GET /vm/%q/%q read %d configs from Proxmox", team, host, after-before)
 			}
+		}
+	})
+}
+
+var pickerOptionRE = regexp.MustCompile(`<input type="radio" name="snapshot" value="([^"]*)"( checked)?>`)
+
+// The reset picker offers the baseline first, then each snapshot of the VM
+// once, leaves out the one the baseline already stands for, keeps whatever
+// was asked for, and marks exactly that option.
+func TestPropResetPickerOptions(t *testing.T) {
+	h := newHarness(t)
+	op := h.login(asOperator)
+	names := []string{"initial", "Initial", "fresh_clone_20261001000000", "fresh_clone_20261002034615", "before-scoring", "round1", "round2", "a", "x-y_z"}
+	rapid.Check(t, func(t *rapid.T) {
+		snaps := rapid.SliceOfNDistinct(rapid.SampledFrom(names), 0, 6, rapid.ID[string]).Draw(t, "snapshots")
+		selected := rapid.SampledFrom(append([]string{""}, append(slices.Clone(names), "gone", "a&b")...)).Draw(t, "selected")
+		h.api.setSnapshots(10101, snaps...)
+		h.poll()
+		body := h.get(&op, "/reset?teams=1&hosts=dc&snapshot="+url.QueryEscape(selected)).Body.String()
+		var values []string
+		checked := 0
+		for _, m := range pickerOptionRE.FindAllStringSubmatch(body, -1) {
+			values = append(values, html.UnescapeString(m[1]))
+			if m[2] != "" {
+				checked++
+				if html.UnescapeString(m[1]) != selected {
+					t.Fatalf("checked option %q, selected %q", m[1], selected)
+				}
+			}
+		}
+		baseline := ""
+		switch {
+		case slices.Contains(snaps, "initial"):
+			baseline = "initial"
+		default:
+			for _, n := range snaps {
+				if strings.HasPrefix(n, "fresh_clone_") && n > baseline {
+					baseline = n
+				}
+			}
+		}
+		want := []string{""}
+		for _, n := range snaps {
+			if n != baseline || n == selected {
+				want = append(want, n)
+			}
+		}
+		if !slices.Contains(want, selected) {
+			want = append(want, selected)
+		}
+		if !slices.Equal(values, want) || checked != 1 {
+			t.Fatalf("snapshots %v, baseline %q, selected %q: options %q (%d checked), want %q", snaps, baseline, selected, values, checked, want)
 		}
 	})
 }
