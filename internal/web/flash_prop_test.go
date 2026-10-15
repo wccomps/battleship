@@ -124,6 +124,14 @@ func TestPropFlashFromAnyCookie(t *testing.T) {
 		func(t *rapid.T) string { return "" },
 		func(t *rapid.T) string { return rapid.StringMatching(`[A-Za-z0-9_.=-]{0,20}`).Draw(t, "raw") },
 	}
+	// Messages at the limit, as a browser could send them.
+	s := &Server{}
+	for _, n := range []int{flashMaxLen - 1, flashMaxLen, flashMaxLen + 1, flashMaxLen + 2} {
+		got := s.takeFlash(httptest.NewRecorder(), flashRequest(s, flashInfo+"."+enc([]byte(strings.Repeat("a", n)))))
+		if (got != nil) != (n <= flashMaxLen) {
+			t.Errorf("a %d byte flash cookie came back as %+v", n, got)
+		}
+	}
 	rapid.Check(t, func(t *rapid.T) {
 		s := &Server{secureCookies: rapid.Bool().Draw(t, "secure")}
 		kind := rapid.SampledFrom([]string{flashInfo, flashSuccess, flashError, "", "Info", "warning", "info ", "error."}).Draw(t, "kind")
@@ -216,5 +224,75 @@ func TestPropResumeFrom(t *testing.T) {
 	}
 	rapid.Check(t, func(t *rapid.T) {
 		checkResume(t, drawNumber(t, "header"), drawNumber(t, "query"))
+	})
+}
+
+// positiveModel is whether text reads as a decimal from 1 to the largest
+// int64, with an optional plus sign and leading zeros.
+func positiveModel(v string) bool {
+	d := strings.TrimPrefix(v, "+")
+	if d == "" || strings.Trim(d, "0123456789") != "" {
+		return false
+	}
+	n, ok := resumeModel(d)
+	return ok && n > 0
+}
+
+// A job ID in a path and ?before= are accepted exactly when they are
+// positive decimals; anything else is a 404.
+func TestPropJobIDAndBefore(t *testing.T) {
+	h := newHarness(t)
+	check := func(t interface{ Fatalf(string, ...any) }, v string) {
+		want := positiveModel(v)
+		r := httptest.NewRequest(http.MethodGet, "/logs/x", nil)
+		r.SetPathValue("id", v)
+		w := httptest.NewRecorder()
+		if _, ok := h.srv.jobID(w, r); ok != want || (!ok && w.Code != http.StatusNotFound) {
+			t.Fatalf("jobID(%q) ok = %v (status %d), want %v", v, ok, w.Code, want)
+		}
+		r = httptest.NewRequest(http.MethodGet, "/logs?before="+url.QueryEscape(v), nil)
+		w = httptest.NewRecorder()
+		h.srv.jobsPage(w, r)
+		if v == "" {
+			want = true // no ?before at all
+		}
+		if got := w.Code != http.StatusNotFound; got != want {
+			t.Fatalf("?before=%q: status %d, want found = %v", v, w.Code, want)
+		}
+	}
+	for _, v := range numberTexts {
+		check(t, v)
+	}
+	rapid.Check(t, func(t *rapid.T) { check(t, drawNumber(t, "id")) })
+}
+
+// The cell page answers only for cells of the grid, and never reads
+// Proxmox for anything else.
+func TestPropCellPageOnlyForGridCells(t *testing.T) {
+	h := newHarness(t)
+	h.poll()
+	op := h.login(asOperator)
+	teams := []string{"01", "02", "03", "04", "00", "1", "001", "", "0 1", "01 ", "+1", "١", "TEAM01", "01/dc", "%", "..", "."}
+	hosts := []string{"dc", "web", "DC", "Web", "dc ", "d", "dcx", "xdc", "", "dc/web", "%2e", "..", ".", "é", "dc\n", "team01-dc", "01"}
+	rapid.Check(t, func(t *rapid.T) {
+		team, host := rapid.SampledFrom(teams).Draw(t, "team"), rapid.SampledFrom(hosts).Draw(t, "host")
+		if rapid.IntRange(0, 5).Draw(t, "any") == 0 {
+			team, host = rapid.StringMatching(`[0-9]{0,3}`).Draw(t, "any team"), rapid.StringMatching(`[a-zA-Z0-9.-]{0,5}`).Draw(t, "any host")
+		}
+		isCell := (team == "01" || team == "02" || team == "03") && (host == "dc" || host == "web")
+		before, _, _ := h.api.readCounts()
+		rec := h.get(&op, "/vm/"+url.PathEscape(team)+"/"+url.PathEscape(host))
+		after, _, _ := h.api.readCounts()
+		if isCell && rec.Code != http.StatusOK {
+			t.Fatalf("GET /vm/%s/%s = %d", team, host, rec.Code)
+		}
+		if !isCell {
+			if rec.Code == http.StatusOK {
+				t.Fatalf("GET /vm/%q/%q = 200, not a cell", team, host)
+			}
+			if after != before {
+				t.Fatalf("GET /vm/%q/%q read %d configs from Proxmox", team, host, after-before)
+			}
+		}
 	})
 }
