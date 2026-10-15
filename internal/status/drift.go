@@ -76,7 +76,7 @@ func (r rules) grid(in inputs) (teams, hosts []string, rows []Row) {
 		seen[host] = true
 	}
 	if pattern := strings.TrimSpace(r.cfg.Web.Templates); pattern != "" {
-		masters, _ := pods.FindMasters(in.vms, r.naming, pattern, r.cfg.Deploy.MasterTag)
+		masters, _, _ := pods.FindMasters(in.vms, r.naming, pattern, r.cfg.Deploy.MasterTag) // TOML text is valid UTF-8
 		for _, m := range masters {
 			seen[pods.Hostname(m.Name)] = true
 		}
