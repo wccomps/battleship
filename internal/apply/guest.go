@@ -135,8 +135,8 @@ func lastLines(s string, n int) string {
 	return strings.Join(lines[len(lines)-n:], " / ")
 }
 
-// verifyGuest checks, through the agent, that net0 has the address and the
-// guest the host name.
+// verifyGuest checks, through the agent, that an interface with net0's MAC
+// has the address and the guest the host name.
 func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error) {
 	mac, err := e.mac(ctx, it)
 	if err != nil {
@@ -151,10 +151,12 @@ func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error)
 			return false, errors.Join(nerr, herr)
 		}
 		if nerr == nil && herr == nil {
+			// A VLAN subinterface (eth0.10) shares its parent's MAC; any
+			// interface with net0's MAC may hold the address.
 			var ips []string
 			for _, n := range nics {
-				if n.MAC == mac {
-					ips = n.IPs
+				if strings.EqualFold(n.MAC, mac) {
+					ips = append(ips, n.IPs...)
 				}
 			}
 			short, _, _ := strings.Cut(host, ".")
