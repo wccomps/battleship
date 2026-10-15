@@ -1,13 +1,18 @@
 package web
 
 import (
+	"crypto/tls"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
+
+	"pgregory.net/rapid"
 
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
@@ -185,4 +190,111 @@ func TestRequestLog(t *testing.T) {
 	if !strings.Contains(h.logs.String(), `web: POST "/auth/logout" 403 from 198.51.100.23 in `) {
 		t.Errorf("logs = %q, want the refused POST with the client", h.logs)
 	}
+}
+
+// forwardedModel is the client a request names, per forwarded's contract:
+// an untrusted peer speaks for itself; a trusted one's X-Forwarded-For is
+// read right to left as far as it parses, and the client is the first hop
+// not trusted, else the leftmost hop read, else the peer. The scheme is the
+// last X-Forwarded-Proto value a trusted peer sends.
+func forwardedModel(trusted []netip.Prefix, remote string, xff, proto []string, tls bool) (string, bool) {
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		host = remote
+	}
+	isTrusted := func(a netip.Addr) bool {
+		return slices.ContainsFunc(trusted, func(p netip.Prefix) bool { return p.Contains(a.Unmap()) })
+	}
+	peer, err := netip.ParseAddr(host)
+	if err != nil || !isTrusted(peer) {
+		return host, tls
+	}
+	var hops []string
+	for _, v := range xff {
+		for _, h := range strings.Split(v, ",") {
+			if h = strings.TrimSpace(h); h != "" {
+				hops = append(hops, h)
+			}
+		}
+	}
+	var read []netip.Addr // right to left
+	for i := len(hops) - 1; i >= 0; i-- {
+		a, err := netip.ParseAddr(hops[i])
+		if err != nil {
+			break
+		}
+		read = append(read, a.Unmap())
+	}
+	ip := peer.Unmap().String()
+	if i := slices.IndexFunc(read, func(a netip.Addr) bool { return !isTrusted(a) }); i >= 0 {
+		ip = read[i].String()
+	} else if len(read) > 0 {
+		ip = read[len(read)-1].String()
+	}
+	https := tls
+	if len(proto) > 0 {
+		last := proto[len(proto)-1]
+		https = strings.EqualFold(strings.TrimSpace(last[strings.LastIndex(last, ",")+1:]), "https")
+	}
+	return ip, https
+}
+
+// forwardedHops are X-Forwarded-For entries: trusted and other addresses,
+// mapped and zoned ones, and junk.
+var forwardedHops = []string{"10.0.0.5", "10.9.9.9", "fd00::5", "::ffff:10.0.0.7", "192.0.2.1", "198.51.100.1", "::ffff:192.0.2.1",
+	"2001:db8::1", "", " ", "unknown", "192.0.2.1:80", "[2001:db8::1]", "1.2.3", "fe80::1%eth0", "fd00::1%eth0", "0300.0.0.1", "10.0.0.5 "}
+
+// The client address and scheme follow the trusted-proxy model, and no
+// handler sees a forwarding header.
+func TestPropForwarded(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("fd00::/8"), netip.MustParsePrefix("127.0.0.1/32")}
+	var got peer
+	var leaked []string
+	mw := forwarded(trusted, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.ip, got.https = clientIP(r), isHTTPS(r)
+		leaked = nil
+		for _, k := range forwardedHeaders {
+			if r.Header.Values(k) != nil {
+				leaked = append(leaked, k)
+			}
+		}
+	}))
+	check := func(t interface{ Fatalf(string, ...any) }, remote string, xff, proto []string, secure bool) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = remote
+		if secure {
+			req.TLS = &tls.ConnectionState{}
+		}
+		for _, v := range xff {
+			req.Header.Add("X-Forwarded-For", v)
+		}
+		for _, v := range proto {
+			req.Header.Add("X-Forwarded-Proto", v)
+		}
+		req.Header.Set("Forwarded", "for=192.0.2.9")
+		req.Header.Set("X-Real-Ip", "192.0.2.9")
+		mw.ServeHTTP(httptest.NewRecorder(), req)
+		ip, https := forwardedModel(trusted, remote, xff, proto, secure)
+		if got.ip != ip || got.https != https || len(leaked) > 0 {
+			t.Fatalf("peer %s, XFF %q, proto %q, TLS %v: client %s https %v, leaked %v; want %s https %v",
+				remote, xff, proto, secure, got.ip, got.https, leaked, ip, https)
+		}
+	}
+	remotes := []string{"10.1.2.3:4444", "[::ffff:10.1.2.3]:4444", "[fd00::1]:80", "127.0.0.1:1", "203.0.113.9:5555", "[2001:db8::9]:1",
+		"[fe80::1%eth0]:1", "garbage", "10.1.2.3"}
+	for _, remote := range remotes {
+		for _, hop := range forwardedHops {
+			check(t, remote, []string{hop + ", 10.9.9.9"}, []string{"http", "HTTPS "}, false)
+			check(t, remote, []string{"198.51.100.1", hop}, []string{"https, http"}, true)
+		}
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		hop := rapid.OneOf(rapid.SampledFrom(forwardedHops[:8]), rapid.SampledFrom(forwardedHops))
+		header := rapid.Custom(func(t *rapid.T) string {
+			return strings.Join(rapid.SliceOfN(hop, 0, 4).Draw(t, "hops"), rapid.SampledFrom([]string{",", ", ", " ,"}).Draw(t, "sep"))
+		})
+		proto := rapid.SampledFrom([]string{"https", "http", "HTTPS", " https ", "https, http", "http,https", "", "wss"})
+		check(t, rapid.SampledFrom(remotes).Draw(t, "remote"), rapid.SliceOfN(header, 0, 2).Draw(t, "xff"),
+			rapid.SliceOfN(proto, 0, 2).Draw(t, "proto"), rapid.Bool().Draw(t, "tls"))
+	})
 }
