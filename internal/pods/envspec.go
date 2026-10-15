@@ -95,6 +95,9 @@ type Notes struct {
 	OS   string `json:"os,omitempty"` // windows or linux: hosts configured through the agent
 	Base string `json:"base,omitempty"`
 	DNS  string `json:"dns,omitempty"` // DNSRouter or a host name
+	// Source is the VMID a base image was registered from, for registering
+	// its next version from the same VM.
+	Source string `json:"source,omitempty"`
 }
 
 const notesPrefix = "battleship:"
@@ -118,6 +121,8 @@ func ParseNotes(desc string) (Notes, bool) {
 				n.Base = v
 			case "dns":
 				n.DNS = v
+			case "source":
+				n.Source = v
 			}
 		}
 		return n, true
@@ -172,7 +177,7 @@ func (n Notes) Checked(subnet string) Notes {
 
 func (n Notes) String() string {
 	parts := []string{notesPrefix}
-	for _, kv := range [][2]string{{"ip", n.IP}, {"os", n.OS}, {"base", n.Base}, {"dns", n.DNS}} {
+	for _, kv := range [][2]string{{"ip", n.IP}, {"os", n.OS}, {"base", n.Base}, {"dns", n.DNS}, {"source", n.Source}} {
 		if kv[1] != "" {
 			parts = append(parts, kv[0]+"="+kv[1])
 		}

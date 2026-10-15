@@ -53,8 +53,37 @@ h1,h2,h3,p{margin:0}
 .sp{flex:1}
 summary{list-style:none;cursor:pointer}
 summary::-webkit-details-marker{display:none}
-.notes{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;color:var(--tx2);margin-top:2px;max-width:60ch}
-.notes-d summary{font-size:12px}
+a:not([class]){text-underline-offset:2px}
+/* A disclosure toggle: underlined, with a marker that turns when open. */
+.disc{display:inline-flex;align-items:center;gap:4px;color:var(--tx2);font-size:var(--t2);text-decoration:underline;text-underline-offset:2px}
+.disc::before{content:"";width:0;height:0;border-left:5px solid currentColor;border-top:4px solid transparent;border-bottom:4px solid transparent}
+details[open]>.disc::before{transform:rotate(90deg)}
+.notes{white-space:pre-wrap;overflow-wrap:anywhere;font:var(--t1)/1.5 var(--fm);color:var(--tx);background:var(--sf2);border-radius:var(--r1);padding:6px 8px;margin-top:4px;max-width:60ch}
+.btn.sm{min-height:26px;padding:0 9px;font-size:var(--t2)}
+.acts{display:flex;flex-direction:column;align-items:stretch;gap:4px}
+.tbl td.act{width:1%}
+.tbl td.img{min-width:190px}
+.tbl .iname{font-weight:600}
+.tbl .chips{margin:4px 0 2px;gap:4px}
+.tbl .chip{height:20px;padding:0 7px}
+.tbl .meta,.imgnotes .meta{color:var(--tx3);font-size:var(--t1)}
+.olds{margin-top:12px;font-size:var(--t2)}
+.olds ul{list-style:none;margin:8px 0 0;padding:0;border:1px solid var(--ln);border-radius:var(--r2)}
+.olds li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;color:var(--tx2)}
+.olds li+li{border-top:1px solid var(--ln)}
+.olds .meta{color:var(--tx3);font-size:var(--t1)}
+@media (max-width:640px){
+  .tbl.cards thead{display:none}
+  .tbl.cards tr{display:block;border-top:1px solid var(--ln);padding:8px 10px}
+  .tbl.cards tr:first-child{border-top:0}
+  .tbl.cards td{display:block;border:0;padding:0}
+  .tbl.cards td+td{margin-top:8px}
+  .tbl.cards td:empty{display:none}
+  .tbl.cards tr.free td{display:inline;margin:0 8px 0 0}
+  .tbl.cards td[data-label]::before{content:attr(data-label);display:block;color:var(--tx3);font-size:var(--t1)}
+  .tbl.cards .notes{max-width:none}
+  .tbl.cards .acts{flex-direction:row;flex-wrap:wrap}
+}
 .imgnotes{margin:0;padding-left:16px;display:grid;gap:6px}
 
 /* ---------- state roles: one class sets colour (--c) and tint (--cb) ---------- */
@@ -253,8 +282,6 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .tbl tr.blk td{background:repeating-linear-gradient(135deg,transparent 0 6px,var(--sf2) 6px 9px);color:var(--tx2)}
 .tbl tr.blk .vm{text-decoration:line-through;text-decoration-color:var(--tx3)}
 .tbl tr.bad td{background:var(--bad-bg)}
-.tbl a{text-decoration:none}
-.tbl a:hover{text-decoration:underline}
 .more td{color:var(--tx3);text-align:center}
 /* the job panel folds done rows into one; the job page shows them all */
 .panel tr.fold,main .more.fold-n,.panel .c-vmid{display:none}

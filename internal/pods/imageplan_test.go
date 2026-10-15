@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -32,7 +33,8 @@ func TestImageRegisterNewVersionRetiresPrevious(t *testing.T) {
 	it := plan.Items[0]
 	want := []Step{StepClone, StepLabel, StepCDROM, StepConvert, StepRetire}
 	if it.Name != "debian-12-v2" || it.VMID != 8001 || it.Blocked != "" || !slices.Equal(it.Steps, want) ||
-		it.Source.VMID != 150 || !slices.Equal(it.Source.Bridges, []string{"vmbr0"}) || it.Pool != "dev-templates" || it.Tags != "base;linux" || it.Supersedes.VMID != 8000 {
+		it.Source.VMID != 150 || !slices.Equal(it.Source.Bridges, []string{"vmbr0"}) || it.Pool != "dev-templates" || it.Tags != "base;linux" || it.Supersedes.VMID != 8000 ||
+		it.Notes == nil || it.Notes.Source != "150" {
 		t.Errorf("item = %+v", it)
 	}
 	if !slices.Contains(plan.Locks, "family:debian-12") || !slices.Contains(plan.Locks, "vmid:8001") {
@@ -87,5 +89,36 @@ func TestImageDeprecateAndDelete(t *testing.T) {
 	}
 	if _, err := p.ImageDelete(ctx, ImageRequest{Image: "nope-v1"}); err == nil {
 		t.Error("deleting a missing image")
+	}
+}
+
+func TestSourceVMID(t *testing.T) {
+	for desc, want := range map[string]int{
+		"Login: root\nbattleship: source=8920": 8920,
+		"battleship: source=0150":              0,
+		"battleship: source=+150":              0,
+		"battleship: source=99":                0,
+		"battleship: source=x":                 0,
+		"source=8920":                          0,
+		"":                                     0,
+	} {
+		if got := sourceVMID(desc); got != want {
+			t.Errorf("sourceVMID(%q) = %d, want %d", desc, got, want)
+		}
+	}
+}
+
+// A router's working copy has its LAN on the edit bridge too, never on the
+// slot bridge it was registered from.
+func TestImageEditMovesEveryNIC(t *testing.T) {
+	f := imageFake()
+	f.Add(proxmox.VM{VMID: 8010, Name: "gw-v1", Node: "alder", Template: true, Tags: "base;router"},
+		map[string]string{"net0": "virtio=BC:24:11:00:80:10,bridge=devext01", "net1": "virtio=BC:24:11:00:80:11,bridge=devint01"})
+	plan, err := NewPlanner(f, envConfig()).ImageEdit(context.Background(), ImageRequest{Family: "gw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]string{"net0": "vmbr0", "net1": "vmbr0"}; !maps.Equal(plan.Items[0].NICs, want) {
+		t.Errorf("NICs = %v, want %v", plan.Items[0].NICs, want)
 	}
 }

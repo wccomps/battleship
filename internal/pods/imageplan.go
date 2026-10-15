@@ -106,7 +106,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 	}
 	it := Item{Name: ImageName(req.Family, version), VMID: vmid, Node: src.Node, Pool: p.Cfg.Images.Pool,
 		Source: &Source{VMID: src.VMID, Node: src.Node, Name: src.Name}, Tags: ImageTags(kind, false),
-		Steps: []Step{StepClone, StepLabel, StepCDROM, StepConvert}}
+		Notes: &Notes{Source: strconv.Itoa(src.VMID)}, Steps: []Step{StepClone, StepLabel, StepCDROM, StepConvert}}
 	if newest, ok := Newest(images, req.Family); ok {
 		it.Supersedes = &Source{VMID: newest.VMID, Node: newest.Node, Name: newest.Name}
 		it.Steps = append(it.Steps, StepRetire)
@@ -136,8 +136,8 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		Locks: []string{"family:" + req.Family, "vmid:" + strconv.Itoa(vmid)}}, nil
 }
 
-// ImageEdit plans a working copy of a family's newest version, on the edit
-// bridge, with its tags cleared so it isn't taken for a base image.
+// ImageEdit plans a working copy of a family's newest version, every NIC on
+// the edit bridge, with its tags cleared so it isn't taken for a base image.
 func (p Planner) ImageEdit(ctx context.Context, req ImageRequest) (*Plan, error) {
 	vms, err := p.API.ClusterVMs(ctx)
 	if err != nil {
@@ -164,6 +164,13 @@ func (p Planner) ImageEdit(ctx context.Context, req ImageRequest) (*Plan, error)
 			return nil, fmt.Errorf("reading %s: %w", newest.Name, err)
 		}
 		it.Source.Bridges = sourceBridges(cfg)
+		// Every NIC goes on the edit bridge: a router's LAN left on a slot's
+		// bridge would clash with that environment's router.
+		for i := range 32 {
+			if key := fmt.Sprintf("net%d", i); cfg[key] != "" {
+				it.NICs[key] = p.Cfg.Images.EditBridge
+			}
+		}
 	}
 	return &Plan{Kind: KindImageEdit, Config: ConfigHash(KindImageEdit, p.Cfg), Items: []Item{it},
 		Locks: []string{"family:" + req.Family, "vmid:" + strconv.Itoa(vmid)}}, nil

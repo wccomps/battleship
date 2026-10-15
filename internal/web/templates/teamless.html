@@ -55,7 +55,7 @@
 <label class="lbl" for="family">Family</label>
 <input class="inp" type="text" id="family" name="family" value="{{.In.Family}}" required list="families" autocomplete="off" spellcheck="false" aria-describedby="family-hint">
 <span class="hint" id="family-hint">e.g. debian-12 · an existing family gets its next version</span>
-<datalist id="families">{{range .Images}}<option value="{{.Family}}"></option>{{end}}</datalist>
+<datalist id="families">{{range .Families}}<option value="{{.}}"></option>{{end}}</datalist>
 </div>
 <fieldset class="field">
 <legend>Kind <span class="muted">· for a new family</span></legend>
@@ -66,7 +66,7 @@
 <div class="field">
 <label class="lbl" for="family">Family</label>
 <input class="inp" type="text" id="family" name="family" value="{{.In.Family}}" required list="families" autocomplete="off" spellcheck="false">
-<datalist id="families">{{range .Images}}<option value="{{.Family}}"></option>{{end}}</datalist>
+<datalist id="families">{{range .Families}}<option value="{{.}}"></option>{{end}}</datalist>
 </div>
 {{- end}}
 {{- if or (eq .Op.Kind "image-deprecate") (eq .Op.Kind "image-delete")}}
