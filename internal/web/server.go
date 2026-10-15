@@ -196,7 +196,7 @@ func New(d Deps) (*Server, error) {
 }
 
 // Handler serves every route group behind forwarded-header handling, security
-// headers and the request log.
+// headers, the request log and the body cap.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.authRoutes(mux)
@@ -204,7 +204,7 @@ func (s *Server) Handler() http.Handler {
 	s.assetRoutes(mux)
 	s.volunteerRoutes(mux)
 	mux.HandleFunc("/", s.notFound)
-	return forwarded(s.proxies, s.secure(s.logRequests(mux)))
+	return forwarded(s.proxies, s.secure(s.logRequests(s.limitBody(mux))))
 }
 
 // CloseStreams ends every open event stream, refuses new ones, and cancels the

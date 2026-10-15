@@ -14,10 +14,59 @@ import (
 
 	"pgregory.net/rapid"
 
+	"github.com/wccomps/battleship/internal/auth"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
 )
+
+// A body over maxBody is refused with 413 before any handler, or auth's
+// CSRF check, parses it: signed in or not, with or without a length. One at
+// the cap works.
+func TestBodyCap(t *testing.T) {
+	h := newHarness(t)
+	h.poll()
+	op := h.login(asOperator)
+	// send posts a power preview form padded to n bytes.
+	send := func(signedIn, chunked bool, target string, n int) *httptest.ResponseRecorder {
+		form := "teams=1&action=stop&" + url.Values{auth.CSRFField: {op.CSRF}}.Encode() + "&pad="
+		req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form+strings.Repeat("x", n-len(form))))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if signedIn {
+			req.AddCookie(op.Cookie)
+		}
+		if chunked {
+			req.ContentLength = -1
+		}
+		rec := httptest.NewRecorder()
+		h.h.ServeHTTP(rec, req)
+		return rec
+	}
+	for _, signedIn := range []bool{false, true} {
+		for _, chunked := range []bool{false, true} {
+			for _, target := range []string{"/power/preview", "/auth/logout"} {
+				rec := send(signedIn, chunked, target, maxBody+1)
+				if rec.Code != http.StatusRequestEntityTooLarge {
+					t.Errorf("signed in %v, chunked %v: POST %s over the cap = %d, want 413", signedIn, chunked, target, rec.Code)
+				}
+				contains(t, "over-cap page", rec.Body.String(), "Request too large", "more than 1 MiB")
+			}
+			for _, n := range []int{60_000, maxBody - 1, maxBody} {
+				want := http.StatusUnauthorized
+				if signedIn {
+					want = http.StatusOK
+				}
+				if rec := send(signedIn, chunked, "/power/preview", n); rec.Code != want {
+					t.Errorf("signed in %v, chunked %v: preview of %d bytes = %d, want %d\n%s", signedIn, chunked, n, rec.Code, want, rec.Body)
+				}
+			}
+		}
+	}
+	if rec := send(true, false, "/auth/logout", maxBody); rec.Code != http.StatusSeeOther {
+		t.Errorf("logout at the cap = %d, want 303", rec.Code)
+	}
+	h.noJobs("after capped posts")
+}
 
 func TestSecurityHeaders(t *testing.T) {
 	h := newHarness(t)
