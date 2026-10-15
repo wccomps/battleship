@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -109,4 +110,12 @@ func TestPropValidateRefusesUnprintableText(t *testing.T) {
 			t.Fatalf("Validate accepted %+v", in)
 		}
 	})
+}
+
+// A refused value is quoted only in part, so pages and logs stay short.
+func TestValidateBoundsRefusedText(t *testing.T) {
+	in := Inputs{Kind: pods.KindSnapshot, Teams: "1", Snapshot: "round2", Description: strings.Repeat("x", 5000) + "\x1b"}
+	if err := in.Validate(); err == nil || len(err.Error()) > 200 {
+		t.Errorf("Validate = %d bytes: %v", len(fmt.Sprint(err)), err)
+	}
 }

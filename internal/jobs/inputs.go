@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 	"unicode"
@@ -99,17 +98,24 @@ func (in Inputs) Validate() error {
 // checkText rejects invalid UTF-8 and control characters in every string
 // field. Each value is one line: the form splits env hosts by line.
 func (in Inputs) checkText() error {
-	fields := map[string][]string{
-		"teams": {in.Teams}, "hosts": in.Hosts, "pattern": {in.Pattern}, "snapshot": {in.Snapshot},
-		"description": {in.Description}, "action": {in.Action}, "vms": in.VMs, "domain": {in.Domain},
-		"router": {in.Router}, "env hosts": in.EnvHosts, "dns": {in.DNS}, "family": {in.Family},
-		"image kind": {in.ImageKind}, "image": {in.Image},
+	fields := []struct {
+		name   string
+		values []string
+	}{
+		{"teams", []string{in.Teams}}, {"hosts", in.Hosts}, {"vms", in.VMs}, {"pattern", []string{in.Pattern}},
+		{"snapshot", []string{in.Snapshot}}, {"description", []string{in.Description}}, {"action", []string{in.Action}},
+		{"domain", []string{in.Domain}}, {"router", []string{in.Router}}, {"env hosts", in.EnvHosts}, {"dns", []string{in.DNS}},
+		{"family", []string{in.Family}}, {"image kind", []string{in.ImageKind}}, {"image", []string{in.Image}},
 	}
 	var errs []error
-	for _, name := range slices.Sorted(maps.Keys(fields)) {
-		for _, v := range fields[name] {
+	for _, f := range fields {
+		for _, v := range f.values {
 			if !utf8.ValidString(v) || strings.ContainsFunc(v, unicode.IsControl) {
-				errs = append(errs, fmt.Errorf("%s must be printable text, not %q", name, v))
+				// Bounded: the error reaches pages and logs.
+				if len(v) > 100 {
+					v = v[:100] + "..."
+				}
+				errs = append(errs, fmt.Errorf("%s must be printable text, not %q", f.name, v))
 				break
 			}
 		}
