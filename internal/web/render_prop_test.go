@@ -26,7 +26,7 @@ var hostileStrings = []string{
 	`javascript:alert(1)`, ` JaVaScRiPt:alert(1)`, `</template><script>x()</script>`, `</div></main>`,
 	`{{.CSRF}}`, `<!--`, `-->`, `<svg onload=alert(1)>`, `<style>*{}</style>`, `style="x"`,
 	"a\rb", "a\r\nb", "a\nb", "\u2028\u2029", "\x00", "\xff\xfe", "&amp;&lt;", "data:text/html,<b>",
-	"team01-dc", "*.kilo.alpha", "01-03", "", " ", "lead", "operator", "#ZgotmplZ",
+	"team01-dc", "*.kilo.alpha", "01-03", "", " ", "  ", "lead", "operator", "#ZgotmplZ",
 }
 
 // hostile draws a string built of hostile pieces and arbitrary text.

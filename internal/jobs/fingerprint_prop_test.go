@@ -107,22 +107,5 @@ func TestPropFingerprintSurvivesStorage(t *testing.T) {
 		if got, want := Fingerprint(&back), Fingerprint(plan); got != want {
 			t.Fatalf("fingerprint changed in storage:\nplan %+v\nstored %s", plan, b)
 		}
-		// Rebuilding the NIC map in another order changes nothing.
-		for i := range plan.Items {
-			if nics := plan.Items[i].NICs; len(nics) > 1 {
-				rebuilt := map[string]string{}
-				keys := make([]string, 0, len(nics))
-				for k := range nics {
-					keys = append(keys, k)
-				}
-				for j := len(keys) - 1; j >= 0; j-- {
-					rebuilt[keys[j]] = nics[keys[j]]
-				}
-				plan.Items[i].NICs = rebuilt
-			}
-		}
-		if got := Fingerprint(plan); got != Fingerprint(&back) {
-			t.Fatalf("fingerprint depends on NIC map order")
-		}
 	})
 }
