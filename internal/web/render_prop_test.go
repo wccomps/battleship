@@ -2,7 +2,12 @@ package web
 
 import (
 	"bytes"
+	"fmt"
+	"html"
 	"maps"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"slices"
 	"strings"
@@ -10,6 +15,7 @@ import (
 
 	"pgregory.net/rapid"
 
+	"github.com/wccomps/battleship/internal/auth"
 	"github.com/wccomps/battleship/internal/pods"
 )
 
@@ -121,6 +127,7 @@ func TestPropPagesEscapeHostileText(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		page := rapid.SampledFrom(names).Draw(t, "page")
 		v := drawHostile[view](t, "view")
+		v.Refresh = localOnly(rapid.OneOf(rapid.Just(v.Refresh), offSiteURL).Draw(t, "refresh")) // as AuthPage sets it
 		v.Data = pageData(t, page)
 		root := rapid.SampledFrom([]string{"layout", "panel"}).Draw(t, "root")
 		var buf bytes.Buffer
@@ -139,6 +146,78 @@ func TestPropPagesEscapeHostileText(t *testing.T) {
 		}
 		if want := map[string]int{"layout": 1, "panel": 0}[root]; scripts != want {
 			t.Fatalf("%s as %s has %d scripts, want %d", page, root, scripts, want)
+		}
+		if err := refreshesOnSite(tags); err != nil {
+			t.Fatalf("%s as %s: %v", page, root, err)
+		}
+	})
+}
+
+// offSiteURL draws addresses that leave the site, or nearly do, mixed with
+// local paths that carry hostile text.
+var offSiteURL = rapid.OneOf(
+	rapid.SampledFrom([]string{"//evil.example", "/\\evil.example", "/\tevil", "javascript:alert(1)", "https://evil.example/",
+		"http:/evil.example", " /x", "/x;url=//evil.example", "/x\"><script>", "/%2F%2Fevil.example", "/auth/proxmox?finish=1&code=a"}),
+	rapid.Map(rapid.String(), func(s string) string { return "/" + s }),
+	rapid.String(),
+)
+
+// siteBase is where the test pages are served.
+var siteBase = &url.URL{Scheme: "https", Host: "battleship.example.org", Path: "/"}
+
+// staysOnSite reports whether a browser on siteBase following u stays on
+// its origin. Browsers drop tabs and newlines and read \ as /.
+func staysOnSite(u string) bool {
+	if !strings.HasPrefix(u, "/") || strings.HasPrefix(u, "//") ||
+		strings.ContainsFunc(u, func(r rune) bool { return r == '\\' || r < 0x20 || r == 0x7f }) {
+		return false
+	}
+	ref, err := url.Parse(u)
+	if err != nil {
+		return false
+	}
+	dest := siteBase.ResolveReference(ref)
+	return dest.Scheme == siteBase.Scheme && dest.Host == siteBase.Host
+}
+
+// refreshesOnSite checks that every meta refresh in tags goes to a path
+// on this site.
+func refreshesOnSite(tags []markupTag) error {
+	for _, tag := range tags {
+		if tag.Name != "meta" || !strings.EqualFold(tag.Attrs["http-equiv"], "refresh") {
+			continue
+		}
+		content := html.UnescapeString(tag.Attrs["content"])
+		to, ok := strings.CutPrefix(content, "0;url=")
+		if !ok || !staysOnSite(to) {
+			return fmt.Errorf("meta refresh %q leaves the site", content)
+		}
+	}
+	return nil
+}
+
+// Auth pages, whatever link and refresh they are given, offer and go on
+// only to paths on this site.
+func TestPropAuthPageGoesOnLocally(t *testing.T) {
+	s := &Server{}
+	rapid.Check(t, func(t *rapid.T) {
+		p := drawHostile[auth.Page](t, "page")
+		p.Status = http.StatusOK
+		p.Link = rapid.OneOf(rapid.Just(p.Link), offSiteURL).Draw(t, "link")
+		p.Refresh = rapid.OneOf(rapid.Just(p.Refresh), offSiteURL).Draw(t, "refresh")
+		w := httptest.NewRecorder()
+		s.AuthPage(w, httptest.NewRequest(http.MethodGet, "/", nil), p)
+		tags, err := checkMarkup(w.Body.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := refreshesOnSite(tags); err != nil {
+			t.Fatal(err)
+		}
+		for _, tag := range tags {
+			if href, ok := tag.Attrs["href"]; ok && tag.Attrs["class"] == "btn" && !staysOnSite(html.UnescapeString(href)) {
+				t.Fatalf("links to %q", href)
+			}
 		}
 	})
 }
