@@ -25,7 +25,7 @@ var hostileStrings = []string{
 	`<script>alert(1)</script>`, `"><img src=x onerror=alert(1)>`, `' onmouseover='alert(1)`,
 	`javascript:alert(1)`, ` JaVaScRiPt:alert(1)`, `</template><script>x()</script>`, `</div></main>`,
 	`{{.CSRF}}`, `<!--`, `-->`, `<svg onload=alert(1)>`, `<style>*{}</style>`, `style="x"`,
-	"a\rb", "a\r\nb", "a\nb", "  ", "\x00", "\xff\xfe", "&amp;&lt;", "data:text/html,<b>",
+	"a\rb", "a\r\nb", "a\nb", "\u2028\u2029", "\x00", "\xff\xfe", "&amp;&lt;", "data:text/html,<b>",
 	"team01-dc", "*.kilo.alpha", "01-03", "", " ", "lead", "operator", "#ZgotmplZ",
 }
 

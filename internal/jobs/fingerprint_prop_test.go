@@ -12,7 +12,7 @@ import (
 // fpTexts are strings that stress JSON: quotes, escapes, markup, line
 // separators, replacement characters and wide runes. All are valid UTF-8,
 // which is what a stored plan can hold.
-var fpTexts = []string{"", "a", "team01-dc", "x y", `"q"`, `\`, "<b>&amp;</b>", "  ", "�", "é", "\U0001F600", "\n", "\t", "\x00", "\x7f", "null", "{}", ","}
+var fpTexts = []string{"", "a", "team01-dc", "x y", `"q"`, `\`, "<b>&amp;</b>", "\u2028\u2029", "�", "é", "\U0001F600", "\n", "\t", "\x00", "\x7f", "null", "{}", ","}
 
 func drawFPText(t *rapid.T, label string) string {
 	return rapid.OneOf(rapid.SampledFrom(fpTexts), rapid.String()).Draw(t, label)
