@@ -87,12 +87,7 @@ func TestPropVerifyGuest(t *testing.T) {
 	macs := []string{mac, mac, mac, "bc:24:11:00:21:02", "bc:24:11:00:21:00", "bc-24-11-00-21-01", "", "BC:24:11:00:21:01"}
 	ips := []string{"192.168.100.20/24", "192.168.100.20/24", "192.168.100.20/25", "192.168.100.20/240", "192.168.100.200/24", "192.168.100.2/24",
 		"192.168.100.21/24", "192.168.100.20", "192.168.100.20/", "92.168.100.20/24", "fe80::1/64", "169.254.1.1/16", " 192.168.100.20/24"}
-	rapid.Check(t, func(t *rapid.T) {
-		var nics []verifyNIC
-		for range rapid.IntRange(1, 3).Draw(t, "nics") {
-			nics = append(nics, verifyNIC{rapid.SampledFrom(macs).Draw(t, "mac"), rapid.SliceOfN(rapid.SampledFrom(ips), 0, 3).Draw(t, "ips")})
-		}
-		hostname := rapid.SampledFrom(hostnames).Draw(t, "hostname")
+	check := func(t interface{ Fatalf(string, ...any) }, nics []verifyNIC, hostname string) {
 		want := verifyModel(nics, hostname, mac, "192.168.100.20/24", "oak")
 
 		f := podstest.New("alder")
@@ -109,5 +104,22 @@ func TestPropVerifyGuest(t *testing.T) {
 		if got := len(res.Succeeded) == 1; got != want {
 			t.Fatalf("verify of hostname %q with %+v: passed = %v, want %v (result %+v)", hostname, nics, got, want, res)
 		}
+	}
+	ok, other := "192.168.100.20/24", "192.168.100.21/24"
+	// Two interfaces with net0's MAC, and other interfaces' addresses.
+	for _, nics := range [][]verifyNIC{
+		{{mac, []string{ok}}, {mac, nil}}, {{mac, nil}, {mac, []string{ok}}}, {{mac, []string{other}}, {mac, []string{ok}}}, {{mac, []string{ok}}, {mac, []string{other}}},
+		{{"bc:24:11:00:21:02", []string{ok}}, {mac, []string{other}}}, {{mac, []string{other}}, {"bc:24:11:00:21:02", []string{ok}}}, {{mac, []string{ok}}},
+	} {
+		for _, h := range []string{"oak", "OAK.kilo", "oakx"} {
+			check(t, nics, h)
+		}
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		var nics []verifyNIC
+		for range rapid.IntRange(1, 3).Draw(t, "nics") {
+			nics = append(nics, verifyNIC{rapid.SampledFrom(macs).Draw(t, "mac"), rapid.SliceOfN(rapid.SampledFrom(ips), 0, 3).Draw(t, "ips")})
+		}
+		check(t, nics, rapid.SampledFrom(hostnames).Draw(t, "hostname"))
 	})
 }
