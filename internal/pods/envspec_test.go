@@ -1,6 +1,7 @@
 package pods
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"unicode"
@@ -127,5 +128,110 @@ func TestPropUserNotes(t *testing.T) {
 		if len([]rune(got)) <= maxUserNotes && UserNotes(got) != got {
 			t.Fatalf("not idempotent: %q -> %q", got, UserNotes(got))
 		}
+	})
+}
+
+// safeFamily is a base-image family written out without regexps: 1-40
+// lower-case ASCII letters, digits and inner dashes, not ending in a
+// version Battleship would add (-v1 to -v9999).
+func safeFamily(f string) bool {
+	if len(f) == 0 || len(f) > 40 || f[0] == '-' || f[len(f)-1] == '-' {
+		return false
+	}
+	for i := range len(f) {
+		if c := f[i]; !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+			return false
+		}
+	}
+	i := strings.LastIndex(f, "-v")
+	if i < 0 || i == 0 {
+		return true
+	}
+	v := f[i+2:]
+	return !(len(v) >= 1 && len(v) <= 4 && v[0] != '0' && strings.Trim(v, "0123456789") == "")
+}
+
+// hostSpecParts are the pieces of "host=family:octet" near the edge of
+// valid, keyed by part; the first of each is valid.
+var hostSpecParts = map[string][]string{
+	"host": {"teak", "dc", "a", "x-1", strings.Repeat("a", 63), "Teak", "-teak", "teak-", "te.ak", "te_ak", "", " ", strings.Repeat("a", 64),
+		"te ak", "t\u0435ak", "teak\u00a0x"},
+	"family": {"debian-12", "win2022", "gw", "x-v0", "x-v01", "x-v10000", strings.Repeat("a", 40), "WIN 2022", "win 2022", "Win2022", "win2022-v1",
+		"x-v9999", "-x", "x-", "", " ", "debian_12", strings.Repeat("a", 41), "a=b", "debian-12\u00a0", "deb\u0131an"},
+	"octet": {"", ":10", ": 10 ", ":4", ":254", ":+10", ":007", ":3", ":255", ":0", ":", ":a", "::10", ":1e1", ":\u0661\u0660", ":-4", ": "},
+	"sep":   {"=", " = ", "==", "=:"},
+}
+
+// parseHostSpecModel is what ParseHostSpec should read from s.
+func parseHostSpecModel(s string) (HostSpec, bool) {
+	eq := strings.IndexByte(s, '=')
+	if eq < 0 {
+		return HostSpec{}, false
+	}
+	rest := s[eq+1:]
+	h := HostSpec{Host: strings.TrimSpace(s[:eq])}
+	octet, hasOctet := "", false
+	if c := strings.IndexByte(rest, ':'); c >= 0 {
+		rest, octet, hasOctet = rest[:c], strings.TrimSpace(rest[c+1:]), true
+	}
+	h.Family = strings.TrimSpace(rest)
+	if !safeLabel(h.Host) || !safeFamily(h.Family) {
+		return HostSpec{}, false
+	}
+	if hasOctet {
+		n, err := strconv.ParseInt(octet, 10, 64)
+		if err != nil || n < 4 || n > 254 {
+			return HostSpec{}, false
+		}
+		h.Octet = int(n)
+	}
+	return h, true
+}
+
+func checkHostSpec(t interface{ Fatalf(string, ...any) }, s string) {
+	got, err := ParseHostSpec(s)
+	want, ok := parseHostSpecModel(s)
+	if (err == nil) != ok || got != want {
+		t.Fatalf("ParseHostSpec(%q) = %+v, %v; want %+v, ok %v", s, got, err, want, ok)
+	}
+	if err == nil {
+		if again, err := ParseHostSpec(got.String()); err != nil || again != got {
+			t.Fatalf("ParseHostSpec(%q) = %+v, %v", got.String(), again, err)
+		}
+	}
+}
+
+// A host spec parses to a host name, a family CheckFamily takes and an
+// address octet in range, or not at all, and writes back the same.
+func TestPropParseHostSpec(t *testing.T) {
+	for _, s := range []string{"dc=WIN 2022", "dc=win2022-v1", "dc=x-v10000", "dc=a=b", "dc=win2022:+10", "dc=win2022:007", "dc==x", "dc=:10"} {
+		checkHostSpec(t, s)
+	}
+	for part, values := range hostSpecParts {
+		for _, v := range values {
+			parts := map[string]string{"host": "teak", "family": "debian-12", "octet": ":10", "sep": "="}
+			parts[part] = v
+			checkHostSpec(t, parts["host"]+parts["sep"]+parts["family"]+parts["octet"])
+		}
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		// Spoil one part; the rest are valid.
+		spoilt := rapid.SampledFrom([]string{"host", "family", "octet", "sep", "none", "any"}).Draw(t, "spoilt")
+		if spoilt == "any" {
+			checkHostSpec(t, rapid.String().Draw(t, "spec"))
+			return
+		}
+		s := ""
+		for _, part := range []string{"host", "sep", "family", "octet"} {
+			values := hostSpecParts[part]
+			if part != spoilt {
+				values = values[:1]
+				if part == "octet" {
+					values = []string{"", ":10", ": 20 "}
+				}
+			}
+			s += rapid.SampledFrom(values).Draw(t, part)
+		}
+		checkHostSpec(t, s)
 	})
 }

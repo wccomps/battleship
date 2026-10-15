@@ -68,6 +68,9 @@ func ParseHostSpec(s string) (HostSpec, error) {
 	if h.Family == "" {
 		return HostSpec{}, fmt.Errorf("%q: name the base image after =", strings.TrimSpace(s))
 	}
+	if err := CheckFamily(h.Family); err != nil {
+		return HostSpec{}, err
+	}
 	if hasOctet {
 		n, err := strconv.Atoi(strings.TrimSpace(octet))
 		if err != nil || n < FirstHostOctet || n > LastHostOctet {
