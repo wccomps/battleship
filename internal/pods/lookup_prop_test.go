@@ -319,3 +319,19 @@ func TestPropVMNamesWithRepeatedTeam(t *testing.T) {
 		}
 	})
 }
+
+// A pattern that is not a valid glob matches nothing, not even a snapshot
+// named like the pattern.
+func TestBadBaselinePatternMatchesNothing(t *testing.T) {
+	for _, bad := range []string{"[", "a[", `\`, "[a-", "fresh_clone_[0-9"} {
+		d := config.Default().Deploy
+		d.BaselinePatterns = []string{bad}
+		snaps := []proxmox.Snapshot{{Name: bad, Time: 1}}
+		if name, ok := BaselineSnapshot(d, snaps); ok {
+			t.Errorf("BaselineSnapshot with pattern %q picked %q", bad, name)
+		}
+		if HasBaseline(d, []string{bad}) {
+			t.Errorf("HasBaseline with pattern %q", bad)
+		}
+	}
+}
