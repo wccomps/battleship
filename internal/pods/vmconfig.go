@@ -28,13 +28,14 @@ func isNetKey(k string) bool {
 // option is k=v.
 
 // splitOptions splits "head,k=v,k2=v2" into the head (volume or model=MAC)
-// and its options.
+// and its options, dropping any without a key (",,").
 func splitOptions(s string) (head string, opts map[string]string) {
 	parts := strings.Split(s, ",")
 	opts = map[string]string{}
 	for _, p := range parts[1:] {
-		k, v, _ := strings.Cut(p, "=")
-		opts[k] = v
+		if k, v, _ := strings.Cut(p, "="); k != "" {
+			opts[k] = v
+		}
 	}
 	return parts[0], opts
 }
