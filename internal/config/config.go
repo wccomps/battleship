@@ -467,8 +467,9 @@ func (c Config) Validate() error {
 		}
 	}
 
-	// A second {host} could not be told from part of the first when a name is
-	// read back, so such VMs would vanish from the grid.
+	// With {host} twice, a host containing the separator text between them
+	// could not be told apart from it, so names use {host} once to parse
+	// unambiguously.
 	if strings.Count(c.Naming.VMName, "{host}") != 1 {
 		errs = append(errs, errors.New("naming.vm_name must contain {host} once"))
 	}
