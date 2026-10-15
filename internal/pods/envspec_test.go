@@ -1,6 +1,9 @@
 package pods
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseHostSpec(t *testing.T) {
 	for in, want := range map[string]HostSpec{
@@ -76,5 +79,23 @@ func TestPickOctetIsStableAndAvoidsUsed(t *testing.T) {
 	}
 	if _, ok := PickOctet("kilo.alpha", "teak", used); ok {
 		t.Error("PickOctet found an octet in a full subnet")
+	}
+}
+
+func TestUserNotes(t *testing.T) {
+	for _, c := range []struct{ desc, want string }{
+		{"", ""},
+		{"battleship: ip=192.168.100.10 base=deb-v1", ""},
+		{"Login: root / pw\nbattleship: ip=192.168.100.10\n", "Login: root / pw"},
+		{"  battleship: reboot\nDebian 13\r\n\nLogin: root  \n", "Debian 13\n\nLogin: root"},
+		{"<script>alert(1)</script>", "<script>alert(1)</script>"}, // pages escape it
+	} {
+		if got := UserNotes(c.desc); got != c.want {
+			t.Errorf("UserNotes(%q) = %q, want %q", c.desc, got, c.want)
+		}
+	}
+	long := strings.Repeat("é", maxUserNotes+5)
+	if got := []rune(UserNotes(long)); len(got) != maxUserNotes+1 || got[maxUserNotes] != '…' {
+		t.Errorf("long notes keep %d runes, want %d and an ellipsis", len(got), maxUserNotes+1)
 	}
 }

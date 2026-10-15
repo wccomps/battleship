@@ -124,6 +124,25 @@ func ParseNotes(desc string) (Notes, bool) {
 	return Notes{}, false
 }
 
+// maxUserNotes caps the notes UserNotes keeps, in runes.
+const maxUserNotes = 4000
+
+// UserNotes is desc without battleship's lines: what people wrote, such as
+// logins. It is text for people; pages escape it like any other text.
+func UserNotes(desc string) string {
+	var keep []string
+	for _, line := range strings.Split(desc, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), notesPrefix) {
+			keep = append(keep, strings.TrimRight(line, " \t\r"))
+		}
+	}
+	s := strings.TrimSpace(strings.Join(keep, "\n"))
+	if r := []rune(s); len(r) > maxUserNotes {
+		s = string(r[:maxUserNotes]) + "…"
+	}
+	return s
+}
+
 // Checked drops the values a guest script can't take. Users can edit notes,
 // and IP reaches scripts that run as root or SYSTEM: it must be a host
 // address of subnet, or the host is treated as having none.

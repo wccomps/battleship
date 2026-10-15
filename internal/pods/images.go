@@ -1,6 +1,7 @@
 package pods
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"slices"
@@ -8,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/wccomps/battleship/internal/proxmox"
 )
@@ -37,6 +40,7 @@ type BaseImage struct {
 	VMID       int
 	Node       string
 	Deprecated bool
+	Notes      string // its Proxmox notes, for people: logins, what's installed
 }
 
 var (
@@ -161,4 +165,22 @@ func ImageByName(images []BaseImage, name string) (BaseImage, bool) {
 		}
 	}
 	return BaseImage{}, false
+}
+
+// ReadNotes reads each image's notes as the user. Notes are only shown, so an
+// image whose config can't be read keeps none.
+func (p Planner) ReadNotes(ctx context.Context, images []BaseImage) []BaseImage {
+	out := slices.Clone(images)
+	var g errgroup.Group
+	g.SetLimit(envReads)
+	for i := range out {
+		g.Go(func() error {
+			if cfg, err := p.API.VMConfig(ctx, out[i].Node, out[i].VMID); err == nil {
+				out[i].Notes = UserNotes(cfg["description"])
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return out
 }

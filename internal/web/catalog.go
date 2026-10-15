@@ -33,7 +33,7 @@ func (s *Server) newCatalogPage(ctx context.Context) catalogPage {
 		return p
 	}
 	p.Envs = envs
-	p.Images = pods.BaseImages(vms)
+	p.Images = s.planner(ctx).ReadNotes(ctx, pods.BaseImages(vms))
 	p.Routers = pods.Families(p.Images, pods.ImageRouter)
 	for _, k := range []string{pods.ImageWindows, pods.ImageLinux, pods.ImageOther} {
 		p.Others = append(p.Others, pods.Families(p.Images, k)...)
