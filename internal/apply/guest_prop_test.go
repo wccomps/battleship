@@ -20,26 +20,29 @@ func checkLastLines(t interface{ Fatalf(string, ...any) }, s string, n int) {
 			lines = append(lines, l)
 		}
 	}
-	lines = lines[max(0, len(lines)-n):]
+	if n <= 0 {
+		lines = nil
+	} else if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
 	got := lastLines(s, n)
-	if strings.Contains(got, "\n") {
-		t.Fatalf("lastLines(%q, %d) = %q has a newline", s, n, got)
+	if strings.ContainsAny(got, "\r\n") {
+		t.Fatalf("lastLines(%q, %d) = %q has a line break", s, n, got)
 	}
 	var segs []string
 	if got != "" {
-		for _, seg := range strings.Split(got, " / ") {
-			segs = append(segs, strings.TrimSpace(seg))
-		}
+		segs = strings.Split(got, " / ")
 	}
 	if !slices.Equal(segs, lines) {
 		t.Fatalf("lastLines(%q, %d) = %q, want the last %d of non-blank lines %q", s, n, got, n, lines)
 	}
 }
 
-// The tail of a script's output is its last n non-blank lines on one line.
+// The tail of a script's output is its last n non-blank lines, trimmed, on
+// one line; none for n <= 0.
 func TestPropLastLines(t *testing.T) {
 	for _, s := range []string{"", "\n", " \n \n", "a", "a\n", "\na\n\nb\n\n", "a\r\nb\r\n", " a \n b ", "a\n\n\n\nb\nc\nd\ne\nf\ng"} {
-		for n := 0; n < 8; n++ {
+		for n := -2; n < 8; n++ {
 			checkLastLines(t, s, n)
 		}
 	}
@@ -52,7 +55,7 @@ func TestPropLastLines(t *testing.T) {
 			b.WriteString(p)
 			b.WriteString(seps.Draw(t, "sep"))
 		}
-		checkLastLines(t, b.String(), rapid.IntRange(0, 7).Draw(t, "n"))
+		checkLastLines(t, b.String(), rapid.IntRange(-2, 7).Draw(t, "n"))
 	})
 }
 
