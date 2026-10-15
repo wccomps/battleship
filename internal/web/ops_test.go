@@ -697,44 +697,64 @@ func TestOperationPostsNeedCSRF(t *testing.T) {
 	h.noJobs("after forged posts")
 }
 
-// formInputs reads back exactly what inputFields writes, for any inputs a
-// form can produce, so the confirm compares like with like.
+// formValues are field values that stress the hidden-field and link
+// encodings: edge and inner spaces, list separators, line breaks, signs and
+// zeros on numbers, and the box values.
+var formValues = []string{
+	"", " ", "a", " a , b ", "a,b", ",", "a,,b", "a\nb", "\r\n x \r\n", "a\r\nb\n\nc", " a \n b ", "\u00a0a\u00a0", "\u0085a\u2028",
+	"+5", "-5", " 12 ", "007", "-0", "0", "100", "7000", "99999999999999999999", "1e3", "0x10",
+	"yes", " yes", "YES", "no", "dc=windows", "gw=opnsense:1", "a=b\nc=d:20", "debian-12-v1", "*.kilo.alpha", "1-3",
+}
+
+// drawFormValues draws url.Values over every field, 0-2 values each, mostly
+// from formValues.
+func drawFormValues(t *rapid.T) url.Values {
+	value := rapid.OneOf(rapid.SampledFrom(formValues), rapid.SampledFrom(formValues), rapid.SampledFrom(formValues),
+		rapid.Custom(func(t *rapid.T) string {
+			return strings.Join(rapid.SliceOfN(rapid.SampledFrom(formValues), 2, 3).Draw(t, "pieces"), "")
+		}),
+		rapid.String())
+	form := url.Values{}
+	for _, name := range confirmFields {
+		if vs := rapid.SliceOfN(value, 0, 2).Draw(t, name); len(vs) > 0 {
+			form[name] = vs
+		}
+	}
+	return form
+}
+
+// Inputs read from any form, of any kind, read back the same from the
+// confirm's hidden fields and from the "change" link.
 func TestInputFieldsRoundTrip(t *testing.T) {
-	word := rapid.StringMatching(`[a-z0-9*.][a-z0-9*. -]{0,10}[a-z0-9*.]`)
-	rapid.Check(t, func(t *rapid.T) {
-		kind := rapid.SampledFrom([]pods.Kind{pods.KindDeploy, pods.KindTeardown, pods.KindReset, pods.KindPower, pods.KindSnapshot}).Draw(t, "kind")
-		in := jobs.Inputs{Kind: kind, Teams: word.Draw(t, "teams")}
-		in.Hosts = jobs.SplitList(strings.Join(rapid.SliceOfN(word, 0, 4).Draw(t, "hosts"), ","))
-		in.VMs = jobs.SplitList(strings.Join(rapid.SliceOfN(word, 0, 4).Draw(t, "vms"), ","))
-		switch kind {
-		case pods.KindDeploy:
-			in.Pattern = word.Draw(t, "pattern")
-			in.Rebuild = rapid.Bool().Draw(t, "rebuild")
-			in.NoSnapshot = rapid.Bool().Draw(t, "noSnapshot")
-		case pods.KindReset:
-			in.Snapshot = rapid.SampledFrom([]string{"", word.Draw(t, "snapshot")}).Draw(t, "snapshotOrBaseline")
-		case pods.KindPower:
-			in.Action = rapid.SampledFrom([]string{"start", "shutdown", "stop", "reboot"}).Draw(t, "action")
-		case pods.KindSnapshot:
-			in.Snapshot = word.Draw(t, "snapshot")
-			in.Description = rapid.SampledFrom([]string{"", word.Draw(t, "description")}).Draw(t, "descriptionOrNone")
-			in.VMState = rapid.Bool().Draw(t, "vmstate")
-		}
-		form := url.Values{}
+	roundTrip := func(t interface{ Fatalf(string, ...any) }, kind pods.Kind, form url.Values) {
+		in := formInputs(kind, form)
+		hidden := url.Values{}
 		for _, f := range inputFields(in) {
-			form.Add(f.Name, f.Value)
+			hidden.Add(f.Name, f.Value)
 		}
-		if got := formInputs(kind, form); !reflect.DeepEqual(got, in) {
-			t.Fatalf("formInputs(inputFields(%+v)) = %+v", in, got)
+		if got := formInputs(kind, hidden); !reflect.DeepEqual(got, in) {
+			t.Fatalf("%s: formInputs(inputFields(%#v)) = %#v", kind, in, got)
 		}
-		// The change link fills the form the same way.
 		link, err := url.Parse(formQuery(operation{Kind: kind, Path: "/x"}, in))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s: %v", kind, err)
 		}
 		if got := formInputs(kind, link.Query()); !reflect.DeepEqual(got, in) {
-			t.Fatalf("formInputs(formQuery(%+v)) = %+v", in, got)
+			t.Fatalf("%s: formInputs(formQuery(%#v)) = %#v", kind, in, got)
 		}
+	}
+	for _, op := range operations {
+		for _, v := range formValues {
+			form := url.Values{}
+			for _, name := range confirmFields {
+				form.Set(name, v)
+			}
+			roundTrip(t, op.Kind, form)
+			roundTrip(t, op.Kind, url.Values{})
+		}
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		roundTrip(t, rapid.SampledFrom(operations).Draw(t, "op").Kind, drawFormValues(t))
 	})
 }
 
