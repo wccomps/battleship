@@ -117,7 +117,15 @@ func newBrowser(t *testing.T, h *harness, sess *authtest.Session, width, height 
 	srv := v.(*httptest.Server)
 	alloc, cancelAlloc := chromedp.NewRemoteAllocator(context.Background(), endpoint)
 	t.Cleanup(cancelAlloc)
-	ctx, cancel := chromedp.NewContext(alloc)
+	// Each browser gets its own browser context: cookies are per host, not
+	// per port, so tabs sharing one would trade sessions between harnesses
+	// (other tests, or another test run using the same Chrome).
+	conn, cancelConn := chromedp.NewContext(alloc)
+	t.Cleanup(cancelConn)
+	if err := chromedp.Run(conn); err != nil {
+		t.Fatalf("connecting to the browser: %v", err)
+	}
+	ctx, cancel := chromedp.NewContext(conn, chromedp.WithNewBrowserContext())
 	t.Cleanup(cancel)
 	ctx, cancelTimeout := context.WithTimeout(ctx, 90*time.Second)
 	t.Cleanup(cancelTimeout)
