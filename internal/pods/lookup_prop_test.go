@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -81,20 +82,82 @@ func TestPropApproxMatchesAncestorModel(t *testing.T) {
 	})
 }
 
-// globModel matches name against a pattern where only * and ? are special
-// (any run of characters, any one character) and a bracket is a bad pattern
-// that matches nothing. Names have no slashes.
+// globTok is one element of a glob: a literal rune, '?', '*', or a
+// bracket class of ranges, negated by a leading ^.
+type globTok struct {
+	kind   rune // 'c', '?', '*' or '['
+	r      rune
+	neg    bool
+	ranges [][2]rune
+}
+
+// parseGlob splits a pattern into globToks, or fails for a bad pattern: a
+// trailing \, an unclosed or empty class, or a class char that is an
+// unescaped - or ]. A backslash escapes the next rune, in a class too.
+func parseGlob(p []rune) ([]globTok, bool) {
+	classChar := func(i int) (rune, int, bool) {
+		switch {
+		case i >= len(p) || p[i] == '-' || p[i] == ']':
+			return 0, i, false
+		case p[i] == '\\':
+			if i+1 >= len(p) {
+				return 0, i, false
+			}
+			return p[i+1], i + 2, true
+		}
+		return p[i], i + 1, true
+	}
+	var out []globTok
+	for i := 0; i < len(p); i++ {
+		switch p[i] {
+		case '*', '?':
+			out = append(out, globTok{kind: p[i]})
+		case '\\':
+			if i++; i == len(p) {
+				return nil, false
+			}
+			out = append(out, globTok{kind: 'c', r: p[i]})
+		case '[':
+			t := globTok{kind: '['}
+			if i++; i < len(p) && p[i] == '^' {
+				t.neg, i = true, i+1
+			}
+			for i >= len(p) || p[i] != ']' || len(t.ranges) == 0 {
+				lo, j, ok := classChar(i)
+				if !ok {
+					return nil, false
+				}
+				hi := lo
+				if j < len(p) && p[j] == '-' {
+					if hi, j, ok = classChar(j + 1); !ok {
+						return nil, false
+					}
+				}
+				t.ranges, i = append(t.ranges, [2]rune{lo, hi}), j
+			}
+			out = append(out, t)
+		default:
+			out = append(out, globTok{kind: 'c', r: p[i]})
+		}
+	}
+	return out, true
+}
+
+// globModel matches name against a pattern: * is any run of characters, ?
+// any one, [...] one in (or with ^, not in) its ranges, \ escapes. A bad
+// pattern matches nothing. Names have no slashes.
 func globModel(pattern, name string) bool {
-	if strings.ContainsAny(pattern, `[\`) {
+	toks, ok := parseGlob([]rune(pattern))
+	if !ok {
 		return false
 	}
-	p, n := []rune(pattern), []rune(name)
+	n := []rune(name)
 	var match func(i, j int) bool
 	match = func(i, j int) bool {
 		switch {
-		case i == len(p):
+		case i == len(toks):
 			return j == len(n)
-		case p[i] == '*':
+		case toks[i].kind == '*':
 			for k := j; k <= len(n); k++ {
 				if match(i+1, k) {
 					return true
@@ -104,7 +167,19 @@ func globModel(pattern, name string) bool {
 		case j == len(n):
 			return false
 		}
-		return (p[i] == '?' || p[i] == n[j]) && match(i+1, j+1)
+		t, c := toks[i], n[j]
+		switch t.kind {
+		case 'c':
+			if c != t.r {
+				return false
+			}
+		case '[':
+			in := slices.ContainsFunc(t.ranges, func(r [2]rune) bool { return r[0] <= c && c <= r[1] })
+			if in == t.neg {
+				return false
+			}
+		}
+		return match(i+1, j+1)
 	}
 	return match(0, 0)
 }
@@ -139,8 +214,10 @@ func baselineModel(d config.Deploy, snaps []proxmox.Snapshot) (string, bool) {
 
 var (
 	baselineNames = []string{"initial", "Initial", "initial2", "initia", "fresh_clone_20261001000000", "fresh_clone_20261002034615", "fresh_clone_2", "fresh_clone_",
-		"fresh_clone", "fresh-clone-1", "[", "a[", `\`, "before-scoring", "round1", "a", "b", "ab", "abc", "zz"}
-	baselinePatterns = []string{"fresh_clone_*", "fresh_*", "*_2", "a?", "a?c", "?", "*", "initial*", "round?", "[", `\`, "abc", "zz*zz"}
+		"fresh_clone", "fresh-clone-1", "[", "a[", `\`, "before-scoring", "round1", "round2", "round3", "a", "b", "ab", "abc", "zz", "*", "a?", "x1", "!x", "f-", "-"}
+	// baselinePatterns include valid classes and escapes as well as bad ones.
+	baselinePatterns = []string{"fresh_clone_*", "fresh_*", "*_2", "a?", "a?c", "?", "*", "initial*", "round?", "[", `\`, "abc", "zz*zz",
+		"[a-f]*", "round[12]", "[!x]*", "[^a-z]*", `\*`, `a\?`, "fresh_clone_2026[01]*", `[\]a]*`, "[a-", "[]a]", "[-a]", "round[^1]", "f[-]"}
 )
 
 // BaselineSnapshot picks the exact baseline when there is one, else the
