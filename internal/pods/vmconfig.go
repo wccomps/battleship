@@ -201,6 +201,7 @@ func VolumeFile(vol string) string {
 
 // VolumeOwner is the VMID a volume's file name (vm-<vmid>-… or
 // base-<vmid>-…) names and whether it is a base volume; 0 for other files.
+// The VMID is plain decimal, as Proxmox writes it: no sign or leading zero.
 func VolumeOwner(vol string) (vmid int, base bool) {
 	file := VolumeFile(vol)
 	rest, base := strings.CutPrefix(file, "base-")
@@ -211,8 +212,11 @@ func VolumeOwner(vol string) (vmid int, base bool) {
 		}
 	}
 	digits, _, ok := strings.Cut(rest, "-")
+	if !ok || digits == "" || digits[0] == '0' || strings.Trim(digits, "0123456789") != "" {
+		return 0, false
+	}
 	n, err := strconv.Atoi(digits)
-	if !ok || err != nil {
+	if err != nil {
 		return 0, false
 	}
 	return n, base

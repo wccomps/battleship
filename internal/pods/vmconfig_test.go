@@ -1,8 +1,10 @@
 package pods
 
 import (
+	"math"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -353,5 +355,64 @@ func TestPropNICChanges(t *testing.T) {
 			cur[k] = strings.Join(append([]string{head}, opts...), ",")
 		}
 		checkNICChanges(t, cur, rapid.SampledFrom([]string{"01", "05", "99"}).Draw(t, "team"), rapid.IntRange(1, 3).Draw(t, "interfaces"))
+	})
+}
+
+// volumeOwnerModel reads "vm-<vmid>-" or "base-<vmid>-" at the start of a
+// volume's file name, the VMID in plain decimal.
+func volumeOwnerModel(vol string) (int, bool) {
+	if i := strings.Index(vol, ":"); i >= 0 {
+		vol = vol[i+1:]
+	}
+	file := vol[strings.LastIndex(vol, "/")+1:]
+	for _, prefix := range []string{"vm-", "base-"} {
+		if !strings.HasPrefix(file, prefix) {
+			continue
+		}
+		rest := file[len(prefix):]
+		end := strings.Index(rest, "-")
+		if end < 1 || rest[0] == '0' {
+			return 0, false
+		}
+		n := 0
+		for _, c := range rest[:end] {
+			if c < '0' || c > '9' || n > (math.MaxInt-int(c-'0'))/10 {
+				return 0, false
+			}
+			n = n*10 + int(c-'0')
+		}
+		return n, prefix == "base-"
+	}
+	return 0, false
+}
+
+// volumeVMIDs are VMIDs as volume names carry them, and near misses.
+var volumeVMIDs = []string{"100", "10105", "9005", "999999999", "+5", "-5", "0010105", "010105", "0", "00", "", " 5", "5 ", "\u0661\u0660\u0660",
+	"99999999999999999999", "1e3", "0x10", "10105x", "1_000"}
+
+func checkVolumeOwner(t interface{ Fatalf(string, ...any) }, vol string) {
+	n, base := VolumeOwner(vol)
+	wn, wbase := volumeOwnerModel(vol)
+	if n != wn || base != wbase {
+		t.Fatalf("VolumeOwner(%q) = %d, %v; want %d, %v", vol, n, base, wn, wbase)
+	}
+	if prefix := map[bool]string{true: "base-", false: "vm-"}[base]; n != 0 && !strings.HasPrefix(VolumeFile(vol), prefix+strconv.Itoa(n)+"-") {
+		t.Fatalf("VolumeOwner(%q) = %d, %v", vol, n, base)
+	}
+}
+
+// A volume belongs to the VMID its file name spells out, and to no other.
+func TestPropVolumeOwner(t *testing.T) {
+	for _, id := range volumeVMIDs {
+		for _, vol := range []string{"s:vm-" + id + "-disk-0", "s:base-" + id + "-disk-0.qcow2", "s:9005/base-9005-disk-0.qcow2/10105/vm-" + id + "-disk-0.qcow2"} {
+			checkVolumeOwner(t, vol)
+		}
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		vol := rapid.SampledFrom([]string{"competitions:", "local:", "", "s:9005/base-9005-disk-0.qcow2/10105/", "s:10105/", "a:b:"}).Draw(t, "storage") +
+			rapid.SampledFrom([]string{"vm-", "base-", "vm-", "base-", "VM-", "vm_", "", "basevm-", "vm--"}).Draw(t, "prefix") +
+			rapid.OneOf(rapid.SampledFrom(volumeVMIDs), rapid.StringMatching(`[0-9+-]{0,6}`), rapid.String()).Draw(t, "vmid") +
+			rapid.SampledFrom([]string{"-disk-0", "-disk-0.qcow2", "", "-cloudinit", "disk", "-"}).Draw(t, "rest")
+		checkVolumeOwner(t, vol)
 	})
 }
