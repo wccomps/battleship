@@ -44,6 +44,9 @@ type BaseImage struct {
 	Source     int    // the VMID it was registered from, if its notes say
 }
 
+// MaxImageVersion is the highest version a base image name carries.
+const MaxImageVersion = 9999
+
 var (
 	familyRE    = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
 	imageNameRE = regexp.MustCompile(`^(.+)-v([1-9][0-9]{0,3})$`)
