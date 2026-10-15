@@ -756,3 +756,35 @@ func TestEventStreamGets401(t *testing.T) {
 	// A page still redirects to the login.
 	wantLoginRedirect(t, b.do(http.MethodGet, "/private", nil, http.Header{"Accept": {"text/html"}}), "/private")
 }
+
+// A cookie one slip from a real token never reaches the store: even with a
+// session stored under its hash, it is no session.
+func TestMalformedCookieNeverReachesTheStore(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	token := b.sessionToken()
+	sess, err := h.st.Session(ctx, auth.HashToken(token))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	last := strings.IndexByte(alphabet, token[42])
+	plant := func(cookie string) response {
+		sess.ID = auth.HashToken(cookie)
+		if err := h.st.CreateSession(ctx, sess); err != nil {
+			t.Fatal(err)
+		}
+		return h.browser().do(http.MethodGet, "/private", nil, http.Header{"Cookie": {auth.SessionCookie + "=" + cookie}})
+	}
+	// The plant works for a well-formed token: its session is found, then
+	// sent to sign in to Proxmox, as its ticket is sealed to the real token...
+	if resp := plant(token[:41] + string(alphabet[(strings.IndexByte(alphabet, token[41])+1)%64]) + token[42:]); resp.Header.Get("Location") != "/auth/proxmox?next=%2Fprivate" {
+		t.Fatalf("planted well-formed token = %d to %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	// ...and never for a near miss.
+	for _, cookie := range []string{token[:42] + string(alphabet[last+1]), token[:42] + string(alphabet[last+3]), token + "=", token + "A",
+		token[:42], token[:20] + "+" + token[21:], token[:20] + "/" + token[21:], token[:20] + "." + token[21:]} {
+		wantLoginRedirect(t, plant(cookie), "/private")
+	}
+}

@@ -1,9 +1,12 @@
 package seal
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"testing"
+
+	"pgregory.net/rapid"
 )
 
 func TestSealOpensWithTheSameKeyAndBinding(t *testing.T) {
@@ -53,4 +56,30 @@ func TestKeyIsRedacted(t *testing.T) {
 			t.Fatalf("%q shows the key", s)
 		}
 	}
+}
+
+// Open refuses, without panicking, anything but a box sealed for the
+// binding: junk, short or cut boxes, and a box with one character changed.
+func TestPropOpenRefusesAllButTheBox(t *testing.T) {
+	k := NewKey("a long enough secret for tests", "job credential v1")
+	rapid.Check(t, func(t *rapid.T) {
+		box := k.Seal("job:7", []byte(rapid.String().Draw(t, "plain")))
+		var other string
+		switch rapid.IntRange(0, 3).Draw(t, "kind") {
+		case 0:
+			other = rapid.SampledFrom([]string{"", "v1:", "v2:", "v1"}).Draw(t, "prefix") + rapid.String().Draw(t, "junk")
+		case 1:
+			other = "v1:" + base64.RawURLEncoding.EncodeToString(rapid.SliceOfN(rapid.Byte(), 0, 40).Draw(t, "raw"))
+		case 2:
+			other = box[:rapid.IntRange(0, len(box)-1).Draw(t, "cut")]
+		case 3:
+			i := rapid.IntRange(0, len(box)-1).Draw(t, "at")
+			alphabet := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=+/:"
+			c := rapid.SampledFrom(strings.Split(alphabet, "")).Filter(func(c string) bool { return c != box[i:i+1] }).Draw(t, "char")
+			other = box[:i] + c + box[i+1:]
+		}
+		if _, err := k.Open("job:7", other); err == nil {
+			t.Fatalf("Open(%q) succeeded; sealed %q", other, box)
+		}
+	})
 }

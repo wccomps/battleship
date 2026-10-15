@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"pgregory.net/rapid"
+
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/store"
@@ -308,4 +310,27 @@ func TestRenewerLeavesTokensAlone(t *testing.T) {
 	if _, err := st.JobCredential(bg, id); err != nil || len(r.calls()) != 0 {
 		t.Fatalf("token: %v, renewals %v", err, r.calls())
 	}
+}
+
+// Open refuses a credential row it can't read, never panicking: junk, or a
+// box sealed for another job.
+func TestPropCredentialOpenRefusesJunk(t *testing.T) {
+	creds := testCreds(t)
+	box, err := creds.Seal(aliceTicket())(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		jc := box
+		jc.JobID = rapid.Int64Range(-1, 9).Draw(t, "job")
+		jc.Kind = rapid.SampledFrom([]string{store.CredentialTicket, store.CredentialToken, ""}).Draw(t, "kind")
+		if rapid.Bool().Draw(t, "junk") {
+			jc.Sealed = rapid.SampledFrom([]string{"", "v1:"}).Draw(t, "prefix") + rapid.String().Draw(t, "sealed")
+		} else if jc.JobID == 7 {
+			return
+		}
+		if _, err := creds.Open(jc); err == nil {
+			t.Fatalf("Open(%+v) succeeded", jc)
+		}
+	})
 }

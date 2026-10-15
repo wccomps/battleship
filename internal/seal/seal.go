@@ -64,7 +64,7 @@ func (k Key) Open(binding, stored string) ([]byte, error) {
 	if !ok {
 		return nil, ErrOpen
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(body)
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(body) // one spelling per sealed value
 	g := k.gcm()
 	if err != nil || len(raw) < g.NonceSize()+g.Overhead() {
 		return nil, ErrOpen
