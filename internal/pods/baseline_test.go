@@ -38,13 +38,22 @@ func TestBaselineSnapshot(t *testing.T) {
 			{Name: "fresh_clone_20261003010101", Time: 100},
 			{Name: "fresh_clone_20261002034615", Time: 200},
 		}, "fresh_clone_20261002034615"},
+		{"an unfinished snapshot_name is skipped", []proxmox.Snapshot{
+			{Name: "initial", State: "prepare"},
+			{Name: "fresh_clone_20261002034615"},
+		}, "fresh_clone_20261002034615"},
+		{"an unfinished newest match is skipped", []proxmox.Snapshot{
+			{Name: "fresh_clone_20261003010101", State: "delete"},
+			{Name: "fresh_clone_20261002034615"},
+		}, "fresh_clone_20261002034615"},
+		{"only unfinished baselines", []proxmox.Snapshot{{Name: "initial", State: "prepare"}}, ""},
 	}
 	for _, tt := range tests {
 		got, ok := BaselineSnapshot(d, tt.snaps)
 		if got != tt.want || ok != (tt.want != "") {
 			t.Errorf("%s: BaselineSnapshot = %q, %v; want %q", tt.name, got, ok, tt.want)
 		}
-		if has := HasBaseline(d, SnapshotNames(tt.snaps)); has != (tt.want != "") {
+		if has := HasBaseline(d, tt.snaps); has != (tt.want != "") {
 			t.Errorf("%s: HasBaseline = %v", tt.name, has)
 		}
 	}
@@ -95,14 +104,17 @@ var resetSnapshots = []string{"initial", "fresh_clone_20261001", "fresh_clone_20
 	"initial2", "xfresh_clone_1", "before-scoring", "round2"}
 
 // resetTargetModel is what a reset to snapshot rolls a VM with snaps back
-// to: snapshot itself if it has it; for the baseline, "initial", else the
-// newest fresh_clone_* by time, then name.
+// to: snapshot itself if it has it finished; for the baseline, a finished
+// "initial", else the newest finished fresh_clone_* by time, then name.
 func resetTargetModel(snaps []proxmox.Snapshot, snapshot string) (string, bool) {
 	if snapshot != "" {
-		return snapshot, slices.ContainsFunc(snaps, func(s proxmox.Snapshot) bool { return s.Name == snapshot })
+		return snapshot, slices.ContainsFunc(snaps, func(s proxmox.Snapshot) bool { return s.Name == snapshot && s.State == "" })
 	}
 	var best *proxmox.Snapshot
 	for i, s := range snaps {
+		if s.State != "" {
+			continue
+		}
 		if s.Name == "initial" {
 			return s.Name, true
 		}
@@ -121,13 +133,13 @@ func checkReset(t interface{ Fatalf(string, ...any) }, vms map[string][]proxmox.
 	vmid := 10101
 	for name, snaps := range vms {
 		var names []string
-		times := map[string]int64{}
+		times, states := map[string]int64{}, map[string]string{}
 		for _, s := range snaps {
 			names = append(names, s.Name)
-			times[s.Name] = s.Time
+			times[s.Name], states[s.Name] = s.Time, s.State
 		}
 		f.Add(proxmox.VM{VMID: vmid, Name: name, Node: "n1"}, nil, names...)
-		f.VMs[vmid].SnapTimes = times
+		f.VMs[vmid].SnapTimes, f.VMs[vmid].SnapStates = times, states
 		vmid++
 	}
 	plan, err := NewPlanner(f, config.Default()).Reset(context.Background(), []string{"01", "02"}, nil, snapshot)
@@ -152,7 +164,7 @@ func TestPropResetTargetsExist(t *testing.T) {
 		"fresh_clone_20261001", "init", "initial\x00"}
 	for _, target := range targets {
 		for _, s := range resetSnapshots {
-			checkReset(t, map[string][]proxmox.Snapshot{"team01-dc": {{Name: s}}, "team02-dc": nil}, target)
+			checkReset(t, map[string][]proxmox.Snapshot{"team01-dc": {{Name: s}}, "team02-dc": {{Name: s, State: "prepare"}}}, target)
 		}
 		checkReset(t, map[string][]proxmox.Snapshot{"team01-dc": {{Name: "fresh_clone_20261001", Time: 2}, {Name: "fresh_clone_20261002", Time: 1}},
 			"team02-dc": {{Name: "fresh_clone_b", Time: 1}, {Name: "fresh_clone_a", Time: 1}}}, target)
@@ -164,7 +176,8 @@ func TestPropResetTargetsExist(t *testing.T) {
 				0, 4, rapid.ID).Draw(t, name)
 			snaps := []proxmox.Snapshot{}
 			for _, n := range names {
-				snaps = append(snaps, proxmox.Snapshot{Name: n, Time: int64(rapid.IntRange(0, 2).Draw(t, n+" time"))})
+				snaps = append(snaps, proxmox.Snapshot{Name: n, Time: int64(rapid.IntRange(0, 2).Draw(t, n+" time")),
+					State: rapid.SampledFrom([]string{"", "", "prepare", "delete"}).Draw(t, n+" state")})
 			}
 			vms[name] = snaps
 		}

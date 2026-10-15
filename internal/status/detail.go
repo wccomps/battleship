@@ -17,7 +17,7 @@ type Detail struct {
 	// Cell is the grid cell, with the drift judged from this read.
 	Cell      Cell
 	Config    map[string]string // the VM's config; nil when it is missing
-	Snapshots []string          // its snapshots, in Proxmox's order; nil when it is missing
+	Snapshots []string          // its finished snapshots, in Proxmox's order; nil when it is missing
 	// Baseline is the default reset target (pods.BaselineSnapshot); empty if
 	// absent.
 	Baseline string
@@ -42,13 +42,13 @@ func (p *Poller) Detail(ctx context.Context, team, host string) (Detail, error) 
 	if err != nil {
 		return d, fmt.Errorf("reading %s (VMID %d on %s): %s", c.Name, c.VMID, c.Node, proxmox.Describe(err))
 	}
-	d.Config, d.Snapshots = cfg, pods.SnapshotNames(snaps)
+	d.Config, d.Snapshots = cfg, pods.SnapshotNames(pods.Finished(snaps))
 	d.Baseline, _ = pods.BaselineSnapshot(p.rules.cfg.Deploy, snaps)
 
 	p.mu.Lock()
 	// Scan results are in database time.
 	dbReadAt := readAt.Add(p.dbOffset)
-	p.in.scan.put(c.Name, scanResult{vmid: c.VMID, readAt: dbReadAt, drift: p.rules.configDrift(team, cfg, d.Snapshots)})
+	p.in.scan.put(c.Name, scanResult{vmid: c.VMID, readAt: dbReadAt, drift: p.rules.configDrift(team, cfg, snaps)})
 	changed := p.update()
 	if now, ok := p.grid.cellCopy(team, host); ok && now.VMID == c.VMID {
 		d.Cell = now

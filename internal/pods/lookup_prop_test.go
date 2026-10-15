@@ -110,15 +110,18 @@ func globModel(pattern, name string) bool {
 }
 
 // baselineModel is the exact baseline name, else the newest match by
-// snapshot time then name.
+// snapshot time then name, among finished snapshots.
 func baselineModel(d config.Deploy, snaps []proxmox.Snapshot) (string, bool) {
 	for _, s := range snaps {
-		if s.Name == d.SnapshotName {
+		if s.Name == d.SnapshotName && s.State == "" {
 			return s.Name, true
 		}
 	}
 	var best *proxmox.Snapshot
 	for i, s := range snaps {
+		if s.State != "" {
+			continue
+		}
 		for _, p := range d.BaselinePatterns {
 			if globModel(p, s.Name) {
 				if best == nil || s.Time > best.Time || s.Time == best.Time && s.Name > best.Name {
@@ -149,14 +152,15 @@ func TestPropBaselineSnapshot(t *testing.T) {
 		d.BaselinePatterns = rapid.SliceOfN(rapid.SampledFrom(baselinePatterns), 0, 3).Draw(t, "patterns")
 		var snaps []proxmox.Snapshot
 		for _, n := range rapid.SliceOfNDistinct(rapid.SampledFrom(baselineNames), 0, 7, rapid.ID[string]).Draw(t, "names") {
-			snaps = append(snaps, proxmox.Snapshot{Name: n, Time: int64(rapid.IntRange(0, 2).Draw(t, "time"))})
+			snaps = append(snaps, proxmox.Snapshot{Name: n, Time: int64(rapid.IntRange(0, 2).Draw(t, "time")),
+				State: rapid.SampledFrom([]string{"", "", "prepare", "delete"}).Draw(t, "state")})
 		}
 		got, ok := BaselineSnapshot(d, snaps)
 		want, wok := baselineModel(d, snaps)
 		if got != want || ok != wok {
 			t.Fatalf("BaselineSnapshot(%+v, %+v) = %q, %v; want %q, %v", d, snaps, got, ok, want, wok)
 		}
-		if has := HasBaseline(d, SnapshotNames(snaps)); has != wok {
+		if has := HasBaseline(d, snaps); has != wok {
 			t.Fatalf("HasBaseline = %v with %+v, want %v", has, snaps, wok)
 		}
 	})
@@ -330,7 +334,7 @@ func TestBadBaselinePatternMatchesNothing(t *testing.T) {
 		if name, ok := BaselineSnapshot(d, snaps); ok {
 			t.Errorf("BaselineSnapshot with pattern %q picked %q", bad, name)
 		}
-		if HasBaseline(d, []string{bad}) {
+		if HasBaseline(d, snaps) {
 			t.Errorf("HasBaseline with pattern %q", bad)
 		}
 	}

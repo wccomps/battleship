@@ -24,6 +24,29 @@ func TestPatternBaselineIsNotDrift(t *testing.T) {
 	}
 }
 
+// A snapshot whose task died (snapstate set) can't be rolled back to: the
+// scan and Detail treat it as no baseline, and Detail doesn't list it.
+func TestUnfinishedSnapshotIsNoBaseline(t *testing.T) {
+	h := newHarness(t, nil)
+	h.api.add(teamVM("01", "dc", 10101), cleanConfig("01"), "initial", "before-scoring")
+	h.api.Mu.Lock()
+	h.api.VMs[10101].SnapStates = map[string]string{"initial": "prepare"}
+	h.api.Mu.Unlock()
+	h.poll(t)
+	h.scan(t)
+	want := []Drift{{Kind: DriftSnapshot, Reason: `no "initial" or fresh_clone_* baseline snapshot`}}
+	if c := cell(t, h.p.Grid(), "01", "dc"); !reflect.DeepEqual(c.Drift, want) {
+		t.Errorf("scan drift = %+v, want %+v", c.Drift, want)
+	}
+	d, err := h.p.Detail(ctx, "01", "dc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Baseline != "" || !reflect.DeepEqual(d.Snapshots, []string{"before-scoring"}) || !reflect.DeepEqual(d.Cell.Drift, want) {
+		t.Errorf("detail baseline %q snapshots %v drift %+v", d.Baseline, d.Snapshots, d.Cell.Drift)
+	}
+}
+
 // Proxmox leaves pool out of /cluster/resources when the token can't audit
 // pools, so an empty pool is unknown, not wrong; a different one is drift.
 func TestPoolDriftOnlyWhenKnown(t *testing.T) {

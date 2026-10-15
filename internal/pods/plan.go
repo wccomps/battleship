@@ -693,7 +693,7 @@ func (p Planner) Reset(ctx context.Context, teams, hosts []string, snapshot stri
 			it.Blocked = "cannot list snapshots: " + proxmox.Describe(err)
 			continue
 		}
-		names := SnapshotNames(snaps)
+		names := SnapshotNames(Finished(snaps))
 		has := "has none"
 		if len(names) > 0 {
 			has = "has: " + strings.Join(names, ", ")

@@ -114,7 +114,7 @@ func (p *Poller) scanVM(ctx context.Context, vm proxmox.VM, offset time.Duration
 	if err != nil {
 		return scanResult{}, err
 	}
-	return scanResult{vmid: vm.VMID, readAt: readAt, drift: p.rules.configDrift(team, cfg, pods.SnapshotNames(snaps))}, nil
+	return scanResult{vmid: vm.VMID, readAt: readAt, drift: p.rules.configDrift(team, cfg, snaps)}, nil
 }
 
 // readVM reads a VM's config and snapshots, one shared call slot at a time.

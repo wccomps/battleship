@@ -64,3 +64,17 @@ func TestDeployKeepsPatternBaseline(t *testing.T) {
 		t.Errorf("result %+v, snapshots %v", res, vm.Snapshots)
 	}
 }
+
+// An unfinished snapshot is no baseline: a deploy takes snapshot_name.
+func TestDeployIgnoresUnfinishedBaseline(t *testing.T) {
+	f := newCluster()
+	testExecutor(f, &recorder{}).Run(context.Background(), deployTeak(t, f, "01"))
+	vm := f.VMs[10121]
+	vm.Snapshots = []string{"fresh_clone_20261002034615"}
+	vm.SnapStates = map[string]string{"fresh_clone_20261002034615": "delete"}
+	vm.Status = "stopped"
+	res := testExecutor(f, &recorder{}).Run(context.Background(), deployTeak(t, f, "01"))
+	if len(res.Failed) != 0 || !reflect.DeepEqual(vm.Snapshots, []string{"fresh_clone_20261002034615", "initial"}) {
+		t.Errorf("result %+v, snapshots %v", res, vm.Snapshots)
+	}
+}
