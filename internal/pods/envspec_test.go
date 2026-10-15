@@ -235,3 +235,67 @@ func TestPropParseHostSpec(t *testing.T) {
 		checkHostSpec(t, s)
 	})
 }
+
+// notesPieces build descriptions: battleship lines, near misses of them,
+// line breaks and what people write.
+var notesPieces = []string{"battleship: ip=192.168.100.10 os=linux", "  battleship: base=gw-v1", "\tbattleship:x", "Battleship: ip=1",
+	"battleship ip=1", "xbattleship:", "\u200bbattleship: ip=1", "battleship:\u2028ip=1\u0085os=x", "battleship:  ip=a=b\tdns=\u00a0x",
+	"\n", "\r\n", "\r", "  ", "\n\n", "Login: root", "pw: hunter2 "}
+
+// oneLine reports whether s is fields joined by single spaces, with no
+// line break or other space Fields would split on.
+func oneLine(s string) bool { return strings.Join(strings.Fields(s), " ") == s }
+
+// The battleship line written into any description reads back the same,
+// writing it twice changes nothing, and people's notes around it are kept.
+func TestPropNotesLineRoundTrip(t *testing.T) {
+	n := Notes{IP: "192.168.100.10", OS: "linux", Base: "a=b", DNS: "router"}
+	for _, a := range notesPieces {
+		for _, b := range notesPieces {
+			with := WithNotes(a+b, n)
+			if got, ok := ParseNotes(with); !ok || got != n || WithNotes(with, n) != with || UserNotes(with) != UserNotes(a+b) {
+				t.Errorf("WithNotes(%q) = %q, reads %+v", a+b, with, got)
+			}
+		}
+	}
+	value := rapid.StringMatching(`[A-Za-z0-9._:=-]{0,12}`)
+	rapid.Check(t, func(t *rapid.T) {
+		piece := rapid.OneOf(rapid.SampledFrom(notesPieces), rapid.SampledFrom(notesPieces), rapid.String())
+		desc := strings.Join(rapid.SliceOfN(piece, 0, 8).Draw(t, "pieces"), "")
+		if old, ok := ParseNotes(desc); ok && !oneLine(old.String()) {
+			t.Fatalf("ParseNotes(%q) = %+v, written %q", desc, old, old.String())
+		}
+		if c := (Notes{IP: editedNoteValue(t), OS: editedNoteValue(t), Base: value.Draw(t, "base"), DNS: editedNoteValue(t)}).Checked("192.168.100"); !oneLine(c.String()) {
+			t.Fatalf("Checked notes written %q", c.String())
+		}
+		n := Notes{IP: value.Draw(t, "ip"), OS: value.Draw(t, "os"), Base: value.Draw(t, "base"), DNS: value.Draw(t, "dns")}
+		with := WithNotes(desc, n)
+		if got, ok := ParseNotes(with); !ok || got != n {
+			t.Fatalf("ParseNotes(WithNotes(%q, %+v)) = %+v, %v", desc, n, got, ok)
+		}
+		if again := WithNotes(with, n); again != with {
+			t.Fatalf("WithNotes twice: %q, then %q", with, again)
+		}
+		if UserNotes(with) != UserNotes(desc) {
+			t.Fatalf("UserNotes(WithNotes(%q)) = %q, want %q", desc, UserNotes(with), UserNotes(desc))
+		}
+		cur := map[string]string{"description": desc, "tags": rapid.SampledFrom([]string{"", "dev", "Dev;kilo.alpha", "kilo.alpha,dev", " dev "}).Draw(t, "tags")}
+		tags := rapid.SampledFrom([]string{"", "dev", "dev;kilo.alpha", "kilo.alpha;router"}).Draw(t, "new tags")
+		for k, v := range LabelChanges(cur, tags, &n) {
+			if k == "delete" {
+				delete(cur, v)
+			} else {
+				cur[k] = v
+			}
+		}
+		if again := LabelChanges(cur, tags, &n); len(again) != 0 {
+			t.Fatalf("LabelChanges after applying them: %q", again)
+		}
+	})
+}
+
+// editedNoteValue draws a note value as people might edit it: spaces, line breaks
+// and script characters around address-like text.
+func editedNoteValue(t *rapid.T) string {
+	return rapid.SampledFrom([]string{"", "10", "192.168.100.10", "192.168.100.10\n", "dc\u2028x", "router", "windows", "a b", "x\u0085"}).Draw(t, "hostile")
+}
