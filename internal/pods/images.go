@@ -41,6 +41,7 @@ type BaseImage struct {
 	Node       string
 	Deprecated bool
 	Notes      string // its Proxmox notes, for people: logins, what's installed
+	Source     int    // the VMID it was registered from, if its notes say
 }
 
 var (
@@ -177,10 +178,34 @@ func (p Planner) ReadNotes(ctx context.Context, images []BaseImage) []BaseImage 
 		g.Go(func() error {
 			if cfg, err := p.API.VMConfig(ctx, out[i].Node, out[i].VMID); err == nil {
 				out[i].Notes = UserNotes(cfg["description"])
+				out[i].Source = sourceVMID(cfg["description"])
 			}
 			return nil
 		})
 	}
 	_ = g.Wait()
+	return out
+}
+
+// sourceVMID is the VMID desc's notes line says an image was registered
+// from, or 0.
+func sourceVMID(desc string) int {
+	n, _ := ParseNotes(desc)
+	id, err := strconv.Atoi(n.Source)
+	if err != nil || strconv.Itoa(id) != n.Source || id < 100 {
+		return 0
+	}
+	return id
+}
+
+// FamilyNames are the families of images, each once, sorted.
+func FamilyNames(images []BaseImage) []string {
+	var out []string
+	for _, im := range images {
+		if !slices.Contains(out, im.Family) {
+			out = append(out, im.Family)
+		}
+	}
+	slices.Sort(out)
 	return out
 }

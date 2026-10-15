@@ -106,7 +106,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 	}
 	it := Item{Name: ImageName(req.Family, version), VMID: vmid, Node: src.Node, Pool: p.Cfg.Images.Pool,
 		Source: &Source{VMID: src.VMID, Node: src.Node, Name: src.Name}, Tags: ImageTags(kind, false),
-		Steps: []Step{StepClone, StepLabel, StepCDROM, StepConvert}}
+		Notes: &Notes{Source: strconv.Itoa(src.VMID)}, Steps: []Step{StepClone, StepLabel, StepCDROM, StepConvert}}
 	if newest, ok := Newest(images, req.Family); ok {
 		it.Supersedes = &Source{VMID: newest.VMID, Node: newest.Node, Name: newest.Name}
 		it.Steps = append(it.Steps, StepRetire)

@@ -23,6 +23,8 @@
 <div class="meta">VMID {{.VMID}} · {{.Node}}</div></td>
 <td>{{with .Notes}}<div class="notes">{{.}}</div>{{else}}<span class="meta">none</span>{{end}}</td>
 <td><div class="acts">
+{{- if not .Deprecated}}
+<a class="btn sm" href="/images/register?family={{.Family}}{{with .Source}}&amp;vmid={{.}}{{end}}" title="{{with .Source}}Copy VM {{.}} in again as the next version{{else}}Register the next version{{end}}">New version</a>{{end}}
 <a class="btn sm" href="/images/edit?family={{.Family}}">Open for editing</a>
 {{- if not .Deprecated}}
 <a class="btn sm" href="/images/deprecate?image={{.Name}}">Deprecate</a>{{end}}

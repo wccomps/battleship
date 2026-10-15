@@ -13,16 +13,17 @@ import (
 // catalogPage is the data of the Images and Environments pages and of their
 // forms.
 type catalogPage struct {
-	Op      operation // set on forms
-	In      jobs.Inputs
-	Error   string
-	Envs    []pods.Environment
-	Images  []pods.BaseImage // every version, by family then version
-	Routers []pods.BaseImage // newest usable version of each router family
-	Others  []pods.BaseImage // newest usable version of each other family
-	Kinds   []string
-	Subnet  string
-	ReadErr string // why the cluster couldn't be read
+	Op       operation // set on forms
+	In       jobs.Inputs
+	Error    string
+	Envs     []pods.Environment
+	Images   []pods.BaseImage // every version, by family then version
+	Routers  []pods.BaseImage // newest usable version of each router family
+	Others   []pods.BaseImage // newest usable version of each other family
+	Families []string         // every family, once
+	Kinds    []string
+	Subnet   string
+	ReadErr  string // why the cluster couldn't be read
 }
 
 // newCatalogPage reads environments and images as the user, without the
@@ -36,6 +37,7 @@ func (s *Server) newCatalogPage(ctx context.Context) catalogPage {
 	}
 	p.Envs = envs
 	p.Images = pods.BaseImages(vms)
+	p.Families = pods.FamilyNames(p.Images)
 	p.Routers = pods.Families(p.Images, pods.ImageRouter)
 	for _, k := range []string{pods.ImageWindows, pods.ImageLinux, pods.ImageOther} {
 		p.Others = append(p.Others, pods.Families(p.Images, k)...)

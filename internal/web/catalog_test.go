@@ -198,3 +198,28 @@ func TestNotesShowAsText(t *testing.T) {
 		}
 	}
 }
+
+// An image registered from a VM offers its next version from the same VM in
+// one click, and the register form lists each family once.
+func TestImagesPageOffersNewVersionFromSource(t *testing.T) {
+	h := newHarness(t)
+	h.api.Add(proxmox.VM{VMID: 8000, Name: "gw-v1", Node: "n1", Template: true, Tags: "base;router;deprecated"},
+		map[string]string{"description": "battleship: source=150", "net0": "virtio=BC:24:11:00:80:00,bridge=vmbr0"})
+	h.api.Add(proxmox.VM{VMID: 8001, Name: "gw-v2", Node: "n1", Template: true, Tags: "base;router"},
+		map[string]string{"description": "Login: admin\nbattleship: source=150", "net0": "virtio=BC:24:11:00:80:01,bridge=vmbr0"})
+	sess := h.login(asLead)
+	body := h.get(&sess, "/images").Body.String()
+	if strings.Count(body, `href="/images/register?family=gw&amp;vmid=150"`) != 1 {
+		t.Errorf("images page lacks one New version link to VM 150:\n%s", body)
+	}
+	if strings.Contains(body, "source=150") {
+		t.Errorf("images page shows battleship's notes line")
+	}
+	form := h.get(&sess, "/images/register?family=gw&vmid=150").Body.String()
+	if !strings.Contains(form, `value="150"`) || !strings.Contains(form, `value="gw" required`) {
+		t.Errorf("register form isn't prefilled:\n%s", form)
+	}
+	if n := strings.Count(form, `<option value="gw">`); n != 1 {
+		t.Errorf("family gw listed %d times, want once", n)
+	}
+}

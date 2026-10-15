@@ -32,7 +32,8 @@ func TestImageRegisterNewVersionRetiresPrevious(t *testing.T) {
 	it := plan.Items[0]
 	want := []Step{StepClone, StepLabel, StepCDROM, StepConvert, StepRetire}
 	if it.Name != "debian-12-v2" || it.VMID != 8001 || it.Blocked != "" || !slices.Equal(it.Steps, want) ||
-		it.Source.VMID != 150 || !slices.Equal(it.Source.Bridges, []string{"vmbr0"}) || it.Pool != "dev-templates" || it.Tags != "base;linux" || it.Supersedes.VMID != 8000 {
+		it.Source.VMID != 150 || !slices.Equal(it.Source.Bridges, []string{"vmbr0"}) || it.Pool != "dev-templates" || it.Tags != "base;linux" || it.Supersedes.VMID != 8000 ||
+		it.Notes == nil || it.Notes.Source != "150" {
 		t.Errorf("item = %+v", it)
 	}
 	if !slices.Contains(plan.Locks, "family:debian-12") || !slices.Contains(plan.Locks, "vmid:8001") {
@@ -87,5 +88,21 @@ func TestImageDeprecateAndDelete(t *testing.T) {
 	}
 	if _, err := p.ImageDelete(ctx, ImageRequest{Image: "nope-v1"}); err == nil {
 		t.Error("deleting a missing image")
+	}
+}
+
+func TestSourceVMID(t *testing.T) {
+	for desc, want := range map[string]int{
+		"Login: root\nbattleship: source=8920": 8920,
+		"battleship: source=0150":              0,
+		"battleship: source=+150":              0,
+		"battleship: source=99":                0,
+		"battleship: source=x":                 0,
+		"source=8920":                          0,
+		"":                                     0,
+	} {
+		if got := sourceVMID(desc); got != want {
+			t.Errorf("sourceVMID(%q) = %d, want %d", desc, got, want)
+		}
 	}
 }
