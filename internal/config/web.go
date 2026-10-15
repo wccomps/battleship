@@ -6,9 +6,11 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Web configures battleship serve: the web app and its job workers.
@@ -111,6 +113,8 @@ func (c Config) validateWeb() []error {
 	}
 	if w.Templates != "" && strings.TrimSpace(w.Templates) == "" {
 		errs = append(errs, errors.New(`web.templates must be a master pattern such as "*.kilo.alpha", or empty`))
+	} else if _, err := WildcardRegexp(w.Templates); err != nil {
+		errs = append(errs, fmt.Errorf("web.templates: %w", err))
 	}
 	if w.SessionIdle < time.Minute {
 		errs = append(errs, errors.New("web.session_idle must be at least 1m"))
@@ -173,4 +177,14 @@ func (c Config) RequireWeb() error {
 		errs = append(errs, errors.New(`oidc.scopes must include "offline_access": without it the identity provider issues no refresh token, and sessions can't re-check the user`))
 	}
 	return errors.Join(errs...)
+}
+
+// WildcardRegexp turns "*.kilo.alpha" into a case-insensitive, fully
+// anchored regexp. It fails only on invalid UTF-8.
+func WildcardRegexp(pattern string) (*regexp.Regexp, error) {
+	if !utf8.ValidString(pattern) {
+		return nil, fmt.Errorf("template pattern %q is not valid UTF-8", pattern)
+	}
+	quoted := strings.ReplaceAll(regexp.QuoteMeta(pattern), `\*`, `.*`)
+	return regexp.Compile("(?is)^" + quoted + "$")
 }

@@ -1,27 +1,15 @@
 package pods
 
 import (
-	"fmt"
 	"maps"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
+	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
-
-// WildcardRegexp turns "*.kilo.alpha" into a case-insensitive, fully
-// anchored regexp. It fails only on invalid UTF-8.
-func WildcardRegexp(pattern string) (*regexp.Regexp, error) {
-	if !utf8.ValidString(pattern) {
-		return nil, fmt.Errorf("template pattern %q is not valid UTF-8", pattern)
-	}
-	quoted := strings.ReplaceAll(regexp.QuoteMeta(pattern), `\*`, `.*`)
-	return regexp.Compile("(?is)^" + quoted + "$")
-}
 
 func hasTag(tags, tag string) bool {
 	if strings.TrimSpace(tag) == "" {
@@ -40,7 +28,7 @@ func hasTag(tags, tag string) bool {
 // names are skipped since clones inherit the tag; a custom naming.vm_name
 // must not match master names.
 func FindMasters(vms []proxmox.VM, n Naming, pattern, tag string) (masters, untagged []proxmox.VM, err error) {
-	re, err := WildcardRegexp(pattern)
+	re, err := config.WildcardRegexp(pattern)
 	if err != nil {
 		return nil, nil, err
 	}

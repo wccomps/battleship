@@ -139,6 +139,7 @@ func TestWebValidation(t *testing.T) {
 		{"base_url query", func(c *Config) { c.Web.BaseURL = "https://example.org?x=1" }, "nothing after it"},
 		{"workers zero", func(c *Config) { c.Web.Workers = 0 }, "web.workers must be at least 1"},
 		{"templates blank", func(c *Config) { c.Web.Templates = " \t" }, "web.templates must be a master pattern such as \"*.kilo.alpha\", or empty"},
+		{"templates not UTF-8", func(c *Config) { c.Web.Templates = "*.kilo\xff" }, "web.templates: template pattern"},
 		{"idle too short", func(c *Config) { c.Web.SessionIdle = 30 * time.Second }, "web.session_idle must be at least 1m"},
 		{"max below idle", func(c *Config) { c.Web.SessionMax = 10 * time.Minute }, "web.session_max must be at least web.session_idle"},
 		{"idle not past renewal", func(c *Config) { c.Web.SessionIdle = time.Hour }, "web.session_idle must be longer than proxmox.ticket_renew_after"},

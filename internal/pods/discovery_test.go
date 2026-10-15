@@ -47,12 +47,12 @@ func TestWildcardRegexpIsAnchoredAndCaseInsensitive(t *testing.T) {
 	}
 	for testName, tt := range tests {
 		t.Run(testName, func(t *testing.T) {
-			re, err := WildcardRegexp(tt.pattern)
+			re, err := config.WildcardRegexp(tt.pattern)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if got := re.MatchString(tt.name); got != tt.want {
-				t.Errorf("WildcardRegexp(%q).MatchString(%q) = %v, want %v", tt.pattern, tt.name, got, tt.want)
+				t.Errorf("config.WildcardRegexp(%q).MatchString(%q) = %v, want %v", tt.pattern, tt.name, got, tt.want)
 			}
 		})
 	}
@@ -391,7 +391,7 @@ func TestPropWildcardRegexpIsAGlob(t *testing.T) {
 	n := NewNaming(config.Default().Naming)
 	rapid.Check(t, func(t *rapid.T) {
 		pattern := strings.Join(rapid.SliceOfN(patternPiece, 0, 6).Draw(t, "pattern"), "")
-		re, err := WildcardRegexp(pattern)
+		re, err := config.WildcardRegexp(pattern)
 		if _, _, ferr := FindMasters([]proxmox.VM{{VMID: 1, Name: "dc.kilo", Tags: "dev"}}, n, pattern, "dev"); (ferr == nil) != (err == nil) {
 			t.Fatalf("FindMasters err = %v, WildcardRegexp err = %v", ferr, err)
 		}
@@ -402,7 +402,7 @@ func TestPropWildcardRegexpIsAGlob(t *testing.T) {
 			return
 		}
 		if err != nil {
-			t.Fatalf("WildcardRegexp(%q): %v", pattern, err)
+			t.Fatalf("config.WildcardRegexp(%q): %v", pattern, err)
 		}
 		// A name made from the pattern, stars filled in and case flipped,
 		// or any name at all.
@@ -419,7 +419,7 @@ func TestPropWildcardRegexpIsAGlob(t *testing.T) {
 		}
 		name := rapid.OneOf(rapid.Just(b.String()), rapid.String()).Draw(t, "name")
 		if got, want := re.MatchString(name), globMatch([]rune(pattern), []rune(name)); got != want {
-			t.Fatalf("WildcardRegexp(%q).MatchString(%q) = %v, want %v", pattern, name, got, want)
+			t.Fatalf("config.WildcardRegexp(%q).MatchString(%q) = %v, want %v", pattern, name, got, want)
 		}
 	})
 }
