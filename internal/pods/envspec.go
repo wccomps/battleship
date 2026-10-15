@@ -1,0 +1,195 @@
+package pods
+
+import (
+	"fmt"
+	"hash/fnv"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+// Every environment's LAN: the router is .2, .3 is the team VPN endpoint,
+// hosts take .4 to .254.
+const (
+	GatewayOctet   = 2
+	FirstHostOctet = 4
+	LastHostOctet  = 254
+	HostPrefix     = 24
+	// DNSRouter is the DNS choice that points hosts at the router.
+	DNSRouter = "router"
+	// MaxWindowsHostname is the NetBIOS name limit Rename-Computer enforces.
+	MaxWindowsHostname = 15
+)
+
+// HostSpec is a host to add: its name, its base-image family, and the last
+// octet of its address (0: Battleship picks one).
+type HostSpec struct {
+	Host   string `json:"host"`
+	Family string `json:"family"`
+	Octet  int    `json:"octet,omitempty"`
+}
+
+var labelRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// CheckHostname checks a host name: one lower-case DNS label.
+func CheckHostname(h string) error {
+	if !labelRE.MatchString(h) {
+		return fmt.Errorf("host name %q must be lower-case letters, digits and dashes (one DNS label)", h)
+	}
+	return nil
+}
+
+// CheckDomain checks an environment's domain: two or more DNS labels.
+func CheckDomain(d string) error {
+	labels := strings.Split(d, ".")
+	if len(labels) < 2 || len(d) > 200 {
+		return fmt.Errorf("domain %q must be two or more labels like kilo.alpha", d)
+	}
+	for _, l := range labels {
+		if !labelRE.MatchString(l) {
+			return fmt.Errorf("domain %q: %q isn't a lower-case DNS label", d, l)
+		}
+	}
+	return nil
+}
+
+// ParseHostSpec reads "host=family" or "host=family:octet".
+func ParseHostSpec(s string) (HostSpec, error) {
+	host, rest, ok := strings.Cut(s, "=")
+	if !ok {
+		return HostSpec{}, fmt.Errorf("%q: write a host as name=image, e.g. dc=win2022 or dc=win2022:10", strings.TrimSpace(s))
+	}
+	family, octet, hasOctet := strings.Cut(rest, ":")
+	h := HostSpec{Host: strings.TrimSpace(host), Family: strings.TrimSpace(family)}
+	if err := CheckHostname(h.Host); err != nil {
+		return HostSpec{}, err
+	}
+	if h.Family == "" {
+		return HostSpec{}, fmt.Errorf("%q: name the base image after =", strings.TrimSpace(s))
+	}
+	if hasOctet {
+		n, err := strconv.Atoi(strings.TrimSpace(octet))
+		if err != nil || n < FirstHostOctet || n > LastHostOctet {
+			return HostSpec{}, fmt.Errorf("%q: the address must be %d-%d (.%d is the router, .3 the team VPN)",
+				strings.TrimSpace(s), FirstHostOctet, LastHostOctet, GatewayOctet)
+		}
+		h.Octet = n
+	}
+	return h, nil
+}
+
+func (h HostSpec) String() string {
+	s := h.Host + "=" + h.Family
+	if h.Octet != 0 {
+		s += ":" + strconv.Itoa(h.Octet)
+	}
+	return s
+}
+
+// Notes is the battleship line in an environment VM's Proxmox notes: what
+// Battleship knows about it while it is stopped, and after its base image
+// is gone.
+type Notes struct {
+	IP   string `json:"ip,omitempty"`
+	OS   string `json:"os,omitempty"` // windows or linux: hosts configured through the agent
+	Base string `json:"base,omitempty"`
+	DNS  string `json:"dns,omitempty"` // DNSRouter or a host name
+}
+
+const notesPrefix = "battleship:"
+
+// ParseNotes finds and reads the battleship line in desc.
+func ParseNotes(desc string) (Notes, bool) {
+	for _, line := range strings.Split(desc, "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), notesPrefix)
+		if !ok {
+			continue
+		}
+		var n Notes
+		for _, f := range strings.Fields(rest) {
+			k, v, _ := strings.Cut(f, "=")
+			switch k {
+			case "ip":
+				n.IP = v
+			case "os":
+				n.OS = v
+			case "base":
+				n.Base = v
+			case "dns":
+				n.DNS = v
+			}
+		}
+		return n, true
+	}
+	return Notes{}, false
+}
+
+// Checked drops the values a guest script can't take. Users can edit notes,
+// and IP reaches scripts that run as root or SYSTEM: it must be a host
+// address of subnet, or the host is treated as having none.
+func (n Notes) Checked(subnet string) Notes {
+	rest, ok := strings.CutPrefix(n.IP, subnet+".")
+	o, err := strconv.Atoi(rest)
+	if !ok || err != nil || strconv.Itoa(o) != rest || o < FirstHostOctet || o > LastHostOctet {
+		n.IP = ""
+	}
+	if n.OS != ImageWindows && n.OS != ImageLinux {
+		n.OS = ""
+	}
+	if n.DNS != DNSRouter && CheckHostname(n.DNS) != nil {
+		n.DNS = ""
+	}
+	return n
+}
+
+func (n Notes) String() string {
+	parts := []string{notesPrefix}
+	for _, kv := range [][2]string{{"ip", n.IP}, {"os", n.OS}, {"base", n.Base}, {"dns", n.DNS}} {
+		if kv[1] != "" {
+			parts = append(parts, kv[0]+"="+kv[1])
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// WithNotes replaces desc's battleship line with n's, or appends one.
+func WithNotes(desc string, n Notes) string {
+	lines := strings.Split(desc, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), notesPrefix) {
+			lines[i] = n.String()
+			return strings.Join(lines, "\n")
+		}
+	}
+	if strings.TrimSpace(desc) == "" {
+		return n.String()
+	}
+	return strings.TrimRight(desc, "\n") + "\n" + n.String()
+}
+
+// PickOctet picks an unused host octet for host in domain. The choice
+// looks random but is the same every time it is planned, so a preview and
+// the job's re-plan agree.
+func PickOctet(domain, host string, used map[int]bool) (int, bool) {
+	h := fnv.New32a()
+	h.Write([]byte(domain + "/" + host))
+	n := LastHostOctet - FirstHostOctet + 1
+	start := int(h.Sum32() % uint32(n))
+	for i := range n {
+		o := FirstHostOctet + (start+i)%n
+		if !used[o] {
+			return o, true
+		}
+	}
+	return 0, false
+}
+
+// LastOctet is the last octet of an IPv4 address, or 0.
+func LastOctet(ip string) int {
+	i := strings.LastIndex(ip, ".")
+	if i < 0 {
+		return 0
+	}
+	n, _ := strconv.Atoi(ip[i+1:])
+	return n
+}

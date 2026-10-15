@@ -1,0 +1,77 @@
+{{define "content" -}}
+{{- $csrf := .CSRF}}
+{{- with .Data}}
+{{- $back := "/environments"}}{{if hasPrefix .Op.Path "/images"}}{{$back = "/images"}}{{end}}
+<form class="sheet" method="post" action="{{.Op.Path}}/preview" aria-labelledby="form-title">
+{{template "csrf" $csrf}}
+<div class="ph"><h1 id="form-title">{{opIcon (print .Op.Kind)}}{{.Op.Title}}</h1><span class="sp"></span>{{template "close" $back}}</div>
+<div class="pb form">
+{{- with .Error}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
+{{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
+{{- if or (eq .Op.Kind "env-create") (eq .Op.Kind "env-add") (eq .Op.Kind "env-dns")}}
+<div class="field">
+<label class="lbl" for="domain">Domain</label>
+<input class="inp" type="text" id="domain" name="domain" value="{{.In.Domain}}" required autocomplete="off" spellcheck="false" aria-describedby="domain-hint"{{if ne .Op.Kind "env-create"}} list="domains"{{end}}>
+<span class="hint" id="domain-hint">e.g. kilo.alpha{{if eq .Op.Kind "env-create"}} · takes the first free dev slot{{end}}</span>
+<datalist id="domains">{{range .Envs}}{{if and .Domain (not .Mixed)}}<option value="{{.Domain}}"></option>{{end}}{{end}}</datalist>
+</div>
+{{- end}}
+{{- if or (eq .Op.Kind "env-create") (eq .Op.Kind "env-add")}}
+<div class="field">
+<label class="lbl" for="router">Router <span class="muted">· name=image{{if eq .Op.Kind "env-add"}} · only if it has none{{end}}</span></label>
+<input class="inp" type="text" id="router" name="router" value="{{.In.Router}}"{{if eq .Op.Kind "env-create"}} required{{end}} autocomplete="off" spellcheck="false" aria-describedby="router-hint">
+<span class="hint" id="router-hint">router images: {{range $i, $r := .Routers}}{{if $i}}, {{end}}{{$r.Family}}{{else}}none registered{{end}} · its LAN is .2</span>
+</div>
+<div class="field">
+<label class="lbl" for="env-hosts">Hosts <span class="muted">· one per line, name=image or name=image:octet</span></label>
+<textarea class="inp" id="env-hosts" name="env_hosts" rows="6" spellcheck="false" aria-describedby="hosts-hint">{{range .In.EnvHosts}}{{.}}
+{{end}}</textarea>
+<span class="hint" id="hosts-hint">images: {{range $i, $o := .Others}}{{if $i}}, {{end}}{{$o.Family}} ({{$o.Kind}}){{else}}none registered{{end}} · addresses {{.Subnet}}.4–254, picked if left out</span>
+</div>
+{{- end}}
+{{- if eq .Op.Kind "env-dns"}}
+<div class="field">
+<label class="lbl" for="dns">DNS server</label>
+<input class="inp" type="text" id="dns" name="dns" value="{{or .In.DNS "router"}}" required autocomplete="off" spellcheck="false" aria-describedby="dns-hint">
+<span class="hint" id="dns-hint">router, or a Windows or Linux host of this environment, e.g. dc</span>
+</div>
+{{- end}}
+{{- if eq .Op.Kind "image-register"}}
+<div class="field">
+<label class="lbl" for="vmid">VM to copy in <span class="muted">· VMID</span></label>
+<input class="inp" type="number" id="vmid" name="vmid" value="{{if .In.VMID}}{{.In.VMID}}{{end}}" required min="100" aria-describedby="vmid-hint">
+<span class="hint" id="vmid-hint">shut down, generalized (sysprep on Windows, cloud-init clean on Linux), with the guest agent installed for Windows and Linux</span>
+</div>
+<div class="field">
+<label class="lbl" for="family">Family</label>
+<input class="inp" type="text" id="family" name="family" value="{{.In.Family}}" required list="families" autocomplete="off" spellcheck="false" aria-describedby="family-hint">
+<span class="hint" id="family-hint">e.g. debian-12 · an existing family gets its next version</span>
+<datalist id="families">{{range .Images}}<option value="{{.Family}}"></option>{{end}}</datalist>
+</div>
+<fieldset class="field">
+<legend>Kind <span class="muted">· for a new family</span></legend>
+<div class="opts">{{range .Kinds}}<label class="opt"><input type="radio" name="image_kind" value="{{.}}"{{if eq . $.Data.In.ImageKind}} checked{{end}}><span>{{.}}</span></label>{{end}}</div>
+</fieldset>
+{{- end}}
+{{- if eq .Op.Kind "image-edit"}}
+<div class="field">
+<label class="lbl" for="family">Family</label>
+<input class="inp" type="text" id="family" name="family" value="{{.In.Family}}" required list="families" autocomplete="off" spellcheck="false">
+<datalist id="families">{{range .Images}}<option value="{{.Family}}"></option>{{end}}</datalist>
+</div>
+{{- end}}
+{{- if or (eq .Op.Kind "image-deprecate") (eq .Op.Kind "image-delete")}}
+<div class="field">
+<label class="lbl" for="image">Base image</label>
+<input class="inp" type="text" id="image" name="image" value="{{.In.Image}}" required list="images" autocomplete="off" spellcheck="false">
+<datalist id="images">{{range .Images}}<option value="{{.Name}}"></option>{{end}}</datalist>
+</div>
+{{- end}}
+</div>
+<div class="pf">
+<a class="btn" href="{{$back}}">Cancel</a>
+<button type="submit" class="btn pri">Preview</button>
+</div>
+</form>
+{{- end}}
+{{- end}}

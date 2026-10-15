@@ -3,6 +3,7 @@ package pods
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -194,8 +195,10 @@ func TestOfferPrivilegesAreItemNeeds(t *testing.T) {
 			return p.Snapshot(ctx, SnapshotRequest{Teams: []string{"01"}, Name: "before-scoring"})
 		},
 	}
-	if len(plans) != len(offerPrivileges) {
-		t.Fatalf("plans cover %d operations, offerPrivileges %d", len(plans), len(offerPrivileges))
+	for kind := range offerPrivileges {
+		if plans[kind] == nil && !kind.Teamless() {
+			t.Fatalf("no plan built for %s", kind)
+		}
 	}
 	for kind, build := range plans {
 		plan, err := build()
@@ -334,5 +337,63 @@ func TestAccessDoesNotRememberACancelledRead(t *testing.T) {
 	_, _ = acc.Privileges(context.Background(), "/vms/1")
 	if n := len(refused.calls); n != 1 {
 		t.Errorf("a refused listing was asked %d times, want 1", n)
+	}
+}
+
+func TestEnvItemNeeds(t *testing.T) {
+	cfg := envConfig()
+	it := Item{Name: "oak.kilo.alpha", VMID: 2101, Pool: "dev-01", Source: &Source{VMID: 8002, Node: "birch"},
+		NICs: map[string]string{"net0": "devint01"}, Guest: &Guest{OS: ImageWindows},
+		Steps: []Step{StepClone, StepLabel, StepNetwork, StepStart, StepWaitAgent, StepGuest, StepVerify}}
+	pool := []string{"VM.Allocate", "VM.Config.Options", "VM.Config.Network", "VM.PowerMgmt", "VM.GuestAgent.Audit", "VM.GuestAgent.Unrestricted"}
+	full := func(poolPrivs []string) grants {
+		return grants{
+			"/vms/8002":                      {"VM.Clone"},
+			"/pool/dev-01":                   poolPrivs,
+			"/storage/" + cfg.Deploy.Storage: {"Datastore.AllocateSpace"},
+			"/sdn/zones/" + cfg.Environments.SDNZone + "/devint01": {"SDN.Use"},
+		}
+	}
+	plan := &Plan{Kind: KindEnvAdd, Items: []Item{it}}
+	if err := BlockUnpermitted(context.Background(), plan, full(pool), cfg); err != nil || plan.Items[0].Blocked != "" {
+		t.Fatalf("full access blocked: %q, %v", plan.Items[0].Blocked, err)
+	}
+	plan = &Plan{Kind: KindEnvAdd, Items: []Item{it}}
+	_ = BlockUnpermitted(context.Background(), plan, full(pool[:5]), cfg)
+	if !strings.Contains(plan.Items[0].Blocked, "VM.GuestAgent.Unrestricted") {
+		t.Errorf("blocked = %q", plan.Items[0].Blocked)
+	}
+}
+
+// After an edit and register, a base image sits on the edit bridge, and
+// Proxmox checks SDN.Use on a clone source's bridges.
+func TestCloneNeedsSDNUseOnSourceBridges(t *testing.T) {
+	cfg := envConfig()
+	cfg.Images.EditBridge, cfg.Images.EditZone = "devedit", "edits"
+	f := envFake()
+	f.Add(proxmox.VM{VMID: 8003, Name: "debian-13-v1", Node: "alder", Template: true, Tags: "base;linux"},
+		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:80:04,bridge=devedit"})
+	plan := create(t, NewPlanner(f, cfg), "teak=debian-13")
+	teak := plan.Items[1]
+	if !slices.Equal(teak.Source.Bridges, []string{"devedit"}) {
+		t.Fatalf("source = %+v", teak.Source)
+	}
+	g := grants{
+		"/vms/8003":                      {"VM.Clone"},
+		"/pool/dev-01":                   {"VM.Allocate", "VM.Config.Options", "VM.Config.Network", "VM.PowerMgmt", "VM.GuestAgent.Audit", "VM.GuestAgent.Unrestricted"},
+		"/storage/" + cfg.Deploy.Storage: {"Datastore.AllocateSpace"},
+		"/sdn/zones/" + cfg.Environments.SDNZone + "/devint01": {"SDN.Use"},
+	}
+	p := &Plan{Kind: KindEnvCreate, Items: []Item{teak}}
+	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if b := p.Items[0].Blocked; !strings.Contains(b, "SDN.Use on /sdn/zones/edits/devedit") {
+		t.Errorf("blocked = %q", b)
+	}
+	g["/sdn/zones/edits/devedit"] = []string{"SDN.Use"}
+	p = &Plan{Kind: KindEnvCreate, Items: []Item{teak}}
+	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "" {
+		t.Errorf("with SDN.Use on the edit bridge: %q, %v", p.Items[0].Blocked, err)
 	}
 }

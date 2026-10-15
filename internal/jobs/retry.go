@@ -26,6 +26,9 @@ func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 	if !store.JobStatus(job.Status).CanRetry() {
 		return Inputs{}, fmt.Errorf("job %d is %s: %w", job.ID, job.Status, ErrNotRetryable)
 	}
+	if pods.Kind(job.Kind).Teamless() {
+		return Inputs{}, fmt.Errorf("job %d: run it again from its form; image and environment jobs resume what exists: %w", job.ID, ErrNotRetryable)
+	}
 	var in Inputs
 	if err := json.Unmarshal(job.Inputs, &in); err != nil {
 		return Inputs{}, fmt.Errorf("reading job %d's inputs: %w", job.ID, err)

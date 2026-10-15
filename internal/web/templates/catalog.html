@@ -1,0 +1,61 @@
+{{define "content" -}}
+{{- with .Data}}
+<div class="sheet">
+<div class="ph"><h1 id="form-title">{{if eq .Show "images"}}Base images{{else}}Environments{{end}}</h1><span class="sp"></span>
+{{- if eq .Show "images"}}
+<a class="btn pri" href="/images/register">Register base image</a>
+{{- else}}
+<a class="btn pri" href="/environments/new">Create environment</a>
+{{- end}}
+</div>
+<div class="pb">
+{{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
+{{- if eq .Show "images"}}
+{{- if .Images}}
+<div class="tscroll">
+<table class="tbl">
+<thead><tr><th scope="col">Image</th><th scope="col">Kind</th><th scope="col">VMID</th><th scope="col">Node</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
+<tbody>
+{{- range .Images}}
+<tr{{if .Deprecated}} class="muted"{{end}}>
+<td>{{names .Name}}{{if .Deprecated}} <span class="muted">· deprecated</span>{{end}}</td>
+<td>{{.Kind}}</td><td>{{.VMID}}</td><td>{{.Node}}</td>
+<td>
+<a href="/images/edit?family={{.Family}}">Open for editing</a>
+{{- if not .Deprecated}} · <a href="/images/deprecate?image={{.Name}}">Deprecate</a>{{end}}
+ · <a href="/images/delete?image={{.Name}}">Delete</a>
+</td>
+</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- else if not .ReadErr}}
+<p class="say">No base images yet. Install an OS on a VM in Proxmox, generalize it, shut it down, then register it here.</p>
+{{- end}}
+{{- else if .Envs}}
+<div class="tscroll">
+<table class="tbl">
+<thead><tr><th scope="col">Slot</th><th scope="col">Domain</th><th scope="col">Hosts</th><th scope="col">DNS</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
+<tbody>
+{{- range .Envs}}
+<tr>
+<td>{{names .Slot.Pool}}</td>
+{{- if .Free}}
+<td colspan="3" class="muted">free</td><td></td>
+{{- else}}
+<td>{{if .Mixed}}<span class="muted">mixed</span>{{else}}{{names .Domain}}{{end}}{{with .Users}} <span class="muted">· also on its networks: {{range $i, $u := .}}{{if $i}}, {{end}}{{names $u}}{{end}}</span>{{end}}</td>
+<td>{{range .Hosts}}<div>{{names .Name}} <span class="muted">{{.Status}}{{with .Notes.IP}} · {{.}}{{end}}</span></div>{{end}}</td>
+<td>{{.DNS}}</td>
+<td>{{if and .Domain (not .Mixed)}}<a href="/environments/add?domain={{.Domain}}">Add hosts</a> · <a href="/environments/dns?domain={{.Domain}}">Set DNS</a>{{end}}</td>
+{{- end}}
+</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- end}}
+</div>
+</div>
+{{- end}}
+{{- end}}

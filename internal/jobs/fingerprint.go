@@ -26,6 +26,14 @@ func Fingerprint(plan *pods.Plan) string {
 		// omitempty keeps other kinds' fingerprints unchanged.
 		Description string `json:",omitempty"`
 		VMState     bool   `json:",omitempty"`
+
+		Source     *fpSource         `json:",omitempty"`
+		Pool       string            `json:",omitempty"`
+		Tags       string            `json:",omitempty"`
+		Notes      *pods.Notes       `json:",omitempty"`
+		NICs       map[string]string `json:",omitempty"`
+		Guest      *pods.Guest       `json:",omitempty"`
+		Supersedes *fpSource         `json:",omitempty"`
 	}
 	type fpTemplate struct {
 		Name           string
@@ -44,7 +52,8 @@ func Fingerprint(plan *pods.Plan) string {
 		Templates []fpTemplate
 		Items     []fpItem
 		Config    string
-	}{Kind: plan.Kind, Teams: plan.Teams, Config: plan.Config}
+		Locks     []string `json:",omitempty"`
+	}{Kind: plan.Kind, Teams: plan.Teams, Config: plan.Config, Locks: plan.Locks}
 	for _, t := range plan.Templates {
 		fp.Templates = append(fp.Templates, fpTemplate{
 			Name:           t.Name,
@@ -70,11 +79,29 @@ func Fingerprint(plan *pods.Plan) string {
 
 			Description: it.Description,
 			VMState:     it.VMState,
+
+			Source: sourceFP(it.Source), Pool: it.Pool, Tags: it.Tags, Notes: it.Notes,
+			NICs: it.NICs, Guest: it.Guest, Supersedes: sourceFP(it.Supersedes),
 		})
 	}
 	b, _ := json.Marshal(fp) // plain structs of strings, ints and bools can't fail
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// fpSource is a Source without Bridges, which only decide the privileges
+// needed, as a template's do.
+type fpSource struct {
+	VMID int    `json:"vmid"`
+	Node string `json:"node"`
+	Name string `json:"name"`
+}
+
+func sourceFP(s *pods.Source) *fpSource {
+	if s == nil {
+		return nil
+	}
+	return &fpSource{VMID: s.VMID, Node: s.Node, Name: s.Name}
 }
 
 // LockKeys names what a plan touches, so overlapping jobs serialize. VMIDs
@@ -90,6 +117,9 @@ func LockKeys(plan *pods.Plan) []string {
 		if t.VMID != 0 {
 			seen["vmid:"+strconv.Itoa(t.VMID)] = true
 		}
+	}
+	for _, k := range plan.Locks {
+		seen[k] = true
 	}
 	return slices.Sorted(maps.Keys(seen))
 }

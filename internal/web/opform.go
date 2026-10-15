@@ -83,6 +83,10 @@ type snapshotPicker struct {
 func (s *Server) opForm(op operation) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
+		if op.Kind.Teamless() {
+			s.teamlessForm(w, r, http.StatusOK, op, formInputs(op.Kind, q), "")
+			return
+		}
 		grid := false
 		if r.Method == http.MethodPost {
 			q = postedForm(r)
@@ -155,6 +159,10 @@ func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, 
 
 // renderForm shows the form again with a problem, keeping what was typed.
 func (s *Server) renderForm(w http.ResponseWriter, r *http.Request, status int, op operation, in jobs.Inputs, problem string) {
+	if op.Kind.Teamless() {
+		s.teamlessForm(w, r, status, op, in, problem)
+		return
+	}
 	p := s.newFormPage(r.Context(), op, in, in.Teams != "")
 	p.Error = problem
 	s.render(w, r, status, "opform", s.newView(w, r, op.Title, string(op.Kind), p))

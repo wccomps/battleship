@@ -228,3 +228,64 @@ func UnconvertedDisk(cfg map[string]string) (key, vol string) {
 	}
 	return "", ""
 }
+
+// NICMAC is a NIC's MAC address, lower case, from its config value
+// ("virtio=BC:24:11:…,bridge=…").
+func NICMAC(nic string) (string, bool) {
+	head, _ := splitOptions(nic)
+	_, mac, ok := strings.Cut(head, "=")
+	if !ok || len(mac) != 17 {
+		return "", false
+	}
+	return strings.ToLower(mac), true
+}
+
+// NICChanges puts each named NIC on its bridge, keeping its model and MAC
+// and dropping a VLAN tag. NICs the VM lacks are left for the planner to
+// block.
+func NICChanges(cur map[string]string, nics map[string]string) map[string]string {
+	want := map[string]string{}
+	for k, bridge := range nics {
+		if cur[k] != "" {
+			want[k] = nicSpec(cur[k], bridge)
+		}
+	}
+	return diff(cur, want)
+}
+
+// LabelChanges sets the tag list to tags ("" removes it) and, if notes is
+// set, the notes line.
+func LabelChanges(cur map[string]string, tags string, notes *Notes) map[string]string {
+	out := map[string]string{}
+	if !sameTags(cur["tags"], tags) {
+		if tags == "" {
+			out["delete"] = "tags"
+		} else {
+			out["tags"] = tags
+		}
+	}
+	if notes != nil {
+		if d := WithNotes(cur["description"], *notes); d != cur["description"] {
+			out["description"] = d
+		}
+	}
+	return out
+}
+
+func sameTags(a, b string) bool {
+	x, y := Tags(a), Tags(b)
+	slices.Sort(x)
+	slices.Sort(y)
+	return slices.Equal(x, y)
+}
+
+// AddTag adds tag to a tag list unless it is there.
+func AddTag(tags, tag string) string {
+	if slices.Contains(Tags(tags), tag) {
+		return tags
+	}
+	if tags == "" {
+		return tag
+	}
+	return tags + ";" + tag
+}

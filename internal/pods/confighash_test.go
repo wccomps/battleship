@@ -11,6 +11,9 @@ import (
 // hashedFor lists, for each run-affecting config field, which kinds'
 // ConfigHash covers it (TestEveryRunConfigFieldIsClassified requires every
 // field). A field no kind lists only shapes planning, which the plan records.
+var imageKinds = []Kind{KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete}
+var envKinds = []Kind{KindEnvCreate, KindEnvAdd, KindEnvDNS}
+
 var hashedFor = map[string]map[string][]Kind{
 	"Naming": {
 		"Pool":   {KindDeploy}, // clones join it
@@ -20,9 +23,18 @@ var hashedFor = map[string]map[string][]Kind{
 		"ExtBridge": {KindDeploy}, "IntBridge": {KindDeploy}, "ExtSubnet": {KindDeploy}, "CICustom": {KindDeploy},
 	},
 	"Deploy": {
-		"Storage": {KindDeploy}, "Linked": {KindDeploy}, "DiskMBpsRead": {KindDeploy}, "DiskMBpsWrite": {KindDeploy},
+		"Storage": append([]Kind{KindDeploy}, append(slices.Clone(imageKinds), envKinds...)...),
+		"Linked":  {KindDeploy}, "DiskMBpsRead": {KindDeploy}, "DiskMBpsWrite": {KindDeploy},
 		"SnapshotName": {KindDeploy}, "BaselinePatterns": {KindDeploy},
-		"MasterTag": nil, "GPUVGA": nil,
+		"MasterTag": envKinds, // environment VMs are tagged with it
+		"GPUVGA":    nil,
+	},
+	"Images": {
+		"Pool": imageKinds, "VMIDRange": imageKinds, "EditBridge": imageKinds, "EditZone": imageKinds,
+	},
+	"Environments": {
+		"Slots": envKinds, "Pool": envKinds, "IntBridge": envKinds, "ExtBridge": envKinds, "SDNZone": envKinds,
+		"VMIDBase": envKinds, "Subnet": envKinds, "AgentTimeout": envKinds,
 	},
 	"Teardown": {
 		"ShutdownTimeout": {KindTeardown},
@@ -51,7 +63,7 @@ func TestEveryRunConfigFieldIsClassified(t *testing.T) {
 }
 
 func TestConfigHashFollowsClassification(t *testing.T) {
-	kinds := []Kind{KindDeploy, KindTeardown, KindReset, KindPower, KindSnapshot}
+	kinds := append([]Kind{KindDeploy, KindTeardown, KindReset, KindPower, KindSnapshot}, append(slices.Clone(imageKinds), envKinds...)...)
 	for section, fields := range hashedFor {
 		for name, hashed := range fields {
 			c := config.Default()

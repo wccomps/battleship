@@ -316,8 +316,9 @@ func (e *Executor) runItems(ctx context.Context, kind pods.Kind, items []pods.It
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			clones := slices.Contains(it.Steps, pods.StepClone)
 			b := builds[it.Template]
+			// Base-image and environment items clone a Source, not a template.
+			clones := b != nil && slices.Contains(it.Steps, pods.StepClone)
 			run := func() error {
 				var err error
 				if clones && b.err != nil {

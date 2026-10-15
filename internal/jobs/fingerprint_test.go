@@ -15,7 +15,7 @@ import (
 // field not listed.
 var fingerprinted = map[string]map[string]bool{
 	"Plan": {
-		"Kind": true, "Teams": true, "Templates": true, "Items": true, "Config": true,
+		"Kind": true, "Teams": true, "Templates": true, "Items": true, "Config": true, "Locks": true,
 	},
 	"TemplateSpec": {
 		"Name": true, "VMID": true, "Exists": true, "Rebuild": true, "Blocked": true,
@@ -28,15 +28,22 @@ var fingerprinted = map[string]map[string]bool{
 	"Item": {
 		"Name": true, "VMID": true, "Steps": true, "Blocked": true, "Snapshot": true, "Action": true, "Template": true,
 		"Description": true, "VMState": true, // what a snapshot job writes to Proxmox
+		// What base-image and environment steps do.
+		"Source": true, "Pool": true, "Tags": true, "Notes": true, "NICs": true, "Guest": true, "Supersedes": true,
 		// Derived from Name or Snapshot, or where the VM runs.
 		"Team": false, "Host": false, "Node": false, "Baseline": false,
 		// Says why Blocked is set, which Blocked already covers.
 		"Unpermitted": false,
 	},
+	"Source": {
+		"VMID": true, "Node": true, "Name": true,
+		// Only decide the privileges needed, as TemplateSpec.Bridges.
+		"Bridges": false,
+	},
 }
 
 func TestEveryPlanFieldIsClassified(t *testing.T) {
-	for _, typ := range []reflect.Type{reflect.TypeFor[pods.Plan](), reflect.TypeFor[pods.TemplateSpec](), reflect.TypeFor[pods.Item]()} {
+	for _, typ := range []reflect.Type{reflect.TypeFor[pods.Plan](), reflect.TypeFor[pods.TemplateSpec](), reflect.TypeFor[pods.Item](), reflect.TypeFor[pods.Source]()} {
 		classes := fingerprinted[typ.Name()]
 		for i := range typ.NumField() {
 			f := typ.Field(i)
@@ -65,6 +72,14 @@ func changed(t *testing.T, v reflect.Value) reflect.Value {
 	case reflect.Slice:
 		out = reflect.Append(reflect.MakeSlice(v.Type(), 0, v.Len()+1), reflect.New(v.Type().Elem()).Elem())
 		out = reflect.AppendSlice(out, v)
+	case reflect.Pointer:
+		if v.IsNil() {
+			return reflect.New(v.Type().Elem())
+		}
+		return reflect.Zero(v.Type())
+	case reflect.Map:
+		out = reflect.MakeMap(v.Type())
+		out.SetMapIndex(reflect.ValueOf("x"), reflect.ValueOf("x"))
 	default:
 		t.Fatalf("no way to change a %s", v.Type())
 	}
@@ -106,6 +121,19 @@ func TestFingerprintFollowsClassification(t *testing.T) {
 			f := reflect.ValueOf(&p.Items[0]).Elem().FieldByName(field)
 			f.Set(changed(t, f))
 		})
+	}
+	withSource := func(p *pods.Plan) *pods.Source {
+		p.Items[0].Source = &pods.Source{VMID: 8001, Node: "n1", Name: "debian-12-v1", Bridges: []string{"vmbr0"}}
+		return p.Items[0].Source
+	}
+	fpSrc := func() string { p := base(); withSource(p); return Fingerprint(p) }()
+	for field := range fingerprinted["Source"] {
+		p := base()
+		f := reflect.ValueOf(withSource(p)).Elem().FieldByName(field)
+		f.Set(changed(t, f))
+		if got := Fingerprint(p) != fpSrc; got != fingerprinted["Source"][field] {
+			t.Errorf("changing Source.%s changed the fingerprint: %v, want %v", field, got, fingerprinted["Source"][field])
+		}
 	}
 }
 

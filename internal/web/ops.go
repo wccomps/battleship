@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/wccomps/battleship/internal/auth"
@@ -29,6 +30,13 @@ var operations = []operation{
 	{Kind: pods.KindSnapshot, Path: "/snapshot", Title: "Take snapshot", Noun: "snapshot"},
 	{Kind: pods.KindDeploy, Path: "/deploy", Title: "Deploy", Noun: "deploy"},
 	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Noun: "teardown"},
+	{Kind: pods.KindEnvCreate, Path: "/environments/new", Title: "Create environment", Noun: "environment"},
+	{Kind: pods.KindEnvAdd, Path: "/environments/add", Title: "Add hosts", Noun: "new hosts"},
+	{Kind: pods.KindEnvDNS, Path: "/environments/dns", Title: "Set DNS", Noun: "DNS change"},
+	{Kind: pods.KindImageRegister, Path: "/images/register", Title: "Register base image", Noun: "registration"},
+	{Kind: pods.KindImageEdit, Path: "/images/edit", Title: "Open for editing", Noun: "working copy"},
+	{Kind: pods.KindImageDeprecate, Path: "/images/deprecate", Title: "Deprecate base image", Noun: "deprecation"},
+	{Kind: pods.KindImageDelete, Path: "/images/delete", Title: "Delete base image", Noun: "deletion"},
 }
 
 // page reports whether the operation opens as its own page rather than in
@@ -36,7 +44,10 @@ var operations = []operation{
 // picked in the grid, and their previews are long. These are the header's
 // buttons (leadOps) and keep job.html's "Preview again" out of the panel;
 // the grid's and VM page's Deploy links leave out data-panel-link for it.
-func (o operation) page() bool { return o.Kind == pods.KindDeploy || o.Kind == pods.KindTeardown }
+// Image and environment operations have nothing to pick in the grid.
+func (o operation) page() bool {
+	return o.Kind == pods.KindDeploy || o.Kind == pods.KindTeardown || o.Kind.Teamless()
+}
 
 func operationFor(kind pods.Kind) (operation, bool) {
 	for _, op := range operations {
@@ -66,6 +77,14 @@ const (
 	fieldTyped       = "typed"    // confirm: the team range, typed
 	fieldRetryOf     = "retry_of" // confirm: the job a retry preview retries; shown only, never trusted
 	fieldFrom        = "from"     // "grid": the grid's form, which sends ticked VMs and no teams
+	fieldDomain      = "domain"
+	fieldRouter      = "router"    // name=family
+	fieldEnvHosts    = "env_hosts" // one name=family[:octet] per line
+	fieldDNS         = "dns"
+	fieldVMID        = "vmid"
+	fieldFamily      = "family"
+	fieldImageKind   = "image_kind"
+	fieldImage       = "image"
 	fromGridValue    = "grid"
 	yes              = "yes"
 )
@@ -75,6 +94,18 @@ const (
 // baseline (pods.BaselineSnapshot). VMs may come comma-separated (a confirm's
 // hidden field), one per ticked box (the grid), or both.
 func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
+	if kind.Teamless() {
+		in := jobs.Inputs{Kind: kind, Domain: strings.TrimSpace(form.Get(fieldDomain)), Router: strings.TrimSpace(form.Get(fieldRouter)),
+			DNS: strings.TrimSpace(form.Get(fieldDNS)), Family: strings.TrimSpace(form.Get(fieldFamily)),
+			ImageKind: strings.TrimSpace(form.Get(fieldImageKind)), Image: strings.TrimSpace(form.Get(fieldImage))}
+		for _, line := range strings.Split(form.Get(fieldEnvHosts), "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				in.EnvHosts = append(in.EnvHosts, line)
+			}
+		}
+		in.VMID, _ = strconv.Atoi(strings.TrimSpace(form.Get(fieldVMID)))
+		return in
+	}
 	in := jobs.Inputs{
 		Kind:  kind,
 		Teams: strings.TrimSpace(form.Get(fieldTeams)),
@@ -112,6 +143,19 @@ type field struct{ Name, Value string }
 
 // inputFields writes inputs as the form fields formInputs reads.
 func inputFields(in jobs.Inputs) []field {
+	if in.Kind.Teamless() {
+		var fs []field
+		for _, f := range []field{{fieldDomain, in.Domain}, {fieldRouter, in.Router}, {fieldEnvHosts, strings.Join(in.EnvHosts, "\n")},
+			{fieldDNS, in.DNS}, {fieldFamily, in.Family}, {fieldImageKind, in.ImageKind}, {fieldImage, in.Image}} {
+			if f.Value != "" {
+				fs = append(fs, f)
+			}
+		}
+		if in.VMID != 0 {
+			fs = append(fs, field{fieldVMID, strconv.Itoa(in.VMID)})
+		}
+		return fs
+	}
 	fs := []field{{fieldTeams, in.Teams}}
 	if len(in.Hosts) > 0 {
 		fs = append(fs, field{fieldHosts, strings.Join(in.Hosts, ",")})
