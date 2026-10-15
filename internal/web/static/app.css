@@ -53,6 +53,9 @@ h1,h2,h3,p{margin:0}
 .sp{flex:1}
 summary{list-style:none;cursor:pointer}
 summary::-webkit-details-marker{display:none}
+.notes{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;color:var(--tx2);margin-top:2px;max-width:60ch}
+.notes-d summary{font-size:12px}
+.imgnotes{margin:0;padding-left:16px;display:grid;gap:6px}
 
 /* ---------- state roles: one class sets colour (--c) and tint (--cb) ---------- */
 .is-running{--c:var(--run);--cb:var(--run-bg)}

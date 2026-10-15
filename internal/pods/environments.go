@@ -59,6 +59,9 @@ type EnvHost struct {
 	Router   bool
 	Notes    Notes
 	HasNotes bool
+	// UserNotes are its other notes, such as the logins its base image's
+	// notes carried over.
+	UserNotes string
 }
 
 // Environment is what a slot holds.
@@ -164,7 +167,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			n, has := ParseNotes(cfg["description"])
 			n = n.Checked(p.Cfg.Environments.Subnet)
 			envs[si].Hosts = append(envs[si].Hosts, EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node,
-				Status: vm.Status, Tags: vm.Tags, Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has})
+				Status: vm.Status, Tags: vm.Tags, Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has, UserNotes: UserNotes(cfg["description"])})
 			continue
 		}
 		if vm.Template {

@@ -1,6 +1,12 @@
 package pods
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"unicode"
+
+	"pgregory.net/rapid"
+)
 
 func TestParseHostSpec(t *testing.T) {
 	for in, want := range map[string]HostSpec{
@@ -77,4 +83,49 @@ func TestPickOctetIsStableAndAvoidsUsed(t *testing.T) {
 	if _, ok := PickOctet("kilo.alpha", "teak", used); ok {
 		t.Error("PickOctet found an octet in a full subnet")
 	}
+}
+
+func TestUserNotes(t *testing.T) {
+	for _, c := range []struct{ desc, want string }{
+		{"", ""},
+		{"battleship: ip=192.168.100.10 base=deb-v1", ""},
+		{"Login: root / pw\nbattleship: ip=192.168.100.10\n", "Login: root / pw"},
+		{"  battleship: reboot\nDebian 13\r\n\nLogin: root  \n", "Debian 13\n\nLogin: root"},
+		{"<script>alert(1)</script>", "<script>alert(1)</script>"}, // pages escape it
+		{"Login: \u202eroot\u200b / pw\ufeff", "Login: root / pw"}, // format characters dropped
+	} {
+		if got := UserNotes(c.desc); got != c.want {
+			t.Errorf("UserNotes(%q) = %q, want %q", c.desc, got, c.want)
+		}
+	}
+	long := strings.Repeat("é", maxUserNotes+5)
+	if got := []rune(UserNotes(long)); len(got) != maxUserNotes+1 || got[maxUserNotes] != '…' {
+		t.Errorf("long notes keep %d runes, want %d and an ellipsis", len(got), maxUserNotes+1)
+	}
+}
+
+// UserNotes never keeps battleship's lines or format characters, stays within
+// its cap, and cleaning cleaned notes changes nothing.
+func TestPropUserNotes(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		piece := rapid.OneOf(rapid.String(), rapid.SampledFrom([]string{
+			"battleship: ip=192.168.100.10", "  battleship: reboot", "\n", "\r\n", "\u202e", "\u200b", "\ufeff", "Login: root",
+		}))
+		desc := strings.Join(rapid.SliceOfN(piece, 0, 40).Draw(t, "pieces"), "")
+		got := UserNotes(desc)
+		for _, line := range strings.Split(got, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), notesPrefix) {
+				t.Fatalf("kept a battleship line: %q", line)
+			}
+		}
+		if strings.ContainsFunc(got, func(r rune) bool { return unicode.Is(unicode.Cf, r) }) {
+			t.Fatalf("kept a format character: %q", got)
+		}
+		if n := len([]rune(got)); n > maxUserNotes+1 {
+			t.Fatalf("kept %d runes", n)
+		}
+		if len([]rune(got)) <= maxUserNotes && UserNotes(got) != got {
+			t.Fatalf("not idempotent: %q -> %q", got, UserNotes(got))
+		}
+	})
 }

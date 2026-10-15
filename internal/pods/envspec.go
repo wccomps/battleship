@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Every environment's LAN: the router is .2, .3 is the team VPN endpoint,
@@ -122,6 +123,33 @@ func ParseNotes(desc string) (Notes, bool) {
 		return n, true
 	}
 	return Notes{}, false
+}
+
+// maxUserNotes caps the notes UserNotes keeps, in runes.
+const maxUserNotes = 4000
+
+// UserNotes is desc without battleship's lines: what people wrote, such as
+// logins. It is text for people; pages escape it like any other text. Format
+// characters (bidi overrides, zero widths) are dropped so notes can't
+// disguise what they say.
+func UserNotes(desc string) string {
+	desc = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, desc)
+	var keep []string
+	for _, line := range strings.Split(desc, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), notesPrefix) {
+			keep = append(keep, strings.TrimRight(line, " \t\r"))
+		}
+	}
+	s := strings.TrimSpace(strings.Join(keep, "\n"))
+	if r := []rune(s); len(r) > maxUserNotes {
+		s = string(r[:maxUserNotes]) + "…"
+	}
+	return s
 }
 
 // Checked drops the values a guest script can't take. Users can edit notes,

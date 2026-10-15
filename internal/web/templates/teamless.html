@@ -28,6 +28,15 @@
 {{end}}</textarea>
 <span class="hint" id="hosts-hint">images: {{range $i, $o := .Others}}{{if $i}}, {{end}}{{$o.Family}} ({{$o.Kind}}){{else}}none registered{{end}} · addresses {{.Subnet}}.4–254, picked if left out</span>
 </div>
+{{- if or .Routers .Others}}
+<div class="field">
+<span class="lbl">Base images <span class="muted">· the newest version of each</span></span>
+<ul class="imgnotes">
+{{- range .Routers}}{{template "imgnote" .}}{{end}}
+{{- range .Others}}{{template "imgnote" .}}{{end}}
+</ul>
+</div>
+{{- end}}
 {{- end}}
 {{- if eq .Op.Kind "env-dns"}}
 <div class="field">
@@ -75,3 +84,5 @@
 </form>
 {{- end}}
 {{- end}}
+
+{{define "imgnote"}}<li>{{names .Name}} <span class="muted">· {{.Kind}}</span>{{with .Notes}}<div class="notes">{{.}}</div>{{end}}</li>{{end}}

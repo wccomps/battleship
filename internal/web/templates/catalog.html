@@ -18,7 +18,8 @@
 <tbody>
 {{- range .Images}}
 <tr{{if .Deprecated}} class="muted"{{end}}>
-<td>{{names .Name}}{{if .Deprecated}} <span class="muted">· deprecated</span>{{end}}</td>
+<td>{{names .Name}}{{if .Deprecated}} <span class="muted">· deprecated</span>{{end}}
+{{- if .Notes}}{{if .Deprecated}}<details class="notes-d"><summary class="muted">notes</summary><div class="notes">{{.Notes}}</div></details>{{else}}<div class="notes">{{.Notes}}</div>{{end}}{{end}}</td>
 <td>{{.Kind}}</td><td>{{.VMID}}</td><td>{{.Node}}</td>
 <td>
 <a href="/images/edit?family={{.Family}}">Open for editing</a>
@@ -45,7 +46,8 @@
 <td colspan="3" class="muted">free</td><td></td>
 {{- else}}
 <td>{{if .Mixed}}<span class="muted">mixed</span>{{else}}{{names .Domain}}{{end}}{{with .Users}} <span class="muted">· also on its networks: {{range $i, $u := .}}{{if $i}}, {{end}}{{names $u}}{{end}}</span>{{end}}</td>
-<td>{{range .Hosts}}<div>{{names .Name}} <span class="muted">{{.Status}}{{with .Notes.IP}} · {{.}}{{end}}</span></div>{{end}}</td>
+<td>{{range .Hosts}}<div>{{names .Name}} <span class="muted">{{.Status}}{{with .Notes.IP}} · {{.}}{{end}}</span>
+{{- with .UserNotes}}<details class="notes-d"><summary class="muted">notes</summary><div class="notes">{{.}}</div></details>{{end}}</div>{{end}}</td>
 <td>{{.DNS}}</td>
 <td>{{if and .Domain (not .Mixed)}}<a href="/environments/add?domain={{.Domain}}">Add hosts</a> · <a href="/environments/dns?domain={{.Domain}}">Set DNS</a>{{end}}</td>
 {{- end}}

@@ -156,3 +156,45 @@ func TestBrowserCatalogPages(t *testing.T) {
 		})
 	}
 }
+
+// xssNotes is notes a Proxmox user could write to break out of the page.
+const xssNotes = "Login: root / pw\n<script>alert(1)</script><img src=x onerror=alert(2)>\"'></textarea></details>{{.CSRF}}"
+
+// Notes show on the images page, the environment forms and the environments
+// page, always as text: anyone with VM.Config.Options can write them.
+func TestNotesShowAsText(t *testing.T) {
+	h := newHarness(t)
+	h.api.Add(proxmox.VM{VMID: 8000, Name: "gw-v1", Node: "n1", Template: true, Tags: "base;router"},
+		map[string]string{"description": xssNotes, "net0": "virtio=BC:24:11:00:80:00,bridge=vmbr0", "net1": "virtio=BC:24:11:00:80:01,bridge=vmbr0"})
+	h.api.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "dev;kilo.alpha;router"},
+		map[string]string{"description": xssNotes + "\nbattleship: base=gw-v1 dns=router"})
+	h.api.Add(proxmox.VM{VMID: 8001, Name: "debian-12-v1", Node: "n1", Template: true, Tags: "base;linux;deprecated"},
+		map[string]string{"description": xssNotes, "agent": "1", "net0": "virtio=BC:24:11:00:80:02,bridge=vmbr0"})
+	h.api.Add(proxmox.VM{VMID: 8002, Name: "debian-12-v2", Node: "n1", Template: true, Tags: "base;linux"},
+		map[string]string{"description": xssNotes, "agent": "1", "net0": "virtio=BC:24:11:00:80:03,bridge=vmbr0"})
+	sess := h.login(asLead)
+	pages := map[string]string{}
+	for _, path := range []string{"/images", "/environments", "/environments/new", "/environments/add?domain=kilo.alpha"} {
+		pages[path] = h.get(&sess, path).Body.String()
+		pages["panel "+path] = h.panelGet(&sess, path, nil).Body.String()
+	}
+	// A refused preview shows the form again.
+	pages["refused preview"] = h.post(&sess, "/environments/new/preview", url.Values{
+		"domain": {"-bad-"}, "router": {"gw=gw"}, "env_hosts": {"teak=debian-12"}}).Body.String()
+	for path, body := range pages {
+		if !strings.Contains(body, "Login: root / pw") {
+			t.Errorf("%s doesn't show the notes", path)
+		}
+		for _, bad := range []string{"<script>alert", "<img src=x", "</textarea></details>{{"} {
+			if strings.Contains(body, bad) {
+				t.Errorf("%s has unescaped notes %q", path, bad)
+			}
+		}
+		if !strings.Contains(body, "&lt;script&gt;alert(1)&lt;/script&gt;") {
+			t.Errorf("%s doesn't show the notes' markup as text", path)
+		}
+		if strings.Contains(body, "battleship: base=gw-v1") {
+			t.Errorf("%s shows battleship's own notes line", path)
+		}
+	}
+}
