@@ -127,7 +127,7 @@ func TestPropPagesEscapeHostileText(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		page := rapid.SampledFrom(names).Draw(t, "page")
 		v := drawHostile[view](t, "view")
-		v.Refresh = localOnly(rapid.OneOf(rapid.Just(v.Refresh), offSiteURL).Draw(t, "refresh")) // as AuthPage sets it
+		v.refresh = rapid.OneOf(rapid.Just("/x"), offSiteURL).Draw(t, "refresh")
 		v.Data = pageData(t, page)
 		root := rapid.SampledFrom([]string{"layout", "panel"}).Draw(t, "root")
 		var buf bytes.Buffer

@@ -125,9 +125,12 @@ type view struct {
 	Live string
 	// Initial is the user's initial, for the account button.
 	Initial string
-	// Refresh, if set, is a local URL the page goes on to at once.
-	Refresh string
+	// refresh, if set, is the URL the page goes on to at once; see Refresh.
+	refresh string
 }
+
+// Refresh is the URL the layout's page goes on to at once, if it is local.
+func (v view) Refresh() string { return localOnly(v.refresh) }
 
 // navItem is an entry of the top navigation.
 type navItem struct {
@@ -241,9 +244,9 @@ type message struct {
 // this app's layout. New makes it the auth service's. A link or refresh
 // that would leave the site is dropped.
 func (s *Server) AuthPage(w http.ResponseWriter, r *http.Request, p auth.Page) {
-	link, refresh := localOnly(p.Link), localOnly(p.Refresh)
-	v := s.newView(w, r, p.Title, "", message{Status: p.Status, Message: sentence(p.Message), Link: link, LinkText: p.LinkText, Waiting: refresh != ""})
-	v.Refresh = refresh
+	v := s.newView(w, r, p.Title, "", nil)
+	v.refresh = p.Refresh
+	v.Data = message{Status: p.Status, Message: sentence(p.Message), Link: localOnly(p.Link), LinkText: p.LinkText, Waiting: v.Refresh() != ""}
 	s.render(w, r, p.Status, "message", v)
 }
 
