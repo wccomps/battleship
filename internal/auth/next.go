@@ -12,8 +12,11 @@ const maxNext = 2048
 // safeNext returns next if it is a path on this site, else "/", so login
 // isn't an open redirect. Paths under /auth/ are refused to avoid loops.
 func safeNext(next string) string {
+	if len(next) > maxNext {
+		return "/"
+	}
 	u := LocalURL(next)
-	if u == nil || len(next) > maxNext {
+	if u == nil {
 		return "/"
 	}
 	// Browsers resolve dot segments (including %2e) before requesting.
