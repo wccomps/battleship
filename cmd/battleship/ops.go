@@ -152,7 +152,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	if all {
 		spec, says, err := resolveAllTeams(ctx, api, cfg)
 		if err != nil {
-			fmt.Fprintln(stderr, "-teams all:", cleanLines(proxmox.Describe(err), ""))
+			fmt.Fprintln(stderr, "-teams all:", cleanLines(proxmox.Describe(err), "  "))
 			return 1
 		}
 		fmt.Fprintln(stdout, says)
@@ -161,7 +161,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	}
 	plan, err := jobs.BuildPlan(ctx, pods.NewPlanner(api, cfg), in)
 	if err != nil {
-		fmt.Fprintln(stderr, "planning:", cleanLines(proxmox.Describe(err), ""))
+		fmt.Fprintln(stderr, "planning:", cleanLines(proxmox.Describe(err), "  "))
 		return 1
 	}
 

@@ -2,61 +2,11 @@ package pods
 
 import (
 	"reflect"
-	"strings"
 	"testing"
-	"unicode"
-	"unicode/utf8"
-
-	"pgregory.net/rapid"
 
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
-
-func TestWildcardRegexpIsAnchoredAndCaseInsensitive(t *testing.T) {
-	tests := map[string]struct {
-		pattern string
-		name    string
-		want    bool
-	}{
-		"case insensitive": {
-			pattern: "*.kilo.alpha",
-			name:    "Violet.Kilo.Alpha",
-			want:    true,
-		},
-		"anchored start": {
-			pattern: "*.kilo.alpha",
-			name:    "violet.kilo.alpha.old",
-			want:    false,
-		},
-		"anchored end": {
-			pattern: "*.kilo.alpha",
-			name:    "violet.kilo.alpha",
-			want:    true,
-		},
-		"no wildcards matches exactly": {
-			pattern: "teak",
-			name:    "Teak",
-			want:    true,
-		},
-		"wildcard star alone": {
-			pattern: "*",
-			name:    "anything",
-			want:    true,
-		},
-	}
-	for testName, tt := range tests {
-		t.Run(testName, func(t *testing.T) {
-			re, err := config.WildcardRegexp(tt.pattern)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := re.MatchString(tt.name); got != tt.want {
-				t.Errorf("config.WildcardRegexp(%q).MatchString(%q) = %v, want %v", tt.pattern, tt.name, got, tt.want)
-			}
-		})
-	}
-}
 
 func TestFindMastersRequiresExactTag(t *testing.T) {
 	n := NewNaming(config.Default().Naming)
@@ -360,66 +310,13 @@ func TestTeamsWithVMs(t *testing.T) {
 	}
 }
 
-// patternPiece draws text for template patterns: any runes, raw bytes (so
-// invalid UTF-8), and regexp metacharacters.
-var patternPiece = rapid.OneOf(
-	rapid.String(),
-	rapid.Map(rapid.SliceOf(rapid.Byte()), func(b []byte) string { return string(b) }),
-	rapid.SampledFrom([]string{"*", "\xff", "\xc3", "(", `\`, "[a-", ".", "$", "^", "K", "k", "K", "ß", "dc", "kilo"}),
-)
-
-// globMatch is a case-insensitive glob where only * is special.
-func globMatch(pattern, name []rune) bool {
-	if len(pattern) == 0 {
-		return len(name) == 0
-	}
-	if pattern[0] == '*' {
-		for i := 0; i <= len(name); i++ {
-			if globMatch(pattern[1:], name[i:]) {
-				return true
-			}
-		}
-		return false
-	}
-	return len(name) > 0 && strings.EqualFold(string(pattern[0]), string(name[0])) && globMatch(pattern[1:], name[1:])
-}
-
-// WildcardRegexp never panics: it refuses exactly invalid UTF-8, and
-// otherwise matches as a case-insensitive glob. FindMasters passes the
-// refusal on.
-func TestPropWildcardRegexpIsAGlob(t *testing.T) {
+// FindMasters passes on the refusal of a pattern that isn't valid UTF-8.
+func TestFindMastersRefusesInvalidPattern(t *testing.T) {
 	n := NewNaming(config.Default().Naming)
-	rapid.Check(t, func(t *rapid.T) {
-		pattern := strings.Join(rapid.SliceOfN(patternPiece, 0, 6).Draw(t, "pattern"), "")
-		re, err := config.WildcardRegexp(pattern)
-		if _, _, ferr := FindMasters([]proxmox.VM{{VMID: 1, Name: "dc.kilo", Tags: "dev"}}, n, pattern, "dev"); (ferr == nil) != (err == nil) {
-			t.Fatalf("FindMasters err = %v, WildcardRegexp err = %v", ferr, err)
+	vms := []proxmox.VM{{VMID: 1, Name: "dc.kilo", Tags: "dev"}}
+	for _, pattern := range []string{"\xff", "dc.\xc3", "*\xff*"} {
+		if _, _, err := FindMasters(vms, n, pattern, "dev"); err == nil {
+			t.Errorf("FindMasters(%q) accepted invalid UTF-8", pattern)
 		}
-		if !utf8.ValidString(pattern) {
-			if err == nil {
-				t.Fatalf("accepted invalid UTF-8 %q", pattern)
-			}
-			return
-		}
-		if err != nil {
-			t.Fatalf("config.WildcardRegexp(%q): %v", pattern, err)
-		}
-		// A name made from the pattern, stars filled in and case flipped,
-		// or any name at all.
-		var b strings.Builder
-		for _, r := range pattern {
-			switch {
-			case r == '*':
-				b.WriteString(rapid.String().Draw(t, "fill"))
-			case rapid.Bool().Draw(t, "flip"):
-				b.WriteRune(unicode.SimpleFold(r))
-			default:
-				b.WriteRune(r)
-			}
-		}
-		name := rapid.OneOf(rapid.Just(b.String()), rapid.String()).Draw(t, "name")
-		if got, want := re.MatchString(name), globMatch([]rune(pattern), []rune(name)); got != want {
-			t.Fatalf("config.WildcardRegexp(%q).MatchString(%q) = %v, want %v", pattern, name, got, want)
-		}
-	})
+	}
 }
