@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -104,5 +105,20 @@ func TestSourceVMID(t *testing.T) {
 		if got := sourceVMID(desc); got != want {
 			t.Errorf("sourceVMID(%q) = %d, want %d", desc, got, want)
 		}
+	}
+}
+
+// A router's working copy has its LAN on the edit bridge too, never on the
+// slot bridge it was registered from.
+func TestImageEditMovesEveryNIC(t *testing.T) {
+	f := imageFake()
+	f.Add(proxmox.VM{VMID: 8010, Name: "gw-v1", Node: "alder", Template: true, Tags: "base;router"},
+		map[string]string{"net0": "virtio=BC:24:11:00:80:10,bridge=devext01", "net1": "virtio=BC:24:11:00:80:11,bridge=devint01"})
+	plan, err := NewPlanner(f, envConfig()).ImageEdit(context.Background(), ImageRequest{Family: "gw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]string{"net0": "vmbr0", "net1": "vmbr0"}; !maps.Equal(plan.Items[0].NICs, want) {
+		t.Errorf("NICs = %v, want %v", plan.Items[0].NICs, want)
 	}
 }
