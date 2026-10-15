@@ -143,7 +143,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	}
 	plan, err := jobs.BuildPlan(ctx, pods.NewPlanner(api, cfg), in)
 	if err != nil {
-		fmt.Fprintln(stderr, "planning:", proxmox.Describe(err))
+		fmt.Fprintln(stderr, "planning:", cleanJoin(strings.Split(proxmox.Describe(err), "\n"), "\n"))
 		return 1
 	}
 
@@ -158,7 +158,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	}
 	if missing := jobs.MissingVMs(in, plan); len(missing) > 0 {
 		fmt.Fprintf(stdout, "\n%d of the %d -vms no longer exist or match -teams/-hosts, so they are left out: %s\n",
-			len(missing), len(in.VMs), strings.Join(missing, ", "))
+			len(missing), len(in.VMs), cleanJoin(missing, ", "))
 	}
 	blocked := len(plan.Items) - len(plan.Runnable())
 	if blocked > 0 {
@@ -167,7 +167,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	if len(plan.Items) == 0 {
 		if len(in.Hosts) > 0 && cmd != "deploy" {
 			fmt.Fprintf(stdout, "\nNo VMs matched -hosts %s for teams %s; check the host names.\n",
-				strings.Join(in.Hosts, ","), in.Teams)
+				cleanJoin(in.Hosts, ","), clean(in.Teams))
 			return 1
 		}
 		fmt.Fprintln(stdout, "\nNothing to do.")

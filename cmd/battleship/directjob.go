@@ -95,7 +95,7 @@ func followJob(ctx context.Context, d deps, cfg config.Config, st *store.Store, 
 				shown = msg
 			}
 			if j.Status == store.StatusRunning && !announced {
-				fmt.Fprintf(d.stdout, "Worker %s is running job %d; following it here.\n", j.ClaimedBy, id)
+				fmt.Fprintf(d.stdout, "Worker %s is running job %d; following it here.\n", clean(j.ClaimedBy), id)
 				announced = true
 			}
 			for _, ev := range evs {
@@ -128,9 +128,9 @@ func reportJob(ctx context.Context, d deps, st *store.Store, id int64) int {
 	if len(j.Summary) > 0 && json.Unmarshal(j.Summary, &sum) == nil {
 		printSummary(d.stdout, sum)
 	}
-	line := fmt.Sprintf("\nJob %d %s", id, strings.ReplaceAll(j.Status, "_", " "))
+	line := fmt.Sprintf("\nJob %d %s", id, clean(strings.ReplaceAll(j.Status, "_", " ")))
 	if j.Error != "" {
-		line += ": " + j.Error
+		line += ": " + clean(j.Error)
 	}
 	fmt.Fprintln(d.stdout, line+".")
 	if j.Status != store.StatusSucceeded {
