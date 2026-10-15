@@ -190,6 +190,17 @@ func inputFields(in jobs.Inputs) []field {
 	return fs
 }
 
+// Normalize is in as the form reads it back from a page that posts it:
+// values trimmed, lists split and blanks dropped. The CLI passes its flags
+// through it, so a command asks for the same job the form would.
+func Normalize(in jobs.Inputs) jobs.Inputs {
+	form := url.Values{}
+	for _, f := range inputFields(in) {
+		form.Add(f.Name, f.Value)
+	}
+	return formInputs(in.Kind, form)
+}
+
 // formQuery is an operation's form URL prefilled with in, for "change" links.
 // A deploy's baseline box is always written, since the form ticks it when the
 // query is silent.

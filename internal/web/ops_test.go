@@ -847,3 +847,69 @@ func TestOperationAndJobRoutesDoNothingWithoutPrivileges(t *testing.T) {
 		t.Error("a user without privileges cancelled the job")
 	}
 }
+
+// cliValues are a command line's values for one operation: each string
+// field as a flag carries it, by form field name, and the boxes.
+type cliValues struct {
+	strs                     map[string]string
+	envHosts                 []string // -host, repeated
+	vmid                     int
+	rebuild, noSnap, vmstate bool
+}
+
+// raw is the inputs a command line sets before Normalize.
+func (v cliValues) raw(kind pods.Kind) jobs.Inputs {
+	s := v.strs
+	return jobs.Inputs{Kind: kind, Teams: s[fieldTeams], Hosts: jobs.SplitList(s[fieldHosts]), VMs: jobs.SplitList(s[fieldVMs]),
+		Pattern: s[fieldPattern], Rebuild: v.rebuild, NoSnapshot: v.noSnap, Snapshot: s[fieldSnapshot], Description: s[fieldDescription],
+		VMState: v.vmstate, Action: s[fieldAction], Domain: s[fieldDomain], Router: s[fieldRouter], EnvHosts: v.envHosts, DNS: s[fieldDNS],
+		VMID: v.vmid, Family: s[fieldFamily], ImageKind: s[fieldImageKind], Image: s[fieldImage]}
+}
+
+// posted is the form a page posts with the same values: boxes as "yes",
+// hosts one per line of the textarea, which browsers send with CRLF.
+func (v cliValues) posted() url.Values {
+	form := url.Values{}
+	for k, s := range v.strs {
+		form.Set(k, s)
+	}
+	form.Set(fieldEnvHosts, strings.Join(v.envHosts, "\r\n"))
+	form.Set(fieldVMID, strconv.Itoa(v.vmid))
+	for k, on := range map[string]bool{fieldRebuild: v.rebuild, fieldBaseline: !v.noSnap, fieldVMState: v.vmstate} {
+		if on {
+			form.Set(k, yes)
+		}
+	}
+	return form
+}
+
+// What the CLI asks for, through Normalize, is what the form reads from a
+// page posting the same values.
+func TestPropNormalizeReadsAsTheForm(t *testing.T) {
+	strFields := []string{fieldTeams, fieldHosts, fieldVMs, fieldPattern, fieldSnapshot, fieldDescription, fieldAction, fieldDomain,
+		fieldRouter, fieldDNS, fieldFamily, fieldImageKind, fieldImage}
+	check := func(t interface{ Fatalf(string, ...any) }, kind pods.Kind, v cliValues) {
+		if got, want := Normalize(v.raw(kind)), formInputs(kind, v.posted()); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: Normalize(%#v) = %#v, the form reads %#v", kind, v.raw(kind), got, want)
+		}
+	}
+	for _, op := range operations {
+		for _, s := range formValues {
+			v := cliValues{strs: map[string]string{}, envHosts: []string{s, "dc=x"}, vmid: 7000}
+			for _, f := range strFields {
+				v.strs[f] = s
+			}
+			check(t, op.Kind, v)
+		}
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		value := rapid.OneOf(rapid.SampledFrom(formValues), rapid.SampledFrom(formValues), rapid.String())
+		v := cliValues{strs: map[string]string{}, envHosts: rapid.SliceOfN(value, 0, 3).Draw(t, "env hosts"),
+			vmid: rapid.SampledFrom([]int{0, 7000, -5, 100}).Draw(t, "vmid"), rebuild: rapid.Bool().Draw(t, "rebuild"),
+			noSnap: rapid.Bool().Draw(t, "no snapshot"), vmstate: rapid.Bool().Draw(t, "vmstate")}
+		for _, f := range strFields {
+			v.strs[f] = value.Draw(t, f)
+		}
+		check(t, rapid.SampledFrom(operations).Draw(t, "op").Kind, v)
+	})
+}
