@@ -53,8 +53,25 @@ h1,h2,h3,p{margin:0}
 .sp{flex:1}
 summary{list-style:none;cursor:pointer}
 summary::-webkit-details-marker{display:none}
-.notes{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;color:var(--tx2);margin-top:2px;max-width:60ch}
-.notes-d summary{font-size:12px}
+.notes{white-space:pre-wrap;overflow-wrap:anywhere;font:var(--t1)/1.5 var(--fm);color:var(--tx);background:var(--sf2);border-radius:var(--r1);padding:6px 8px;margin-top:4px;max-width:60ch}
+.notes-d summary{font-size:var(--t1);color:var(--tx2);text-decoration:underline;text-underline-offset:2px}
+.btn.sm{min-height:26px;padding:0 9px;font-size:var(--t2)}
+.acts{display:flex;flex-direction:column;align-items:stretch;gap:4px}
+.tbl td.img{min-width:190px}
+.tbl .iname{font-weight:600}
+.tbl .chips{margin:4px 0 2px;gap:4px}
+.tbl .chip{height:20px;padding:0 7px}
+.tbl .meta,.imgnotes .meta{color:var(--tx3);font-size:var(--t1)}
+.tbl tr.muted .notes{color:var(--tx2)}
+@media (max-width:640px){
+  .tbl.cards thead{display:none}
+  .tbl.cards tr{display:block;border-top:1px solid var(--ln);padding:8px 10px}
+  .tbl.cards tr:first-child{border-top:0}
+  .tbl.cards td{display:block;border:0;padding:0}
+  .tbl.cards td+td{margin-top:8px}
+  .tbl.cards .notes{max-width:none}
+  .tbl.cards .acts{flex-direction:row;flex-wrap:wrap}
+}
 .imgnotes{margin:0;padding-left:16px;display:grid;gap:6px}
 
 /* ---------- state roles: one class sets colour (--c) and tint (--cb) ---------- */
