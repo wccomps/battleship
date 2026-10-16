@@ -212,10 +212,14 @@ func TestTeamlessInputsValidate(t *testing.T) {
 }
 
 func TestTeamlessLockKeys(t *testing.T) {
-	plan := &pods.Plan{Kind: pods.KindEnvCreate, Locks: []string{"slot:05", "domain:kilo.alpha", "vmid:2500"}}
+	plan := &pods.Plan{Kind: pods.KindEnvCreate, Locks: []string{"slot:05", "domain:kilo.alpha"},
+		Items: []pods.Item{{Name: "gw.kilo.alpha", VMID: 2500, Source: &pods.Source{VMID: 8000}}}}
 	keys := LockKeys(plan)
 	if !slices.Equal(keys, []string{"domain:kilo.alpha", "slot:05", "vmid:2500"}) {
 		t.Errorf("LockKeys = %v", keys)
+	}
+	if reads := ReadKeys(plan); !slices.Equal(reads, []string{"vmid:8000"}) {
+		t.Errorf("ReadKeys = %v", reads)
 	}
 }
 

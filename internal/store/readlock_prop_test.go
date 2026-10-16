@@ -12,8 +12,9 @@ import (
 	"github.com/wccomps/battleship/internal/store/storetest"
 )
 
-// conflicts is the lock rule, written from its definition: two keys clash
-// when equal, unless both are reads; "read:K" also clashes with K.
+// conflicts is the lock rule, written from its definition, over keys
+// spelled "read:K" for a read of K: two keys clash when equal, unless both
+// are reads; "read:K" also clashes with K.
 func conflicts(a, b []string) bool {
 	for _, x := range a {
 		for _, y := range b {
@@ -46,15 +47,15 @@ func TestPropClaimHonoursReadLocks(t *testing.T) {
 		var jobs []*job
 		for i := range rapid.IntRange(1, 6).Draw(t, "jobs") {
 			keys := rapid.SliceOfNDistinct(rapid.SampledFrom(keyPool), 1, 3, rapid.ID).Draw(t, fmt.Sprintf("keys %d", i))
-			var stored []string
+			nj := newJob(fmt.Sprintf("%sown:%d", ns, i)) // every job changes something
 			for _, k := range keys {
 				if r, ok := strings.CutPrefix(k, "read:"); ok {
-					stored = append(stored, "read:"+ns+r)
+					nj.ReadKeys = append(nj.ReadKeys, ns+r)
 				} else {
-					stored = append(stored, ns+k)
+					nj.LockKeys = append(nj.LockKeys, ns+k)
 				}
 			}
-			id, err := s.CreateJob(ctx, newJob(stored...))
+			id, err := s.CreateJob(ctx, nj)
 			if err != nil {
 				t.Fatal(err)
 			}

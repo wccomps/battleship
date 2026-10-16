@@ -54,6 +54,7 @@ func Submit(ctx context.Context, st *store.Store, in Inputs, plan *pods.Plan, by
 		Plan:        planJSON,
 		Fingerprint: Fingerprint(plan),
 		LockKeys:    LockKeys(plan),
+		ReadKeys:    ReadKeys(plan),
 		CreatedBy:   by.User,
 		CreatedAs:   by.Credential.User,
 		Items:       items,

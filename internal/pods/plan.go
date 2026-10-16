@@ -175,8 +175,8 @@ type Plan struct {
 	// Config is the ConfigHash the plan was made under; plans stored without
 	// it are stale.
 	Config string `json:"config,omitempty"`
-	// Locks are lock keys beyond teams and templates (slot:NN, domain:…,
-	// family:…, vmid:N), so jobs over the same slot, family or VMIDs wait.
+	// Locks are lock keys beyond teams, templates and VMs (slot:NN,
+	// domain:…, family:…), so jobs over the same slot or family wait.
 	Locks []string `json:"locks,omitempty"`
 	// Notices are what a person should know the plan leaves alone, such as
 	// VMs named like team VMs that aren't; nothing acts on them.

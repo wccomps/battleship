@@ -104,48 +104,55 @@ func sourceFP(s *pods.Source) *fpSource {
 	return &fpSource{VMID: s.VMID, Node: s.Node, Name: s.Name}
 }
 
-// LockKeys names what a plan touches, so overlapping jobs serialize. Every
-// VM a plan changes is a vmid: key: the items' VMs, each template, the
-// image a register retires, and a master whose template the plan builds
-// (the build may stop it). A VM a plan only copies (a base image an
-// environment host or new version is cloned from) is a shared read:vmid:
-// key: such jobs run together and wait only for one that changes it (see
-// store's blocksSQL). So a deploy building from an environment host waits
-// for Set DNS on it, an environment waits for its image's delete, and two
-// deploys that pick the same free VMID for new templates don't overlap.
+// LockKeys are the lock keys of what a plan changes, so jobs that change
+// the same things run one at a time: its teams, templates and slot, domain
+// or family (Plan.Locks), and as vmid: keys the items' VMs, each template,
+// the image a register retires, and a master whose template the plan
+// builds (the build may stop it).
 func LockKeys(plan *pods.Plan) []string {
-	writes, reads := map[string]bool{}, map[string]bool{}
+	writes, _ := lockKeys(plan)
+	return writes
+}
+
+// ReadKeys are the vmid: keys of VMs a plan only copies (items' Sources)
+// and doesn't change. Jobs reading one VM run together; each waits only
+// for a job with it among its LockKeys (see store's blocksSQL).
+func ReadKeys(plan *pods.Plan) []string {
+	_, reads := lockKeys(plan)
+	return reads
+}
+
+func lockKeys(plan *pods.Plan) (writes, reads []string) {
+	w, r := map[string]bool{}, map[string]bool{}
 	vmid := func(set map[string]bool, id int) {
 		if id != 0 {
 			set["vmid:"+strconv.Itoa(id)] = true
 		}
 	}
 	for _, t := range plan.Teams {
-		writes["team:"+t] = true
+		w["team:"+t] = true
 	}
 	for _, t := range plan.Templates {
-		writes["template:"+t.Name] = true
-		vmid(writes, t.VMID)
+		w["template:"+t.Name] = true
+		vmid(w, t.VMID)
 		if !t.Exists || t.Rebuild {
-			vmid(writes, t.MasterVMID)
+			vmid(w, t.MasterVMID)
 		}
 	}
 	for _, it := range plan.Items {
-		vmid(writes, it.VMID)
+		vmid(w, it.VMID)
 		if it.Source != nil {
-			vmid(reads, it.Source.VMID)
+			vmid(r, it.Source.VMID)
 		}
 		if it.Supersedes != nil {
-			vmid(writes, it.Supersedes.VMID)
+			vmid(w, it.Supersedes.VMID)
 		}
 	}
 	for _, k := range plan.Locks {
-		writes[k] = true
+		w[k] = true
 	}
-	for k := range reads {
-		if !writes[k] {
-			writes["read:"+k] = true
-		}
+	for k := range w {
+		delete(r, k) // a VM the plan changes is locked as such
 	}
-	return slices.Sorted(maps.Keys(writes))
+	return slices.Sorted(maps.Keys(w)), slices.Sorted(maps.Keys(r))
 }

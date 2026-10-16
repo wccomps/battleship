@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/wccomps/battleship/internal/config"
@@ -29,17 +28,12 @@ func envCluster() *podstest.Fake {
 }
 
 // clash is whether two plans' jobs wait for each other, by the lock rule:
-// equal keys clash unless both are reads, and "read:K" clashes with K.
+// one changes what the other changes or reads.
 func clash(a, b *pods.Plan) bool {
-	for _, x := range LockKeys(a) {
-		for _, y := range LockKeys(b) {
-			xr, yr := strings.HasPrefix(x, "read:"), strings.HasPrefix(y, "read:")
-			if !(xr && yr) && strings.TrimPrefix(x, "read:") == strings.TrimPrefix(y, "read:") {
-				return true
-			}
-		}
+	meet := func(x, y []string) bool {
+		return slices.ContainsFunc(x, func(k string) bool { return slices.Contains(y, k) })
 	}
-	return false
+	return meet(LockKeys(a), LockKeys(b)) || meet(LockKeys(a), ReadKeys(b)) || meet(ReadKeys(a), LockKeys(b))
 }
 
 // Jobs that touch the same VM serialize, whatever their kinds: a deploy
@@ -92,7 +86,7 @@ func TestCloningAnImageIsShared(t *testing.T) {
 	retire := &pods.Plan{Kind: pods.KindImageRegister, Items: []pods.Item{{Name: "debian-12-v2", VMID: 8002, Source: &pods.Source{VMID: 150}, Supersedes: &pods.Source{VMID: 8001}}}}
 	switch {
 	case clash(src(2101), src(2201)):
-		t.Errorf("two clones of one image wait for each other: %v, %v", LockKeys(src(2101)), LockKeys(src(2201)))
+		t.Errorf("two clones of one image wait for each other: %v, %v", ReadKeys(src(2101)), ReadKeys(src(2201)))
 	case !clash(src(2101), del):
 		t.Errorf("a clone %v and the image's delete %v don't wait for each other", LockKeys(src(2101)), LockKeys(del))
 	case !clash(src(2101), retire):

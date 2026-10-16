@@ -230,7 +230,6 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 			}
 			ip.VMID, taken[id] = id, true
 		}
-		plan.Locks = append(plan.Locks, "vmid:"+strconv.Itoa(ip.VMID))
 		cfg, err := readImage(im)
 		if err != nil {
 			return nil, err

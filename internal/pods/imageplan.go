@@ -135,7 +135,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		}
 	}
 	return &Plan{Kind: KindImageRegister, Config: ConfigHash(KindImageRegister, p.Cfg), Items: []Item{it},
-		Locks: []string{"family:" + req.Family, "vmid:" + strconv.Itoa(vmid)}}, nil
+		Locks: []string{"family:" + req.Family}}, nil
 }
 
 // ImageEdit plans a working copy of a family's newest version, every NIC on
@@ -175,7 +175,7 @@ func (p Planner) ImageEdit(ctx context.Context, req ImageRequest) (*Plan, error)
 		}
 	}
 	return &Plan{Kind: KindImageEdit, Config: ConfigHash(KindImageEdit, p.Cfg), Items: []Item{it},
-		Locks: []string{"family:" + req.Family, "vmid:" + strconv.Itoa(vmid)}}, nil
+		Locks: []string{"family:" + req.Family}}, nil
 }
 
 // imageItem finds req.Image for deprecate and delete.
@@ -214,5 +214,5 @@ func (p Planner) ImageDelete(ctx context.Context, req ImageRequest) (*Plan, erro
 	}
 	return &Plan{Kind: KindImageDelete, Config: ConfigHash(KindImageDelete, p.Cfg),
 		Items: []Item{{Name: im.Name, VMID: im.VMID, Node: im.Node, Steps: []Step{StepDelete}}},
-		Locks: []string{"family:" + im.Family, "vmid:" + strconv.Itoa(im.VMID)}}, nil
+		Locks: []string{"family:" + im.Family}}, nil
 }
