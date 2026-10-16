@@ -111,12 +111,17 @@ func (s *Service) callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Once the login has succeeded at the provider, the browser's old
-	// session is dropped.
+	// session is dropped, and its refresh token revoked.
 	old, err := r.Cookie(s.names.session)
 	hadOld := err == nil
 	if hadOld && wellFormed(old.Value) {
-		if err := s.st.DeleteSession(context.WithoutCancel(r.Context()), HashToken(old.Value)); err != nil {
+		oldID := HashToken(old.Value)
+		rt, _, ok, err := s.st.EndSession(context.WithoutCancel(r.Context()), oldID)
+		switch {
+		case err != nil:
 			s.logf("auth: deleting the previous session of subject=%q: %v", id.Subject, err)
+		case ok:
+			s.revokeSealed(r.Context(), oldID, rt, "login: subject=%q: revoking the previous session's refresh token", id.Subject)
 		}
 	}
 
@@ -167,18 +172,19 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 		s.rejectCSRF(w, r, sess.Subject, reason)
 		return
 	}
-	if err := s.st.DeleteSession(r.Context(), sess.ID); err != nil {
+	rt, idt, ok, err := s.st.EndSession(r.Context(), sess.ID)
+	if err != nil {
 		s.serverError(w, r, "ending your session", err)
 		return
 	}
 	s.clearSessionCookie(w)
 	s.logf("auth: logout: subject=%q", sess.Subject)
-	// The provider's copy of the refresh token outlives the session row, so
-	// revoke it. Logout goes on if that fails: the session is gone either way.
-	if rt, err := s.openRefreshToken(sess.ID, sess.RefreshToken); err == nil && s.revokeURL != "" {
-		if err := s.revoke(r.Context(), rt); err != nil {
-			s.logf("auth: logout: subject=%q: revoking the refresh token: %v", sess.Subject, err)
-		}
+	if ok {
+		// The tokens as deleted, which a refresh may have rotated since sess
+		// was read. The provider's refresh token outlives the row, so revoke
+		// it; logout goes on if that fails.
+		s.revokeSealed(r.Context(), sess.ID, rt, "logout: subject=%q: revoking the refresh token", sess.Subject)
+		sess.IDToken = idt
 	}
 	dest := "/"
 	if s.endSessionURL != "" {
@@ -198,9 +204,24 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
-// revokeTimeout bounds the revocation a logout waits for: the session is
-// already gone, so a slow provider shouldn't hold the logout up for long.
+// revokeTimeout bounds a revocation a request waits for: its session is
+// already gone, so a slow provider shouldn't hold the request up for long.
 const revokeTimeout = 3 * time.Second
+
+// revokeSealed revokes the refresh token sealed for sessionID, if the
+// provider takes revocations, logging a failure with format and args.
+func (s *Service) revokeSealed(ctx context.Context, sessionID, sealed, format string, args ...any) {
+	if s.revokeURL == "" {
+		return
+	}
+	rt, err := s.openRefreshToken(sessionID, sealed)
+	if err == nil {
+		err = s.revoke(ctx, rt)
+	}
+	if err != nil {
+		s.logf("auth: "+format+": %v", append(args, err)...)
+	}
+}
 
 // revoke asks the provider to revoke a refresh token (RFC 7009), as the
 // client, the way the token endpoint authenticates it.

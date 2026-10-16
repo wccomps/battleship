@@ -209,14 +209,15 @@ func TestUpdateSession(t *testing.T) {
 		Name:         "Alice B",
 		Email:        "ab@example.org",
 		RefreshToken: "refresh-2",
+		IDToken:      "id-2",
 		RefreshedAt:  t0.Add(5 * time.Minute),
 	}
 	if err := s.UpdateSession(ctx, "hash-1", up); err != nil {
 		t.Fatal(err)
 	}
 	want := newSession("hash-1")
-	want.Name, want.Email, want.RefreshToken, want.RefreshedAt =
-		up.Name, up.Email, up.RefreshToken, up.RefreshedAt
+	want.Name, want.Email, want.RefreshToken, want.IDToken, want.RefreshedAt =
+		up.Name, up.Email, up.RefreshToken, up.IDToken, up.RefreshedAt
 	got, err := s.Session(ctx, "hash-1")
 	if err != nil {
 		t.Fatal(err)
@@ -232,22 +233,23 @@ func TestUpdateSession(t *testing.T) {
 	}
 }
 
-// A refresh's ID token replaces the stored one; a refresh without one
-// keeps it.
-func TestUpdateSessionIDToken(t *testing.T) {
+// EndSession removes a session and returns its tokens as stored then, so a
+// rotation committed after the caller read the session isn't missed.
+func TestEndSessionReturnsTheTokensItDeleted(t *testing.T) {
 	s := storetest.New(t)
 	createSession(t, s, newSession("hash-1"))
-	for _, c := range []struct{ sent, want string }{{"", "id-1"}, {"id-2", "id-2"}, {"", "id-2"}} {
-		if err := s.UpdateSession(ctx, "hash-1", store.SessionUpdate{RefreshToken: "r", IDToken: c.sent, RefreshedAt: t0}); err != nil {
-			t.Fatal(err)
-		}
-		got, err := s.Session(ctx, "hash-1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got.IDToken != c.want {
-			t.Errorf("after an update with ID token %q: %q, want %q", c.sent, got.IDToken, c.want)
-		}
+	if err := s.UpdateSession(ctx, "hash-1", store.SessionUpdate{RefreshToken: "refresh-2", IDToken: "id-2", RefreshedAt: t0}); err != nil {
+		t.Fatal(err)
+	}
+	rt, idt, ok, err := s.EndSession(ctx, "hash-1")
+	if err != nil || !ok || rt != "refresh-2" || idt != "id-2" {
+		t.Errorf("EndSession = %q, %q, %v, %v; want the rotated tokens", rt, idt, ok, err)
+	}
+	if _, err := s.Session(ctx, "hash-1"); !errors.Is(err, store.ErrSessionNotFound) {
+		t.Errorf("session after EndSession: %v", err)
+	}
+	if _, _, ok, err := s.EndSession(ctx, "hash-1"); ok || err != nil {
+		t.Errorf("EndSession of a gone session = %v, %v; want not ok, no error", ok, err)
 	}
 }
 

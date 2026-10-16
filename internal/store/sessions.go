@@ -67,7 +67,7 @@ type SessionUpdate struct {
 	Name         string
 	Email        string
 	RefreshToken string // the provider may rotate it
-	IDToken      string // sealed; empty keeps the stored one (a refresh may bring none)
+	IDToken      string // sealed
 	RefreshedAt  time.Time
 }
 
@@ -230,7 +230,7 @@ func (s *Store) UpdateSession(ctx context.Context, id string, u SessionUpdate) e
 	tag, err := s.pool.Exec(ctx, `UPDATE sessions
 		SET name = $2, email = $3, refresh_token = $4, refreshed_at = $5,
 			refresh_retry_at = NULL, refresh_failed_at = NULL, username = $6,
-			id_token_sealed = CASE WHEN $7 = '' THEN id_token_sealed ELSE $7 END
+			id_token_sealed = $7
 		WHERE id = $1`, id, u.Name, u.Email, u.RefreshToken, u.RefreshedAt, u.Username, u.IDToken)
 	if err != nil {
 		return fmt.Errorf("updating session: %w", err)
@@ -247,6 +247,21 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 		return fmt.Errorf("deleting session: %w", err)
 	}
 	return nil
+}
+
+// EndSession removes a session and returns its tokens as they were when
+// removed (a refresh may have just rotated them), or ok false if it was
+// already gone.
+func (s *Store) EndSession(ctx context.Context, id string) (refreshToken, idToken string, ok bool, err error) {
+	err = s.pool.QueryRow(ctx, `DELETE FROM sessions WHERE id = $1 RETURNING refresh_token, id_token_sealed`, id).
+		Scan(&refreshToken, &idToken)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, fmt.Errorf("ending session: %w", err)
+	}
+	return refreshToken, idToken, true, nil
 }
 
 // DeleteExpiredSessions removes sessions expired at now and returns the count.

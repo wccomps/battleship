@@ -204,6 +204,7 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 		}
 		rerr := s.st.RecordSessionRefreshFailure(ctx, sess.ID, refreshToken, failedAt, failedAt.Add(refreshBackoff))
 		if errors.Is(rerr, store.ErrSessionNotFound) { // logged out meanwhile
+			s.revokeRotated(ctx, sess, refreshToken)
 			s.clearSessionCookie(w)
 			s.unauthenticated(w, r)
 			return sess, false
@@ -216,19 +217,16 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 			sess.Subject, err, stamp(graceEnd))
 		return sess, true
 	}
+	// A refresh without an ID token keeps the session's last one.
+	idToken := sess.IDToken
+	if id.IDToken != "" {
+		idToken = s.sealIDToken(sess.ID, id.IDToken)
+	}
 	up := store.SessionUpdate{Username: id.Username, Name: id.Name, Email: id.Email, RefreshToken: refreshToken,
-		IDToken: s.sealIDToken(sess.ID, id.IDToken), RefreshedAt: now}
+		IDToken: idToken, RefreshedAt: now}
 	err = s.st.UpdateSession(ctx, sess.ID, up)
 	if errors.Is(err, store.ErrSessionNotFound) { // logged out meanwhile
-		// The logout revoked the token it read; this refresh's rotated one
-		// would otherwise stay valid at the provider.
-		if refreshToken != sess.RefreshToken && s.revokeURL != "" {
-			if rt, err := s.openRefreshToken(sess.ID, refreshToken); err == nil {
-				if err := s.revoke(ctx, rt); err != nil {
-					s.logf("auth: refresh after logout: subject=%q: revoking the rotated refresh token: %v", sess.Subject, err)
-				}
-			}
-		}
+		s.revokeRotated(ctx, sess, refreshToken)
 		s.clearSessionCookie(w)
 		s.unauthenticated(w, r)
 		return sess, false
@@ -237,13 +235,19 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 		s.serverError(w, r, "saving refreshed session", err)
 		return sess, false
 	}
-	sess.Name, sess.Email, sess.RefreshToken, sess.RefreshedAt = id.Name, id.Email, refreshToken, now
-	if up.IDToken != "" {
-		sess.IDToken = up.IDToken
-	}
+	sess.Name, sess.Email, sess.RefreshToken, sess.RefreshedAt, sess.IDToken = id.Name, id.Email, refreshToken, now, idToken
 	sess.Username = id.Username
 	sess.RefreshRetryAt, sess.RefreshFailedAt = time.Time{}, time.Time{}
 	return sess, true
+}
+
+// revokeRotated revokes the refresh token a refresh rotated to if its
+// session was logged out meanwhile: the logout revoked only the one it
+// deleted.
+func (s *Service) revokeRotated(ctx context.Context, sess store.Session, refreshToken string) {
+	if refreshToken != sess.RefreshToken {
+		s.revokeSealed(ctx, sess.ID, refreshToken, "refresh after logout: subject=%q: revoking the rotated refresh token", sess.Subject)
+	}
 }
 
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }

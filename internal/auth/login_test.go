@@ -500,6 +500,41 @@ func TestRefreshRacingLogoutRevokesTheRotatedToken(t *testing.T) {
 	}
 }
 
+// A refresh that fails (the provider unreachable for userinfo) after
+// rotating the token, while its session is logged out, revokes the rotated
+// token too.
+func TestFailedRefreshRacingLogoutRevokesTheRotatedToken(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	csrf := b.csrf() // before the clock moves: reading it may refresh
+	h.clock.Advance(5 * time.Minute)
+	h.idp.Set(func(f *authtest.Behavior) {
+		f.NoIDTokenOnRefresh = true
+		f.UserinfoStatus = http.StatusServiceUnavailable
+		f.OnRefresh = func(*http.Request) bool {
+			b.postForm("/auth/logout", url.Values{"csrf": {csrf}}, nil)
+			return false
+		}
+	})
+	b.do(http.MethodGet, "/private", nil, nil)
+	if live := h.idp.RefreshTokens(); len(live) != 0 {
+		t.Errorf("refresh tokens still live after logout: %v (revoked %v)", live, h.idp.Revoked())
+	}
+}
+
+// Logging in again in the same browser revokes the old session's token.
+func TestLoginAgainRevokesTheOldSessionsToken(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	first := h.idp.RefreshTokens()
+	b.login(alice)
+	if !slices.Equal(h.idp.Revoked(), first) || len(h.idp.RefreshTokens()) != 1 {
+		t.Errorf("revoked %v (first session's %v); live %v", h.idp.Revoked(), first, h.idp.RefreshTokens())
+	}
+}
+
 // A provider that won't revoke, or has no revocation endpoint, doesn't stop
 // the logout.
 func TestLogoutWhenRevocationFails(t *testing.T) {
