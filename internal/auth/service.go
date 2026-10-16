@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -65,6 +66,7 @@ type Service struct {
 	endSessionURL string           // provider logout URL; "" if discovery lists none
 	revokeURL     string           // provider token revocation URL (RFC 7009); "" if none
 	revokeStyle   oauth2.AuthStyle // how revoke authenticates (see authStyle)
+	revoking      sync.WaitGroup   // revocations in the background (revokeLater)
 	secure        bool             // cookies get Secure (base_url is https)
 	names         cookieNames      // cookie names, from namesFor(secure)
 	origin        string           // base_url's origin, for the Origin check

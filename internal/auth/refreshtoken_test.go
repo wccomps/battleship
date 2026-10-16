@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -11,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/wccomps/battleship/internal/seal"
-	"github.com/wccomps/battleship/internal/store"
 )
 
 // oldSealRefreshToken is how refresh tokens were sealed before auth used
@@ -71,17 +69,5 @@ func TestIDTokenSealIsItsOwn(t *testing.T) {
 	}
 	if s.sealIDToken("sess-1", "") != "" || s.openIDToken("sess-1", "") != "" {
 		t.Error("no ID token should seal and open as none")
-	}
-}
-
-// A refresh that got no token from an unreachable provider has nothing to
-// revoke when it finds its session logged out, and says nothing.
-func TestRevokeRotatedSkipsNoToken(t *testing.T) {
-	var logged []string
-	s := &Service{refreshKey: seal.NewKey("client-secret", refreshTokenPurpose), revokeURL: "http://127.0.0.1:1/revoke",
-		logf: func(f string, a ...any) { logged = append(logged, f) }}
-	s.revokeRotated(context.Background(), store.Session{ID: "sess-1", RefreshToken: s.sealRefreshToken("sess-1", "rt-1")}, "")
-	if len(logged) != 0 {
-		t.Errorf("logged %q", logged)
 	}
 }

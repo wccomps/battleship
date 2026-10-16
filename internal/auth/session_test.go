@@ -58,14 +58,14 @@ func TestIdleExpiry(t *testing.T) {
 		}
 	}
 	h.clock.Advance(30 * time.Minute)
-	live := h.idp.RefreshTokens()
+	live := h.liveTokens()
 	wantLoginRedirect(t, b.do(http.MethodGet, "/private", nil, nil), "/private")
 	h.sessionGone(token)
 	if !strings.Contains(h.logs.String(), `session expired: subject="sub-alice"`) {
 		t.Errorf("logs = %q, want the expiry", h.logs.String())
 	}
-	if !slices.Equal(h.idp.Revoked(), live) || len(live) != 1 {
-		t.Errorf("revoked %v; the expired session held %v", h.idp.Revoked(), live)
+	if !slices.Equal(h.revoked(), live) || len(live) != 1 {
+		t.Errorf("revoked %v; the expired session held %v", h.revoked(), live)
 	}
 }
 
@@ -78,8 +78,26 @@ func TestRejectedRefreshRevokesBothTokens(t *testing.T) {
 	h.clock.Advance(5 * time.Minute)
 	h.idp.Set(func(f *authtest.Behavior) { f.MutateIDToken = func(c map[string]any) { c["sub"] = "sub-mallory" } })
 	wantLoginRedirect(t, b.do(http.MethodGet, "/private", nil, nil), "/private")
-	if live := h.idp.RefreshTokens(); len(live) != 0 {
-		t.Errorf("refresh tokens live after the refresh was refused: %v (revoked %v)", live, h.idp.Revoked())
+	if live := h.liveTokens(); len(live) != 0 {
+		t.Errorf("refresh tokens live after the refresh was refused: %v (revoked %v)", live, h.revoked())
+	}
+}
+
+// A refresh whose token the provider rotated but whose userinfo it then
+// couldn't serve, past the grace period, ends the session leaving no token
+// live: neither the stored one nor the rotated one.
+func TestRefreshPastGraceRevokesTheRotatedToken(t *testing.T) {
+	h := newHarness(t) // session_refresh 5m: grace is 15m, idle 30m
+	b := h.browser()
+	b.login(alice)
+	h.clock.Advance(16 * time.Minute)
+	h.idp.Set(func(f *authtest.Behavior) { f.NoIDTokenOnRefresh, f.UserinfoStatus = true, http.StatusServiceUnavailable })
+	wantLoginRedirect(t, b.do(http.MethodGet, "/private", nil, nil), "/private")
+	if h.idp.Refreshes() != 1 {
+		t.Fatalf("refreshed %d times, want 1", h.idp.Refreshes())
+	}
+	if live := h.liveTokens(); len(live) != 0 {
+		t.Errorf("refresh tokens live after the session ended: %v (revoked %v)", live, h.revoked())
 	}
 }
 
@@ -88,14 +106,21 @@ func TestExpiredSessionsSweptAreRevoked(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	b.login(alice)
-	live := h.idp.RefreshTokens()
+	live := h.liveTokens()
 	h.clock.Advance(13 * time.Hour) // past session_max, with no request
+	// A sweep out of time leaves them for the next, rather than delete them
+	// unrevoked.
+	done, cancel := context.WithCancel(context.Background())
+	cancel()
+	if n, err := h.svc.EndExpiredSessions(done, h.clock.Now()); n != 0 || len(h.revoked()) != 0 {
+		t.Fatalf("a sweep out of time ended %d sessions (%v), revoked %v", n, err, h.revoked())
+	}
 	n, err := h.svc.EndExpiredSessions(context.Background(), h.clock.Now())
 	if err != nil || n != 1 {
 		t.Fatalf("EndExpiredSessions = %d, %v", n, err)
 	}
-	if !slices.Equal(h.idp.Revoked(), live) || len(h.idp.RefreshTokens()) != 0 {
-		t.Errorf("revoked %v of %v; live %v", h.idp.Revoked(), live, h.idp.RefreshTokens())
+	if !slices.Equal(h.revoked(), live) || len(h.liveTokens()) != 0 {
+		t.Errorf("revoked %v of %v; live %v", h.revoked(), live, h.liveTokens())
 	}
 }
 
@@ -198,7 +223,7 @@ func TestRefreshRereadsIdentity(t *testing.T) {
 		t.Errorf("/private = %q, want the new name", resp.body)
 	}
 	sess := b.session()
-	if rt := b.refreshToken(); rt == firstRT || !slices.Contains(h.idp.RefreshTokens(), rt) {
+	if rt := b.refreshToken(); rt == firstRT || !slices.Contains(h.liveTokens(), rt) {
 		t.Errorf("refresh token not rotated: %q", rt)
 	}
 	if !sess.RefreshedAt.Equal(h.clock.Now()) {
@@ -470,7 +495,7 @@ func TestRefreshSurvivesClientDisconnect(t *testing.T) {
 	h.mux.Load().ServeHTTP(httptest.NewRecorder(), req)
 	h.idp.Set(func(f *authtest.Behavior) { f.OnRefresh = nil })
 
-	if rt := b.refreshToken(); !slices.Contains(h.idp.RefreshTokens(), rt) {
+	if rt := b.refreshToken(); !slices.Contains(h.liveTokens(), rt) {
 		t.Fatalf("stored refresh token %q is no longer valid at the provider", rt)
 	}
 	h.clock.Advance(5 * time.Minute)

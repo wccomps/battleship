@@ -115,13 +115,8 @@ func (s *Service) callback(w http.ResponseWriter, r *http.Request) {
 	old, err := r.Cookie(s.names.session)
 	hadOld := err == nil
 	if hadOld && wellFormed(old.Value) {
-		oldID := HashToken(old.Value)
-		rt, _, ok, err := s.st.EndSession(context.WithoutCancel(r.Context()), oldID)
-		switch {
-		case err != nil:
+		if _, _, err := s.end(context.WithoutCancel(r.Context()), HashToken(old.Value), fmt.Sprintf("login: subject=%q: the previous session", id.Subject)); err != nil {
 			s.logf("auth: deleting the previous session of subject=%q: %v", id.Subject, err)
-		case ok:
-			s.revokeSealed(r.Context(), oldID, rt, "login: subject=%q: revoking the previous session's refresh token", id.Subject)
 		}
 	}
 
@@ -172,7 +167,7 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 		s.rejectCSRF(w, r, sess.Subject, reason)
 		return
 	}
-	rt, idt, ok, err := s.st.EndSession(r.Context(), sess.ID)
+	ended, ok, err := s.end(context.WithoutCancel(r.Context()), sess.ID, fmt.Sprintf("logout: subject=%q", sess.Subject))
 	if err != nil {
 		s.serverError(w, r, "ending your session", err)
 		return
@@ -180,11 +175,7 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 	s.clearSessionCookie(w)
 	s.logf("auth: logout: subject=%q", sess.Subject)
 	if ok {
-		// Revoke the tokens as deleted (a refresh may have rotated them
-		// since sess was read): the provider's outlive the row. Logout goes
-		// on if that fails.
-		s.revokeSealed(r.Context(), sess.ID, rt, "logout: subject=%q: revoking the refresh token", sess.Subject)
-		sess.IDToken = idt
+		sess.IDToken = ended.IDToken // as deleted: a refresh may have replaced it since sess was read
 	}
 	dest := "/"
 	if s.endSessionURL != "" {
@@ -204,30 +195,52 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
-// revokeTimeout bounds a revocation a request waits for: its session is
-// already gone, so a slow provider shouldn't hold the request up for long.
+// revokeTimeout bounds one revocation.
 const revokeTimeout = 3 * time.Second
 
-// revokeSealed revokes the refresh token sealed for sessionID, if the
-// provider takes revocations, logging a failure with format and args.
-func (s *Service) revokeSealed(ctx context.Context, sessionID, sealed, format string, args ...any) {
-	if s.revokeURL == "" {
+// end removes session id and has its refresh token revoked in the
+// background (see revokeLater), what naming the session in the log. It
+// returns the session as removed, or ok false if it was already gone.
+func (s *Service) end(ctx context.Context, id, what string) (_ store.EndedSession, ok bool, _ error) {
+	ended, ok, err := s.st.EndSession(ctx, id)
+	if ok {
+		s.revokeLater(id, ended.RefreshToken, what)
+	}
+	return ended, ok, err
+}
+
+// revokeLater revokes the refresh token sealed for sessionID without
+// holding anyone up: the provider's copy outlives the session, and a
+// revocation that fails is logged and left to expire.
+func (s *Service) revokeLater(sessionID, sealed, what string) {
+	if s.revokeURL == "" || sealed == "" {
 		return
 	}
+	s.revoking.Add(1)
+	go func() {
+		defer s.revoking.Done()
+		s.revokeSealed(context.Background(), sessionID, sealed, what)
+	}()
+}
+
+// revokeSealed revokes the refresh token sealed for sessionID, within ctx,
+// logging a failure with what.
+func (s *Service) revokeSealed(ctx context.Context, sessionID, sealed, what string) {
 	rt, err := s.openRefreshToken(sessionID, sealed)
 	if err == nil {
 		err = s.revoke(ctx, rt)
 	}
 	if err != nil {
-		s.logf("auth: "+format+": %v", append(args, err)...)
+		s.logf("auth: %s: revoking its refresh token: %v", what, err)
 	}
 }
 
 // revoke asks the provider to revoke a refresh token (RFC 7009), as the
-// client, authenticating as the revocation endpoint lists (see authStyle);
-// with nothing listed, as oauth2 does: basic, then post if refused.
+// client: authenticating as the revocation endpoint lists, else as the
+// token endpoint does (see authStyle); where neither lists any, basic,
+// then post if refused with a 401.
 func (s *Service) revoke(ctx context.Context, refreshToken string) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), revokeTimeout)
+	ctx, cancel := context.WithTimeout(ctx, revokeTimeout)
 	defer cancel()
 	styles := []oauth2.AuthStyle{s.revokeStyle}
 	if s.revokeStyle == oauth2.AuthStyleAutoDetect {

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"reflect"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -243,34 +242,49 @@ func TestEndSessionReturnsTheTokensItDeleted(t *testing.T) {
 	if err := s.UpdateSession(ctx, "hash-1", store.SessionUpdate{RefreshToken: "refresh-2", IDToken: "id-2", RefreshedAt: t0}); err != nil {
 		t.Fatal(err)
 	}
-	rt, idt, ok, err := s.EndSession(ctx, "hash-1")
-	if err != nil || !ok || rt != "refresh-2" || idt != "id-2" {
-		t.Errorf("EndSession = %q, %q, %v, %v; want the rotated tokens", rt, idt, ok, err)
+	ended, ok, err := s.EndSession(ctx, "hash-1")
+	if want := (store.EndedSession{ID: "hash-1", RefreshToken: "refresh-2", IDToken: "id-2"}); err != nil || !ok || ended != want {
+		t.Errorf("EndSession = %+v, %v, %v; want %+v", ended, ok, err, want)
 	}
 	if _, err := s.Session(ctx, "hash-1"); !errors.Is(err, store.ErrSessionNotFound) {
 		t.Errorf("session after EndSession: %v", err)
 	}
-	if _, _, ok, err := s.EndSession(ctx, "hash-1"); ok || err != nil {
+	if _, ok, err := s.EndSession(ctx, "hash-1"); ok || err != nil {
 		t.Errorf("EndSession of a gone session = %v, %v; want not ok, no error", ok, err)
 	}
 }
 
-func TestEndExpiredSessions(t *testing.T) {
+// ExpiredSessions lists sessions expired at now, oldest first, up to a
+// limit; DeleteExpiredSessions removes only the listed ones still expired.
+func TestExpiredSessions(t *testing.T) {
 	s := storetest.New(t)
-	for i, exp := range []time.Duration{-time.Minute, 0, time.Second, time.Hour} {
+	for i, exp := range []time.Duration{-time.Minute, 0, time.Second, time.Hour, -time.Hour} {
 		sess := newSession("hash-" + string(rune('a'+i)))
 		sess.ExpiresAt = t0.Add(exp)
 		createSession(t, s, sess)
 	}
-	ended, err := s.EndExpiredSessions(ctx, t0)
+	expired, err := s.ExpiredSessions(ctx, t0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	slices.SortFunc(ended, func(a, b store.EndedSession) int { return strings.Compare(a.ID, b.ID) })
-	if want := []store.EndedSession{{"hash-a", "refresh-1"}, {"hash-b", "refresh-1"}}; !slices.Equal(ended, want) {
-		t.Errorf("ended %v, want %v (expired before or at now, with their refresh tokens)", ended, want)
+	ids := func(es []store.EndedSession) (out []string) {
+		for _, e := range es {
+			out = append(out, e.ID)
+		}
+		return out
 	}
-	for id, live := range map[string]bool{"hash-a": false, "hash-b": false, "hash-c": true, "hash-d": true} {
+	if got, want := ids(expired), []string{"hash-e", "hash-a", "hash-b"}; !slices.Equal(got, want) || expired[0].RefreshToken != "refresh-1" || expired[0].IDToken != "id-1" {
+		t.Errorf("ExpiredSessions = %+v, want %v, oldest first, with their tokens", expired, want)
+	}
+	if some, err := s.ExpiredSessions(ctx, t0, 2); err != nil || !slices.Equal(ids(some), []string{"hash-e", "hash-a"}) {
+		t.Errorf("ExpiredSessions(limit 2) = %+v, %v", some, err)
+	}
+	// hash-c isn't expired at t0: listing it by mistake doesn't remove it.
+	n, err := s.DeleteExpiredSessions(ctx, []string{"hash-a", "hash-b", "hash-c"}, t0)
+	if err != nil || n != 2 {
+		t.Fatalf("DeleteExpiredSessions = %d, %v; want 2", n, err)
+	}
+	for id, live := range map[string]bool{"hash-a": false, "hash-b": false, "hash-c": true, "hash-d": true, "hash-e": true} {
 		_, err := s.Session(ctx, id)
 		if live && err != nil {
 			t.Errorf("%s: %v, want kept", id, err)

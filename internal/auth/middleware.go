@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wccomps/battleship/internal/store"
@@ -187,10 +188,17 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 		return sess, true
 	}
 	id, refreshToken, err := s.refresh(ctx, sess)
+	// A token the provider rotated to is stored, or revoked: nothing else
+	// would ever revoke it.
+	stored := refreshToken == "" || refreshToken == sess.RefreshToken
+	defer func() {
+		if !stored {
+			s.revokeLater(sess.ID, refreshToken, fmt.Sprintf("refresh: subject=%q: the rotated token", sess.Subject))
+		}
+	}()
 	if err != nil && !unreachable(err) {
 		s.logf("auth: refresh rejected: subject=%q: %v; ending the session", sess.Subject, err)
 		s.endSession(w, r, sess)
-		s.revokeRotated(ctx, sess, refreshToken) // the provider rotated it, then identify failed
 		s.unauthenticated(w, r)
 		return sess, false
 	}
@@ -206,7 +214,6 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 		}
 		rerr := s.st.RecordSessionRefreshFailure(ctx, sess.ID, refreshToken, failedAt, failedAt.Add(refreshBackoff))
 		if errors.Is(rerr, store.ErrSessionNotFound) { // logged out meanwhile
-			s.revokeRotated(ctx, sess, refreshToken)
 			s.clearSessionCookie(w)
 			s.unauthenticated(w, r)
 			return sess, false
@@ -215,6 +222,7 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 			s.serverError(w, r, "recording refresh failure", rerr)
 			return sess, false
 		}
+		stored = true
 		s.logf("auth: refresh failed: subject=%q: %v; the identity provider is unreachable, keeping the session until %s at the latest",
 			sess.Subject, err, stamp(graceEnd))
 		return sess, true
@@ -227,7 +235,6 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 		IDToken: idToken, RefreshedAt: now}
 	err = s.st.UpdateSession(ctx, sess.ID, up)
 	if errors.Is(err, store.ErrSessionNotFound) { // logged out meanwhile
-		s.revokeRotated(ctx, sess, refreshToken)
 		s.clearSessionCookie(w)
 		s.unauthenticated(w, r)
 		return sess, false
@@ -236,19 +243,11 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 		s.serverError(w, r, "saving refreshed session", err)
 		return sess, false
 	}
+	stored = true
 	sess.Name, sess.Email, sess.RefreshToken, sess.RefreshedAt, sess.IDToken = id.Name, id.Email, refreshToken, now, idToken
 	sess.Username = id.Username
 	sess.RefreshRetryAt, sess.RefreshFailedAt = time.Time{}, time.Time{}
 	return sess, true
-}
-
-// revokeRotated revokes the refresh token a refresh rotated to if its
-// session was logged out meanwhile: the logout revoked only the one it
-// deleted.
-func (s *Service) revokeRotated(ctx context.Context, sess store.Session, refreshToken string) {
-	if refreshToken != "" && refreshToken != sess.RefreshToken {
-		s.revokeSealed(ctx, sess.ID, refreshToken, "refresh after logout: subject=%q: revoking the rotated refresh token", sess.Subject)
-	}
 }
 
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
@@ -320,40 +319,53 @@ func wantsEventStream(r *http.Request) bool {
 	return false
 }
 
-// endSession deletes a session, revokes its refresh token, and clears its
-// cookie, even if the browser has gone. A failed delete still expires on
-// its own.
+// endSession ends a session (see end) and clears its cookie, even if the
+// browser has gone. A failed delete still expires on its own.
 func (s *Service) endSession(w http.ResponseWriter, r *http.Request, sess store.Session) {
-	ctx := context.WithoutCancel(r.Context())
-	switch rt, _, ok, err := s.st.EndSession(ctx, sess.ID); {
-	case err != nil:
-		s.logf("auth: deleting session of subject=%q: %v", sess.Subject, err)
-	case ok:
-		s.revokeSealed(ctx, sess.ID, rt, "ending the session of subject=%q: revoking its refresh token", sess.Subject)
+	what := fmt.Sprintf("ending the session of subject=%q", sess.Subject)
+	if _, _, err := s.end(context.WithoutCancel(r.Context()), sess.ID, what); err != nil {
+		s.logf("auth: %s: %v", what, err)
 	}
 	s.clearSessionCookie(w)
 }
 
-// EndExpiredSessions removes the sessions expired at now, revokes their
-// refresh tokens while ctx lasts, and returns how many it removed.
+// EndExpiredSessions revokes the refresh tokens of up to expiredBatch
+// sessions expired at now, while ctx lasts, then removes the ones it tried
+// (the rest wait for the next sweep), and returns how many it removed.
 func (s *Service) EndExpiredSessions(ctx context.Context, now time.Time) (int64, error) {
-	ended, err := s.st.EndExpiredSessions(ctx, now)
+	expired, err := s.st.ExpiredSessions(context.WithoutCancel(ctx), now, expiredBatch) // ctx bounds the revocations
+	if err != nil {
+		return 0, err
+	}
+	var mu sync.Mutex
+	var tried []string
 	var g errgroup.Group
 	g.SetLimit(expiredRevokes)
-	for _, e := range ended {
+	for _, e := range expired {
 		g.Go(func() error {
-			if ctx.Err() == nil { // the sweep's time is up: the rest expire on their own
-				s.revokeSealed(ctx, e.ID, e.RefreshToken, "ending expired session %.8s: revoking its refresh token", e.ID)
+			if ctx.Err() != nil {
+				return nil
 			}
+			if s.revokeURL != "" {
+				s.revokeSealed(ctx, e.ID, e.RefreshToken, fmt.Sprintf("expired session %.8s", e.ID))
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			tried = append(tried, e.ID)
 			return nil
 		})
 	}
 	_ = g.Wait()
-	return int64(len(ended)), err
+	if len(tried) == 0 {
+		return 0, ctx.Err()
+	}
+	return s.st.DeleteExpiredSessions(context.WithoutCancel(ctx), tried, now)
 }
 
-// expiredRevokes is how many revocations EndExpiredSessions sends at once.
-const expiredRevokes = 4
+const (
+	expiredBatch   = 40 // sessions one sweep ends; at most expiredBatch/expiredRevokes × revokeTimeout
+	expiredRevokes = 4  // revocations a sweep sends at once
+)
 
 func (s *Service) serverError(w http.ResponseWriter, r *http.Request, what string, err error) {
 	s.logf("auth: %s: %v", what, err)

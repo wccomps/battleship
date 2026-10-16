@@ -371,11 +371,20 @@ func (h *harness) sessionGone(token string) {
 // countSessions removes every session and reports how many there were.
 func (h *harness) countSessions() int64 {
 	h.t.Helper()
-	ended, err := h.st.EndExpiredSessions(ctx, h.clock.Now().Add(100*365*24*time.Hour))
+	far := h.clock.Now().Add(100 * 365 * 24 * time.Hour)
+	all, err := h.st.ExpiredSessions(ctx, far, 1000)
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	return int64(len(ended))
+	var ids []string
+	for _, e := range all {
+		ids = append(ids, e.ID)
+	}
+	n, err := h.st.DeleteExpiredSessions(ctx, ids, far)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return n
 }
 
 // wantLoginRedirect checks resp redirects to the login page with next.
@@ -402,4 +411,18 @@ func (b *browser) refreshToken() string {
 // pveUser is u's Proxmox user in the OpenID realm.
 func pveUser(u authtest.User) string {
 	return strings.TrimPrefix(u.Subject, "sub-") + "@" + pvetest.Realm
+}
+
+// revoked is the refresh tokens the provider revoked, once the background
+// revocations are done.
+func (h *harness) revoked() []string {
+	auth.WaitRevocations(h.svc)
+	return h.idp.Revoked()
+}
+
+// liveTokens is the refresh tokens the provider still honours, once the
+// background revocations are done.
+func (h *harness) liveTokens() []string {
+	auth.WaitRevocations(h.svc)
+	return h.idp.RefreshTokens()
 }

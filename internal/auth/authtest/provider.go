@@ -64,6 +64,7 @@ type Behavior struct {
 	NoRevocation       bool                              // discovery lists no revocation_endpoint
 	RevokeStatus       int                               // non-zero: the revocation endpoint fails with this status
 	AuthMethods        []string                          // non-nil: token_endpoint_auth_methods_supported in discovery
+	RevokeAuthMethods  []string                          // non-nil: revocation_endpoint_auth_methods_supported in discovery
 	RevokePostOnly     bool                              // the revocation endpoint refuses HTTP Basic client auth (401)
 	AdvertiseAlgs      []string                          // extra id_token_signing_alg_values_supported
 	KeyID              string                            // the signing key's ID, default "authtest"; change it to rotate
@@ -223,6 +224,9 @@ func (p *Provider) discovery(w http.ResponseWriter, _ *http.Request) {
 	doc["id_token_signing_alg_values_supported"] = append([]string{"RS256"}, p.b.AdvertiseAlgs...)
 	if p.b.AuthMethods != nil {
 		doc["token_endpoint_auth_methods_supported"] = p.b.AuthMethods
+	}
+	if p.b.RevokeAuthMethods != nil {
+		doc["revocation_endpoint_auth_methods_supported"] = p.b.RevokeAuthMethods
 	}
 	if !p.b.NoEndSession {
 		doc["end_session_endpoint"] = p.srv.URL + "/end-session"

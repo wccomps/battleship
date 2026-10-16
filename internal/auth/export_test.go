@@ -16,3 +16,6 @@ func OpenRefreshToken(s *Service, sessionID, stored string) (string, error) {
 func OpenSessionTicket(s *Service, sess store.Session) (proxmox.Credential, bool) {
 	return s.openTicket(sess)
 }
+
+// WaitRevocations waits for the revocations s sent in the background.
+func WaitRevocations(s *Service) { s.revoking.Wait() }
