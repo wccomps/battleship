@@ -20,7 +20,8 @@ var bindingNames = []string{"alice", "Alice", "ALICE", "alic", "alice2", "a@b", 
 var bindingRealms = []string{pvetest.Realm, strings.ToUpper(pvetest.Realm), "pve", pvetest.Realm + ".evil", "b@" + pvetest.Realm}
 
 // The Proxmox sign-in is kept only for the session's own user,
-// <username>@<realm> ignoring case; a session never holds another's ticket.
+// exactly <username>@<realm>; a session never holds another's ticket, nor
+// one whose name differs only in case or by Unicode case folding.
 func TestPropProxmoxSignInIsTheSessionsUser(t *testing.T) {
 	h := newHarness(t)
 	check := func(t interface{ Fatalf(string, ...any) }, username string, pveNames []string) {
@@ -36,10 +37,10 @@ func TestPropProxmoxSignInIsTheSessionsUser(t *testing.T) {
 			}
 			resp := b.get(target)
 			accepted := resp.StatusCode == http.StatusOK && resp.Request.URL.Path == "/private"
-			if accepted != strings.EqualFold(name, want) {
+			if accepted != (name == want) {
 				t.Fatalf("session of %q, Proxmox signed in %q: %d at %s, want accepted %v", username, name, resp.StatusCode, resp.Request.URL, !accepted)
 			}
-			if cred, ok := b.pveTicket(); ok && !strings.EqualFold(cred.User, want) {
+			if cred, ok := b.pveTicket(); ok && cred.User != want {
 				t.Fatalf("session of %q holds %q's ticket", username, cred.User)
 			}
 		}
