@@ -125,13 +125,13 @@ var linuxLocked = lockedShell("/run/battleship-guest.lock", GuestLockWait)
 
 // lockedShell runs the script from stdin holding lock, waiting up to wait
 // for it (a copy a stopped or timed-out job left running holds it), and
-// exits 75 if it can't. The lock is taken on fd 9 with "timeout N flock 9",
-// a form util-linux and busybox both have, and the script runs with fd 9
-// closed, so a daemon it starts (an ifup hook, say) doesn't keep the lock:
-// only this shell holds it, until the script ends. A guest without flock or
-// timeout runs the script unlocked.
+// exits 75 if it can't. The lock is taken on fd 9 with "timeout N flock 9"
+// (coreutils' timeout, or busybox's from 1.30), and the script runs with
+// fd 9 closed, so a daemon it starts (an ifup hook, say) doesn't keep the
+// lock. A guest without flock, or a timeout that takes bare seconds, runs
+// the script unlocked.
 func lockedShell(lock string, wait time.Duration) string {
-	return fmt.Sprintf(`if command -v flock >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+	return fmt.Sprintf(`if command -v flock >/dev/null 2>&1 && timeout 1 true >/dev/null 2>&1; then
 	exec 9>%s
 	if ! timeout %s flock 9; then echo "another battleship setup script is still running in this guest" >&2; exit 75; fi
 	/bin/sh -s 9>&-
