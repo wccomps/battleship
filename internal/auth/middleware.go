@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/wccomps/battleship/internal/store"
+	"golang.org/x/sync/errgroup"
 )
 
 type ctxKey struct{}
@@ -189,6 +190,7 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 	if err != nil && !unreachable(err) {
 		s.logf("auth: refresh rejected: subject=%q: %v; ending the session", sess.Subject, err)
 		s.endSession(w, r, sess)
+		s.revokeRotated(ctx, sess, refreshToken) // the provider rotated it, then identify failed
 		s.unauthenticated(w, r)
 		return sess, false
 	}
@@ -319,14 +321,38 @@ func wantsEventStream(r *http.Request) bool {
 	return false
 }
 
-// endSession deletes a session and clears its cookie, even if the browser
-// has gone. A failed delete still expires on its own.
+// endSession deletes a session, revokes its refresh token, and clears its
+// cookie, even if the browser has gone. A failed delete still expires on
+// its own.
 func (s *Service) endSession(w http.ResponseWriter, r *http.Request, sess store.Session) {
-	if err := s.st.DeleteSession(context.WithoutCancel(r.Context()), sess.ID); err != nil {
+	ctx := context.WithoutCancel(r.Context())
+	switch rt, _, ok, err := s.st.EndSession(ctx, sess.ID); {
+	case err != nil:
 		s.logf("auth: deleting session of subject=%q: %v", sess.Subject, err)
+	case ok:
+		s.revokeSealed(ctx, sess.ID, rt, "ending the session of subject=%q: revoking its refresh token", sess.Subject)
 	}
 	s.clearSessionCookie(w)
 }
+
+// EndExpiredSessions removes the sessions expired at now, revokes their
+// refresh tokens, and returns how many it removed.
+func (s *Service) EndExpiredSessions(ctx context.Context, now time.Time) (int64, error) {
+	ended, err := s.st.EndExpiredSessions(ctx, now)
+	var g errgroup.Group
+	g.SetLimit(expiredRevokes)
+	for _, e := range ended {
+		g.Go(func() error {
+			s.revokeSealed(ctx, e.ID, e.RefreshToken, "ending expired session %.8s: revoking its refresh token", e.ID)
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return int64(len(ended)), err
+}
+
+// expiredRevokes is how many revocations EndExpiredSessions sends at once.
+const expiredRevokes = 4
 
 func (s *Service) serverError(w http.ResponseWriter, r *http.Request, what string, err error) {
 	s.logf("auth: %s: %v", what, err)

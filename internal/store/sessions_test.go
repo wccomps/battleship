@@ -3,6 +3,8 @@ package store_test
 import (
 	"errors"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -253,38 +255,20 @@ func TestEndSessionReturnsTheTokensItDeleted(t *testing.T) {
 	}
 }
 
-func TestDeleteSession(t *testing.T) {
-	s := storetest.New(t)
-	createSession(t, s, newSession("hash-1"))
-	createSession(t, s, newSession("hash-2"))
-	if err := s.DeleteSession(ctx, "hash-1"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Session(ctx, "hash-1"); !errors.Is(err, store.ErrSessionNotFound) {
-		t.Errorf("deleted session err = %v, want ErrSessionNotFound", err)
-	}
-	if _, err := s.Session(ctx, "hash-2"); err != nil {
-		t.Errorf("other session: %v", err)
-	}
-	// Logging out twice is not an error.
-	if err := s.DeleteSession(ctx, "hash-1"); err != nil {
-		t.Errorf("second delete: %v", err)
-	}
-}
-
-func TestDeleteExpiredSessions(t *testing.T) {
+func TestEndExpiredSessions(t *testing.T) {
 	s := storetest.New(t)
 	for i, exp := range []time.Duration{-time.Minute, 0, time.Second, time.Hour} {
 		sess := newSession("hash-" + string(rune('a'+i)))
 		sess.ExpiresAt = t0.Add(exp)
 		createSession(t, s, sess)
 	}
-	n, err := s.DeleteExpiredSessions(ctx, t0)
+	ended, err := s.EndExpiredSessions(ctx, t0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 2 {
-		t.Errorf("deleted %d sessions, want 2 (expired before or at now)", n)
+	slices.SortFunc(ended, func(a, b store.EndedSession) int { return strings.Compare(a.ID, b.ID) })
+	if want := []store.EndedSession{{"hash-a", "refresh-1"}, {"hash-b", "refresh-1"}}; !slices.Equal(ended, want) {
+		t.Errorf("ended %v, want %v (expired before or at now, with their refresh tokens)", ended, want)
 	}
 	for id, live := range map[string]bool{"hash-a": false, "hash-b": false, "hash-c": true, "hash-d": true} {
 		_, err := s.Session(ctx, id)

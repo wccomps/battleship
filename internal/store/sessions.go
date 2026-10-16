@@ -241,14 +241,6 @@ func (s *Store) UpdateSession(ctx context.Context, id string, u SessionUpdate) e
 	return nil
 }
 
-// DeleteSession removes a session; a missing one is not an error.
-func (s *Store) DeleteSession(ctx context.Context, id string) error {
-	if _, err := s.pool.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, id); err != nil {
-		return fmt.Errorf("deleting session: %w", err)
-	}
-	return nil
-}
-
 // EndSession removes a session and returns its tokens as they were when
 // removed (a refresh may have just rotated them), or ok false if it was
 // already gone.
@@ -264,11 +256,24 @@ func (s *Store) EndSession(ctx context.Context, id string) (refreshToken, idToke
 	return refreshToken, idToken, true, nil
 }
 
-// DeleteExpiredSessions removes sessions expired at now and returns the count.
-func (s *Store) DeleteExpiredSessions(ctx context.Context, now time.Time) (int64, error) {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM sessions WHERE expires_at <= $1`, now)
+// EndedSession is a session EndExpiredSessions removed: its ID and its
+// refresh token, still sealed.
+type EndedSession struct {
+	ID, RefreshToken string
+}
+
+// EndExpiredSessions removes the sessions expired at now and returns them.
+func (s *Store) EndExpiredSessions(ctx context.Context, now time.Time) ([]EndedSession, error) {
+	rows, err := s.pool.Query(ctx, `DELETE FROM sessions WHERE expires_at <= $1 RETURNING id, refresh_token`, now)
 	if err != nil {
-		return 0, fmt.Errorf("deleting expired sessions: %w", err)
+		return nil, fmt.Errorf("deleting expired sessions: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	ended, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (EndedSession, error) {
+		var e EndedSession
+		return e, r.Scan(&e.ID, &e.RefreshToken)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("deleting expired sessions: %w", err)
+	}
+	return ended, nil
 }

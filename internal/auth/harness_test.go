@@ -371,11 +371,11 @@ func (h *harness) sessionGone(token string) {
 // countSessions removes every session and reports how many there were.
 func (h *harness) countSessions() int64 {
 	h.t.Helper()
-	n, err := h.st.DeleteExpiredSessions(ctx, h.clock.Now().Add(100*365*24*time.Hour))
+	ended, err := h.st.EndExpiredSessions(ctx, h.clock.Now().Add(100*365*24*time.Hour))
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	return n
+	return int64(len(ended))
 }
 
 // wantLoginRedirect checks resp redirects to the login page with next.

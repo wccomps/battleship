@@ -58,10 +58,44 @@ func TestIdleExpiry(t *testing.T) {
 		}
 	}
 	h.clock.Advance(30 * time.Minute)
+	live := h.idp.RefreshTokens()
 	wantLoginRedirect(t, b.do(http.MethodGet, "/private", nil, nil), "/private")
 	h.sessionGone(token)
 	if !strings.Contains(h.logs.String(), `session expired: subject="sub-alice"`) {
 		t.Errorf("logs = %q, want the expiry", h.logs.String())
+	}
+	if !slices.Equal(h.idp.Revoked(), live) || len(live) != 1 {
+		t.Errorf("revoked %v; the expired session held %v", h.idp.Revoked(), live)
+	}
+}
+
+// A refresh the provider answered with a rotated token but an ID token
+// battleship refuses ends the session and leaves no token live.
+func TestRejectedRefreshRevokesBothTokens(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	h.clock.Advance(5 * time.Minute)
+	h.idp.Set(func(f *authtest.Behavior) { f.MutateIDToken = func(c map[string]any) { c["sub"] = "sub-mallory" } })
+	wantLoginRedirect(t, b.do(http.MethodGet, "/private", nil, nil), "/private")
+	if live := h.idp.RefreshTokens(); len(live) != 0 {
+		t.Errorf("refresh tokens live after the refresh was refused: %v (revoked %v)", live, h.idp.Revoked())
+	}
+}
+
+// The sweep of expired sessions revokes their refresh tokens too.
+func TestExpiredSessionsSweptAreRevoked(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	live := h.idp.RefreshTokens()
+	h.clock.Advance(13 * time.Hour) // past session_max, with no request
+	n, err := h.svc.EndExpiredSessions(context.Background(), h.clock.Now())
+	if err != nil || n != 1 {
+		t.Fatalf("EndExpiredSessions = %d, %v", n, err)
+	}
+	if !slices.Equal(h.idp.Revoked(), live) || len(h.idp.RefreshTokens()) != 0 {
+		t.Errorf("revoked %v of %v; live %v", h.idp.Revoked(), live, h.idp.RefreshTokens())
 	}
 }
 

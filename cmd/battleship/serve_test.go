@@ -659,7 +659,7 @@ type fakeCleaner struct {
 	previewsCtx  error // ctx.Err() when DeleteExpiredPreviews was called
 }
 
-func (c *fakeCleaner) DeleteExpiredSessions(ctx context.Context, _ time.Time) (int64, error) {
+func (c *fakeCleaner) EndExpiredSessions(ctx context.Context, _ time.Time) (int64, error) {
 	if c.hangSessions {
 		<-ctx.Done()
 		return 0, ctx.Err()
