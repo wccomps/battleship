@@ -323,8 +323,8 @@ func TestPreviewThenConfirmMakesOneJob(t *testing.T) {
 	if j.Kind != "reset" || j.Status != store.StatusPending || j.CreatedBy != "test-operator@example.org" || j.CreatedAs != "test-operator@auth.example.org" {
 		t.Errorf("job = %+v", j)
 	}
-	if !reflect.DeepEqual(j.LockKeys, []string{"team:01"}) {
-		t.Errorf("lock keys = %v, want [team:01]", j.LockKeys)
+	if want := []string{"team:01", "vmid:10101"}; !reflect.DeepEqual(j.LockKeys, want) {
+		t.Errorf("lock keys = %v, want %v", j.LockKeys, want)
 	}
 	var in jobs.Inputs
 	_ = json.Unmarshal(j.Inputs, &in)

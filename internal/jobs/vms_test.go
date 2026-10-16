@@ -109,7 +109,7 @@ func TestBuildPlanNarrowsDeployTemplates(t *testing.T) {
 	if len(some.Templates) != 1 || some.Templates[0].Name != "web.kilo.alpha.tpl" {
 		t.Errorf("templates = %+v, want only web.kilo.alpha.tpl", some.Templates)
 	}
-	if got := LockKeys(some); !reflect.DeepEqual(got, []string{"team:01", "team:02", "template:web.kilo.alpha.tpl", "vmid:9002"}) {
+	if got := LockKeys(some); !reflect.DeepEqual(got, []string{"team:01", "team:02", "template:web.kilo.alpha.tpl", "vmid:10202", "vmid:5002", "vmid:9002"}) {
 		t.Errorf("lock keys = %v", got)
 	}
 	if Fingerprint(some) == Fingerprint(all) {

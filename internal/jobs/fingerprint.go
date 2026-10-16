@@ -104,18 +104,30 @@ func sourceFP(s *pods.Source) *fpSource {
 	return &fpSource{VMID: s.VMID, Node: s.Node, Name: s.Name}
 }
 
-// LockKeys names what a plan touches, so overlapping jobs serialize. VMIDs
-// are keys too because deploys of different masters can pick the same free
-// VMID for new templates.
+// LockKeys names what a plan touches, so overlapping jobs serialize. Every
+// VM a plan reads to copy or changes is a vmid: key: the items' VMs, each
+// template and the master it is built from. So a deploy copying an
+// environment host (a master) waits for a job changing that host, and two
+// deploys that pick the same free VMID for new templates don't overlap.
 func LockKeys(plan *pods.Plan) []string {
 	seen := map[string]bool{}
+	vmid := func(id int) {
+		if id != 0 {
+			seen["vmid:"+strconv.Itoa(id)] = true
+		}
+	}
 	for _, t := range plan.Teams {
 		seen["team:"+t] = true
 	}
 	for _, t := range plan.Templates {
 		seen["template:"+t.Name] = true
-		if t.VMID != 0 {
-			seen["vmid:"+strconv.Itoa(t.VMID)] = true
+		vmid(t.VMID)
+		vmid(t.MasterVMID)
+	}
+	for _, it := range plan.Items {
+		vmid(it.VMID)
+		if it.Source != nil {
+			vmid(it.Source.VMID)
 		}
 	}
 	for _, k := range plan.Locks {
