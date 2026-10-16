@@ -71,7 +71,7 @@ func (r rules) grid(in inputs) (teams, hosts []string, rows []Row) {
 	byCell := map[[2]string][]proxmox.VM{}
 	seen := map[string]bool{}
 	for _, vm := range pods.AllTeamVMs(in.vms, r.naming) {
-		team, host, _ := r.naming.ParseVMName(vm.Name)
+		team, host, _ := r.naming.TeamVM(vm)
 		byCell[[2]string{team, host}] = append(byCell[[2]string{team, host}], vm)
 		seen[host] = true
 	}

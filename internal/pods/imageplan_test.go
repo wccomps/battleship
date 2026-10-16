@@ -62,6 +62,16 @@ func TestImageRegisterBlocks(t *testing.T) {
 	if _, err := p.ImageRegister(ctx, ImageRequest{VMID: 150, Family: "new", Kind: "toaster"}); err == nil {
 		t.Error("unknown kind accepted")
 	}
+	// Team-named sources are refused, each saying what it is.
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "alder", Status: "stopped"}, nil)
+	f.Add(proxmox.VM{VMID: 152, Name: "team01-oak", Node: "alder", Status: "stopped"}, nil)
+	for vmid, want := range map[int]string{10121: "team01-teak is a team VM",
+		152: "team01-oak has a team 01 name but is VMID 152, outside the team's VMIDs, so it isn't a team VM; rename or remove it in Proxmox"} {
+		plan, err := p.ImageRegister(ctx, ImageRequest{VMID: vmid, Family: "deb", Kind: ImageLinux})
+		if err != nil || plan.Items[0].Blocked != want {
+			t.Errorf("register %d: %+v, %v; want blocked %q", vmid, plan, err, want)
+		}
+	}
 }
 
 func TestImageEditMakesWorkingCopy(t *testing.T) {

@@ -108,7 +108,7 @@ func (p *Poller) measureOffset(ctx context.Context) time.Duration {
 
 // scanVM reads and judges one team VM.
 func (p *Poller) scanVM(ctx context.Context, vm proxmox.VM, offset time.Duration) (scanResult, error) {
-	team, _, _ := p.rules.naming.ParseVMName(vm.Name)
+	team, _, _ := p.rules.naming.TeamVM(vm)
 	readAt := p.clock.Now().Add(offset)
 	cfg, snaps, err := p.readVM(ctx, vm.Node, vm.VMID)
 	if err != nil {

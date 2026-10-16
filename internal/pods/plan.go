@@ -479,9 +479,9 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snap
 		it.VMID, it.Node = vm.VMID, vm.Node
 		if len(named) > 1 {
 			it.Blocked = fmt.Sprintf("several VMs are named %s (VMIDs %s)", it.Name, vmidList(named))
-		} else if vm.Template {
+		} else if kind, _, _ := p.Naming.Classify(vm); kind == TeamTemplate {
 			it.Blocked = "is a template, not a team VM"
-		} else if t, in := p.Naming.TeamOfCloneVMID(vm.VMID); !in || t != team {
+		} else if kind == OutsideBlock {
 			it.Blocked = outsideBlock(vm, team)
 		} else if want := p.Naming.Pool(team); vm.Pool != "" && vm.Pool != want {
 			it.Blocked = wrongPool(vm, want)
@@ -759,7 +759,7 @@ func (p Planner) simple(ctx context.Context, kind Kind, teams, hosts []string, f
 	}
 	plan := &Plan{Kind: kind, Teams: teams, Config: ConfigHash(kind, p.Cfg)}
 	for _, vm := range FindTeamVMs(vms, p.Naming, teams, hosts) {
-		team, host, _ := p.Naming.ParseVMName(vm.Name)
+		team, host, _ := p.Naming.TeamVM(vm)
 		it := Item{Team: team, Host: host, Name: vm.Name, VMID: vm.VMID, Node: vm.Node}
 		fill(&it)
 		// Proxmox leaves the pool out when the viewer can't audit pools, so
@@ -772,9 +772,8 @@ func (p Planner) simple(ctx context.Context, kind Kind, teams, hosts []string, f
 	// VMs with a team's name outside its block aren't team VMs: say so, so
 	// a teardown doesn't seem to miss them silently.
 	for _, vm := range namedOutsideBlock(vms, p.Naming, teams, hosts) {
-		team, _, _ := p.Naming.ParseVMName(vm.Name)
-		plan.Notices = append(plan.Notices, fmt.Sprintf("%s (VMID %d) has a team %s name but is outside the team's VMIDs, so it isn't a team VM and is left alone.",
-			vm.Name, vm.VMID, team))
+		_, team, _ := p.Naming.Classify(vm)
+		plan.Notices = append(plan.Notices, fmt.Sprintf("Left alone: %s %s.", vm.Name, outsideBlock(vm, team)))
 	}
 	sort.SliceStable(plan.Items, func(i, j int) bool { return plan.Items[i].Name < plan.Items[j].Name })
 	return plan, vms, nil

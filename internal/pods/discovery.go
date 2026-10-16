@@ -33,8 +33,8 @@ func FindMasters(vms []proxmox.VM, n Naming, pattern, tag string) (masters, unta
 		return nil, nil, err
 	}
 	for _, vm := range vms {
-		_, _, isTeam := n.ParseVMName(vm.Name)
-		if vm.Template || n.IsTemplateName(vm.Name) || isTeam || !re.MatchString(vm.Name) {
+		kind, _, _ := n.Classify(vm)
+		if vm.Template || n.IsTemplateName(vm.Name) || kind != NotTeamNamed || !re.MatchString(vm.Name) {
 			continue
 		}
 		if hasTag(vm.Tags, tag) {
@@ -66,16 +66,39 @@ func FindTeamVMs(vms []proxmox.VM, n Naming, teams, hosts []string) []proxmox.VM
 	return out
 }
 
-// TeamVM is the team and host of vm if it is a team VM: named as VMName
-// names them, in that team's clone VMID block (where deploys put them), and
-// not a template. The name alone isn't enough: anyone can name a VM
-// "team05-test" in their own pool, and teardown would delete it.
-func (n Naming) TeamVM(vm proxmox.VM) (team, host string, ok bool) {
-	team, host, ok = n.ParseVMName(vm.Name)
-	if !ok || vm.Template || n.IsTemplateName(vm.Name) {
-		return "", "", false
+// VMKind is what a VM is to team naming (see Naming.Classify).
+type VMKind int
+
+const (
+	NotTeamNamed VMKind = iota // not named as VMName names team VMs
+	TeamTemplate               // team-named, but a template
+	OutsideBlock               // team-named, outside that team's clone VMIDs
+	TeamVMKind                 // a team VM
+)
+
+// Classify is what vm is, and the team and host its name gives if it is
+// team-named. A team VM is named as VMName names them, in that team's clone
+// VMID block (where deploys put them), and not a template. The name alone
+// isn't enough: anyone can name a VM "team05-test" in their own pool, and
+// teardown would delete it.
+func (n Naming) Classify(vm proxmox.VM) (kind VMKind, team, host string) {
+	team, host, ok := n.ParseVMName(vm.Name)
+	switch {
+	case !ok:
+		return NotTeamNamed, "", ""
+	case vm.Template || n.IsTemplateName(vm.Name):
+		return TeamTemplate, team, host
 	}
 	if t, in := n.TeamOfCloneVMID(vm.VMID); !in || t != team {
+		return OutsideBlock, team, host
+	}
+	return TeamVMKind, team, host
+}
+
+// TeamVM is the team and host of vm if it is a team VM (see Classify).
+func (n Naming) TeamVM(vm proxmox.VM) (team, host string, ok bool) {
+	kind, team, host := n.Classify(vm)
+	if kind != TeamVMKind {
 		return "", "", false
 	}
 	return team, host, true
@@ -172,16 +195,12 @@ func MasterSets(vms []proxmox.VM, n Naming, tag string) (sets []MasterSet, other
 	return sets, others
 }
 
-// namedOutsideBlock is the non-template VMs of teams, filtered by hosts,
-// that have a team VM's name but are outside the team's clone VMID block.
+// namedOutsideBlock is the OutsideBlock VMs of teams (see Classify),
+// filtered by hosts.
 func namedOutsideBlock(vms []proxmox.VM, n Naming, teams, hosts []string) []proxmox.VM {
 	var out []proxmox.VM
 	for _, vm := range vms {
-		team, host, ok := n.ParseVMName(vm.Name)
-		if !ok || vm.Template || n.IsTemplateName(vm.Name) || !slices.Contains(teams, team) || !MatchesHost(host, hosts) {
-			continue
-		}
-		if _, _, isTeamVM := n.TeamVM(vm); !isTeamVM {
+		if kind, team, host := n.Classify(vm); kind == OutsideBlock && slices.Contains(teams, team) && MatchesHost(host, hosts) {
 			out = append(out, vm)
 		}
 	}

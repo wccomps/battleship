@@ -111,14 +111,16 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		it.Supersedes = &Source{VMID: newest.VMID, Node: newest.Node, Name: newest.Name}
 		it.Steps = append(it.Steps, StepRetire)
 	}
-	_, _, isTeam := p.Naming.ParseVMName(src.Name)
+	srcKind, srcTeam, _ := p.Naming.Classify(src)
 	switch {
 	case version > MaxImageVersion:
 		it.Blocked = fmt.Sprintf("family %s is at v%d, the last version a base image name holds; register it as a new family", req.Family, MaxImageVersion)
 	case src.Template:
 		it.Blocked = src.Name + " is a template; register the VM it was made from, or open the family for editing"
-	case isTeam:
+	case srcKind == TeamVMKind:
 		it.Blocked = src.Name + " is a team VM"
+	case srcKind == OutsideBlock:
+		it.Blocked = src.Name + " " + outsideBlock(src, srcTeam)
 	case src.Status != "stopped":
 		it.Blocked = fmt.Sprintf("%s is %s; shut it down first so the copy is consistent", src.Name, src.Status)
 	case len(vmsNamed(vms, it.Name)) > 0:

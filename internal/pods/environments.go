@@ -135,7 +135,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 	var read []proxmox.VM
 	for _, vm := range vms {
 		_, inSlot := byPool[vm.Pool]
-		if _, _, team := p.Naming.ParseVMName(vm.Name); inSlot || (!vm.Template && !team) {
+		if kind, _, _ := p.Naming.Classify(vm); inSlot || (!vm.Template && kind == NotTeamNamed) {
 			read = append(read, vm)
 		}
 	}
