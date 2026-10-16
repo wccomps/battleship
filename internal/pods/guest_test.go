@@ -147,25 +147,36 @@ func TestDNSOnlyScriptsLeaveTheRestAlone(t *testing.T) {
 	}
 }
 
+// lockTools are the guest commands lockedShell needs, or skip.
+func lockTools(t *testing.T) (sh string) {
+	t.Helper()
+	for _, tool := range []string{"sh", "flock", "timeout"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("no %s", tool)
+		}
+	}
+	sh, _ = exec.LookPath("sh")
+	return sh
+}
+
+// runLocked runs body as the agent would, under lockedShell(lock, wait).
+func runLocked(t *testing.T, sh, lock string, wait time.Duration, env []string, body string) ([]byte, error) {
+	c := exec.Command(sh, "-c", lockedShell(lock, wait))
+	c.Env = append(os.Environ(), env...)
+	c.Stdin = strings.NewReader(body)
+	return c.CombinedOutput()
+}
+
 // Two copies of a Linux script never run at once: the second waits for the
 // first's lock (one a stopped job left running), then runs. A daemon the
 // first starts doesn't keep the lock.
 func TestLinuxScriptsTakeTurns(t *testing.T) {
-	sh, err := exec.LookPath("sh")
-	if err != nil {
-		t.Skip("no sh")
-	}
-	if _, err := exec.LookPath("flock"); err != nil {
-		t.Skip("no flock")
-	}
+	sh := lockTools(t)
 	dir := t.TempDir()
-	log := filepath.Join(dir, "log")
+	lock, log := filepath.Join(dir, "lock"), filepath.Join(dir, "log")
 	body := "echo start >> \"$LOG\"; sleep 0.3; echo end >> \"$LOG\"; (sleep 5 </dev/null >/dev/null 2>&1 &)\n"
 	run := func(i int) {
-		c := exec.Command(sh, "-c", linuxLocked)
-		c.Env = append(os.Environ(), "BATTLESHIP_LOCK="+filepath.Join(dir, "lock"), "LOG="+log)
-		c.Stdin = strings.NewReader(body)
-		if out, err := c.CombinedOutput(); err != nil {
+		if out, err := runLocked(t, sh, lock, 10*time.Second, []string{"LOG=" + log}, body); err != nil {
 			t.Errorf("script %d: %v\n%s", i, err, out)
 		}
 	}
@@ -192,14 +203,8 @@ func TestLinuxScriptsTakeTurns(t *testing.T) {
 
 // A script that can't get the lock in time exits 75 and says why.
 func TestLinuxScriptGivesUpOnAHeldLock(t *testing.T) {
-	sh, err := exec.LookPath("sh")
-	if err != nil {
-		t.Skip("no sh")
-	}
-	flock, err := exec.LookPath("flock")
-	if err != nil {
-		t.Skip("no flock")
-	}
+	sh := lockTools(t)
+	flock, _ := exec.LookPath("flock")
 	lock := filepath.Join(t.TempDir(), "lock")
 	holder := exec.Command(flock, lock, "sleep", "3")
 	if err := holder.Start(); err != nil {
@@ -207,43 +212,41 @@ func TestLinuxScriptGivesUpOnAHeldLock(t *testing.T) {
 	}
 	defer holder.Wait() //nolint:errcheck
 	time.Sleep(200 * time.Millisecond)
-	c := exec.Command(sh, "-c", linuxLocked)
-	c.Env = append(os.Environ(), "BATTLESHIP_LOCK="+lock, "BATTLESHIP_LOCK_WAIT=0.2")
-	c.Stdin = strings.NewReader("echo ran\n")
-	out, err := c.CombinedOutput()
+	out, err := runLocked(t, sh, lock, time.Second, nil, "echo ran\n")
 	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 75 || !strings.Contains(string(out), "still running") || strings.Contains(string(out), "ran") {
+	if !errors.As(err, &exit) || exit.ExitCode() != 75 || !strings.Contains(string(out), "still running") || strings.Contains(string(out), "ran\n") {
 		t.Errorf("err = %v, output %q; want exit 75 saying another script is still running", err, out)
 	}
 }
 
-// Where flock lacks -w, -E or -o (busybox, old util-linux) or is missing,
-// the script still runs, unlocked.
-func TestLinuxScriptRunsWithoutAUsableFlock(t *testing.T) {
+// Without flock or timeout, the script still runs, unlocked.
+func TestLinuxScriptRunsWithoutTheLockTools(t *testing.T) {
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("no sh")
 	}
-	for name, fake := range map[string]string{
-		"busybox":  "#!/bin/sh\necho 'flock: unrecognized option: w' >&2\nexit 1\n",
-		"old":      "#!/bin/sh\ncase \"$*\" in *-E*) echo 'flock: invalid option -- E' >&2; exit 64;; esac\nexit 0\n",
-		"no flock": "",
-	} {
+	for name, tools := range map[string][]string{"neither": nil, "no timeout": {"flock"}, "no flock": {"timeout"}} {
 		t.Run(name, func(t *testing.T) {
 			bin := t.TempDir()
-			if fake != "" {
-				if err := os.WriteFile(filepath.Join(bin, "flock"), []byte(fake), 0o755); err != nil {
+			for _, tool := range tools {
+				if err := os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 					t.Fatal(err)
 				}
 			}
-			c := exec.Command(sh, "-c", linuxLocked)
-			// Only the fake bin, plus sh itself for the exec.
-			c.Env = []string{"PATH=" + bin, "BATTLESHIP_LOCK=" + filepath.Join(t.TempDir(), "lock")}
+			c := exec.Command(sh, "-c", lockedShell(filepath.Join(t.TempDir(), "lock"), time.Second))
+			c.Env = []string{"PATH=" + bin}
 			c.Stdin = strings.NewReader("echo ran\n")
 			out, err := c.CombinedOutput()
 			if err != nil || strings.TrimSpace(string(out)) != "ran" {
 				t.Errorf("err = %v, output %q; want the script to run", err, out)
 			}
 		})
+	}
+}
+
+// The shipped wrapper is lockedShell with the real lock and wait.
+func TestLinuxLockedIsTheRealLock(t *testing.T) {
+	if linuxLocked != lockedShell("/run/battleship-guest.lock", GuestLockWait) || !strings.Contains(linuxLocked, "timeout 240 flock 9") {
+		t.Errorf("linuxLocked = %q", linuxLocked)
 	}
 }
