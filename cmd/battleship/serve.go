@@ -185,7 +185,8 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	bgCtx, stopBackground := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopBackground()
 	var bg sync.WaitGroup
-	background := []func(context.Context){hub.Run, func(ctx context.Context) { <-ctx.Done(); views.Close() }, func(ctx context.Context) { cleanupLoop(ctx, svc.EndExpiredSessions, st.DeleteExpiredPreviews, log) }}
+	background := []func(context.Context){hub.Run, func(ctx context.Context) { <-ctx.Done(); views.Close() }, func(ctx context.Context) { cleanupLoop(ctx, svc.EndExpiredSessions, st.DeleteExpiredPreviews, log) },
+		svc.RunRevocations}
 	if renewer, ok := api.(jobs.TicketRenewer); ok {
 		r := &jobs.Renewer{Store: st, Proxmox: renewer, Credentials: creds, Logf: logfFor(log, "renewer")}
 		background = append(background, r.Run)
@@ -225,13 +226,6 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	}
 	stopHTTP()
 	stopBackground()
-	// Requests and the session sweep have stopped: let the refresh token
-	// revocations they started finish.
-	revokeCtx, stopRevokes := context.WithDeadline(context.Background(), deadline)
-	if err := svc.WaitRevocations(revokeCtx); err != nil {
-		log.Warn("refresh token revocations still running at shutdown; those tokens expire on their own")
-	}
-	stopRevokes()
 
 	timeout := time.NewTimer(time.Until(deadline))
 	defer timeout.Stop()

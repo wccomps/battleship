@@ -1,7 +1,6 @@
 package auth_test
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -562,21 +561,38 @@ func TestLogoutRevokesWithTheProvidersClientAuth(t *testing.T) {
 	}
 }
 
-// WaitRevocations waits for a revocation still running, up to its ctx: what
-// serve does when it stops.
-func TestWaitRevocationsWaitsForTheRunningOne(t *testing.T) {
+// A revocation the provider refuses stays queued and is sent again later;
+// after revokeAttempts tries it is dropped. Nothing is lost to a failure in
+// between.
+func TestRevocationIsRetriedThenDropped(t *testing.T) {
 	h := newHarness(t)
-	h.idp.Set(func(f *authtest.Behavior) { f.RevokeDelay = 300 * time.Millisecond })
 	b := h.browser()
 	b.login(alice)
+	live := h.liveTokens()
+	h.idp.Set(func(f *authtest.Behavior) { f.RevokeStatus = http.StatusServiceUnavailable })
 	b.postForm("/auth/logout", url.Values{"csrf": {b.csrf()}}, nil)
-	short, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	if err := h.svc.WaitRevocations(short); !errors.Is(err, context.DeadlineExceeded) || len(h.idp.Revoked()) != 0 {
-		t.Fatalf("WaitRevocations with a revocation running = %v, revoked %v; want it still waiting", err, h.idp.Revoked())
+	if got := h.revoked(); len(got) != 0 {
+		t.Fatalf("revoked %v while the provider refused", got)
 	}
-	if err := h.svc.WaitRevocations(context.Background()); err != nil || len(h.idp.Revoked()) != 1 {
-		t.Errorf("WaitRevocations = %v, revoked %v; want it done", err, h.idp.Revoked())
+	h.idp.Set(func(f *authtest.Behavior) { f.RevokeStatus = 0 })
+	deadline := time.Now().Add(5 * time.Second)
+	for len(h.revoked()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond) // the retry comes due
+	}
+	if got := h.revoked(); !slices.Equal(got, live) {
+		t.Fatalf("revoked %v after the provider came back, want %v", got, live)
+	}
+
+	// A provider that never takes it: tried revokeAttempts times, then dropped.
+	b.login(alice)
+	h.idp.Set(func(f *authtest.Behavior) { f.RevokeStatus = http.StatusServiceUnavailable })
+	b.postForm("/auth/logout", url.Values{"csrf": {b.csrf()}}, nil)
+	for !strings.Contains(h.logs.String(), "giving up after 5 tries") && time.Now().Before(deadline.Add(5*time.Second)) {
+		_ = h.revoked()
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(h.logs.String(), "giving up after 5 tries") {
+		t.Errorf("logs = %q, want the revocation given up", h.logs.String())
 	}
 }
 
@@ -602,7 +618,7 @@ func TestLogoutWhenRevocationFails(t *testing.T) {
 			if len(h.revoked()) != 0 {
 				t.Errorf("revoked %v", h.revoked())
 			}
-			if failed := strings.Contains(h.logs.String(), "revoking its refresh token"); failed != (name == "revocation fails") {
+			if failed := strings.Contains(h.logs.String(), "revoking the refresh token of session"); failed != (name == "revocation fails") {
 				t.Errorf("logs = %q", h.logs.String())
 			}
 		})

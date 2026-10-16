@@ -47,10 +47,10 @@ once, and pushes changes to open pages.
 | `pods` | The rules and the model: naming, VM config rules, privileges, capacity, and the read-only `Planner` that makes a `Plan` |
 | `apply` | The `Executor` that carries out a plan, and the limits on how hard it pushes Proxmox |
 | `jobs` | Submitting, fingerprints, retries, the worker, credential renewal |
-| `store` | Postgres: jobs, items, events, claims and locks, sessions, previews |
+| `store` | Postgres: jobs, items, events, claims and locks, sessions, previews, queued refresh token revocations |
 | `status` | Each viewer's live grid (polls and drift scans) and the notification hub |
 | `web` | Server-rendered pages, forms, live updates (server-sent events) |
-| `auth` | Authentik login, the Proxmox sign-in, sessions and CSRF |
+| `auth` | Authentik login, the Proxmox sign-in, sessions (and revoking their refresh tokens) and CSRF |
 | `proxmox` | Typed Proxmox API client with node failover and task waiting |
 | `config` | The TOML config |
 | `seal` | Encrypting credentials at rest |

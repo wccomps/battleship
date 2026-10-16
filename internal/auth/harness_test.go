@@ -125,7 +125,7 @@ func newHarness(t *testing.T, mut ...func(*config.Config)) *harness {
 // Sessions in the database carry over.
 func (h *harness) restart(cfg config.Config) {
 	h.t.Helper()
-	svc, err := auth.NewService(ctx, cfg, h.st, auth.Options{Now: h.clock.Now, Logf: h.logs.Logf, Proxmox: h.pve.Client()})
+	svc, err := auth.NewService(ctx, cfg, h.st, auth.Options{Now: h.clock.Now, Logf: h.logs.Logf, Proxmox: h.pve.Client(), RevokeRetry: 20 * time.Millisecond})
 	if err != nil {
 		h.t.Fatalf("NewService: %v", err)
 	}
@@ -371,11 +371,11 @@ func (h *harness) sessionGone(token string) {
 // countSessions removes every session and reports how many there were.
 func (h *harness) countSessions() int64 {
 	h.t.Helper()
-	ended, err := h.st.EndExpiredSessions(ctx, h.clock.Now().Add(100*365*24*time.Hour), 1000)
+	n, err := h.st.EndExpiredSessions(ctx, h.clock.Now().Add(100*365*24*time.Hour), 1000, false)
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	return int64(len(ended))
+	return int64(n)
 }
 
 // wantLoginRedirect checks resp redirects to the login page with next.
@@ -404,19 +404,19 @@ func pveUser(u authtest.User) string {
 	return strings.TrimPrefix(u.Subject, "sub-") + "@" + pvetest.Realm
 }
 
-// revoked is the refresh tokens the provider revoked, once the background
-// revocations are done.
+// revoked is the refresh tokens the provider revoked, once the queued
+// revocations that are due have been sent.
 func (h *harness) revoked() []string {
-	if err := h.svc.WaitRevocations(context.Background()); err != nil {
+	if err := h.svc.DrainRevocations(context.Background()); err != nil {
 		h.t.Fatal(err)
 	}
 	return h.idp.Revoked()
 }
 
 // liveTokens is the refresh tokens the provider still honours, once the
-// background revocations are done.
+// queued revocations that are due have been sent.
 func (h *harness) liveTokens() []string {
-	if err := h.svc.WaitRevocations(context.Background()); err != nil {
+	if err := h.svc.DrainRevocations(context.Background()); err != nil {
 		h.t.Fatal(err)
 	}
 	return h.idp.RefreshTokens()

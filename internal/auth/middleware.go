@@ -191,7 +191,7 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 	stored := refreshToken == "" || refreshToken == sess.RefreshToken
 	defer func() {
 		if !stored {
-			s.revokeLater(sess.ID, refreshToken, fmt.Sprintf("refresh: subject=%q: the rotated token", sess.Subject))
+			s.queueRevocation(context.WithoutCancel(ctx), sess.ID, refreshToken, fmt.Sprintf("refresh: subject=%q: the rotated token", sess.Subject))
 		}
 	}()
 	if err != nil && !unreachable(err) {
@@ -320,29 +320,24 @@ func wantsEventStream(r *http.Request) bool {
 // endSession ends a session (see end) and clears its cookie, even if the
 // browser has gone. A failed delete still expires on its own.
 func (s *Service) endSession(w http.ResponseWriter, r *http.Request, sess store.Session) {
-	what := fmt.Sprintf("ending the session of subject=%q", sess.Subject)
-	if _, _, err := s.end(context.WithoutCancel(r.Context()), sess.ID, what); err != nil {
-		s.logf("auth: %s: %v", what, err)
+	if _, _, err := s.end(context.WithoutCancel(r.Context()), sess.ID); err != nil {
+		s.logf("auth: ending the session of subject=%q: %v", sess.Subject, err)
 	}
 	s.clearSessionCookie(w)
 }
 
-// EndExpiredSessions ends the sessions expired at now, a batch at a time
-// while ctx lasts, has their refresh tokens revoked (see revokeLater), and
-// returns how many it ended.
+// EndExpiredSessions ends the sessions expired at now (see end), a batch at
+// a time while ctx lasts, and returns how many it ended.
 func (s *Service) EndExpiredSessions(ctx context.Context, now time.Time) (int64, error) {
-	var n int64
+	var total int64
 	for {
-		ended, err := s.st.EndExpiredSessions(ctx, now, expiredBatch)
-		if err != nil {
-			return n, err
+		n, err := s.st.EndExpiredSessions(ctx, now, expiredBatch, s.revokeURL != "")
+		total += int64(n)
+		if n > 0 {
+			s.kickRevocations()
 		}
-		n += int64(len(ended))
-		for _, e := range ended {
-			s.revokeLater(e.ID, e.RefreshToken, fmt.Sprintf("expired session %.8s", e.ID))
-		}
-		if len(ended) < expiredBatch {
-			return n, nil
+		if err != nil || n < expiredBatch {
+			return total, err
 		}
 	}
 }

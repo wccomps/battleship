@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"net/url"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -49,6 +49,9 @@ type Options struct {
 	// Proxmox signs users in to Proxmox and renews their tickets; it is
 	// required. It holds no credential of its own.
 	Proxmox ProxmoxLogin
+	// RevokeRetry is how often queued refresh token revocations are looked
+	// for, and how long a failed one first waits. Default a minute.
+	RevokeRetry time.Duration
 }
 
 // Service logs users in through the identity provider (OpenID Connect),
@@ -66,8 +69,8 @@ type Service struct {
 	endSessionURL string           // provider logout URL; "" if discovery lists none
 	revokeURL     string           // provider token revocation URL (RFC 7009); "" if none
 	revokeStyle   oauth2.AuthStyle // how revoke authenticates (see authStyle)
-	revoking      sync.WaitGroup   // revocations in the background (revokeLater)
-	revokeSlots   chan struct{}    // one per revocation running (revokeLater)
+	revokeKick    chan struct{}    // wakes RunRevocations
+	revokeRetry   time.Duration    // RunRevocations' tick; a failed revocation waits this, doubling
 	secure        bool             // cookies get Secure (base_url is https)
 	names         cookieNames      // cookie names, from namesFor(secure)
 	origin        string           // base_url's origin, for the Origin check
@@ -126,7 +129,8 @@ func NewService(ctx context.Context, cfg config.Config, st *store.Store, opts Op
 		origin:      normalOrigin(base),
 		loginKey:    seal.NewKey(cfg.OIDC.ClientSecret, loginStatePurpose),
 		refreshKey:  seal.NewKey(cfg.OIDC.ClientSecret, refreshTokenPurpose),
-		revokeSlots: make(chan struct{}, revokesAtOnce),
+		revokeKick:  make(chan struct{}, 1),
+		revokeRetry: cmp.Or(opts.RevokeRetry, time.Minute),
 		ticketKey:   ticketKey(cfg),
 		pve:         opts.Proxmox,
 	}

@@ -129,7 +129,7 @@ func TestPreviewsGoWithTheirSession(t *testing.T) {
 	s := storetest.New(t)
 	createSession(t, s, newSession("sess-a"))
 	createPreview(t, s, newPreview("sess-a", "prev-1"))
-	if _, _, err := s.EndSession(ctx, "sess-a"); err != nil {
+	if _, _, err := s.EndSession(ctx, "sess-a", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Preview(ctx, "sess-a", "prev-1"); !errors.Is(err, store.ErrPreviewNotFound) {
@@ -189,7 +189,7 @@ func TestDeleteExpiredPreviews(t *testing.T) {
 	}
 
 	// The submitted preview goes with its session; its job stays.
-	if _, _, err := s.EndSession(ctx, "sess-b"); err != nil {
+	if _, _, err := s.EndSession(ctx, "sess-b", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Preview(ctx, "sess-b", "used"); !errors.Is(err, store.ErrPreviewNotFound) {

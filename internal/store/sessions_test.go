@@ -242,20 +242,24 @@ func TestEndSessionReturnsTheTokensItDeleted(t *testing.T) {
 	if err := s.UpdateSession(ctx, "hash-1", store.SessionUpdate{RefreshToken: "refresh-2", IDToken: "id-2", RefreshedAt: t0}); err != nil {
 		t.Fatal(err)
 	}
-	ended, ok, err := s.EndSession(ctx, "hash-1")
+	ended, ok, err := s.EndSession(ctx, "hash-1", true)
 	if want := (store.EndedSession{ID: "hash-1", RefreshToken: "refresh-2", IDToken: "id-2"}); err != nil || !ok || ended != want {
 		t.Errorf("EndSession = %+v, %v, %v; want %+v", ended, ok, err, want)
 	}
 	if _, err := s.Session(ctx, "hash-1"); !errors.Is(err, store.ErrSessionNotFound) {
 		t.Errorf("session after EndSession: %v", err)
 	}
-	if _, ok, err := s.EndSession(ctx, "hash-1"); ok || err != nil {
+	// Its refresh token was queued in the same statement.
+	if revs, err := s.LeaseRevocations(ctx, 10, time.Minute); err != nil || len(revs) != 1 || revs[0].SessionID != "hash-1" || revs[0].RefreshToken != "refresh-2" {
+		t.Errorf("queued revocations = %+v, %v; want hash-1's rotated token", revs, err)
+	}
+	if _, ok, err := s.EndSession(ctx, "hash-1", true); ok || err != nil {
 		t.Errorf("EndSession of a gone session = %v, %v; want not ok, no error", ok, err)
 	}
 }
 
 // EndExpiredSessions removes sessions expired at now, oldest first, up to
-// a limit, and returns them with their tokens.
+// a limit, queuing their tokens if asked.
 func TestEndExpiredSessions(t *testing.T) {
 	s := storetest.New(t)
 	for i, exp := range []time.Duration{-time.Minute, 0, time.Second, time.Hour, -time.Hour} {
@@ -263,20 +267,11 @@ func TestEndExpiredSessions(t *testing.T) {
 		sess.ExpiresAt = t0.Add(exp)
 		createSession(t, s, sess)
 	}
-	ids := func(es []store.EndedSession) (out []string) { // in any order
-		for _, e := range es {
-			out = append(out, e.ID)
-		}
-		slices.Sort(out)
-		return out
+	if n, err := s.EndExpiredSessions(ctx, t0, 2, true); err != nil || n != 2 {
+		t.Fatalf("EndExpiredSessions(limit 2) = %d, %v", n, err)
 	}
-	first, err := s.EndExpiredSessions(ctx, t0, 2)
-	if err != nil || !slices.Equal(ids(first), []string{"hash-a", "hash-e"}) || first[0].RefreshToken != "refresh-1" || first[0].IDToken != "id-1" {
-		t.Fatalf("EndExpiredSessions(limit 2) = %+v, %v; want the two oldest, with their tokens", first, err)
-	}
-	rest, err := s.EndExpiredSessions(ctx, t0, 10)
-	if err != nil || !slices.Equal(ids(rest), []string{"hash-b"}) {
-		t.Fatalf("EndExpiredSessions = %+v, %v; want hash-b", rest, err)
+	if n, err := s.EndExpiredSessions(ctx, t0, 10, false); err != nil || n != 1 {
+		t.Fatalf("EndExpiredSessions = %d, %v; want the last one", n, err)
 	}
 	for id, live := range map[string]bool{"hash-a": false, "hash-b": false, "hash-c": true, "hash-d": true, "hash-e": false} {
 		_, err := s.Session(ctx, id)
@@ -286,5 +281,44 @@ func TestEndExpiredSessions(t *testing.T) {
 		if !live && !errors.Is(err, store.ErrSessionNotFound) {
 			t.Errorf("%s: err = %v, want deleted", id, err)
 		}
+	}
+	// The two oldest were queued (hash-e, hash-a); hash-b, ended without, wasn't.
+	revs, err := s.LeaseRevocations(ctx, 10, time.Minute)
+	var ids []string
+	for _, r := range revs {
+		ids = append(ids, r.SessionID)
+	}
+	slices.Sort(ids)
+	if err != nil || !slices.Equal(ids, []string{"hash-a", "hash-e"}) {
+		t.Errorf("queued = %v, %v", ids, err)
+	}
+}
+
+// A leased revocation isn't leased again until its lease runs out or it is
+// rescheduled; done ones are gone. Attempts count the leases before.
+func TestRevocationQueue(t *testing.T) {
+	s := storetest.New(t)
+	for _, id := range []string{"s1", "s2"} {
+		if err := s.QueueRevocation(ctx, id, "rt-"+id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := s.LeaseRevocations(ctx, 1, time.Hour)
+	if err != nil || len(first) != 1 || first[0].SessionID != "s1" || first[0].Attempts != 0 {
+		t.Fatalf("lease = %+v, %v", first, err)
+	}
+	second, err := s.LeaseRevocations(ctx, 10, time.Hour)
+	if err != nil || len(second) != 1 || second[0].SessionID != "s2" {
+		t.Fatalf("second lease = %+v, %v; want only s2 (s1 is leased)", second, err)
+	}
+	if err := s.RetryRevocation(ctx, first[0].ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DoneRevocation(ctx, second[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.LeaseRevocations(ctx, 10, time.Hour)
+	if err != nil || len(again) != 1 || again[0].SessionID != "s1" || again[0].Attempts != 1 {
+		t.Fatalf("after retry and done = %+v, %v; want s1 on its second try", again, err)
 	}
 }

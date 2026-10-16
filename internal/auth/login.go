@@ -16,6 +16,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/wccomps/battleship/internal/store"
+	"golang.org/x/sync/errgroup"
 )
 
 // login starts the authorization-code flow with PKCE, keeping its state in
@@ -111,11 +112,14 @@ func (s *Service) callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Once the login has succeeded at the provider, the browser's old
-	// session is ended (see end).
+	// session is ended (see end). Revoking its refresh token assumes the
+	// provider revokes only that token, as Authentik does; one that ends the
+	// whole client session on revocation (Keycloak) would end the new
+	// session too.
 	old, err := r.Cookie(s.names.session)
 	hadOld := err == nil
 	if hadOld && wellFormed(old.Value) {
-		if _, _, err := s.end(context.WithoutCancel(r.Context()), HashToken(old.Value), fmt.Sprintf("login: subject=%q: the previous session", id.Subject)); err != nil {
+		if _, _, err := s.end(context.WithoutCancel(r.Context()), HashToken(old.Value)); err != nil {
 			s.logf("auth: deleting the previous session of subject=%q: %v", id.Subject, err)
 		}
 	}
@@ -167,7 +171,7 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 		s.rejectCSRF(w, r, sess.Subject, reason)
 		return
 	}
-	ended, ok, err := s.end(context.WithoutCancel(r.Context()), sess.ID, fmt.Sprintf("logout: subject=%q", sess.Subject))
+	ended, ok, err := s.end(context.WithoutCancel(r.Context()), sess.ID)
 	if err != nil {
 		s.serverError(w, r, "ending your session", err)
 		return
@@ -197,60 +201,105 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 
 const revokeTimeout = 3 * time.Second
 
-// end removes session id and has its refresh token revoked (see
-// revokeLater; what names it in the log). It returns the session as
+// end removes session id and, in the same statement, queues its refresh
+// token for revocation (see DrainRevocations). It returns the session as
 // removed, or ok false if it was already gone.
-func (s *Service) end(ctx context.Context, id, what string) (_ store.EndedSession, ok bool, _ error) {
-	ended, ok, err := s.st.EndSession(ctx, id)
+func (s *Service) end(ctx context.Context, id string) (_ store.EndedSession, ok bool, _ error) {
+	ended, ok, err := s.st.EndSession(ctx, id, s.revokeURL != "")
 	if ok {
-		s.revokeLater(id, ended.RefreshToken, what)
+		s.kickRevocations()
 	}
 	return ended, ok, err
 }
 
-// revokeLater revokes the refresh token sealed for sessionID without
-// holding anyone up: the provider's copy outlives the session. At most
-// revokesAtOnce run at a time; one that fails is logged and the token left
-// to expire, and serve waits for those still running when it stops (see
-// WaitRevocations).
-func (s *Service) revokeLater(sessionID, sealed, what string) {
+// queueRevocation queues a refresh token sealed for sessionID that no
+// session holds (a rotated one that couldn't be stored). If the database
+// can't take it, the token is left to expire.
+func (s *Service) queueRevocation(ctx context.Context, sessionID, sealed, what string) {
 	if s.revokeURL == "" || sealed == "" {
 		return
 	}
-	s.revoking.Add(1)
-	go func() {
-		defer s.revoking.Done()
-		s.revokeSlots <- struct{}{}
-		defer func() { <-s.revokeSlots }()
-		s.revokeSealed(context.Background(), sessionID, sealed, what)
-	}()
+	if err := s.st.QueueRevocation(ctx, sessionID, sealed); err != nil {
+		s.logf("auth: %s: the refresh token is left to expire: %v", what, err)
+		return
+	}
+	s.kickRevocations()
 }
 
-// revokesAtOnce is how many revocations run at a time.
-const revokesAtOnce = 4
-
-// WaitRevocations waits, until ctx ends, for the revocations started so far.
-func (s *Service) WaitRevocations(ctx context.Context) error {
-	done := make(chan struct{})
-	go func() { s.revoking.Wait(); close(done) }()
+// kickRevocations wakes RunRevocations.
+func (s *Service) kickRevocations() {
 	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	case s.revokeKick <- struct{}{}:
+	default:
 	}
 }
 
-// revokeSealed revokes the refresh token sealed for sessionID, within ctx,
-// logging a failure with what.
-func (s *Service) revokeSealed(ctx context.Context, sessionID, sealed, what string) {
+// RunRevocations revokes queued refresh tokens until ctx ends, as they are
+// queued here and every revokeRetry for the rest (other replicas', and
+// retries).
+func (s *Service) RunRevocations(ctx context.Context) {
+	t := time.NewTicker(s.revokeRetry)
+	defer t.Stop()
+	for {
+		if err := s.DrainRevocations(ctx); err != nil && ctx.Err() == nil {
+			s.logf("auth: revoking refresh tokens: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.revokeKick:
+		case <-t.C:
+		}
+	}
+}
+
+// DrainRevocations revokes the queued refresh tokens that are due, a few at
+// a time, until none are left or ctx ends. One that fails is tried again
+// later, up to revokeAttempts times, then dropped (the token expires on its
+// own).
+func (s *Service) DrainRevocations(ctx context.Context) error {
+	for ctx.Err() == nil {
+		revs, err := s.st.LeaseRevocations(ctx, revokeBatch, revokeLease)
+		if err != nil || len(revs) == 0 {
+			return err
+		}
+		var g errgroup.Group
+		g.SetLimit(revokesAtOnce)
+		for _, rv := range revs {
+			g.Go(func() error {
+				err := s.revokeSealed(ctx, rv.SessionID, rv.RefreshToken)
+				switch {
+				case err == nil:
+				case rv.Attempts+1 >= revokeAttempts:
+					s.logf("auth: revoking the refresh token of session %.8s: %v; giving up after %d tries", rv.SessionID, err, revokeAttempts)
+				default:
+					s.logf("auth: revoking the refresh token of session %.8s: %v; trying again", rv.SessionID, err)
+					return s.st.RetryRevocation(context.WithoutCancel(ctx), rv.ID, s.revokeRetry<<rv.Attempts)
+				}
+				return s.st.DoneRevocation(context.WithoutCancel(ctx), rv.ID)
+			})
+		}
+		if err := g.Wait(); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
+const (
+	revokesAtOnce  = 4               // revocations sent at a time
+	revokeBatch    = 20              // queued revocations leased at a time
+	revokeLease    = 2 * time.Minute // a lease outlasts a batch: 20/4 × revokeTimeout
+	revokeAttempts = 5               // tries before a token is left to expire
+)
+
+// revokeSealed revokes the refresh token sealed for sessionID, within ctx.
+func (s *Service) revokeSealed(ctx context.Context, sessionID, sealed string) error {
 	rt, err := s.openRefreshToken(sessionID, sealed)
-	if err == nil {
-		err = s.revoke(ctx, rt)
-	}
 	if err != nil {
-		s.logf("auth: %s: revoking its refresh token: %v", what, err)
+		return err
 	}
+	return s.revoke(ctx, rt)
 }
 
 // revoke asks the provider to revoke a refresh token (RFC 7009), as the
