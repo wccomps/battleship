@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf16"
 )
 
@@ -112,29 +114,32 @@ done
 if [ -z "$iface" ]; then echo "no network interface has MAC $MAC" >&2; exit 2; fi
 `
 
+// GuestLockWait is how long a setup script waits for another one still
+// running in the guest (one a stopped or timed-out job left) before giving
+// up with exit 75. It is under the executor's limit for a script, so the
+// wait ends the script, not the executor.
+const GuestLockWait = 4 * time.Minute
+
 // linuxLocked runs the script from stdin holding
-// /run/battleship-guest.lock, waiting up to 4 minutes (under the
-// executor's 5-minute limit) for a copy a stopped or timed-out job left
-// running. flock holds the lock itself (-o), so a daemon the script starts
-// (an ifup hook, say) doesn't inherit it and keep later scripts out.
-// Without a util-linux flock that has -w, -E and -o (busybox's has none of
-// them), the script runs unlocked, as it did before there was a lock; the
-// executor still never starts a second copy itself. The probe locks
-// /dev/null, so a held lock (exit 75) still counts as a usable flock.
-// BATTLESHIP_LOCK and BATTLESHIP_LOCK_WAIT are for tests; the agent sets
-// neither.
-const linuxLocked = `lock="${BATTLESHIP_LOCK:-/run/battleship-guest.lock}"
+// /run/battleship-guest.lock for up to GuestLockWait. flock holds the lock
+// itself (-o), so a daemon the script starts (an ifup hook, say) doesn't
+// inherit it and keep later scripts out. Without a util-linux flock that
+// has -w, -E and -o (busybox's has none), the script runs unlocked. The
+// probe locks /dev/null, not the lock itself; exit 75 there still means
+// flock works. BATTLESHIP_LOCK and BATTLESHIP_LOCK_WAIT are for tests; the
+// agent sets neither.
+var linuxLocked = `lock="${BATTLESHIP_LOCK:-/run/battleship-guest.lock}"
 flock -w 0 -E 75 -o /dev/null true >/dev/null 2>&1
 case $? in 0|75) ;; *) exec /bin/sh -s ;; esac
-flock -w "${BATTLESHIP_LOCK_WAIT:-240}" -E 75 -o "$lock" /bin/sh -s
+flock -w "${BATTLESHIP_LOCK_WAIT:-` + strconv.Itoa(int(GuestLockWait.Seconds())) + `}" -E 75 -o "$lock" /bin/sh -s
 rc=$?
 if [ "$rc" = 75 ]; then echo "another battleship setup script is still running in this guest" >&2; fi
 exit "$rc"`
 
-// windowsLock holds a machine-wide mutex the same way, which Windows
-// releases when the process holding it exits.
-const windowsLock = `$lock = New-Object System.Threading.Mutex($false, 'Global\battleship-guest')
-try { $held = $lock.WaitOne([TimeSpan]::FromMinutes(4)) } catch [System.Threading.AbandonedMutexException] { $held = $true }
+// windowsLock holds a machine-wide mutex for the script the same way;
+// Windows releases it when the process holding it exits.
+var windowsLock = `$lock = New-Object System.Threading.Mutex($false, 'Global\battleship-guest')
+try { $held = $lock.WaitOne([TimeSpan]::FromSeconds(` + strconv.Itoa(int(GuestLockWait.Seconds())) + `)) } catch [System.Threading.AbandonedMutexException] { $held = $true }
 if (-not $held) { [Console]::Error.WriteLine('another battleship setup script is still running in this guest'); exit 75 }
 `
 
@@ -205,7 +210,7 @@ echo "127.0.1.1 $HOST.$DOMAIN $HOST" >> /etc/hosts
 
 // windowsScript sets a static address on the adapter with the MAC, its DNS
 // and suffix, and renames the computer; a rename prints RebootMarker.
-const windowsScript = `$ErrorActionPreference = 'Stop'
+var windowsScript = `$ErrorActionPreference = 'Stop'
 ` + windowsLock + `$mac = %s
 $ip = %s
 $prefix = %d
@@ -283,7 +288,7 @@ fi
 
 // windowsDNSScript sets only the DNS server and suffix of the adapter with
 // the MAC.
-const windowsDNSScript = `$ErrorActionPreference = 'Stop'
+var windowsDNSScript = `$ErrorActionPreference = 'Stop'
 ` + windowsLock + `$mac = %s
 $dns = %s
 $domain = %s

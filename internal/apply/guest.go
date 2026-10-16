@@ -99,20 +99,21 @@ func (e *Executor) restart(ctx context.Context, it *pods.Item) error {
 
 // exec runs a command through the agent and waits for it to exit 0.
 //
-// The agent can't stop a command, so one that outlasts execLimit (or a stop)
-// keeps running in the guest. The run remembers it, and the next exec on
-// that VM (a retry round) waits for it to exit before starting another, so
-// two copies never change the guest at once.
+// The agent can't stop a command, so one that outlasts execLimit keeps
+// running in the guest. This run waits for it before starting another;
+// across jobs, only the guest lock (see pods.GuestCommand) keeps a second
+// copy out.
 func (e *Executor) exec(ctx context.Context, it *pods.Item, cmd []string, input string) (string, error) {
 	e.mu.Lock()
 	prev, running := e.guestRuns[it.VMID]
 	e.mu.Unlock()
 	if running {
-		var exited *scriptExitError
-		if _, err := e.waitExec(ctx, it, prev); err != nil && !errors.As(err, &exited) {
-			if errors.Is(err, errStillRunning) {
-				return "", fmt.Errorf("the previous run of the setup script was still running after another %s; not starting a second copy", execLimit)
-			}
+		// However the previous copy ended (an exit, or a guest restart
+		// that lost its PID), only one still running keeps this one out.
+		switch _, err := e.waitExec(ctx, it, prev); {
+		case errors.Is(err, errStillRunning):
+			return "", fmt.Errorf("the previous run of the setup script was still running after another %s; not starting a second copy", execLimit)
+		case err != nil && ctx.Err() != nil:
 			return "", err
 		}
 	}

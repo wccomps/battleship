@@ -104,7 +104,7 @@ func (f *Fake) AgentExecStatus(ctx context.Context, node string, vmid, pid int) 
 	var st proxmox.ExecStatus
 	err := f.agentCall(ctx, fmt.Sprintf("agent-status:%d", vmid), node, vmid, func(*Guest) error {
 		s, ok := f.execs[pid]
-		if !ok {
+		if !ok || f.ExecGone != nil && f.ExecGone(pid) {
 			return &proxmox.APIError{Status: 500, Message: fmt.Sprintf("Agent error: Invalid parameter 'pid' %d", pid)}
 		}
 		if f.polls == nil {

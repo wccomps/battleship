@@ -137,6 +137,31 @@ func TestGuestScriptRetryWaitsForTheRunningOne(t *testing.T) {
 	}
 }
 
+// A previous copy whose PID can't be read any more (the guest restarted)
+// isn't running: the retry runs the script again.
+func TestGuestScriptRetryRunsAfterTheGuestRestarted(t *testing.T) {
+	limit := int(execLimit / execPoll)
+	f := guestFake(t)
+	f.ExecRunsFor = func(pid int) int {
+		if pid == 1 {
+			return limit + 10 // outlasts the first round
+		}
+		return 0
+	}
+	f.ExecHook = applied(f, "")
+	e := catalogExec(f)
+	e.Cfg.Retry.Rounds = 1
+	e.OnEvent = func(ev Event) {
+		if ev.Status == EventFailed && strings.Contains(ev.Message, "still running") {
+			f.ExecGone = func(pid int) bool { return pid == 1 } // then the guest restarts
+		}
+	}
+	res := e.Run(context.Background(), &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{guestItem(pods.ImageLinux)}})
+	if len(f.Execs) != 2 || len(res.Succeeded) != 1 {
+		t.Fatalf("%d execs, result %+v; want the retry to run the script again and succeed", len(f.Execs), res)
+	}
+}
+
 func TestVerifyStopsOnForbidden(t *testing.T) {
 	f := guestFake(t)
 	f.ExecHook = applied(f, "")
@@ -177,5 +202,13 @@ func TestSetDNSRunsOnlyTheDNSScript(t *testing.T) {
 	}
 	if len(f.Execs) != 1 || strings.Contains(f.Execs[0].Input, "addresses: [$IP") || !strings.Contains(f.Execs[0].Input, "dns-nameservers") {
 		t.Errorf("execs = %+v", f.Execs)
+	}
+}
+
+// A script waiting for the guest lock gives up before the executor would
+// stop waiting for it, so the failure names the other script.
+func TestGuestLockWaitIsUnderTheExecLimit(t *testing.T) {
+	if pods.GuestLockWait >= execLimit {
+		t.Errorf("guest lock wait %v isn't under the exec limit %v", pods.GuestLockWait, execLimit)
 	}
 }

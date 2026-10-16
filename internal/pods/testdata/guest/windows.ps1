@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $lock = New-Object System.Threading.Mutex($false, 'Global\battleship-guest')
-try { $held = $lock.WaitOne([TimeSpan]::FromMinutes(4)) } catch [System.Threading.AbandonedMutexException] { $held = $true }
+try { $held = $lock.WaitOne([TimeSpan]::FromSeconds(240)) } catch [System.Threading.AbandonedMutexException] { $held = $true }
 if (-not $held) { [Console]::Error.WriteLine('another battleship setup script is still running in this guest'); exit 75 }
 $mac = 'BC-24-11-00-00-01'
 $ip = '192.168.100.10'

@@ -133,6 +133,9 @@ type Fake struct {
 	// ExecRunsFor, if set, is how many status reads command pid stays
 	// running for before it exits; unset, commands exit at once.
 	ExecRunsFor func(pid int) int
+	// ExecGone, if set, says command pid's status can't be read any more,
+	// as after the guest restarts.
+	ExecGone func(pid int) bool
 	// Execs are the guest commands run, in order.
 	Execs   []ExecCall
 	execs   map[int]proxmox.ExecStatus // by PID
