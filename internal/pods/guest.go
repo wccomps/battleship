@@ -117,16 +117,21 @@ if [ -z "$iface" ]; then echo "no network interface has MAC $MAC" >&2; exit 2; f
 // executor's 5-minute limit) for a copy a stopped or timed-out job left
 // running. flock holds the lock itself (-o), so a daemon the script starts
 // (an ifup hook, say) doesn't inherit it and keep later scripts out.
+// Without a util-linux flock that has -w, -E and -o (busybox's has none of
+// them), the script runs unlocked, as it did before there was a lock; the
+// executor still never starts a second copy itself. The probe locks
+// /dev/null, so a held lock (exit 75) still counts as a usable flock.
 // BATTLESHIP_LOCK and BATTLESHIP_LOCK_WAIT are for tests; the agent sets
 // neither.
 const linuxLocked = `lock="${BATTLESHIP_LOCK:-/run/battleship-guest.lock}"
-command -v flock >/dev/null 2>&1 || exec /bin/sh -s
+flock -w 0 -E 75 -o /dev/null true >/dev/null 2>&1
+case $? in 0|75) ;; *) exec /bin/sh -s ;; esac
 flock -w "${BATTLESHIP_LOCK_WAIT:-240}" -E 75 -o "$lock" /bin/sh -s
 rc=$?
 if [ "$rc" = 75 ]; then echo "another battleship setup script is still running in this guest" >&2; fi
 exit "$rc"`
 
-// windowsLock does the same with a machine-wide mutex, which Windows
+// windowsLock holds a machine-wide mutex the same way, which Windows
 // releases when the process holding it exits.
 const windowsLock = `$lock = New-Object System.Threading.Mutex($false, 'Global\battleship-guest')
 try { $held = $lock.WaitOne([TimeSpan]::FromMinutes(4)) } catch [System.Threading.AbandonedMutexException] { $held = $true }

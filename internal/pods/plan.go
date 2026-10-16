@@ -178,6 +178,9 @@ type Plan struct {
 	// Locks are lock keys beyond teams and templates (slot:NN, domain:…,
 	// family:…, vmid:N), so jobs over the same slot, family or VMIDs wait.
 	Locks []string `json:"locks,omitempty"`
+	// Notices are what a person should know the plan leaves alone, such as
+	// VMs named like team VMs that aren't; nothing acts on them.
+	Notices []string `json:"notices,omitempty"`
 }
 
 // ConfigHash identifies the settings that change what a plan of kind does
@@ -766,15 +769,12 @@ func (p Planner) simple(ctx context.Context, kind Kind, teams, hosts []string, f
 		}
 		plan.Items = append(plan.Items, it)
 	}
-	// VMs with a team's name outside its block aren't team VMs, but show
-	// them, blocked, so a teardown doesn't seem to miss them silently. Items
-	// are known by name, so one sharing a team VM's name is left out.
+	// VMs with a team's name outside its block aren't team VMs: say so, so
+	// a teardown doesn't seem to miss them silently.
 	for _, vm := range namedOutsideBlock(vms, p.Naming, teams, hosts) {
-		if slices.ContainsFunc(plan.Items, func(it Item) bool { return it.Name == vm.Name }) {
-			continue
-		}
-		team, host, _ := p.Naming.ParseVMName(vm.Name)
-		plan.Items = append(plan.Items, Item{Team: team, Host: host, Name: vm.Name, VMID: vm.VMID, Node: vm.Node, Blocked: outsideBlock(vm, team)})
+		team, _, _ := p.Naming.ParseVMName(vm.Name)
+		plan.Notices = append(plan.Notices, fmt.Sprintf("%s (VMID %d) has a team %s name but is outside the team's VMIDs, so it isn't a team VM and is left alone.",
+			vm.Name, vm.VMID, team))
 	}
 	sort.SliceStable(plan.Items, func(i, j int) bool { return plan.Items[i].Name < plan.Items[j].Name })
 	return plan, vms, nil

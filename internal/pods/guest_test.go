@@ -216,3 +216,34 @@ func TestLinuxScriptGivesUpOnAHeldLock(t *testing.T) {
 		t.Errorf("err = %v, output %q; want exit 75 saying another script is still running", err, out)
 	}
 }
+
+// Where flock lacks -w, -E or -o (busybox, old util-linux) or is missing,
+// the script still runs, unlocked.
+func TestLinuxScriptRunsWithoutAUsableFlock(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	for name, fake := range map[string]string{
+		"busybox":  "#!/bin/sh\necho 'flock: unrecognized option: w' >&2\nexit 1\n",
+		"old":      "#!/bin/sh\ncase \"$*\" in *-E*) echo 'flock: invalid option -- E' >&2; exit 64;; esac\nexit 0\n",
+		"no flock": "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			bin := t.TempDir()
+			if fake != "" {
+				if err := os.WriteFile(filepath.Join(bin, "flock"), []byte(fake), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			c := exec.Command(sh, "-c", linuxLocked)
+			// Only the fake bin, plus sh itself for the exec.
+			c.Env = []string{"PATH=" + bin, "BATTLESHIP_LOCK=" + filepath.Join(t.TempDir(), "lock")}
+			c.Stdin = strings.NewReader("echo ran\n")
+			out, err := c.CombinedOutput()
+			if err != nil || strings.TrimSpace(string(out)) != "ran" {
+				t.Errorf("err = %v, output %q; want the script to run", err, out)
+			}
+		})
+	}
+}

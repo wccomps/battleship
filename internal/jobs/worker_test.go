@@ -61,6 +61,28 @@ func newWorker(st *store.Store, f *fakeAPI) *Worker {
 	return &Worker{Store: st, Cfg: cfg, Bind: f.as, Credentials: mustCreds(), ID: "w1"}
 }
 
+// runJob runs a job a test claimed. Its lease starts now, after the claim,
+// which Run never does (see claimNext); tests' claims are instant.
+func (w *Worker) runJob(ctx context.Context, job *store.Job) {
+	w.runClaimed(ctx, job, w.newLease())
+}
+
+// The lease starts before the claim's heartbeat stamp, so it can't outlast
+// the claim however long Claim takes.
+func TestClaimNextLeasesBeforeTheClaim(t *testing.T) {
+	st := storetest.New(t)
+	f := teamVMs()
+	submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
+	w := newWorker(st, f)
+	job, l, err := w.claimNext(bg)
+	if err != nil || job == nil {
+		t.Fatalf("claimNext = %v, %v", job, err)
+	}
+	if _, wall := l.since(); job.StartedAt == nil || wall.After(*job.StartedAt) {
+		t.Errorf("lease from %v, claim stamped %v: the lease started after the claim", wall, job.StartedAt)
+	}
+}
+
 func claim(t *testing.T, st *store.Store) *store.Job {
 	t.Helper()
 	j, err := st.Claim(bg, "w1")

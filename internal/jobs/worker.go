@@ -113,12 +113,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		case len(ids) > 0:
 			w.Logf("marked jobs %v interrupted: their workers stopped sending heartbeats", ids)
 		}
-		// The claim's heartbeat stamp is taken during Claim, so a lease
-		// started before it never outlasts the claim.
-		claim := w.newLease()
-		claimCtx, stopClaim := context.WithTimeout(ctx, DBCallTimeout)
-		job, err := w.Store.Claim(claimCtx, w.ID)
-		stopClaim()
+		job, claim, err := w.claimNext(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
 				w.Logf("claiming a job: %v", err)
@@ -142,15 +137,21 @@ func (w *Worker) Run(ctx context.Context) error {
 	return nil
 }
 
-// runJob runs a job this worker has claimed and records how it ended. A
-// shutdown or cancel stops it gracefully (cleanup included) and records it
-// interrupted or cancelled; a stop after every runnable VM finished changes
-// nothing.
-func (w *Worker) runJob(ctx context.Context, job *store.Job) {
-	w.runClaimed(ctx, job, w.newLease())
+// claimNext claims the next runnable job, if any, with its lease. The
+// claim's heartbeat stamp is taken during Claim, so the lease, started
+// before it, never outlasts the claim.
+func (w *Worker) claimNext(ctx context.Context) (*store.Job, *lease, error) {
+	claim := w.newLease()
+	claimCtx, stop := context.WithTimeout(ctx, DBCallTimeout)
+	defer stop()
+	job, err := w.Store.Claim(claimCtx, w.ID)
+	return job, claim, err
 }
 
-// runClaimed is runJob with the lease taken out before the claim.
+// runClaimed runs a job this worker has claimed under lease claim (see
+// claimNext) and records how it ended. A shutdown or cancel stops it
+// gracefully (cleanup included) and records it interrupted or cancelled; a
+// stop after every runnable VM finished changes nothing.
 func (w *Worker) runClaimed(ctx context.Context, job *store.Job, claim *lease) {
 	w.init()
 	var wake <-chan struct{}

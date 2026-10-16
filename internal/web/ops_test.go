@@ -282,6 +282,19 @@ func TestPreviewRefusesBadInputs(t *testing.T) {
 	h.noJobs("after refused previews")
 }
 
+// A VM with a team name outside the team's VMIDs isn't acted on, and the
+// preview says so even when nothing else matches.
+func TestPreviewNoticesTeamNamedVMsOutsideTheBlock(t *testing.T) {
+	h := newHarness(t)
+	h.api.add(proxmox.VM{VMID: 8005, Name: "team01-scratch", Node: "n1", Status: "running", Pool: "dev-05"}, nil)
+	h.poll()
+	op := h.login(asOperator)
+	body := h.post(&op, "/teardown/preview", url.Values{"teams": {"1"}, "hosts": {"scratch"}}).Body.String()
+	contains(t, "teardown preview", body, "No team VMs match these teams and hosts.",
+		`<span class="name">team01-scratch</span> (VMID 8005) has a team 01 name but is outside the team&#39;s VMIDs, so it isn&#39;t a team VM and is left alone.`)
+	lacks(t, "teardown preview", body, `name="nonce"`)
+}
+
 func TestPreviewWithNothingToRun(t *testing.T) {
 	h := newHarness(t)
 	h.poll()

@@ -381,6 +381,15 @@ func TestPrintPlanShowsMasterStop(t *testing.T) {
 	}
 }
 
+func TestPrintPlanShowsNotices(t *testing.T) {
+	var buf bytes.Buffer
+	printPlan(&buf, pods.NewNaming(config.Default().Naming), &pods.Plan{Kind: pods.KindTeardown, Teams: []string{"01"},
+		Notices: []string{"team01-scratch (VMID 8005) is left alone\x1b[2J"}})
+	if want := "Note: team01-scratch (VMID 8005) is left alone"; !strings.Contains(buf.String(), want) || strings.Contains(buf.String(), "\x1b") {
+		t.Errorf("want %q, cleaned:\n%q", want, buf.String())
+	}
+}
+
 func TestPrintCleanupSummary(t *testing.T) {
 	var out bytes.Buffer
 	printResult(&out, apply.Result{
