@@ -28,7 +28,7 @@ func TestBusyVMs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ClaimJob(ctx, running, "w", 0); err != nil {
+	if _, err := s.ClaimJob(ctx, running, "w", time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AddEvent(ctx, running, store.Event{At: time.Now(), Item: "team02-dc", Step: "stop", Status: "started"}); err != nil {

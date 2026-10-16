@@ -14,8 +14,9 @@ import (
 )
 
 func checkLastLines(t interface{ Fatalf(string, ...any) }, s string, n int) {
+	// A line ends at \n or \r: a terminal returns the cursor at either.
 	var lines []string
-	for _, l := range strings.Split(s, "\n") {
+	for _, l := range strings.Split(strings.ReplaceAll(s, "\r", "\n"), "\n") {
 		if l = strings.TrimSpace(l); l != "" {
 			lines = append(lines, l)
 		}
@@ -41,7 +42,7 @@ func checkLastLines(t interface{ Fatalf(string, ...any) }, s string, n int) {
 // The tail of a script's output is its last n non-blank lines, trimmed, on
 // one line; none for n <= 0.
 func TestPropLastLines(t *testing.T) {
-	for _, s := range []string{"", "\n", " \n \n", "a", "a\n", "\na\n\nb\n\n", "a\r\nb\r\n", " a \n b ", "a\n\n\n\nb\nc\nd\ne\nf\ng"} {
+	for _, s := range []string{"", "\n", " \n \n", "a", "a\n", "\na\n\nb\n\n", "a\r\nb\r\n", " a \n b ", "a\n\n\n\nb\nc\nd\ne\nf\ng", "a\rb", "a\r\rb\r"} {
 		for n := -2; n < 8; n++ {
 			checkLastLines(t, s, n)
 		}

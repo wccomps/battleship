@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"pgregory.net/rapid"
 
@@ -80,7 +81,7 @@ func TestPropClaimHonoursReadLocks(t *testing.T) {
 					break
 				}
 			}
-			got, err := s.Claim(ctx, "w", 0)
+			got, err := s.Claim(ctx, "w", time.Hour)
 			if err != nil {
 				t.Fatal(err)
 			}

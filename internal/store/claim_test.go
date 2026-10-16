@@ -14,7 +14,7 @@ import (
 
 func mustClaim(t *testing.T, s *store.Store, worker string) *store.Job {
 	t.Helper()
-	j, err := s.Claim(ctx, worker, 0)
+	j, err := s.Claim(ctx, worker, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestConcurrentClaimsNeverOverlap(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			j, err := s.Claim(ctx, "w", 0)
+			j, err := s.Claim(ctx, "w", time.Hour)
 			if err != nil {
 				t.Error(err)
 				return
@@ -166,7 +166,7 @@ func TestCancelDuringClaimWins(t *testing.T) {
 	t.Cleanup(func() { store.SetBeforeClaimUpdate(nil) })
 
 	// Claim must return nil because the job was cancelled before the update.
-	got, err := s.Claim(ctx, "w", 0)
+	got, err := s.Claim(ctx, "w", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestCancelDuringClaimWins(t *testing.T) {
 	}
 
 	// A second claim must also return nil.
-	if got, _ := s.Claim(ctx, "w", 0); got != nil {
+	if got, _ := s.Claim(ctx, "w", time.Hour); got != nil {
 		t.Errorf("second claim = %+v, want nil", got)
 	}
 }
@@ -189,13 +189,15 @@ func TestCancelDuringClaimWins(t *testing.T) {
 func TestReapStaleInterruptsSilentJobs(t *testing.T) {
 	s := storetest.New(t)
 	id := create(t, s, "team:01")
-	mustClaim(t, s, "w1")
+	if _, err := s.Claim(ctx, "w1", 10*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
 
 	if ids, err := s.ReapStale(ctx, time.Hour); err != nil || len(ids) != 0 {
-		t.Fatalf("ReapStale(1h) = %v, %v; want none", ids, err)
+		t.Fatalf("ReapStale of a fresh job = %v, %v; want none", ids, err)
 	}
 	time.Sleep(20 * time.Millisecond)
-	ids, err := s.ReapStale(ctx, 10*time.Millisecond)
+	ids, err := s.ReapStale(ctx, time.Hour) // the claim's 10ms, not the reaper's hour
 	if err != nil || !reflect.DeepEqual(ids, []int64{id}) {
 		t.Fatalf("ReapStale = %v, %v; want [%d]", ids, err, id)
 	}
@@ -293,7 +295,7 @@ func TestClaimJobClaimsThatJob(t *testing.T) {
 	s := storetest.New(t)
 	j1 := create(t, s, "team:01")
 	j2 := create(t, s, "team:02")
-	got, err := s.ClaimJob(ctx, j2, "cli", 0)
+	got, err := s.ClaimJob(ctx, j2, "cli", time.Hour)
 	if err != nil || got == nil || got.ID != j2 || got.Status != store.StatusRunning || got.ClaimedBy != "cli" {
 		t.Fatalf("ClaimJob(%d) = %+v, %v", j2, got, err)
 	}
@@ -306,17 +308,17 @@ func TestClaimJobWaitsForOlderOverlappingJob(t *testing.T) {
 	s := storetest.New(t)
 	j1 := create(t, s, "team:01")
 	j2 := create(t, s, "team:01", "team:02")
-	if got, err := s.ClaimJob(ctx, j2, "cli", 0); err != nil || got != nil {
+	if got, err := s.ClaimJob(ctx, j2, "cli", time.Hour); err != nil || got != nil {
 		t.Fatalf("ClaimJob behind pending job = %+v, %v; want nil, nil", got, err)
 	}
 	mustClaim(t, s, "w1") // j1 is now running
-	if got, err := s.ClaimJob(ctx, j2, "cli", 0); err != nil || got != nil {
+	if got, err := s.ClaimJob(ctx, j2, "cli", time.Hour); err != nil || got != nil {
 		t.Fatalf("ClaimJob behind running job = %+v, %v; want nil, nil", got, err)
 	}
 	if err := s.Finish(ctx, j1, "w1", store.Outcome{Status: store.StatusSucceeded}); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.ClaimJob(ctx, j2, "cli", 0); err != nil || got == nil || got.ID != j2 {
+	if got, err := s.ClaimJob(ctx, j2, "cli", time.Hour); err != nil || got == nil || got.ID != j2 {
 		t.Fatalf("ClaimJob after blocker finished = %+v, %v; want job %d", got, err, j2)
 	}
 }
@@ -327,10 +329,10 @@ func TestClaimJobDoesNotTakeOtherWork(t *testing.T) {
 	j2 := create(t, s, "team:01")
 	// Claiming the older job must not start the newer one, and claiming the
 	// newer one must not start the older one in its place.
-	if got, err := s.ClaimJob(ctx, j2, "cli", 0); err != nil || got != nil {
+	if got, err := s.ClaimJob(ctx, j2, "cli", time.Hour); err != nil || got != nil {
 		t.Fatalf("ClaimJob(%d) = %+v, %v; want nil, nil", j2, got, err)
 	}
-	if got, err := s.ClaimJob(ctx, j1, "cli", 0); err != nil || got == nil || got.ID != j1 {
+	if got, err := s.ClaimJob(ctx, j1, "cli", time.Hour); err != nil || got == nil || got.ID != j1 {
 		t.Fatalf("ClaimJob(%d) = %+v, %v", j1, got, err)
 	}
 	if j, _ := s.Job(ctx, j2); j.Status != store.StatusPending {
@@ -464,17 +466,23 @@ func TestBlockersOf(t *testing.T) {
 }
 
 // A job is reaped by the stale_after of the worker that claimed it, not the
-// reaper's, so the claimer's lease (which counts on its own) holds; a job
-// claimed without one falls back to the reaper's.
+// reaper's, so the claimer's lease (which counts on its own) holds; a job an
+// older battleship claimed without one falls back to the reaper's.
 func TestReapStaleHonoursTheClaimersStaleAfter(t *testing.T) {
+	if _, err := storetest.New(t).Claim(ctx, "w", 0); err == nil {
+		t.Error("Claim without a stale_after: no error")
+	}
 	s := storetest.New(t)
 	long := create(t, s, "team:01")
 	if got, err := s.Claim(ctx, "w1", time.Hour); err != nil || got == nil || got.ID != long {
 		t.Fatalf("claim = %+v, %v", got, err)
 	}
 	none := create(t, s, "team:02")
-	if got, err := s.Claim(ctx, "w2", 0); err != nil || got == nil || got.ID != none {
+	if got, err := s.Claim(ctx, "w2", time.Hour); err != nil || got == nil || got.ID != none {
 		t.Fatalf("claim = %+v, %v", got, err)
+	}
+	if err := store.ClearStaleAfter(ctx, s, none); err != nil { // as an older battleship claims
+		t.Fatal(err)
 	}
 	// A reaper whose own stale_after has already passed for both.
 	ids, err := s.ReapStale(ctx, -time.Minute)

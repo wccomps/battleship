@@ -44,7 +44,7 @@ func (h *dbHarness) startJob(t *testing.T, kind string, names ...string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.st.ClaimJob(ctx, id, "w", 0); err != nil {
+	if _, err := h.st.ClaimJob(ctx, id, "w", time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	for _, n := range names {

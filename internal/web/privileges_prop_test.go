@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"pgregory.net/rapid"
 
@@ -210,7 +211,7 @@ func TestPropJobActionsFollowPrivileges(t *testing.T) {
 }
 
 func claim(t *rapid.T, h *harness, id int64) bool {
-	j, err := h.st.ClaimJob(context.Background(), id, "w1", 0)
+	j, err := h.st.ClaimJob(context.Background(), id, "w1", time.Hour)
 	if err != nil {
 		t.Fatalf("claiming job %d: %v", id, err)
 	}

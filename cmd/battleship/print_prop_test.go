@@ -206,7 +206,7 @@ func TestPropJobsCommandsEscapeStoredText(t *testing.T) {
 			t.Fatal(err)
 		}
 		worker := "w" + storable(t, "worker")
-		if _, err := st.ClaimJob(ctx, id, worker, 0); err != nil {
+		if _, err := st.ClaimJob(ctx, id, worker, time.Hour); err != nil {
 			t.Fatal(err)
 		}
 		// Errors and messages keep their lines: count them.

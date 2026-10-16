@@ -49,7 +49,7 @@ var (
 // start claims job id for worker w1.
 func (h *harness) start(id int64) {
 	h.t.Helper()
-	j, err := h.st.ClaimJob(context.Background(), id, "w1", 0)
+	j, err := h.st.ClaimJob(context.Background(), id, "w1", time.Hour)
 	if err != nil || j == nil {
 		h.t.Fatalf("claiming job %d: %v %v", id, j, err)
 	}

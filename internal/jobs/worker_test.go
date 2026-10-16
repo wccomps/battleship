@@ -91,7 +91,9 @@ func TestClaimNextLeasesBeforeTheClaim(t *testing.T) {
 
 func claim(t *testing.T, st *store.Store) *store.Job {
 	t.Helper()
-	j, err := st.Claim(bg, "w1", 0)
+	// Reaped as soon as its heartbeat is a millisecond old: tests reap
+	// (ReapStale) only when they mean to.
+	j, err := st.Claim(bg, "w1", time.Millisecond)
 	if err != nil || j == nil {
 		t.Fatalf("Claim = %v, %v", j, err)
 	}

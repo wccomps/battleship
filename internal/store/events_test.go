@@ -120,7 +120,7 @@ func TestAddEventAlongsideJobRowWriters(t *testing.T) {
 	s := storetest.New(t)
 	ids := []int64{create(t, s, "team:01"), create(t, s, "team:02")}
 	for range ids {
-		if j, err := s.Claim(ctx, "w", 0); err != nil || j == nil {
+		if j, err := s.Claim(ctx, "w", time.Nanosecond); err != nil || j == nil { // the reaper races the rest
 			t.Fatalf("claim: %v %v", j, err)
 		}
 	}
@@ -214,7 +214,7 @@ func TestRequestCancelOnFinishedJobDoesNotStarveThePool(t *testing.T) {
 	defer s.Close()
 
 	id := create(t, big, "team:01")
-	if j, err := big.Claim(ctx, "w", 0); err != nil || j == nil {
+	if j, err := big.Claim(ctx, "w", time.Hour); err != nil || j == nil {
 		t.Fatalf("claim: %v %v", j, err)
 	}
 	// A Finish in progress, on a connection of its own: it holds the row.
@@ -292,7 +292,7 @@ func TestAddEventRefusesJobsNotRunning(t *testing.T) {
 	}
 
 	id := create(t, s, "team:02")
-	if _, err := s.ClaimJob(ctx, id, "w", 0); err != nil {
+	if _, err := s.ClaimJob(ctx, id, "w", time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Finish(ctx, id, "w", store.Outcome{Status: store.StatusInterrupted}); err != nil {
@@ -327,7 +327,7 @@ func TestAddEventRefusesJobsNotRunning(t *testing.T) {
 func TestAddEventRecordsStepOutcomes(t *testing.T) {
 	s := storetest.New(t)
 	id := create(t, s, "team:01")
-	if _, err := s.ClaimJob(ctx, id, "w", 0); err != nil {
+	if _, err := s.ClaimJob(ctx, id, "w", time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	for _, ev := range []store.Event{

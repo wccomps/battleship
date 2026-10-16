@@ -19,7 +19,7 @@ var beforeClaimUpdate func(id int64)
 
 // Claim starts the oldest pending job nothing blocks (see blocksSQL), or
 // returns nil. Overlapping jobs run in creation order. ReapStale reaps it
-// once it has no heartbeat for staleAfter (if 0, ReapStale's own).
+// once it has no heartbeat for staleAfter, which must be positive.
 func (s *Store) Claim(ctx context.Context, worker string, staleAfter time.Duration) (*Job, error) {
 	return s.claim(ctx, worker, nil, staleAfter)
 }
@@ -38,6 +38,9 @@ const blocksSQL = `(o.lock_keys && j.lock_keys OR o.lock_keys && j.lock_reads OR
 
 // claim starts the oldest runnable pending job or, if only is set, that job.
 func (s *Store) claim(ctx context.Context, worker string, only *int64, staleAfter time.Duration) (*Job, error) {
+	if staleAfter <= 0 {
+		return nil, fmt.Errorf("claiming a job: stale_after %v isn't positive", staleAfter)
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -61,7 +64,7 @@ func (s *Store) claim(ctx context.Context, worker string, only *int64, staleAfte
 		beforeClaimUpdate(id)
 	}
 	job, err := scanJob(tx.QueryRow(ctx, `UPDATE jobs SET status = 'running', claimed_by = $2,
-		started_at = now(), heartbeat_at = now(), stale_after = NULLIF(make_interval(secs => $3), '0')
+		started_at = now(), heartbeat_at = now(), stale_after = make_interval(secs => $3)
 		WHERE id = $1 AND status = 'pending' AND NOT cancel_requested RETURNING `+jobColumns, id, worker, staleAfter.Seconds()))
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -161,8 +164,8 @@ func endItems(ctx context.Context, tx pgx.Tx, jobIDs []int64, stopped bool) erro
 }
 
 // ReapStale marks running jobs with no heartbeat for their stale_after
-// (see Claim; after for jobs claimed without one) as interrupted and
-// returns their IDs.
+// (see Claim; after for jobs an older battleship claimed without one) as
+// interrupted and returns their IDs.
 func (s *Store) ReapStale(ctx context.Context, after time.Duration) ([]int64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

@@ -167,10 +167,11 @@ func (e *Executor) waitExec(ctx context.Context, it *pods.Item, pid int) (string
 	return "", errStillRunning
 }
 
-// lastLines is the last n non-blank lines of s, each trimmed (Windows
-// guests end lines with \r\n), joined with " / ".
+// lastLines is the last n non-blank lines of s, each trimmed, joined with
+// " / ". A line ends at \n or \r (Windows ends lines with \r\n, and progress
+// output rewrites one with a bare \r).
 func lastLines(s string, n int) string {
-	lines := strings.Split(s, "\n")
+	lines := strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == '\r' })
 	for i, l := range lines {
 		lines[i] = strings.TrimSpace(l)
 	}
