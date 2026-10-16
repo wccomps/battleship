@@ -1079,11 +1079,11 @@ func TestUnsureClaimHoldsBackCleanup(t *testing.T) {
 		}
 	}
 	e := testExecutor(f, &recorder{})
-	e.Held = func() error {
+	e.Held = func(ctx context.Context) (context.Context, context.CancelFunc, error) {
 		if unsure.Load() {
-			return errUnsure
+			return ctx, func() {}, errUnsure
 		}
-		return nil
+		return ctx, func() {}, nil
 	}
 	res := e.Run(ctx, plan)
 	if f.VMs[10121] == nil {
