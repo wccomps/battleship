@@ -48,6 +48,27 @@
 {{- else if not .ReadErr}}
 <p class="say">No base images yet. Install an OS on a VM in Proxmox, generalize it, shut it down, then register it here.</p>
 {{- end}}
+{{- with .Ready}}
+<h2 class="sub" id="ready">Ready to register</h2>
+<p class="meta">Stopped VMs in the images pool. Register one to copy it in as a base image; the VM stays as it is.</p>
+<div class="tscroll">
+<table class="tbl cards" aria-labelledby="ready">
+<thead><tr><th scope="col">VM</th><th scope="col">Notes</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
+<tbody>
+{{- range .}}
+<tr>
+<td class="img"><div class="iname">{{names .Name}}</div>
+<div class="meta">VMID {{.VMID}} · {{.Node}}{{with .Registered}} · registered as {{names .}}{{end}}</div></td>
+<td>{{with .Notes}}<div class="notes">{{.}}</div>{{else}}<span class="meta">none</span>{{end}}</td>
+<td class="act"><div class="acts">
+<a class="btn sm" href="/images/register?vmid={{.VMID}}{{with .Family}}&amp;family={{.}}{{end}}{{with .Kind}}&amp;image_kind={{.}}{{end}}">Register</a>
+</div></td>
+</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- end}}
 {{- else if .Envs}}
 <div class="tscroll">
 <table class="tbl cards">

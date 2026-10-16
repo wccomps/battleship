@@ -212,3 +212,98 @@ func FamilyNames(images []BaseImage) []string {
 	slices.Sort(out)
 	return out
 }
+
+// Unregistered is a VM in the images pool that is ready to register: stopped
+// and not a template.
+type Unregistered struct {
+	VMID       int
+	Name, Node string
+	Family     string // suggested: see SuggestFamily; "" if none
+	Kind       string // its family's kind, or by its OS type; "" if neither says
+	Notes      string
+	Registered string // the newest base image registered from it, if any
+}
+
+// buildSuffixes are what SuggestFamily drops from a VM's name: a build VM,
+// and a working copy from ImageEdit.
+var buildSuffixes = []string{"-build", "-edit"}
+
+// SuggestFamily is the family a VM named name is likely registered as: the
+// name lower-cased, less a -build or -edit suffix, or "" if that isn't a
+// valid family.
+func SuggestFamily(name string) string {
+	f := strings.ToLower(name)
+	for _, s := range buildSuffixes {
+		if t, ok := strings.CutSuffix(f, s); ok {
+			f = t
+			break
+		}
+	}
+	if CheckFamily(f) != nil {
+		return ""
+	}
+	return f
+}
+
+// KindForOSType is the image kind Proxmox's ostype implies: windows for
+// the win* types, linux for l24 and l26, else "" (routers report other).
+func KindForOSType(ostype string) string {
+	switch {
+	case strings.HasPrefix(ostype, "win"):
+		return ImageWindows
+	case ostype == "l24" || ostype == "l26":
+		return ImageLinux
+	}
+	return ""
+}
+
+// UnregisteredVMs lists the stopped VMs in pool that aren't templates, by
+// VMID, with a suggested family, and the base image last registered from
+// each (images must carry their Source; see ReadNotes).
+func UnregisteredVMs(vms []proxmox.VM, pool string, images []BaseImage) []Unregistered {
+	var out []Unregistered
+	for _, vm := range vms {
+		if vm.Pool != pool || vm.Template || vm.Status != "stopped" {
+			continue
+		}
+		u := Unregistered{VMID: vm.VMID, Name: vm.Name, Node: vm.Node, Family: SuggestFamily(vm.Name)}
+		for _, im := range images {
+			if im.Source == vm.VMID && (u.Registered == "" || im.Version > imageVersion(u.Registered)) {
+				u.Registered = im.Name
+			}
+		}
+		if latest, ok := Latest(images, u.Family); ok {
+			u.Kind = latest.Kind
+		}
+		out = append(out, u)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].VMID < out[j].VMID })
+	return out
+}
+
+func imageVersion(name string) int {
+	_, v, _ := ParseImageName(name)
+	return v
+}
+
+// ReadUnregistered reads each VM's notes and, where its family doesn't
+// decide the kind, its OS type, as the user. A VM whose config can't be read
+// keeps what it had.
+func (p Planner) ReadUnregistered(ctx context.Context, us []Unregistered) []Unregistered {
+	out := slices.Clone(us)
+	var g errgroup.Group
+	g.SetLimit(envReads)
+	for i := range out {
+		g.Go(func() error {
+			if cfg, err := p.API.VMConfig(ctx, out[i].Node, out[i].VMID); err == nil {
+				out[i].Notes = UserNotes(cfg["description"])
+				if out[i].Kind == "" {
+					out[i].Kind = KindForOSType(cfg["ostype"])
+				}
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return out
+}

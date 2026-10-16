@@ -246,3 +246,30 @@ func TestImagesPageFoldsDeprecated(t *testing.T) {
 		t.Errorf("deprecated section = %s", folded)
 	}
 }
+
+// A stopped VM in the images pool is offered for registering, its form
+// filled in from its name and OS type; templates and running VMs aren't.
+func TestImagesPageOffersReadyVMs(t *testing.T) {
+	h := newHarness(t)
+	addImages(h)
+	pool := h.cfg.Images.Pool
+	h.api.Add(proxmox.VM{VMID: 150, Name: "teak-build", Node: "n1", Pool: pool, Status: "stopped"},
+		map[string]string{"ostype": "win11", "agent": "1", "description": "Login: admin"})
+	h.api.Add(proxmox.VM{VMID: 151, Name: "oak-build", Node: "n1", Pool: pool, Status: "running"}, map[string]string{"ostype": "l26"})
+	sess := h.login(asLead)
+	body := h.get(&sess, "/images").Body.String()
+	link := `href="/images/register?vmid=150&amp;family=teak&amp;image_kind=windows"`
+	if !strings.Contains(body, "Ready to register") || strings.Count(body, link) != 1 || !strings.Contains(body, "Login: admin") {
+		t.Errorf("images page lacks teak-build ready to register:\n%s", body)
+	}
+	for _, not := range []string{"vmid=151", "vmid=8000", "vmid=8001"} {
+		if strings.Contains(body, not) {
+			t.Errorf("images page offers %s", not)
+		}
+	}
+	form := h.get(&sess, "/images/register?vmid=150&family=teak&image_kind=windows").Body.String()
+	if !strings.Contains(form, `value="150"`) || !strings.Contains(form, `value="teak" required`) ||
+		!strings.Contains(form, `value="windows" checked`) {
+		t.Errorf("register form isn't filled in:\n%s", form)
+	}
+}

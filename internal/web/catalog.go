@@ -23,7 +23,9 @@ type catalogPage struct {
 	Families []string         // every family, once
 	Kinds    []string
 	Subnet   string
-	ReadErr  string // why the cluster couldn't be read
+	ReadErr  string              // why the cluster couldn't be read
+	Ready    []pods.Unregistered // VMs ready to register (the images page)
+	vms      []proxmox.VM
 }
 
 // newCatalogPage reads environments and images as the user, without the
@@ -35,7 +37,7 @@ func (s *Server) newCatalogPage(ctx context.Context) catalogPage {
 		p.ReadErr = "Couldn't read the cluster: " + sentence(proxmox.Describe(err))
 		return p
 	}
-	p.Envs = envs
+	p.Envs, p.vms = envs, vms
 	p.Images = pods.BaseImages(vms)
 	p.Families = pods.FamilyNames(p.Images)
 	p.Routers = pods.Families(p.Images, pods.ImageRouter)
@@ -69,7 +71,9 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) imagesPage(w http.ResponseWriter, r *http.Request) {
 	p := s.newCatalogPage(r.Context())
-	p.Images = s.planner(r.Context()).ReadNotes(r.Context(), p.Images)
+	planner := s.planner(r.Context())
+	p.Images = planner.ReadNotes(r.Context(), p.Images)
+	p.Ready = planner.ReadUnregistered(r.Context(), pods.UnregisteredVMs(p.vms, s.cfg.Images.Pool, p.Images))
 	s.render(w, r, http.StatusOK, "catalog", s.newView(w, r, "Images", "images", catalogView{p, "images"}))
 }
 
