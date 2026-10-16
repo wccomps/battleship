@@ -50,7 +50,6 @@ type Provider struct {
 	requests  []url.Values // every token request's form
 	revoked   []string     // refresh tokens revoked at /revoke
 	idTokens  []string     // every ID token issued, in order
-	logouts   []url.Values // every end-session request's query
 	b         Behavior
 }
 
@@ -127,9 +126,6 @@ func NewProvider(t testing.TB, cfg *config.Config) *Provider {
 	mux.HandleFunc("POST /token", p.token)
 	mux.HandleFunc("GET /userinfo", p.userinfo)
 	mux.HandleFunc("GET /end-session", func(w http.ResponseWriter, r *http.Request) {
-		p.mu.Lock()
-		p.logouts = append(p.logouts, r.URL.Query())
-		p.mu.Unlock()
 		_, _ = w.Write([]byte("signed out of the test provider"))
 	})
 	mux.HandleFunc("POST /revoke", p.revoke)
@@ -331,13 +327,6 @@ func (p *Provider) IDTokens() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return slices.Clone(p.idTokens)
-}
-
-// Logouts is every end-session request's query, in order.
-func (p *Provider) Logouts() []url.Values {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return slices.Clone(p.logouts)
 }
 
 func (p *Provider) token(w http.ResponseWriter, r *http.Request) {

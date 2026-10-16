@@ -144,7 +144,7 @@ func (w *Worker) claimNext(ctx context.Context) (*store.Job, *lease, error) {
 	claim := w.newLease()
 	claimCtx, stop := context.WithTimeout(ctx, DBCallTimeout)
 	defer stop()
-	job, err := w.Store.Claim(claimCtx, w.ID, w.Cfg.Jobs.StaleAfter)
+	job, err := w.Store.Claim(claimCtx, w.ID, claim.stale)
 	return job, claim, err
 }
 

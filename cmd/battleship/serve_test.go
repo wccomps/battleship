@@ -653,7 +653,7 @@ func TestServeStoppedWhileWaitingForIdentityProvider(t *testing.T) {
 	}
 }
 
-// fakeCleaner is a store for cleanUp whose session delete can hang.
+// fakeCleaner gives cleanUp a session sweep that can hang.
 type fakeCleaner struct {
 	hangSessions bool
 	previewsCtx  error // ctx.Err() when DeleteExpiredPreviews was called
@@ -678,7 +678,7 @@ func TestCleanUpTimesEachQuery(t *testing.T) {
 	logs := &syncBuffer{}
 	log := slog.New(slog.NewJSONHandler(logs, nil))
 	c := &fakeCleaner{hangSessions: true}
-	cleanUp(context.Background(), c, time.Now(), 50*time.Millisecond, log)
+	cleanUp(context.Background(), c.EndExpiredSessions, c.DeleteExpiredPreviews, time.Now(), 50*time.Millisecond, log)
 	if c.previewsCtx != nil {
 		t.Errorf("the preview delete ran with its context already %v", c.previewsCtx)
 	}

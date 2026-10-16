@@ -185,7 +185,7 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	bgCtx, stopBackground := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopBackground()
 	var bg sync.WaitGroup
-	background := []func(context.Context){hub.Run, func(ctx context.Context) { <-ctx.Done(); views.Close() }, func(ctx context.Context) { cleanupLoop(ctx, sweeper{svc, st}, log) }}
+	background := []func(context.Context){hub.Run, func(ctx context.Context) { <-ctx.Done(); views.Close() }, func(ctx context.Context) { cleanupLoop(ctx, svc.EndExpiredSessions, st.DeleteExpiredPreviews, log) }}
 	if renewer, ok := api.(jobs.TicketRenewer); ok {
 		r := &jobs.Renewer{Store: st, Proxmox: renewer, Credentials: creds, Logf: logfFor(log, "renewer")}
 		background = append(background, r.Run)
@@ -337,9 +337,9 @@ func startWorkers(ctx context.Context, cfg config.Config, st *store.Store, clien
 
 // cleanupLoop deletes expired sessions and previews at startup and then
 // every cleanupEvery, until ctx is done.
-func cleanupLoop(ctx context.Context, st cleaner, log *slog.Logger) {
+func cleanupLoop(ctx context.Context, sessions, previews sweepFunc, log *slog.Logger) {
 	for {
-		cleanUp(ctx, st, time.Now(), cleanupTimeout, log)
+		cleanUp(ctx, sessions, previews, time.Now(), cleanupTimeout, log)
 		t := time.NewTimer(cleanupEvery)
 		select {
 		case <-ctx.Done():
@@ -350,33 +350,15 @@ func cleanupLoop(ctx context.Context, st cleaner, log *slog.Logger) {
 	}
 }
 
-// cleaner is what cleanUp uses.
-type cleaner interface {
-	EndExpiredSessions(ctx context.Context, now time.Time) (int64, error)
-	DeleteExpiredPreviews(ctx context.Context, now time.Time) (int64, error)
-}
+// sweepFunc ends what expired by now and returns how many it ended.
+type sweepFunc func(ctx context.Context, now time.Time) (int64, error)
 
-// sweeper ends expired sessions through auth, which revokes their refresh
-// tokens, and deletes expired previews in the store.
-type sweeper struct {
-	auth *auth.Service
-	st   *store.Store
-}
-
-func (s sweeper) EndExpiredSessions(ctx context.Context, now time.Time) (int64, error) {
-	return s.auth.EndExpiredSessions(ctx, now)
-}
-
-func (s sweeper) DeleteExpiredPreviews(ctx context.Context, now time.Time) (int64, error) {
-	return s.st.DeleteExpiredPreviews(ctx, now)
-}
-
-// cleanUp deletes the sessions and previews that expired by now; sessions
+// cleanUp ends the sessions and previews that expired by now; sessions
 // take their previews with them.
-func cleanUp(parent context.Context, st cleaner, now time.Time, timeout time.Duration, log *slog.Logger) {
+func cleanUp(parent context.Context, sessions, previews sweepFunc, now time.Time, timeout time.Duration, log *slog.Logger) {
 	// Each delete gets its own timeout, so one that hangs doesn't use up
 	// the other's.
-	deleteExpired := func(what string, del func(context.Context, time.Time) (int64, error)) int64 {
+	deleteExpired := func(what string, del sweepFunc) int64 {
 		ctx, cancel := context.WithTimeout(parent, timeout)
 		defer cancel()
 		n, err := del(ctx, now)
@@ -385,10 +367,10 @@ func cleanUp(parent context.Context, st cleaner, now time.Time, timeout time.Dur
 		}
 		return n
 	}
-	sessions := deleteExpired("sessions", st.EndExpiredSessions)
-	previews := deleteExpired("previews", st.DeleteExpiredPreviews)
-	if sessions+previews > 0 {
-		log.Info("cleaned up", "sessions", sessions, "previews", previews)
+	nSessions := deleteExpired("sessions", sessions)
+	nPreviews := deleteExpired("previews", previews)
+	if nSessions+nPreviews > 0 {
+		log.Info("cleaned up", "sessions", nSessions, "previews", nPreviews)
 	}
 }
 

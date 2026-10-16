@@ -47,15 +47,9 @@ func FindMasters(vms []proxmox.VM, n Naming, pattern, tag string) (masters, unta
 	return masters, untagged, nil
 }
 
-// FindTeamVMs returns non-template team VMs for teams, filtered by hosts
-// (see MatchesHost; all-blank filters match nothing).
-func FindTeamVMs(vms []proxmox.VM, n Naming, teams, hosts []string) []proxmox.VM {
-	team, _ := findForTeams(vms, n, teams, hosts)
-	return team
-}
-
-// findForTeams is FindTeamVMs, and the OutsideBlock VMs of the same teams
-// and hosts (see Classify), each sorted by name.
+// findForTeams is the team VMs of teams, filtered by hosts (see
+// MatchesHost; all-blank filters match nothing), and the OutsideBlock VMs
+// of the same teams and hosts (see Classify), each sorted by name.
 func findForTeams(vms []proxmox.VM, n Naming, teams, hosts []string) (team, outside []proxmox.VM) {
 	for _, vm := range vms {
 		kind, t, host := n.Classify(vm)
@@ -204,7 +198,7 @@ func MasterSets(vms []proxmox.VM, n Naming, tag string) (sets []MasterSet, other
 	return sets, others
 }
 
-// AllTeamVMs is every non-template team VM, as FindTeamVMs finds them,
+// AllTeamVMs is every non-template team VM, as findForTeams finds them,
 // sorted by name.
 func AllTeamVMs(vms []proxmox.VM, n Naming) []proxmox.VM {
 	var out []proxmox.VM
