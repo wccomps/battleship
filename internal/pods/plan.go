@@ -478,6 +478,8 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snap
 			it.Blocked = fmt.Sprintf("several VMs are named %s (VMIDs %s)", it.Name, vmidList(named))
 		} else if vm.Template {
 			it.Blocked = "is a template, not a team VM"
+		} else if t, in := p.Naming.TeamOfCloneVMID(vm.VMID); !in || t != team {
+			it.Blocked = fmt.Sprintf("the name is taken by VMID %d, which is outside team %s's VMIDs, so it isn't a team VM; rename or remove it in Proxmox", vm.VMID, team)
 		} else if want := p.Naming.CloneVMID(team, tpl.VMID); vm.VMID != want {
 			it.Blocked = fmt.Sprintf("exists as VMID %d, expected %d (built from a different template?); tear it down first", vm.VMID, want)
 		}
@@ -685,6 +687,9 @@ func (p Planner) Reset(ctx context.Context, teams, hosts []string, snapshot stri
 	}
 	for i := range plan.Items {
 		it := &plan.Items[i]
+		if it.Blocked != "" {
+			continue
+		}
 		snaps, err := p.API.Snapshots(ctx, it.Node, it.VMID)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -742,6 +747,11 @@ func (p Planner) simple(ctx context.Context, kind Kind, teams, hosts []string, f
 		team, host, _ := p.Naming.ParseVMName(vm.Name)
 		it := Item{Team: team, Host: host, Name: vm.Name, VMID: vm.VMID, Node: vm.Node}
 		fill(&it)
+		// Proxmox leaves the pool out when the viewer can't audit pools, so
+		// only a known, different pool blocks.
+		if want := p.Naming.Pool(team); vm.Pool != "" && vm.Pool != want {
+			it.Blocked = fmt.Sprintf("is in pool %s, not %s; move it back to the team pool in Proxmox first", vm.Pool, want)
+		}
 		plan.Items = append(plan.Items, it)
 	}
 	sort.SliceStable(plan.Items, func(i, j int) bool { return plan.Items[i].Name < plan.Items[j].Name })

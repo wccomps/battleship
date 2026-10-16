@@ -29,16 +29,17 @@ type clusterModel struct {
 }
 
 // drawCluster draws a cluster with odd team VMs (unpadded, wrong pool,
-// duplicated, templates) and masters of this set and another.
+// duplicated, templates, outside the team's VMID block) and masters of this set and another.
 func drawCluster(t *rapid.T) clusterModel {
 	var m clusterModel
 	hostPool := rapid.SliceOfNDistinct(rapid.StringMatching(`[a-z][a-z0-9]{0,4}(-[a-z0-9]{1,2})?`), 1, 8, rapid.ID).Draw(t, "hosts")
 	m.templates = rapid.SampledFrom([]string{"", "*.kilo.alpha"}).Draw(t, "web.templates")
 	m.hist = map[string]store.ItemResult{}
 	m.byCell = map[[2]string][]proxmox.VM{}
-	vmid := 10000
+	vmid := 1000 // masters and VMs outside any team block
 	nVMs := rapid.IntRange(0, 40).Draw(t, "vm count")
 	seen := map[string]bool{}
+	offsets := map[int]int{} // next free clone offset of each team
 	for i := range nVMs {
 		vmid += rapid.IntRange(1, 3).Draw(t, "vmid step")
 		host := rapid.SampledFrom(hostPool).Draw(t, "host")
@@ -62,13 +63,24 @@ func drawCluster(t *rapid.T) clusterModel {
 		if unpadded {
 			name = "team" + strconv.Itoa(n) + "-" + host
 		}
-		vm := proxmox.VM{VMID: vmid, Name: name, Node: "n1",
+		// Team VMs live in their team's clone block; one outside it (in
+		// another team's block or none) is someone else's VM with a team
+		// name, not a team VM.
+		inBlock := rapid.IntRange(0, 5).Draw(t, label+" outside block") != 0
+		vmID := vmid
+		if inBlock {
+			vmID = 10000 + n*100 + offsets[n]
+			offsets[n]++
+		} else if rapid.Bool().Draw(t, label+" other team's block") {
+			vmID = 10000 + ((n+1)%46)*100 + 99 - i // in-block offsets stay below 40
+		}
+		vm := proxmox.VM{VMID: vmID, Name: name, Node: "n1",
 			Status: rapid.SampledFrom([]string{"running", "stopped", "paused"}).Draw(t, label+" status"),
 			Pool:   rapid.SampledFrom([]string{"pool-" + team, "", "pool-99", "elsewhere"}).Draw(t, label+" pool"),
 		}
 		vm.Template = rapid.IntRange(0, 9).Draw(t, label+" template") == 0
 		m.vms = append(m.vms, vm)
-		if !unpadded && !vm.Template {
+		if !unpadded && !vm.Template && inBlock {
 			key := [2]string{team, host}
 			m.byCell[key] = append(m.byCell[key], vm)
 			seen[host] = true

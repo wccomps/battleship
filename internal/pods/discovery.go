@@ -67,10 +67,15 @@ func FindTeamVMs(vms []proxmox.VM, n Naming, teams, hosts []string) []proxmox.VM
 }
 
 // teamVM is the team and host of vm if it is a team VM: named as VMName
-// names them, and not a template.
+// names them, in that team's clone VMID block (where deploys put them), and
+// not a template. The name alone isn't enough: anyone can name a VM
+// "team05-test" in their own pool, and teardown would delete it.
 func (n Naming) teamVM(vm proxmox.VM) (team, host string, ok bool) {
 	team, host, ok = n.ParseVMName(vm.Name)
 	if !ok || vm.Template || n.IsTemplateName(vm.Name) {
+		return "", "", false
+	}
+	if t, in := n.TeamOfCloneVMID(vm.VMID); !in || t != team {
 		return "", "", false
 	}
 	return team, host, true
