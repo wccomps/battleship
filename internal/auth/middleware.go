@@ -335,14 +335,16 @@ func (s *Service) endSession(w http.ResponseWriter, r *http.Request, sess store.
 }
 
 // EndExpiredSessions removes the sessions expired at now, revokes their
-// refresh tokens, and returns how many it removed.
+// refresh tokens while ctx lasts, and returns how many it removed.
 func (s *Service) EndExpiredSessions(ctx context.Context, now time.Time) (int64, error) {
 	ended, err := s.st.EndExpiredSessions(ctx, now)
 	var g errgroup.Group
 	g.SetLimit(expiredRevokes)
 	for _, e := range ended {
 		g.Go(func() error {
-			s.revokeSealed(ctx, e.ID, e.RefreshToken, "ending expired session %.8s: revoking its refresh token", e.ID)
+			if ctx.Err() == nil { // the sweep's time is up: the rest expire on their own
+				s.revokeSealed(ctx, e.ID, e.RefreshToken, "ending expired session %.8s: revoking its refresh token", e.ID)
+			}
 			return nil
 		})
 	}
