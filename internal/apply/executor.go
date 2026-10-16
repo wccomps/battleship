@@ -165,6 +165,9 @@ type Executor struct {
 	// left is how each item, by name, last left its VM's config across rounds;
 	// absent means untouched (see leftAt).
 	left map[string]Left
+	// guestRuns are setup scripts started in guests and not yet seen to
+	// exit, by VMID: the agent's PID (see exec).
+	guestRuns map[int]int
 }
 
 // cloneState is what a run knows about the outcome of a template clone.
@@ -208,6 +211,7 @@ func (e *Executor) init() {
 	e.asked = map[int][]string{}
 	e.mastersStopped = map[string]string{}
 	e.left = map[string]Left{}
+	e.guestRuns = map[int]int{}
 }
 
 // noteMasterStopped records a master a template build left stopped.

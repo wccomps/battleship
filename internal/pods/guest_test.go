@@ -6,8 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 	"unicode/utf16"
 )
 
@@ -140,5 +143,39 @@ func TestDNSOnlyScriptsLeaveTheRestAlone(t *testing.T) {
 		if !strings.Contains(script, g.DNS) || !strings.Contains(script, g.Domain) {
 			t.Errorf("%s DNS-only script lacks the server or domain", os)
 		}
+	}
+}
+
+// Two copies of a Linux script never run at once: the second waits for the
+// first's lock (one a stopped job left running), then runs.
+func TestLinuxScriptsTakeTurns(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	if _, err := exec.LookPath("flock"); err != nil {
+		t.Skip("no flock")
+	}
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	body := linuxLock + "\necho start >> \"$LOG\"; sleep 0.3; echo end >> \"$LOG\"\n"
+	var wg sync.WaitGroup
+	for i := range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			time.Sleep(time.Duration(i) * 50 * time.Millisecond)
+			c := exec.Command(sh, "-s")
+			c.Env = append(os.Environ(), "BATTLESHIP_LOCK="+filepath.Join(dir, "lock"), "LOG="+log)
+			c.Stdin = strings.NewReader(body)
+			if out, err := c.CombinedOutput(); err != nil {
+				t.Errorf("script %d: %v\n%s", i, err, out)
+			}
+		}()
+	}
+	wg.Wait()
+	b, _ := os.ReadFile(log)
+	if got := strings.Fields(string(b)); !slices.Equal(got, []string{"start", "end", "start", "end"}) {
+		t.Errorf("log = %q, want the two runs one after the other", got)
 	}
 }

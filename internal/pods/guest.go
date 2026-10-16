@@ -103,13 +103,31 @@ func GuestScript(g Guest, mac string) (string, error) {
 		quote(strings.ToLower(mac)), quote(g.IP), g.Prefix, quote(g.Gateway), quote(g.DNS), quote(g.Hostname), quote(g.Domain)) + linuxFindIface + linuxScript, nil
 }
 
-// linuxFindIface sets $iface to the NIC with $MAC.
+// linuxFindIface waits for any other battleship script in the guest to
+// finish (one a stopped or timed-out job left running), then sets $iface
+// to the NIC with $MAC.
 const linuxFindIface = `set -eu
+` + linuxLock + `
 iface=
 for d in /sys/class/net/*; do
 	if [ "$(cat "$d/address" 2>/dev/null)" = "$MAC" ]; then iface=${d##*/}; fi
 done
 if [ -z "$iface" ]; then echo "no network interface has MAC $MAC" >&2; exit 2; fi
+`
+
+// linuxLock holds /run/battleship-guest.lock for the rest of the script,
+// waiting up to 4 minutes (under the executor's 5-minute limit) for a
+// running copy to exit.
+const linuxLock = `if command -v flock >/dev/null 2>&1; then
+	exec 9>"${BATTLESHIP_LOCK:-/run/battleship-guest.lock}"
+	if ! flock -w 240 9; then echo "another battleship setup script is still running in this guest" >&2; exit 75; fi
+fi`
+
+// windowsLock does the same with a machine-wide mutex, which Windows
+// releases when the process holding it exits.
+const windowsLock = `$lock = New-Object System.Threading.Mutex($false, 'Global\battleship-guest')
+try { $held = $lock.WaitOne([TimeSpan]::FromMinutes(4)) } catch [System.Threading.AbandonedMutexException] { $held = $true }
+if (-not $held) { [Console]::Error.WriteLine('another battleship setup script is still running in this guest'); exit 75 }
 `
 
 // linuxScript sets a static address on the NIC with $MAC through whichever
@@ -180,7 +198,7 @@ echo "127.0.1.1 $HOST.$DOMAIN $HOST" >> /etc/hosts
 // windowsScript sets a static address on the adapter with the MAC, its DNS
 // and suffix, and renames the computer; a rename prints RebootMarker.
 const windowsScript = `$ErrorActionPreference = 'Stop'
-$mac = %s
+` + windowsLock + `$mac = %s
 $ip = %s
 $prefix = %d
 $gw = %s
@@ -258,7 +276,7 @@ fi
 // windowsDNSScript sets only the DNS server and suffix of the adapter with
 // the MAC.
 const windowsDNSScript = `$ErrorActionPreference = 'Stop'
-$mac = %s
+` + windowsLock + `$mac = %s
 $dns = %s
 $domain = %s
 $nic = Get-NetAdapter | Where-Object { $_.MacAddress -eq $mac } | Select-Object -First 1

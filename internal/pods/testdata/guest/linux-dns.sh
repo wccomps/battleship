@@ -2,6 +2,10 @@ MAC='bc:24:11:00:00:01'
 DNS='192.168.100.2'
 DOMAIN='kilo.alpha'
 set -eu
+if command -v flock >/dev/null 2>&1; then
+	exec 9>"${BATTLESHIP_LOCK:-/run/battleship-guest.lock}"
+	if ! flock -w 240 9; then echo "another battleship setup script is still running in this guest" >&2; exit 75; fi
+fi
 iface=
 for d in /sys/class/net/*; do
 	if [ "$(cat "$d/address" 2>/dev/null)" = "$MAC" ]; then iface=${d##*/}; fi
