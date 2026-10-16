@@ -269,7 +269,8 @@ func (s *Store) EndSession(ctx context.Context, id string, revoke bool) (_ Ended
 
 // EndExpiredSessions removes up to limit sessions expired at now, oldest
 // first, as EndSession does, and returns how many it removed. Sessions
-// another call is removing are skipped.
+// locked by another statement (another sweep, or a refresh updating one)
+// are left for a later sweep.
 func (s *Store) EndExpiredSessions(ctx context.Context, now time.Time, limit int, revoke bool) (int, error) {
 	var n int
 	err := s.pool.QueryRow(ctx, `WITH ended AS (DELETE FROM sessions WHERE id IN (
@@ -283,12 +284,13 @@ func (s *Store) EndExpiredSessions(ctx context.Context, now time.Time, limit int
 	return n, nil
 }
 
-// Revocation is a queued refresh token (see EndSession).
+// Revocation is a leased, queued refresh token (see EndSession).
 type Revocation struct {
 	ID           int64
 	SessionID    string
-	RefreshToken string // sealed for SessionID
-	Attempts     int    // tries before this one
+	RefreshToken string    // sealed for SessionID
+	Attempts     int       // tries before this one
+	Lease        time.Time // when the lease runs out; it identifies the lease
 }
 
 // QueueRevocation queues a sealed refresh token for revocation.
@@ -300,12 +302,13 @@ func (s *Store) QueueRevocation(ctx context.Context, sessionID, refreshToken str
 }
 
 // LeaseRevocations takes up to limit queued revocations that are due, for
-// lease: another caller doesn't get them until it runs out (or Retry sets
-// a new time). Each counts as an attempt.
+// lease: another caller doesn't get them until it runs out. Each counts as
+// an attempt. DoneRevocation, RetryRevocation and ReleaseRevocation act on
+// a revocation only while its lease holds.
 func (s *Store) LeaseRevocations(ctx context.Context, limit int, lease time.Duration) ([]Revocation, error) {
 	rows, err := s.pool.Query(ctx, `UPDATE revocations SET attempts = attempts + 1, next_at = now() + make_interval(secs => $2)
 		WHERE id IN (SELECT id FROM revocations WHERE next_at <= now() ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED)
-		RETURNING id, session_id, refresh_token, attempts - 1`, limit, lease.Seconds())
+		RETURNING id, session_id, refresh_token, attempts - 1, next_at`, limit, lease.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("leasing revocations: %w", err)
 	}
@@ -316,18 +319,29 @@ func (s *Store) LeaseRevocations(ctx context.Context, limit int, lease time.Dura
 	return revs, nil
 }
 
-// DoneRevocation removes a revocation that was sent, or given up on.
-func (s *Store) DoneRevocation(ctx context.Context, id int64) error {
-	if _, err := s.pool.Exec(ctx, `DELETE FROM revocations WHERE id = $1`, id); err != nil {
+// DoneRevocation removes a leased revocation that was sent, or given up on.
+func (s *Store) DoneRevocation(ctx context.Context, rv Revocation) error {
+	if _, err := s.pool.Exec(ctx, `DELETE FROM revocations WHERE id = $1 AND next_at = $2`, rv.ID, rv.Lease); err != nil {
 		return fmt.Errorf("removing a revocation: %w", err)
 	}
 	return nil
 }
 
 // RetryRevocation makes a leased revocation due again after wait.
-func (s *Store) RetryRevocation(ctx context.Context, id int64, wait time.Duration) error {
-	if _, err := s.pool.Exec(ctx, `UPDATE revocations SET next_at = now() + make_interval(secs => $2) WHERE id = $1`, id, wait.Seconds()); err != nil {
+func (s *Store) RetryRevocation(ctx context.Context, rv Revocation, wait time.Duration) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE revocations SET next_at = now() + make_interval(secs => $3) WHERE id = $1 AND next_at = $2`,
+		rv.ID, rv.Lease, wait.Seconds()); err != nil {
 		return fmt.Errorf("rescheduling a revocation: %w", err)
+	}
+	return nil
+}
+
+// ReleaseRevocation makes a leased revocation due now, without counting
+// the attempt: one that wasn't really tried.
+func (s *Store) ReleaseRevocation(ctx context.Context, rv Revocation) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE revocations SET next_at = now(), attempts = attempts - 1 WHERE id = $1 AND next_at = $2`,
+		rv.ID, rv.Lease); err != nil {
+		return fmt.Errorf("releasing a revocation: %w", err)
 	}
 	return nil
 }

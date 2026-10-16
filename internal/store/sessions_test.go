@@ -311,14 +311,50 @@ func TestRevocationQueue(t *testing.T) {
 	if err != nil || len(second) != 1 || second[0].SessionID != "s2" {
 		t.Fatalf("second lease = %+v, %v; want only s2 (s1 is leased)", second, err)
 	}
-	if err := s.RetryRevocation(ctx, first[0].ID, 0); err != nil {
+	if err := s.RetryRevocation(ctx, first[0], 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DoneRevocation(ctx, second[0].ID); err != nil {
+	if err := s.DoneRevocation(ctx, second[0]); err != nil {
 		t.Fatal(err)
 	}
 	again, err := s.LeaseRevocations(ctx, 10, time.Hour)
 	if err != nil || len(again) != 1 || again[0].SessionID != "s1" || again[0].Attempts != 1 {
 		t.Fatalf("after retry and done = %+v, %v; want s1 on its second try", again, err)
+	}
+}
+
+// Once a lease runs out and another caller leases the revocation, the first
+// holder's writes change nothing; a release hands it back uncounted.
+func TestRevocationLeaseOwnsTheRow(t *testing.T) {
+	s := storetest.New(t)
+	if err := s.QueueRevocation(ctx, "s1", "rt"); err != nil {
+		t.Fatal(err)
+	}
+	old, err := s.LeaseRevocations(ctx, 1, 0) // runs out at once
+	if err != nil || len(old) != 1 {
+		t.Fatalf("lease = %+v, %v", old, err)
+	}
+	cur, err := s.LeaseRevocations(ctx, 1, time.Hour)
+	if err != nil || len(cur) != 1 || cur[0].Attempts != 1 {
+		t.Fatalf("second lease = %+v, %v", cur, err)
+	}
+	if err := s.DoneRevocation(ctx, old[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RetryRevocation(ctx, old[0], 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReleaseRevocation(ctx, old[0]); err != nil {
+		t.Fatal(err)
+	}
+	if revs, err := s.LeaseRevocations(ctx, 1, time.Hour); err != nil || len(revs) != 0 {
+		t.Fatalf("after the old holder's writes = %+v, %v; want it still leased by the second", revs, err)
+	}
+	if err := s.ReleaseRevocation(ctx, cur[0]); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.LeaseRevocations(ctx, 1, time.Hour)
+	if err != nil || len(again) != 1 || again[0].Attempts != 1 {
+		t.Fatalf("after a release = %+v, %v; want it due, its released try uncounted", again, err)
 	}
 }

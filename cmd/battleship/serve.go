@@ -245,7 +245,7 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	case <-bgDone:
 	case <-timeout.C:
 		keepStore = true // closing it would wait for their connections
-		log.Warn("the status views or hub didn't stop in time")
+		log.Warn("background loops (status views, hub, revocations) didn't stop in time")
 	}
 	log.Info("stopped", "took", time.Since(start).Round(time.Millisecond).String())
 	return failure
