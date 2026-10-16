@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -127,8 +126,10 @@ func (s *Service) proxmoxCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	// The realm names users <preferred_username>@<realm>; the browser's
 	// Authentik session must be this session's user, or it would act as
-	// someone else.
-	if want := sess.Username + "@" + s.cfg.Proxmox.Realm; sess.Username == "" || !strings.EqualFold(cred.User, want) {
+	// someone else. Both names come from the same Authentik username, which
+	// Proxmox keeps as given, so they must match exactly: ignoring case would
+	// also fold Unicode, making "\u212aate" (Kelvin sign) the same as "kate".
+	if want := sess.Username + "@" + s.cfg.Proxmox.Realm; sess.Username == "" || cred.User != want {
 		s.logf("auth: proxmox login refused: subject=%q username=%q: Proxmox signed in %q", sess.Subject, sess.Username, cred.User)
 		s.render(w, r, Page{Status: http.StatusForbidden, Title: "Proxmox sign-in refused",
 			Message: "Proxmox signed you in as " + cred.User + ", but you are signed in to battleship as " + orUnknown(sess.Username) + " (" + s.cfg.Proxmox.Realm + "). " +
