@@ -101,101 +101,63 @@ func (g guardedAPI) may(ctx context.Context) (_ context.Context, done context.Ca
 	return ctx, done, nil
 }
 
-func (g guardedAPI) SetVMConfig(ctx context.Context, node string, vmid int, changes map[string]string) error {
+// guard sends change through g's checks (see may), with may's context.
+func guard[T any](g guardedAPI, ctx context.Context, change func(context.Context) (T, error)) (T, error) {
 	ctx, done, err := g.may(ctx)
 	if err != nil {
-		return err
+		var zero T
+		return zero, err
 	}
 	defer done()
-	return g.API.SetVMConfig(ctx, node, vmid, changes)
+	return change(ctx)
+}
+
+func (g guardedAPI) SetVMConfig(ctx context.Context, node string, vmid int, changes map[string]string) error {
+	_, err := guard(g, ctx, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, g.API.SetVMConfig(ctx, node, vmid, changes)
+	})
+	return err
 }
 
 func (g guardedAPI) AgentExec(ctx context.Context, node string, vmid int, command []string, input string) (int, error) {
-	ctx, done, err := g.may(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer done()
-	return g.API.AgentExec(ctx, node, vmid, command, input)
+	return guard(g, ctx, func(ctx context.Context) (int, error) { return g.API.AgentExec(ctx, node, vmid, command, input) })
 }
 
 func (g guardedAPI) Clone(ctx context.Context, r proxmox.CloneRequest) (string, error) {
-	ctx, done, err := g.may(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer done()
-	return g.API.Clone(ctx, r)
+	return guard(g, ctx, func(ctx context.Context) (string, error) { return g.API.Clone(ctx, r) })
 }
 
 func (g guardedAPI) ConvertToTemplate(ctx context.Context, node string, vmid int) (string, error) {
-	ctx, done, err := g.may(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer done()
-	return g.API.ConvertToTemplate(ctx, node, vmid)
+	return guard(g, ctx, func(ctx context.Context) (string, error) { return g.API.ConvertToTemplate(ctx, node, vmid) })
 }
 
 func (g guardedAPI) RegenerateCloudInit(ctx context.Context, node string, vmid int) error {
-	ctx, done, err := g.may(ctx)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return g.API.RegenerateCloudInit(ctx, node, vmid)
+	_, err := guard(g, ctx, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, g.API.RegenerateCloudInit(ctx, node, vmid)
+	})
+	return err
 }
 
 func (g guardedAPI) CreateSnapshot(ctx context.Context, node string, vmid int, r proxmox.SnapshotRequest) (string, error) {
-	ctx, done, err := g.may(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer done()
-	return g.API.CreateSnapshot(ctx, node, vmid, r)
+	return guard(g, ctx, func(ctx context.Context) (string, error) { return g.API.CreateSnapshot(ctx, node, vmid, r) })
 }
 
 func (g guardedAPI) Rollback(ctx context.Context, node string, vmid int, snapshot string) (string, error) {
-	ctx, done, err := g.may(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer done()
-	return g.API.Rollback(ctx, node, vmid, snapshot)
+	return guard(g, ctx, func(ctx context.Context) (string, error) { return g.API.Rollback(ctx, node, vmid, snapshot) })
 }
 
 func (g guardedAPI) Power(ctx context.Context, node string, vmid int, action string) (string, error) {
-	ctx, done, err := g.may(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer done()
-	return g.API.Power(ctx, node, vmid, action)
+	return guard(g, ctx, func(ctx context.Context) (string, error) { return g.API.Power(ctx, node, vmid, action) })
 }
 
 func (g guardedAPI) Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration, forceStop bool) (string, error) {
-	ctx, done, err := g.may(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer done()
-	return g.API.Shutdown(ctx, node, vmid, timeout, forceStop)
+	return guard(g, ctx, func(ctx context.Context) (string, error) { return g.API.Shutdown(ctx, node, vmid, timeout, forceStop) })
 }
 
 func (g guardedAPI) DeleteVM(ctx context.Context, node string, vmid int) (string, error) {
-	ctx, done, err := g.may(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer done()
-	return g.API.DeleteVM(ctx, node, vmid)
+	return guard(g, ctx, func(ctx context.Context) (string, error) { return g.API.DeleteVM(ctx, node, vmid) })
 }
 
 func (g guardedAPI) DeleteVolume(ctx context.Context, node, storage, volid string) (string, error) {
-	ctx, done, err := g.may(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer done()
-	return g.API.DeleteVolume(ctx, node, storage, volid)
+	return guard(g, ctx, func(ctx context.Context) (string, error) { return g.API.DeleteVolume(ctx, node, storage, volid) })
 }
