@@ -21,8 +21,11 @@ type Slot struct {
 	Pool      string
 	IntBridge string
 	ExtBridge string
-	FirstVMID int // the block is FirstVMID to FirstVMID+99
+	FirstVMID int
 }
+
+// LastVMID is the last VMID of the slot's block, FirstVMID+99.
+func (s Slot) LastVMID() int { return s.FirstVMID + 99 }
 
 // ExpandSlot replaces {slot} with n as two digits.
 func ExpandSlot(pattern string, n int) string {
@@ -111,13 +114,14 @@ func (e Environment) DNS() string {
 	return DNSRouter
 }
 
-// envReads is how many VM configs Environments reads at once.
+// envReads is how many Proxmox reads environment planning makes at once.
 const envReads = 8
 
 // Environments reads every slot: the VMs in its pool with their notes, and
 // the other VMs on its bridges. Templates never run, so they hold no slot;
-// team VMs are on team bridges, so they aren't read. It also returns the
-// VM listing it read.
+// team VMs (see Classify) are on team bridges, so they aren't read, but a
+// VM only named like one may be anywhere. It also returns the VM listing it
+// read.
 func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM, error) {
 	vms, err := p.API.ClusterVMs(ctx)
 	if err != nil {
@@ -135,7 +139,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 	var read []proxmox.VM
 	for _, vm := range vms {
 		_, inSlot := byPool[vm.Pool]
-		if _, _, team := p.Naming.ParseVMName(vm.Name); inSlot || (!vm.Template && !team) {
+		if kind, _, _ := p.Naming.Classify(vm); inSlot || (!vm.Template && kind != TeamVMKind) {
 			read = append(read, vm)
 		}
 	}

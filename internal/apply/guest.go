@@ -99,73 +99,24 @@ func (e *Executor) restart(ctx context.Context, it *pods.Item) error {
 
 // exec runs a command through the agent and waits for it to exit 0.
 //
-// The agent can't stop a command, so one that outlasts execLimit (or a stop)
-// keeps running in the guest. The run remembers it, and the next exec on
-// that VM (a retry round) waits for it to exit before starting another, so
-// two copies never change the guest at once.
+// The agent can't stop a command, so one that outlasts execLimit keeps
+// running in the guest; a retry runs the script again, and the guest lock
+// (see pods.GuestLockWait) makes it wait for the one still running.
 func (e *Executor) exec(ctx context.Context, it *pods.Item, cmd []string, input string) (string, error) {
-	e.mu.Lock()
-	prev, running := e.guestRuns[it.VMID]
-	e.mu.Unlock()
-	if running {
-		var exited *scriptExitError
-		if _, err := e.waitExec(ctx, it, prev); err != nil && !errors.As(err, &exited) {
-			if errors.Is(err, errStillRunning) {
-				return "", fmt.Errorf("the previous run of the setup script was still running after another %s; not starting a second copy", execLimit)
-			}
-			return "", err
-		}
-	}
 	var pid int
 	// Sent once: a retry after a lost answer would run a second copy of the
 	// script alongside the first. The round retry reruns it instead.
 	if err := e.lim.Call(ctx, func() (err error) { pid, err = e.api.AgentExec(ctx, it.Node, it.VMID, cmd, input); return }); err != nil {
 		return "", err
 	}
-	e.mu.Lock()
-	e.guestRuns[it.VMID] = pid
-	e.mu.Unlock()
-	out, err := e.waitExec(ctx, it, pid)
-	if errors.Is(err, errStillRunning) {
-		return "", fmt.Errorf("the setup script was still running after %s", execLimit)
-	}
-	return out, err
-}
-
-var errStillRunning = errors.New("still running")
-
-// scriptExitError is a setup script that exited non-zero.
-type scriptExitError struct {
-	code int
-	tail string // its last lines of output
-}
-
-func (e *scriptExitError) Error() string {
-	return fmt.Sprintf("the setup script exited %d: %s", e.code, e.tail)
-}
-
-// waitExec waits up to execLimit for pid to exit 0, and forgets it once it
-// has exited or can't be read (the guest restarted, say).
-func (e *Executor) waitExec(ctx context.Context, it *pods.Item, pid int) (string, error) {
-	forget := func() {
-		e.mu.Lock()
-		defer e.mu.Unlock()
-		if e.guestRuns[it.VMID] == pid {
-			delete(e.guestRuns, it.VMID)
-		}
-	}
 	for range int(execLimit / execPoll) {
 		var st proxmox.ExecStatus
 		if err := e.call(ctx, func() (err error) { st, err = e.api.AgentExecStatus(ctx, it.Node, it.VMID, pid); return }); err != nil {
-			if ctx.Err() == nil {
-				forget()
-			}
 			return "", err
 		}
 		if st.Exited {
-			forget()
 			if st.ExitCode != 0 {
-				return st.Out, &scriptExitError{st.ExitCode, lastLines(st.Err+"\n"+st.Out, 5)}
+				return st.Out, fmt.Errorf("the setup script exited %d: %s", st.ExitCode, lastLines(st.Err+"\n"+st.Out, 5))
 			}
 			return st.Out, nil
 		}
@@ -173,13 +124,14 @@ func (e *Executor) waitExec(ctx context.Context, it *pods.Item, pid int) (string
 			return "", err
 		}
 	}
-	return "", errStillRunning
+	return "", fmt.Errorf("the setup script was still running after %s", execLimit)
 }
 
-// lastLines is the last n non-blank lines of s, each trimmed (Windows
-// guests end lines with \r\n), joined with " / ".
+// lastLines is the last n non-blank lines of s, each trimmed, joined with
+// " / ". A line ends at \n or \r (Windows ends lines with \r\n, and progress
+// output rewrites one with a bare \r).
 func lastLines(s string, n int) string {
-	lines := strings.Split(s, "\n")
+	lines := strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == '\r' })
 	for i, l := range lines {
 		lines[i] = strings.TrimSpace(l)
 	}

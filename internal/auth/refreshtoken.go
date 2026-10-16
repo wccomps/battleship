@@ -15,8 +15,7 @@ func (s *Service) sealRefreshToken(sessionID, token string) string {
 	return s.refreshKey.Seal(sessionID, []byte(token))
 }
 
-// sealIDToken seals an ID token for session sessionID, apart from its
-// refresh token; "" stays "" (a refresh may bring no ID token).
+// sealIDToken seals an ID token for session sessionID; "" stays "".
 func (s *Service) sealIDToken(sessionID, token string) string {
 	if token == "" {
 		return ""

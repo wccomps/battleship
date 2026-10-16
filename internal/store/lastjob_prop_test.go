@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+	"time"
 
 	"pgregory.net/rapid"
 
@@ -46,7 +47,7 @@ func TestPropLastJobOf(t *testing.T) {
 				store.StatusCompletedWithFailures, store.StatusFailed, store.StatusCancelled, store.StatusInterrupted, store.StatusStale}).Draw(t, "status"); st {
 			case store.StatusPending:
 			default:
-				j, err := s.ClaimJob(ctx, id, "w")
+				j, err := storetest.ClaimJob(s, id, "w", time.Hour)
 				if err != nil || j == nil {
 					t.Fatalf("claiming job %d: %v, %v", id, j, err)
 				}

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -99,6 +100,10 @@ type Source struct {
 	Bridges []string `json:"bridges,omitempty"`
 }
 
+// Builds is whether a deploy builds the template from its master (it
+// doesn't exist yet, or is rebuilt) rather than reusing it.
+func (t TemplateSpec) Builds() bool { return !t.Exists || t.Rebuild }
+
 // TemplateSpec is a .tpl template a deploy clones from.
 type TemplateSpec struct {
 	Name       string `json:"name"` // teak.tango.delta.tpl
@@ -175,12 +180,51 @@ type Plan struct {
 	// Config is the ConfigHash the plan was made under; plans stored without
 	// it are stale.
 	Config string `json:"config,omitempty"`
-	// Locks are lock keys beyond teams and templates (slot:NN, domain:…,
-	// family:…, vmid:N), so jobs over the same slot, family or VMIDs wait.
+	// Locks are lock keys beyond teams, templates and VMs (slot:NN,
+	// domain:…, family:…), so jobs over the same slot, domain or family wait.
 	Locks []string `json:"locks,omitempty"`
 	// Notices are what a person should know the plan leaves alone, such as
 	// VMs named like team VMs that aren't; nothing acts on them.
 	Notices []string `json:"notices,omitempty"`
+}
+
+// LockKeys are what a plan changes and, apart, what it only reads (its
+// items' Sources), as lock keys (see the store's blocksSQL). Besides its own
+// VMs, a plan changes the image a register retires and the master of a
+// template it builds (the build may stop it).
+func (plan *Plan) LockKeys() (writes, reads []string) {
+	w, r := map[string]bool{}, map[string]bool{}
+	vmid := func(set map[string]bool, id int) {
+		if id != 0 {
+			set["vmid:"+strconv.Itoa(id)] = true
+		}
+	}
+	for _, t := range plan.Teams {
+		w["team:"+t] = true
+	}
+	for _, t := range plan.Templates {
+		w["template:"+t.Name] = true
+		vmid(w, t.VMID)
+		if t.Builds() {
+			vmid(w, t.MasterVMID)
+		}
+	}
+	for _, it := range plan.Items {
+		vmid(w, it.VMID)
+		if it.Source != nil {
+			vmid(r, it.Source.VMID)
+		}
+		if it.Supersedes != nil {
+			vmid(w, it.Supersedes.VMID)
+		}
+	}
+	for _, k := range plan.Locks {
+		w[k] = true
+	}
+	for k := range w {
+		delete(r, k) // a VM the plan changes is locked as such
+	}
+	return slices.Sorted(maps.Keys(w)), slices.Sorted(maps.Keys(r))
 }
 
 // ConfigHash identifies the settings that change what a plan of kind does
@@ -315,7 +359,7 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		if err != nil {
 			return nil, err
 		}
-		spec.WillStopMaster = spec.Blocked == "" && (!spec.Exists || spec.Rebuild) && m.Status == "running"
+		spec.WillStopMaster = spec.Blocked == "" && spec.Builds() && m.Status == "running"
 		plan.Templates = append(plan.Templates, spec)
 	}
 	p.blockDuplicateHosts(plan.Templates, req.Teams[0])
@@ -390,7 +434,9 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool,
 		spec.Interfaces, spec.GPU = p.describe(tcfg)
 		spec.CPU, spec.CloudInit, spec.Bridges = tcfg["cpu"], HasCloudInit(tcfg), NICBridges(tcfg)
 	case exists && rebuild:
-		// Rebuilding deletes the template, which would break its linked clones.
+		// Rebuilding deletes the template, which would break team VMs linked
+		// to it. Proxmox itself refuses to free a base disk any other linked
+		// clone still uses.
 		for _, vm := range vms {
 			if _, host, ok := p.Naming.TeamVM(vm); ok && host == spec.Host {
 				spec.Blocked = fmt.Sprintf("team VMs such as %s still use this template; tear them down first", vm.Name)
@@ -479,11 +525,11 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snap
 		it.VMID, it.Node = vm.VMID, vm.Node
 		if len(named) > 1 {
 			it.Blocked = fmt.Sprintf("several VMs are named %s (VMIDs %s)", it.Name, vmidList(named))
-		} else if vm.Template {
+		} else if kind, _, _ := p.Naming.Classify(vm); kind == TeamTemplate {
 			it.Blocked = "is a template, not a team VM"
-		} else if t, in := p.Naming.TeamOfCloneVMID(vm.VMID); !in || t != team {
+		} else if kind == OutsideBlock {
 			it.Blocked = outsideBlock(vm, team)
-		} else if want := p.Naming.Pool(team); vm.Pool != "" && vm.Pool != want {
+		} else if want, wrong := p.Naming.WrongPool(vm, team); wrong {
 			it.Blocked = wrongPool(vm, want)
 		} else if want := p.Naming.CloneVMID(team, tpl.VMID); vm.VMID != want {
 			it.Blocked = fmt.Sprintf("exists as VMID %d, expected %d (built from a different template?); tear it down first", vm.VMID, want)
@@ -563,10 +609,8 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	if err != nil {
 		return err
 	}
-	held := map[int]bool{}
-	for _, vm := range vms {
-		held[vm.VMID] = true
-	}
+	use := newVMIDUse(p.API, vms)
+	held := maps.Clone(use.listed) // and, as items are added, VMIDs already itemized
 	want := map[string]bool{}
 	for _, t := range plan.Teams {
 		want[t] = true
@@ -612,7 +656,7 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 			}
 			held[vmid] = true // one item per VMID, from the first node that lists it
 			// A VM the user can't see may hold it: the disks are its own.
-			if taken, err := p.API.VMIDHeld(ctx, vmid); err != nil || taken {
+			if taken, err := use.inUse(ctx, vmid); err != nil || taken {
 				if err != nil {
 					return fmt.Errorf("checking whether VMID %d is free: %w", vmid, err)
 				}
@@ -758,23 +802,19 @@ func (p Planner) simple(ctx context.Context, kind Kind, teams, hosts []string, f
 		return nil, nil, err
 	}
 	plan := &Plan{Kind: kind, Teams: teams, Config: ConfigHash(kind, p.Cfg)}
-	for _, vm := range FindTeamVMs(vms, p.Naming, teams, hosts) {
-		team, host, _ := p.Naming.ParseVMName(vm.Name)
-		it := Item{Team: team, Host: host, Name: vm.Name, VMID: vm.VMID, Node: vm.Node}
+	teamVMs, outside := findForTeams(vms, p.Naming, teams, hosts)
+	for _, vm := range teamVMs {
+		it := Item{Team: vm.Team, Host: vm.Host, Name: vm.Name, VMID: vm.VMID, Node: vm.Node}
 		fill(&it)
-		// Proxmox leaves the pool out when the viewer can't audit pools, so
-		// only a known, different pool blocks.
-		if want := p.Naming.Pool(team); vm.Pool != "" && vm.Pool != want {
-			it.Blocked = wrongPool(vm, want)
+		if want, wrong := vm.WrongPool(p.Naming); wrong {
+			it.Blocked = wrongPool(vm.VM, want)
 		}
 		plan.Items = append(plan.Items, it)
 	}
 	// VMs with a team's name outside its block aren't team VMs: say so, so
 	// a teardown doesn't seem to miss them silently.
-	for _, vm := range namedOutsideBlock(vms, p.Naming, teams, hosts) {
-		team, _, _ := p.Naming.ParseVMName(vm.Name)
-		plan.Notices = append(plan.Notices, fmt.Sprintf("%s (VMID %d) has a team %s name but is outside the team's VMIDs, so it isn't a team VM and is left alone.",
-			vm.Name, vm.VMID, team))
+	for _, vm := range outside {
+		plan.Notices = append(plan.Notices, fmt.Sprintf("Left alone: %s %s.", vm.Name, outsideBlock(vm.VM, vm.Team)))
 	}
 	sort.SliceStable(plan.Items, func(i, j int) bool { return plan.Items[i].Name < plan.Items[j].Name })
 	return plan, vms, nil

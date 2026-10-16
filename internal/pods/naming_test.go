@@ -266,10 +266,10 @@ func TestPropVMNames(t *testing.T) {
 				want = append(want, vm)
 			}
 		}
-		got := FindTeamVMs(vms, n, []string{team}, nil)
+		got := findTeamVMs(vms, n, []string{team}, nil)
 		slices.SortFunc(want, func(a, b proxmox.VM) int { return strings.Compare(a.Name, b.Name) })
 		if !slices.EqualFunc(got, want, func(a, b proxmox.VM) bool { return a.Node == b.Node }) {
-			t.Fatalf("pattern %q: FindTeamVMs(%+v) = %+v, want %+v", n.cfg.VMName, vms, got, want)
+			t.Fatalf("pattern %q: findTeamVMs(%+v) = %+v, want %+v", n.cfg.VMName, vms, got, want)
 		}
 	})
 }

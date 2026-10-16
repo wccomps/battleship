@@ -34,7 +34,7 @@ func TestLoginRoundTrip(t *testing.T) {
 	if sess.Subject != alice.Subject || sess.Name != alice.Name || sess.Email != alice.Email || sess.Username != "alice" {
 		t.Errorf("session = %+v, want alice's identity", sess)
 	}
-	if rt := b.refreshToken(); !slices.Contains(h.idp.RefreshTokens(), rt) {
+	if rt := b.refreshToken(); !slices.Contains(h.liveTokens(), rt) {
 		t.Errorf("stored refresh token %q is not one the provider issued", rt)
 	}
 	now := h.clock.Now()
@@ -417,7 +417,7 @@ func TestLogout(t *testing.T) {
 	b := h.browser()
 	b.login(alice)
 	token := b.sessionToken()
-	live := h.idp.RefreshTokens()
+	live := h.liveTokens()
 	resp := b.postForm("/auth/logout", url.Values{"csrf": {b.csrf()}}, nil)
 	loc, _ := url.Parse(resp.Header.Get("Location"))
 	if resp.StatusCode != http.StatusSeeOther || loc == nil || loc.Scheme+"://"+loc.Host+loc.Path != h.idp.Issuer()+"end-session" {
@@ -426,8 +426,8 @@ func TestLogout(t *testing.T) {
 	if q := loc.Query(); idTokenSubject(t, q.Get("id_token_hint")) != "sub-alice" || q.Get("client_id") != h.cfg.OIDC.ClientID {
 		t.Errorf("end-session query = %v, want alice's ID token as id_token_hint and the client ID", q)
 	}
-	if got := h.idp.Revoked(); len(live) != 1 || !slices.Equal(got, live) || len(h.idp.RefreshTokens()) != 0 {
-		t.Errorf("revoked %v of %v; still live %v", got, live, h.idp.RefreshTokens())
+	if got := h.revoked(); len(live) != 1 || !slices.Equal(got, live) || len(h.liveTokens()) != 0 {
+		t.Errorf("revoked %v of %v; still live %v", got, live, h.liveTokens())
 	}
 	if c := resp.cookie(auth.SessionCookie); c == nil || c.MaxAge >= 0 {
 		t.Errorf("session cookie after logout = %+v, want it cleared", c)
@@ -495,8 +495,104 @@ func TestRefreshRacingLogoutRevokesTheRotatedToken(t *testing.T) {
 		}
 	})
 	b.do(http.MethodGet, "/private", nil, nil)
-	if live := h.idp.RefreshTokens(); len(live) != 0 {
-		t.Errorf("refresh tokens still live after logout: %v (revoked %v)", live, h.idp.Revoked())
+	if live := h.liveTokens(); len(live) != 0 {
+		t.Errorf("refresh tokens still live after logout: %v (revoked %v)", live, h.revoked())
+	}
+}
+
+// A refresh that fails (the provider unreachable for userinfo) after
+// rotating the token, while its session is logged out, revokes the rotated
+// token too.
+func TestFailedRefreshRacingLogoutRevokesTheRotatedToken(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	csrf := b.csrf() // before the clock moves: reading it may refresh
+	h.clock.Advance(5 * time.Minute)
+	h.idp.Set(func(f *authtest.Behavior) {
+		f.NoIDTokenOnRefresh = true
+		f.UserinfoStatus = http.StatusServiceUnavailable
+		f.OnRefresh = func(*http.Request) bool {
+			b.postForm("/auth/logout", url.Values{"csrf": {csrf}}, nil)
+			return false
+		}
+	})
+	b.do(http.MethodGet, "/private", nil, nil)
+	if live := h.liveTokens(); len(live) != 0 {
+		t.Errorf("refresh tokens still live after logout: %v (revoked %v)", live, h.revoked())
+	}
+}
+
+// Logging in again in the same browser revokes the old session's token.
+func TestLoginAgainRevokesTheOldSessionsToken(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	first := h.liveTokens()
+	b.login(alice)
+	if !slices.Equal(h.revoked(), first) || len(h.liveTokens()) != 1 {
+		t.Errorf("revoked %v (first session's %v); live %v", h.revoked(), first, h.liveTokens())
+	}
+}
+
+// Revocation authenticates the client as the provider takes it: as the
+// revocation endpoint lists, else as the token endpoint lists, else basic
+// and then post.
+func TestLogoutRevokesWithTheProvidersClientAuth(t *testing.T) {
+	for name, set := range map[string]func(*authtest.Behavior){
+		"revocation lists post": func(f *authtest.Behavior) {
+			f.AuthMethods, f.RevokeAuthMethods = []string{"client_secret_basic"}, []string{"client_secret_post"}
+		},
+		"token endpoint lists post": func(f *authtest.Behavior) { f.AuthMethods = []string{"client_secret_post"} },
+		"none listed":               func(f *authtest.Behavior) { f.AuthMethods = []string{} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.idp.Set(func(f *authtest.Behavior) { set(f); f.RevokePostOnly = true })
+			h.restart(h.cfg)
+			b := h.browser()
+			b.login(alice)
+			live := h.liveTokens()
+			b.postForm("/auth/logout", url.Values{"csrf": {b.csrf()}}, nil)
+			if !slices.Equal(h.revoked(), live) {
+				t.Errorf("revoked %v, want %v; logs %s", h.revoked(), live, h.logs.String())
+			}
+		})
+	}
+}
+
+// A revocation the provider refuses stays queued and is sent again later;
+// after revokeAttempts tries it is dropped. Nothing is lost to a failure in
+// between.
+func TestRevocationIsRetriedThenDropped(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	live := h.liveTokens()
+	h.idp.Set(func(f *authtest.Behavior) { f.RevokeStatus = http.StatusServiceUnavailable })
+	b.postForm("/auth/logout", url.Values{"csrf": {b.csrf()}}, nil)
+	if got := h.revoked(); len(got) != 0 {
+		t.Fatalf("revoked %v while the provider refused", got)
+	}
+	h.idp.Set(func(f *authtest.Behavior) { f.RevokeStatus = 0 })
+	deadline := time.Now().Add(5 * time.Second)
+	for len(h.revoked()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond) // the retry comes due
+	}
+	if got := h.revoked(); !slices.Equal(got, live) {
+		t.Fatalf("revoked %v after the provider came back, want %v", got, live)
+	}
+
+	// A provider that never takes it: tried revokeAttempts times, then dropped.
+	b.login(alice)
+	h.idp.Set(func(f *authtest.Behavior) { f.RevokeStatus = http.StatusServiceUnavailable })
+	b.postForm("/auth/logout", url.Values{"csrf": {b.csrf()}}, nil)
+	for !strings.Contains(h.logs.String(), "giving up after 5 tries") && time.Now().Before(deadline.Add(5*time.Second)) {
+		_ = h.revoked()
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(h.logs.String(), "giving up after 5 tries") {
+		t.Errorf("logs = %q, want the revocation given up", h.logs.String())
 	}
 }
 
@@ -519,10 +615,10 @@ func TestLogoutWhenRevocationFails(t *testing.T) {
 				t.Errorf("logout = %d", resp.StatusCode)
 			}
 			h.sessionGone(token)
-			if len(h.idp.Revoked()) != 0 {
-				t.Errorf("revoked %v", h.idp.Revoked())
+			if len(h.revoked()) != 0 {
+				t.Errorf("revoked %v", h.revoked())
 			}
-			if failed := strings.Contains(h.logs.String(), "revoking the refresh token"); failed != (name == "revocation fails") {
+			if failed := strings.Contains(h.logs.String(), "revoking the refresh token of session"); failed != (name == "revocation fails") {
 				t.Errorf("logs = %q", h.logs.String())
 			}
 		})

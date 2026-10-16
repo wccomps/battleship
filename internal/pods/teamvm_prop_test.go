@@ -76,7 +76,9 @@ func TestPropTeamVMsAreNamedAndNumbered(t *testing.T) {
 				if in != isTeam {
 					t.Fatalf("%s plan has %s (VMID %d, pool %q, template %v): %v, want %v", plan.Kind, vm.Name, vm.VMID, vm.Pool, vm.Template, in, isTeam)
 				}
-				noticed := slices.ContainsFunc(plan.Notices, func(n string) bool { return strings.HasPrefix(n, fmt.Sprintf("%s (VMID %d) ", vm.Name, vm.VMID)) })
+				noticed := slices.ContainsFunc(plan.Notices, func(n string) bool {
+					return strings.HasPrefix(n, fmt.Sprintf("Left alone: %s has a team ", vm.Name)) && strings.Contains(n, fmt.Sprintf(" is VMID %d, ", vm.VMID))
+				})
 				if want := named && !isTeam; noticed != want {
 					t.Fatalf("%s plan notices %s (VMID %d): %v, want %v (%q)", plan.Kind, vm.Name, vm.VMID, noticed, want, plan.Notices)
 				}
@@ -112,7 +114,7 @@ func TestDeployBlocksNameTakenOutsideTeamBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(td.Items) != 0 || len(td.Notices) != 1 || !strings.HasPrefix(td.Notices[0], "team01-teak (VMID 8005) ") {
+	if len(td.Items) != 0 || len(td.Notices) != 1 || !strings.HasPrefix(td.Notices[0], "Left alone: team01-teak has a team 01 name but is VMID 8005") {
 		t.Fatalf("teardown of team 01 = %+v, notices %q; want nothing to do, and a notice about team01-teak", td.Items, td.Notices)
 	}
 }
@@ -152,4 +154,36 @@ func TestRebuildIgnoresTeamNamesOutsideTheBlock(t *testing.T) {
 	if !strings.Contains(plan.Templates[0].Blocked, "team05-teak") {
 		t.Errorf("rebuild not blocked by team 05's VM: %q", plan.Templates[0].Blocked)
 	}
+}
+
+// Classify sorts any VM by the rule: not team-named; team-named but a
+// template; team-named outside its team's clone block; or a team VM.
+func TestPropClassify(t *testing.T) {
+	cfg := config.Default().Naming
+	n := NewNaming(cfg)
+	rapid.Check(t, func(t *rapid.T) {
+		team := fmt.Sprintf("%02d", rapid.IntRange(0, 99).Draw(t, "team"))
+		name := rapid.SampledFrom([]string{"team" + team + "-dc", "team" + team + "-dc" + cfg.TemplateSuffix, "team" + team[1:] + "-dc",
+			"dc." + team, "team" + team + "-"}).Draw(t, "name")
+		vm := proxmox.VM{Name: name, VMID: rapid.SampledFrom(blockVMIDs(cfg, team)).Draw(t, "vmid"), Template: rapid.Bool().Draw(t, "template")}
+		host, named := strings.CutPrefix(name, "team"+team+"-")
+		named = named && host != ""
+		want := NotTeamNamed
+		switch {
+		case !named:
+		case vm.Template || strings.HasSuffix(name, cfg.TemplateSuffix):
+			want = TeamTemplate
+		case !inTeamBlock(cfg, team, vm.VMID):
+			want = OutsideBlock
+		default:
+			want = TeamVMKind
+		}
+		kind, gotTeam, _ := n.Classify(vm)
+		if kind != want || kind != NotTeamNamed && gotTeam != team {
+			t.Fatalf("Classify(%+v) = %v, team %q; want %v, team %s", vm, kind, gotTeam, want, team)
+		}
+		if _, _, ok := n.TeamVM(vm); ok != (want == TeamVMKind) {
+			t.Fatalf("TeamVM(%+v) = %v", vm, ok)
+		}
+	})
 }

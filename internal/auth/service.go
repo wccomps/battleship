@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -48,6 +49,9 @@ type Options struct {
 	// Proxmox signs users in to Proxmox and renews their tickets; it is
 	// required. It holds no credential of its own.
 	Proxmox ProxmoxLogin
+	// RevokeRetry is how often queued refresh token revocations are looked
+	// for, and how long a failed one first waits. Default a minute.
+	RevokeRetry time.Duration
 }
 
 // Service logs users in through the identity provider (OpenID Connect),
@@ -62,14 +66,17 @@ type Service struct {
 	provider      *oidc.Provider
 	verifier      *oidc.IDTokenVerifier
 	oauth         oauth2.Config
-	endSessionURL string      // provider logout URL; "" if discovery lists none
-	revokeURL     string      // provider token revocation URL (RFC 7009); "" if none
-	secure        bool        // cookies get Secure (base_url is https)
-	names         cookieNames // cookie names, from namesFor(secure)
-	origin        string      // base_url's origin, for the Origin check
-	loginKey      seal.Key    // seals the login cookie (loginstate.go)
-	refreshKey    seal.Key    // seals refresh tokens at rest (refreshtoken.go)
-	ticketKey     seal.Key    // seals Proxmox tickets at rest (ticket.go)
+	endSessionURL string           // provider logout URL; "" if discovery lists none
+	revokeURL     string           // provider token revocation URL (RFC 7009); "" if none
+	revokeStyle   oauth2.AuthStyle // how revoke authenticates (see authStyle)
+	revokeKick    chan struct{}    // wakes RunRevocations
+	revokeRetry   time.Duration    // RunRevocations' tick; a failed revocation waits this, doubling
+	secure        bool             // cookies get Secure (base_url is https)
+	names         cookieNames      // cookie names, from namesFor(secure)
+	origin        string           // base_url's origin, for the Origin check
+	loginKey      seal.Key         // seals the login cookie (loginstate.go)
+	refreshKey    seal.Key         // seals refresh tokens at rest (refreshtoken.go)
+	ticketKey     seal.Key         // seals Proxmox tickets at rest (ticket.go)
 	pve           ProxmoxLogin
 }
 
@@ -111,19 +118,21 @@ func NewService(ctx context.Context, cfg config.Config, st *store.Store, opts Op
 	}
 
 	s := &Service{
-		cfg:        cfg,
-		st:         st,
-		now:        opts.Now,
-		logf:       opts.Logf,
-		render:     plainPage,
-		client:     &http.Client{Timeout: providerTimeout},
-		secure:     SecureBaseURL(w.BaseURL),
-		names:      namesFor(SecureBaseURL(w.BaseURL)),
-		origin:     normalOrigin(base),
-		loginKey:   seal.NewKey(cfg.OIDC.ClientSecret, loginStatePurpose),
-		refreshKey: seal.NewKey(cfg.OIDC.ClientSecret, refreshTokenPurpose),
-		ticketKey:  ticketKey(cfg),
-		pve:        opts.Proxmox,
+		cfg:         cfg,
+		st:          st,
+		now:         opts.Now,
+		logf:        opts.Logf,
+		render:      plainPage,
+		client:      &http.Client{Timeout: providerTimeout},
+		secure:      SecureBaseURL(w.BaseURL),
+		names:       namesFor(SecureBaseURL(w.BaseURL)),
+		origin:      normalOrigin(base),
+		loginKey:    seal.NewKey(cfg.OIDC.ClientSecret, loginStatePurpose),
+		refreshKey:  seal.NewKey(cfg.OIDC.ClientSecret, refreshTokenPurpose),
+		revokeKick:  make(chan struct{}, 1),
+		revokeRetry: cmp.Or(opts.RevokeRetry, time.Minute),
+		ticketKey:   ticketKey(cfg),
+		pve:         opts.Proxmox,
 	}
 	if s.now == nil {
 		s.now = time.Now
@@ -141,6 +150,7 @@ func NewService(ctx context.Context, cfg config.Config, st *store.Store, opts Op
 	var meta struct {
 		EndSession  string   `json:"end_session_endpoint"`
 		Revocation  string   `json:"revocation_endpoint"`
+		RevokeAuth  []string `json:"revocation_endpoint_auth_methods_supported"`
 		AuthMethods []string `json:"token_endpoint_auth_methods_supported"`
 		JWKSURI     string   `json:"jwks_uri"`
 		Algorithms  []string `json:"id_token_signing_alg_values_supported"`
@@ -155,11 +165,10 @@ func NewService(ctx context.Context, cfg config.Config, st *store.Store, opts Op
 		s.revokeURL = meta.Revocation
 	}
 	endpoint := provider.Endpoint()
-	switch {
-	case slices.Contains(meta.AuthMethods, "client_secret_basic"):
-		endpoint.AuthStyle = oauth2.AuthStyleInHeader
-	case slices.Contains(meta.AuthMethods, "client_secret_post"):
-		endpoint.AuthStyle = oauth2.AuthStyleInParams
+	endpoint.AuthStyle = authStyle(meta.AuthMethods)
+	s.revokeStyle = endpoint.AuthStyle
+	if len(meta.RevokeAuth) > 0 {
+		s.revokeStyle = authStyle(meta.RevokeAuth)
 	}
 	s.provider = provider
 	var algs []string // what go-oidc supports of what the provider offers; empty means RS256
@@ -195,6 +204,18 @@ func (s *Service) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /auth/logout", s.logout)
 	mux.HandleFunc("GET /auth/proxmox", s.proxmoxStart)
 	mux.HandleFunc("GET "+proxmoxCallbackPath, s.proxmoxCallback)
+}
+
+// authStyle is how a client authenticates to an endpoint that lists
+// methods: basic, else post, else oauth2's auto-detect (basic, then post).
+func authStyle(methods []string) oauth2.AuthStyle {
+	switch {
+	case slices.Contains(methods, "client_secret_basic"):
+		return oauth2.AuthStyleInHeader
+	case slices.Contains(methods, "client_secret_post"):
+		return oauth2.AuthStyleInParams
+	}
+	return oauth2.AuthStyleAutoDetect
 }
 
 // webURL is whether a discovery endpoint is an absolute http(s) URL.

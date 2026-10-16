@@ -291,7 +291,7 @@ func TestPreviewNoticesTeamNamedVMsOutsideTheBlock(t *testing.T) {
 	op := h.login(asOperator)
 	body := h.post(&op, "/teardown/preview", url.Values{"teams": {"1"}, "hosts": {"scratch"}}).Body.String()
 	contains(t, "teardown preview", body, "No team VMs match these teams and hosts.",
-		`<span class="name">team01-scratch</span> (VMID 8005) has a team 01 name but is outside the team&#39;s VMIDs, so it isn&#39;t a team VM and is left alone.`)
+		`Left alone: <span class="name">team01-scratch</span> has a team 01 name but is VMID 8005, outside the team&#39;s VMIDs, so it isn&#39;t a team VM; rename or remove it in Proxmox.`)
 	lacks(t, "teardown preview", body, `name="nonce"`)
 }
 

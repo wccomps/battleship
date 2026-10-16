@@ -61,3 +61,10 @@ func PoolSizes(s *Store) (main, liveness int) {
 // SlotConnConfig is the config the store's slot session connects with, so
 // tests can wrap its dialer.
 func SlotConnConfig(s *Store) *pgx.ConnConfig { return s.slots.cfg }
+
+// ClearStaleAfter drops a running job's stale_after, as an older
+// battleship's claim left it.
+func ClearStaleAfter(ctx context.Context, s *Store, id int64) error {
+	_, err := s.pool.Exec(ctx, `UPDATE jobs SET stale_after = NULL WHERE id = $1`, id)
+	return err
+}

@@ -46,7 +46,7 @@ var vmTasks = map[string]bool{
 
 // touchedByTasks re-reads team VMs touched by tasks on auditable nodes.
 // Failures are only logged; the full scan still finds the changes.
-func (p *Poller) touchedByTasks(ctx context.Context, teamVMs []proxmox.VM, offset time.Duration) scanResults {
+func (p *Poller) touchedByTasks(ctx context.Context, teamVMs []pods.NamedVM, offset time.Duration) scanResults {
 	tasks, ok1 := p.api.(TaskReader)
 	perms, ok2 := p.api.(pods.PermissionReader)
 	if !ok1 || !ok2 {
@@ -54,7 +54,7 @@ func (p *Poller) touchedByTasks(ctx context.Context, teamVMs []proxmox.VM, offse
 	}
 	now := p.clock.Now()
 	// Only the VM a cell shows is re-read, as the scan's results are by name.
-	byVMID := map[int]proxmox.VM{}
+	byVMID := map[int]pods.NamedVM{}
 	nodes := map[string]bool{}
 	for _, vm := range shownVMs(teamVMs) {
 		byVMID[vm.VMID] = vm

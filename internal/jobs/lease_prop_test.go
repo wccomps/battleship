@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -31,10 +30,9 @@ const leaseStale = time.Minute
 func newLeaseWorld() *leaseWorld {
 	epoch := time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
 	lw := &leaseWorld{real: epoch, mono: epoch, wall: epoch}
-	w := &Worker{now: func() time.Time { return lw.wall }}
+	w := &Worker{now: func() time.Time { return lw.wall }, monoNow: func() time.Time { return lw.mono }}
 	w.Cfg.Jobs.StaleAfter = leaseStale
 	lw.l = w.newLease()
-	lw.l.monoNow = func() time.Time { return lw.mono }
 	lw.beat()
 	return lw
 }
@@ -132,14 +130,12 @@ func TestExecuteSendsNothingWithoutASureClaim(t *testing.T) {
 	submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
 	w := newWorker(st, f)
 	j := claim(t, st)
-	unsure := func(ctx context.Context) (context.Context, context.CancelFunc, error) {
-		return ctx, func() {}, errClaimUnsure
-	}
+	unsure := func() (time.Time, error) { return time.Time{}, errClaimUnsure }
 	out, _ := w.execute(bg, bg, nil, j, f, unsure)
 	if len(f.DeletedIDs()) != 0 {
 		t.Errorf("deleted %v without a sure claim", f.DeletedIDs())
 	}
-	if !strings.Contains(string(out.Summary), "another worker may have taken over the job") {
+	if !strings.Contains(string(out.Summary), "the job may have been reaped") {
 		t.Errorf("outcome = %s: %s, want the VMs failed with the claim unsure", out.Status, out.Summary)
 	}
 }

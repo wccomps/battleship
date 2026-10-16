@@ -4,9 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"maps"
-	"slices"
-	"strconv"
 
 	"github.com/wccomps/battleship/internal/pods"
 )
@@ -102,50 +99,4 @@ func sourceFP(s *pods.Source) *fpSource {
 		return nil
 	}
 	return &fpSource{VMID: s.VMID, Node: s.Node, Name: s.Name}
-}
-
-// LockKeys names what a plan touches, so overlapping jobs serialize. Every
-// VM a plan changes is a vmid: key: the items' VMs, each template, the
-// image a register retires, and a master whose template the plan builds
-// (the build may stop it). A VM a plan only copies (a base image an
-// environment host or new version is cloned from) is a shared read:vmid:
-// key: such jobs run together and wait only for one that changes it (see
-// store's blocksSQL). So a deploy building from an environment host waits
-// for Set DNS on it, an environment waits for its image's delete, and two
-// deploys that pick the same free VMID for new templates don't overlap.
-func LockKeys(plan *pods.Plan) []string {
-	writes, reads := map[string]bool{}, map[string]bool{}
-	vmid := func(set map[string]bool, id int) {
-		if id != 0 {
-			set["vmid:"+strconv.Itoa(id)] = true
-		}
-	}
-	for _, t := range plan.Teams {
-		writes["team:"+t] = true
-	}
-	for _, t := range plan.Templates {
-		writes["template:"+t.Name] = true
-		vmid(writes, t.VMID)
-		if !t.Exists || t.Rebuild {
-			vmid(writes, t.MasterVMID)
-		}
-	}
-	for _, it := range plan.Items {
-		vmid(writes, it.VMID)
-		if it.Source != nil {
-			vmid(reads, it.Source.VMID)
-		}
-		if it.Supersedes != nil {
-			vmid(writes, it.Supersedes.VMID)
-		}
-	}
-	for _, k := range plan.Locks {
-		writes[k] = true
-	}
-	for k := range reads {
-		if !writes[k] {
-			writes["read:"+k] = true
-		}
-	}
-	return slices.Sorted(maps.Keys(writes))
 }

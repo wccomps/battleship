@@ -61,7 +61,7 @@ type NewJob struct {
 	Inputs      json.RawMessage
 	Plan        json.RawMessage
 	Fingerprint string
-	LockKeys    []string
+	LockKeys    []string // what it changes, and "read:"+K for what it only reads (see blocksSQL)
 	CreatedBy   string
 	CreatedAs   string // the Proxmox user (or API token ID) it acts as
 	Items       []NewItem

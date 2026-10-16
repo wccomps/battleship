@@ -82,20 +82,17 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 	return p.envPlan(ctx, KindEnvCreate, env, append([]HostSpec{req.Router}, req.Hosts...), vms)
 }
 
-// slotHeld is whether any VMID in slot's block exists, listed or not: what a
-// user may see of a slot depends on their rights, but Proxmox reports any
-// VMID in use, so an environment never lands in a slot someone else uses.
+// slotHeld is whether any VMID in slot's block is in use, listed or not:
+// what a user may see depends on their rights, but Proxmox reports any.
+// VMs on the slot's bridges count through Environments' Users instead.
 func (p Planner) slotHeld(ctx context.Context, slot Slot, vms []proxmox.VM) (bool, error) {
-	last := slot.FirstVMID + 99
-	if slices.ContainsFunc(vms, func(vm proxmox.VM) bool { return vm.VMID >= slot.FirstVMID && vm.VMID <= last }) {
-		return true, nil
-	}
-	// One VMID held is enough: errSlotHeld stops the rest.
+	use := newVMIDUse(p.API, vms)
+	// errSlotHeld cancels gctx, which stops the rest.
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(envReads)
-	for id := slot.FirstVMID; id <= last; id++ {
+	for id := slot.FirstVMID; id <= slot.LastVMID(); id++ {
 		g.Go(func() error {
-			held, err := p.API.VMIDHeld(gctx, id)
+			held, err := use.inUse(gctx, id)
 			switch {
 			case held:
 				return errSlotHeld
@@ -223,14 +220,13 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 			ip.Blocked = "a VM named " + name + " already exists outside " + env.Slot.Pool
 			continue
 		default:
-			id, err := p.freeVMID(ctx, vms, env.Slot.FirstVMID, env.Slot.FirstVMID+99, taken)
+			id, err := p.freeVMID(ctx, vms, env.Slot.FirstVMID, env.Slot.LastVMID(), taken)
 			if err != nil {
 				ip.Blocked = "dev slot " + env.Slot.Name + " has " + err.Error()
 				continue
 			}
 			ip.VMID, taken[id] = id, true
 		}
-		plan.Locks = append(plan.Locks, "vmid:"+strconv.Itoa(ip.VMID))
 		cfg, err := readImage(im)
 		if err != nil {
 			return nil, err

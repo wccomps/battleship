@@ -16,6 +16,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/wccomps/battleship/internal/store"
+	"golang.org/x/sync/errgroup"
 )
 
 // login starts the authorization-code flow with PKCE, keeping its state in
@@ -111,11 +112,14 @@ func (s *Service) callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Once the login has succeeded at the provider, the browser's old
-	// session is dropped.
+	// session is ended (see end). Revoking its refresh token assumes the
+	// provider revokes only that token, as Authentik does; one that ends the
+	// whole client session on revocation (Keycloak) would end the new
+	// session too.
 	old, err := r.Cookie(s.names.session)
 	hadOld := err == nil
 	if hadOld && wellFormed(old.Value) {
-		if err := s.st.DeleteSession(context.WithoutCancel(r.Context()), HashToken(old.Value)); err != nil {
+		if _, _, err := s.end(context.WithoutCancel(r.Context()), HashToken(old.Value)); err != nil {
 			s.logf("auth: deleting the previous session of subject=%q: %v", id.Subject, err)
 		}
 	}
@@ -167,18 +171,15 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 		s.rejectCSRF(w, r, sess.Subject, reason)
 		return
 	}
-	if err := s.st.DeleteSession(r.Context(), sess.ID); err != nil {
+	ended, ok, err := s.end(context.WithoutCancel(r.Context()), sess.ID)
+	if err != nil {
 		s.serverError(w, r, "ending your session", err)
 		return
 	}
 	s.clearSessionCookie(w)
 	s.logf("auth: logout: subject=%q", sess.Subject)
-	// The provider's copy of the refresh token outlives the session row, so
-	// revoke it. Logout goes on if that fails: the session is gone either way.
-	if rt, err := s.openRefreshToken(sess.ID, sess.RefreshToken); err == nil && s.revokeURL != "" {
-		if err := s.revoke(r.Context(), rt); err != nil {
-			s.logf("auth: logout: subject=%q: revoking the refresh token: %v", sess.Subject, err)
-		}
+	if ok {
+		sess.IDToken = ended.IDToken // as deleted: a refresh may have replaced it since sess was read
 	}
 	dest := "/"
 	if s.endSessionURL != "" {
@@ -198,38 +199,159 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
-// revokeTimeout bounds the revocation a logout waits for: the session is
-// already gone, so a slow provider shouldn't hold the logout up for long.
 const revokeTimeout = 3 * time.Second
 
+// end removes session id and, in the same statement, queues its refresh
+// token for revocation (see DrainRevocations). It returns the session as
+// removed, or ok false if it was already gone.
+func (s *Service) end(ctx context.Context, id string) (_ store.EndedSession, ok bool, _ error) {
+	ended, ok, err := s.st.EndSession(ctx, id, s.revokeURL != "")
+	if ok {
+		s.kickRevocations()
+	}
+	return ended, ok, err
+}
+
+// queueRevocation queues a refresh token sealed for sessionID that no
+// session holds (a rotated one that couldn't be stored). If the database
+// can't take it, the token is left to expire.
+func (s *Service) queueRevocation(ctx context.Context, sessionID, sealed, what string) {
+	if s.revokeURL == "" || sealed == "" {
+		return
+	}
+	if err := s.st.QueueRevocation(ctx, sessionID, sealed); err != nil {
+		s.logf("auth: %s: the refresh token is left to expire: %v", what, err)
+		return
+	}
+	s.kickRevocations()
+}
+
+// kickRevocations wakes RunRevocations.
+func (s *Service) kickRevocations() {
+	select {
+	case s.revokeKick <- struct{}{}:
+	default:
+	}
+}
+
+// RunRevocations revokes queued refresh tokens until ctx ends, as they are
+// queued here and every revokeRetry for the rest (other replicas', and
+// retries).
+func (s *Service) RunRevocations(ctx context.Context) {
+	t := time.NewTicker(s.revokeRetry)
+	defer t.Stop()
+	for {
+		if err := s.DrainRevocations(ctx); err != nil && ctx.Err() == nil {
+			s.logf("auth: revoking refresh tokens: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.revokeKick:
+		case <-t.C:
+		}
+	}
+}
+
+// DrainRevocations revokes the queued refresh tokens that are due, a few at
+// a time, until none are left or ctx ends. One that fails is tried again
+// later, up to revokeAttempts times, then dropped (the token expires on its
+// own).
+func (s *Service) DrainRevocations(ctx context.Context) error {
+	for ctx.Err() == nil {
+		revs, err := s.st.LeaseRevocations(ctx, revokeBatch, revokeLease)
+		if err != nil || len(revs) == 0 {
+			return err
+		}
+		var g errgroup.Group
+		g.SetLimit(revokesAtOnce)
+		for _, rv := range revs {
+			g.Go(func() error {
+				err := s.revokeSealed(ctx, rv.SessionID, rv.RefreshToken)
+				switch {
+				case err == nil:
+				case rv.Attempts+1 >= revokeAttempts:
+					s.logf("auth: revoking the refresh token of session %.8s: %v; giving up after %d tries", rv.SessionID, err, revokeAttempts)
+				default:
+					s.logf("auth: revoking the refresh token of session %.8s: %v; trying again", rv.SessionID, err)
+					return s.st.RetryRevocation(context.WithoutCancel(ctx), rv.ID, s.revokeRetry<<rv.Attempts)
+				}
+				return s.st.DoneRevocation(context.WithoutCancel(ctx), rv.ID)
+			})
+		}
+		if err := g.Wait(); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
+const (
+	revokesAtOnce  = 4               // revocations sent at a time
+	revokeBatch    = 20              // queued revocations leased at a time
+	revokeLease    = 2 * time.Minute // a lease outlasts a batch: 20/4 × revokeTimeout
+	revokeAttempts = 5               // tries before a token is left to expire
+)
+
+// revokeSealed revokes the refresh token sealed for sessionID, within ctx.
+func (s *Service) revokeSealed(ctx context.Context, sessionID, sealed string) error {
+	rt, err := s.openRefreshToken(sessionID, sealed)
+	if err != nil {
+		return err
+	}
+	return s.revoke(ctx, rt)
+}
+
 // revoke asks the provider to revoke a refresh token (RFC 7009), as the
-// client, the way the token endpoint authenticates it.
+// client: authenticating as the revocation endpoint lists, or if it lists
+// none, as the token endpoint does (see authStyle); with no listed method
+// it knows, basic, then post if refused with a 401.
 func (s *Service) revoke(ctx context.Context, refreshToken string) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), revokeTimeout)
+	ctx, cancel := context.WithTimeout(ctx, revokeTimeout)
 	defer cancel()
+	styles := []oauth2.AuthStyle{s.revokeStyle}
+	if s.revokeStyle == oauth2.AuthStyleAutoDetect {
+		styles = []oauth2.AuthStyle{oauth2.AuthStyleInHeader, oauth2.AuthStyleInParams}
+	}
+	var status int
+	for _, style := range styles {
+		var err error
+		if status, err = s.revokeAs(ctx, refreshToken, style); err != nil {
+			return err
+		}
+		if status != http.StatusUnauthorized {
+			break
+		}
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("the provider answered %d %s", status, http.StatusText(status))
+	}
+	return nil
+}
+
+// revokeAs sends one revocation authenticated with style and returns the
+// provider's status.
+func (s *Service) revokeAs(ctx context.Context, refreshToken string, style oauth2.AuthStyle) (int, error) {
 	form := url.Values{"token": {refreshToken}, "token_type_hint": {"refresh_token"}}
-	if s.oauth.Endpoint.AuthStyle == oauth2.AuthStyleInParams {
+	if style == oauth2.AuthStyleInParams {
 		form.Set("client_id", s.oauth.ClientID)
 		form.Set("client_secret", s.oauth.ClientSecret)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.revokeURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if s.oauth.Endpoint.AuthStyle != oauth2.AuthStyleInParams {
+	if style != oauth2.AuthStyleInParams {
 		req.SetBasicAuth(url.QueryEscape(s.oauth.ClientID), url.QueryEscape(s.oauth.ClientSecret))
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("the provider answered %s", resp.Status)
-	}
-	return nil
+	return resp.StatusCode, nil
 }
 
 func (s *Service) clearLoginCookie(w http.ResponseWriter) {

@@ -37,7 +37,8 @@ func TestImageRegisterNewVersionRetiresPrevious(t *testing.T) {
 		it.Notes == nil || it.Notes.Source != "150" {
 		t.Errorf("item = %+v", it)
 	}
-	if !slices.Contains(plan.Locks, "family:debian-12") || !slices.Contains(plan.Locks, "vmid:8001") {
+	// The VMs it changes are its items'; Plan.LockKeys locks those.
+	if !slices.Equal(plan.Locks, []string{"family:debian-12"}) {
 		t.Errorf("locks = %v", plan.Locks)
 	}
 }
@@ -60,6 +61,16 @@ func TestImageRegisterBlocks(t *testing.T) {
 	}
 	if _, err := p.ImageRegister(ctx, ImageRequest{VMID: 150, Family: "new", Kind: "toaster"}); err == nil {
 		t.Error("unknown kind accepted")
+	}
+	// Team-named sources are refused, each saying what it is.
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "alder", Status: "stopped"}, nil)
+	f.Add(proxmox.VM{VMID: 152, Name: "team01-oak", Node: "alder", Status: "stopped"}, nil)
+	for vmid, want := range map[int]string{10121: "team01-teak is a team VM",
+		152: "team01-oak has a team 01 name but is VMID 152, outside the team's VMIDs, so it isn't a team VM; rename or remove it in Proxmox"} {
+		plan, err := p.ImageRegister(ctx, ImageRequest{VMID: vmid, Family: "deb", Kind: ImageLinux})
+		if err != nil || plan.Items[0].Blocked != want {
+			t.Errorf("register %d: %+v, %v; want blocked %q", vmid, plan, err, want)
+		}
 	}
 }
 

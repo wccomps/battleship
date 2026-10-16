@@ -66,8 +66,9 @@ type Worker struct {
 	onEvent func(apply.Event)
 	// beat sends a heartbeat; tests replace it. Nil means Store.Heartbeat.
 	beat func(ctx context.Context, jobID int64, worker string) (bool, error)
-	// now reads the wall clock for the heartbeat deadline; tests replace it.
-	now func() time.Time
+	// now and monoNow read the wall and the monotonic clock for a claim's
+	// lease; tests replace them.
+	now, monoNow func() time.Time
 
 	once sync.Once
 }
@@ -85,6 +86,9 @@ func (w *Worker) init() {
 		}
 		if w.now == nil {
 			w.now = time.Now
+		}
+		if w.monoNow == nil {
+			w.monoNow = time.Now
 		}
 	})
 }
@@ -144,7 +148,7 @@ func (w *Worker) claimNext(ctx context.Context) (*store.Job, *lease, error) {
 	claim := w.newLease()
 	claimCtx, stop := context.WithTimeout(ctx, DBCallTimeout)
 	defer stop()
-	job, err := w.Store.Claim(claimCtx, w.ID)
+	job, err := w.Store.Claim(claimCtx, w.ID, claim.stale)
 	return job, claim, err
 }
 
@@ -186,7 +190,7 @@ func (w *Worker) runClaimed(ctx context.Context, job *store.Job, claim *lease) {
 		held.set(cred)
 		go w.watchCredential(bg, job.ID, held, cancel, hbDone)
 		api := w.Bind(held.get, func() { cancel(errAuthLapsed) })
-		outcome, finished = w.execute(runCtx, bg, ctx.Done(), job, api, claim.bound)
+		outcome, finished = w.execute(runCtx, bg, ctx.Done(), job, api, claim.held)
 	}
 	// A lost claim (errLostClaim) needs no case: Finish refuses it below.
 	switch cause := context.Cause(runCtx); {
@@ -204,8 +208,7 @@ func (w *Worker) runClaimed(ctx context.Context, job *store.Job, claim *lease) {
 		outcome.Status = store.StatusCancelled
 	case errors.Is(cause, errNoHeartbeat):
 		// Stopped before another worker may reap it. Cleanup runs, but
-		// sends a change only while the claim is sure, each bounded to end
-		// before the job could be reaped (see lease).
+		// sends a change only while the claim is sure (see lease).
 		if store.JobStatus(outcome.Status).RanNothing() {
 			break
 		}
@@ -234,7 +237,6 @@ func (w *Worker) runClaimed(ctx context.Context, job *store.Job, claim *lease) {
 	}
 }
 
-// describeOutcome is an outcome for the log.
 func describeOutcome(o store.Outcome) string {
 	msg := string(o.Status)
 	if o.Error != "" {
@@ -247,22 +249,16 @@ func describeOutcome(o store.Outcome) string {
 }
 
 // heartbeat beats every Jobs.Heartbeat (and at once on wake) until done is
-// closed, cancelling the run on a cancel request or a lost claim.
-//
-// No successful beat for StaleAfter/2 cancels with errNoHeartbeat; a timer
-// enforces this so a beat hung on a dead connection can't defer it. Beating
-// continues afterwards to keep the job claimed during cleanup. Each
-// successful beat renews claim.
+// closed, renewing claim on each successful beat and cancelling the run on
+// a cancel request, a lost claim, or (errNoHeartbeat) once the claim is
+// unsure. A timer enforces the last so a beat hung on a dead connection
+// can't defer it. Beating continues afterwards to keep the job claimed
+// during cleanup.
 func (w *Worker) heartbeat(ctx context.Context, jobID int64, claim *lease, cancel context.CancelCauseFunc, wake <-chan struct{}, done <-chan struct{}) {
 	t := time.NewTicker(w.Cfg.Jobs.Heartbeat)
 	defer t.Stop()
-	threshold := w.Cfg.Jobs.StaleAfter / 2
-	// The claim itself counts as a heartbeat, from when it was asked for.
-	sinceMono, lastOKWall := claim.since()
-	deadline := time.AfterFunc(threshold-time.Since(sinceMono), func() { cancel(errNoHeartbeat) })
-	defer deadline.Stop()
-	// The timer's monotonic clock stops while the machine sleeps, so also
-	// check the wall clock (lastOKWall has no monotonic reading).
+	stopWatch := claim.watch(func() { cancel(errNoHeartbeat) })
+	defer stopWatch()
 	for {
 		select {
 		case <-done:
@@ -274,10 +270,8 @@ func (w *Worker) heartbeat(ctx context.Context, jobID int64, claim *lease, cance
 				continue
 			}
 		}
-		if w.now().Round(0).Sub(lastOKWall) >= threshold {
-			cancel(errNoHeartbeat)
-		}
-		start := time.Now()
+		claim.check()
+		start := w.monoNow()
 		startWall := w.now().Round(0)
 		beatCtx, stopBeat := context.WithTimeout(ctx, w.Cfg.Jobs.Heartbeat)
 		stop, err := w.beat(beatCtx, jobID, w.ID)
@@ -291,8 +285,6 @@ func (w *Worker) heartbeat(ctx context.Context, jobID int64, claim *lease, cance
 			w.Logf("job %d: heartbeat: %v", jobID, err)
 		default:
 			claim.renew(start, startWall)
-			lastOKWall = startWall
-			deadline.Reset(threshold - time.Since(start))
 			if stop {
 				cancel(apply.ErrCancelRequested)
 			}
@@ -304,7 +296,7 @@ func (w *Worker) heartbeat(ctx context.Context, jobID int64, claim *lease, cance
 // it. bg outlives ctx and records progress; halt closes on shutdown
 // (apply.Executor.Halt). finished means no VM was interrupted and no retry
 // round was skipped.
-func (w *Worker) execute(ctx, bg context.Context, halt <-chan struct{}, job *store.Job, api pods.API, held func(context.Context) (context.Context, context.CancelFunc, error)) (out store.Outcome, finished bool) {
+func (w *Worker) execute(ctx, bg context.Context, halt <-chan struct{}, job *store.Job, api pods.API, held func() (time.Time, error)) (out store.Outcome, finished bool) {
 	var in Inputs
 	if err := json.Unmarshal(job.Inputs, &in); err != nil {
 		return store.Outcome{Status: store.StatusFailed, Error: "reading job inputs: " + err.Error()}, false
@@ -373,20 +365,24 @@ func (w *Worker) jobCredential(ctx context.Context, jobID int64) (proxmox.Creden
 	return cred, nil
 }
 
-// errClaimUnsure holds back a change once the job's claim isn't sure.
-var errClaimUnsure = errors.New("not sent to Proxmox: battleship lost contact with its database, so another worker may have taken over the job")
+var errClaimUnsure = errors.New("not sent to Proxmox: battleship lost contact with its database, so the job may have been reaped and another job may be changing these VMs")
 
 // lease is whether this worker is sure it still holds a job's claim, and
-// until when a change it sends may take effect.
+// how long it waits for a change's answer.
 //
-// Another worker reaps a job once its heartbeat stamp is StaleAfter old.
-// Every stamp is taken at or after the start of the beat (or claim) that
-// wrote it, so the job can't be reaped before that start + StaleAfter. The
-// claim is sure while the last successful beat began under StaleAfter/2
-// ago by both the monotonic clock and the wall clock (the monotonic one
-// stops while the machine sleeps), the threshold that also stops the run;
-// each change must finish by that start + StaleAfter - margin, by the
-// larger of the two, so one sent late can't land after a reap.
+// A job is reaped once its heartbeat stamp is StaleAfter old (the claimer's
+// StaleAfter, see store.Claim; a reaper older than migration 014 uses its
+// own), and a stamp is never earlier than the start
+// of the beat (or claim) that wrote it. The claim is sure while that start
+// is under StaleAfter/2 ago; no change is sent once it isn't. The wait for
+// a change's answer ends StaleAfter - margin after that start. Elapsed time
+// is the larger of the monotonic clock's (which stops while the machine
+// sleeps) and the wall clock's, assuming NTP never steps the wall clock
+// back by more than the margin while the machine sleeps. The wait is a
+// context deadline, so a sleep delays it too; the next change is checked
+// against both clocks. Giving up waiting doesn't undo a request Proxmox
+// already received, and tasks a change started run on, under Proxmox's own
+// VM locks.
 type lease struct {
 	mu      sync.Mutex
 	mono    time.Time // start of the last successful beat, with a monotonic reading
@@ -395,29 +391,52 @@ type lease struct {
 	stale   time.Duration
 	wallNow func() time.Time
 	monoNow func() time.Time
+	// onUnsure, set by watch, runs once the claim is unsure; timer fires it
+	// when that is due by the monotonic clock, check by the wall clock.
+	onUnsure func()
+	timer    *time.Timer
 }
 
-// newLease starts a lease now: call it before the claim it is for.
+// newLease starts a lease now with the worker's clocks: call it before the
+// claim it is for.
 func (w *Worker) newLease() *lease {
 	w.init()
-	l := &lease{stale: w.Cfg.Jobs.StaleAfter, wallNow: w.now, monoNow: time.Now}
+	l := &lease{stale: w.Cfg.Jobs.StaleAfter, wallNow: w.now, monoNow: w.monoNow}
 	l.renew(l.monoNow(), l.wallNow().Round(0))
 	return l
 }
 
-// margin is how long before the earliest reap a change must finish.
+// watch runs onUnsure once the claim is unsure without a renewal (a timer,
+// so a beat hung on a dead connection can't delay it) until the returned
+// stop is called.
+func (l *lease) watch(onUnsure func()) (stop func()) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.onUnsure = onUnsure
+	elapsed, _ := l.elapsed()
+	l.timer = time.AfterFunc(l.stale/2-elapsed, onUnsure)
+	return func() { l.timer.Stop() }
+}
+
+// check runs onUnsure if the claim is unsure by the wall clock, which the
+// timer misses after the machine sleeps.
+func (l *lease) check() {
+	if _, err := l.held(); errors.Is(err, errClaimUnsure) && l.onUnsure != nil {
+		l.onUnsure()
+	}
+}
+
+// margin is how long before the earliest reap the wait for an answer ends.
 func (l *lease) margin() time.Duration { return min(5*time.Second, l.stale/4) }
 
 func (l *lease) renew(mono, wall time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.mono, l.wall = mono, wall
-}
-
-func (l *lease) since() (mono, wall time.Time) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.mono, l.wall
+	if l.timer != nil {
+		elapsed, _ := l.elapsed()
+		l.timer.Reset(l.stale/2 - elapsed)
+	}
 }
 
 func (l *lease) lose() {
@@ -426,16 +445,19 @@ func (l *lease) lose() {
 	l.lost = true
 }
 
-// held is the deadline by which a change sent now must finish, or why no
-// change may be sent.
+// elapsed is how long ago the last successful beat began, and the
+// monotonic now. The caller holds l.mu.
+func (l *lease) elapsed() (time.Duration, time.Time) {
+	monoNow := l.monoNow()
+	return max(monoNow.Sub(l.mono), l.wallNow().Round(0).Sub(l.wall)), monoNow
+}
+
+// held is when to stop waiting for a change sent now, or why no change may
+// be sent: it is apply.Executor.Held.
 func (l *lease) held() (time.Time, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	// Real time since the beat is at least the monotonic clock's (which
-	// misses sleep) and about the wall clock's (which misses nothing but
-	// NTP steps, far under the margin): take the larger.
-	monoNow := l.monoNow()
-	elapsed := max(monoNow.Sub(l.mono), l.wallNow().Round(0).Sub(l.wall))
+	elapsed, monoNow := l.elapsed()
 	switch {
 	case l.lost:
 		return time.Time{}, fmt.Errorf("not sent to Proxmox: the %w", errLostClaim)
@@ -443,17 +465,6 @@ func (l *lease) held() (time.Time, error) {
 		return time.Time{}, errClaimUnsure
 	}
 	return monoNow.Add(l.stale - l.margin() - elapsed), nil
-}
-
-// bound is held as apply.Executor.Held wants it: ctx limited to the
-// deadline, or why no change may be sent.
-func (l *lease) bound(ctx context.Context) (context.Context, context.CancelFunc, error) {
-	deadline, err := l.held()
-	if err != nil {
-		return ctx, func() {}, err
-	}
-	bctx, cancel := context.WithDeadline(ctx, deadline)
-	return bctx, cancel, nil
 }
 
 // stillOurs reports whether this worker still runs job jobID, as far as
@@ -523,6 +534,11 @@ func staleMessage(then, now *pods.Plan) string {
 	}
 	if privilegesChanged(then, now) {
 		return "your Proxmox privileges changed since the preview, so it would now do something else; nothing was changed. Preview it again."
+	}
+	if len(then.Items) == len(now.Items) && len(then.Runnable()) == len(now.Runnable()) {
+		// Something the counts don't show: a VM, step or setting, or a
+		// battleship upgrade that plans the same job differently.
+		return "the plan no longer matches the preview (the cluster changed, or battleship was upgraded, since); nothing was changed. Preview it again."
 	}
 	return fmt.Sprintf("the cluster changed since the preview (it had %d VMs, %d runnable; now %d, %d runnable); nothing was changed. Preview it again.",
 		len(then.Items), len(then.Runnable()), len(now.Items), len(now.Runnable()))

@@ -80,14 +80,20 @@ func TestClaimNextLeasesBeforeTheClaim(t *testing.T) {
 	if err != nil || job == nil {
 		t.Fatalf("claimNext = %v, %v", job, err)
 	}
-	if _, wall := l.since(); job.StartedAt == nil || wall.After(*job.StartedAt) {
+	if wall := l.wall; job.StartedAt == nil || wall.After(*job.StartedAt) {
 		t.Errorf("lease from %v, claim stamped %v: the lease started after the claim", wall, job.StartedAt)
+	}
+	// The claim carries this worker's stale_after, which reapers honour.
+	if ids, err := st.ReapStale(bg, -time.Minute); err != nil || len(ids) != 0 {
+		t.Errorf("a reaper with a shorter stale_after reaped %v (%v)", ids, err)
 	}
 }
 
 func claim(t *testing.T, st *store.Store) *store.Job {
 	t.Helper()
-	j, err := st.Claim(bg, "w1")
+	// Reaped as soon as its heartbeat is a millisecond old: tests reap
+	// (ReapStale) only when they mean to.
+	j, err := st.Claim(bg, "w1", time.Millisecond)
 	if err != nil || j == nil {
 		t.Fatalf("Claim = %v, %v", j, err)
 	}
@@ -913,5 +919,69 @@ func TestWorkerLogsAnOutcomeItCannotRecord(t *testing.T) {
 	defer mu.Unlock()
 	if !strings.Contains(logs.String(), "not recording its outcome: ") {
 		t.Errorf("logs = %q, want the unrecorded outcome", logs.String())
+	}
+}
+
+// A sleep that the beats after it can't renew (the database is gone too)
+// still stops the run at once: only the wall clock shows the gap.
+func TestWorkerStopsAfterWallClockGapWithFailingBeats(t *testing.T) {
+	st := storetest.New(t)
+	f := teamVMs()
+	f.gate = make(chan struct{}) // tasks hang until cancelled
+	id := submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
+	w := newWorker(st, f)
+	w.Cfg.Jobs.StaleAfter = 10 * time.Second // the timer won't fire during the test
+	var skew atomic.Int64
+	w.now = func() time.Time { return time.Now().Add(time.Duration(skew.Load())) }
+	var calls atomic.Int32
+	w.beat = func(ctx context.Context, jobID int64, worker string) (bool, error) {
+		if calls.Add(1) == 1 {
+			return w.Store.Heartbeat(ctx, jobID, worker)
+		}
+		skew.Store(int64(time.Hour)) // the laptop slept, and woke to no database
+		return false, errors.New("db down")
+	}
+	j := claim(t, st)
+
+	done := make(chan struct{})
+	go func() { w.runJob(bg, j); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("job kept running after the wall clock jumped past the threshold")
+	}
+	if got := job(t, st, id); !strings.Contains(got.Error, "lost contact with the database") {
+		t.Errorf("job = %s: %s", got.Status, got.Error)
+	}
+}
+
+// A stale plan whose counts match the preview's says it no longer matches,
+// not that the cluster changed by counts that are the same.
+func TestStaleMessageWithMatchingCounts(t *testing.T) {
+	then := &pods.Plan{Kind: pods.KindImageDelete, Locks: []string{"family:x", "vmid:8001"}, Items: []pods.Item{{Name: "x-v1", VMID: 8001}}}
+	now := &pods.Plan{Kind: pods.KindImageDelete, Locks: []string{"family:x"}, Items: []pods.Item{{Name: "x-v1", VMID: 8001}}}
+	if msg := staleMessage(then, now); !strings.Contains(msg, "no longer matches the preview") || strings.Contains(msg, "runnable") {
+		t.Errorf("staleMessage = %q", msg)
+	}
+	now.Items = nil
+	if msg := staleMessage(then, now); !strings.Contains(msg, "it had 1 VMs, 1 runnable; now 0, 0 runnable") {
+		t.Errorf("staleMessage = %q", msg)
+	}
+}
+
+// Beats that land keep the claim sure: a job running far past StaleAfter/2
+// isn't stopped while they do.
+func TestWorkerKeepsALongJobWhileBeatsLand(t *testing.T) {
+	st := storetest.New(t)
+	f := teamVMs()
+	f.gate = make(chan struct{})
+	id := submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
+	w := newWorker(st, f)
+	// Beats get 100ms each, room even under the race detector.
+	w.Cfg.Jobs.Heartbeat, w.Cfg.Jobs.StaleAfter = 100*time.Millisecond, time.Second
+	go func() { time.Sleep(2 * time.Second); close(f.gate) }()
+	w.runJob(bg, claim(t, st))
+	if got := job(t, st, id); got.Status != store.StatusSucceeded {
+		t.Errorf("job = %s: %s", got.Status, got.Error)
 	}
 }

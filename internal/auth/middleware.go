@@ -186,6 +186,14 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 		return sess, true
 	}
 	id, refreshToken, err := s.refresh(ctx, sess)
+	// A token the provider rotated to is stored, or revoked: nothing else
+	// would ever revoke it.
+	stored := refreshToken == "" || refreshToken == sess.RefreshToken
+	defer func() {
+		if !stored {
+			s.queueRevocation(context.WithoutCancel(ctx), sess.ID, refreshToken, fmt.Sprintf("refresh: subject=%q: the rotated token", sess.Subject))
+		}
+	}()
 	if err != nil && !unreachable(err) {
 		s.logf("auth: refresh rejected: subject=%q: %v; ending the session", sess.Subject, err)
 		s.endSession(w, r, sess)
@@ -212,23 +220,19 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 			s.serverError(w, r, "recording refresh failure", rerr)
 			return sess, false
 		}
+		stored = true
 		s.logf("auth: refresh failed: subject=%q: %v; the identity provider is unreachable, keeping the session until %s at the latest",
 			sess.Subject, err, stamp(graceEnd))
 		return sess, true
 	}
+	idToken := sess.IDToken
+	if id.IDToken != "" {
+		idToken = s.sealIDToken(sess.ID, id.IDToken)
+	}
 	up := store.SessionUpdate{Username: id.Username, Name: id.Name, Email: id.Email, RefreshToken: refreshToken,
-		IDToken: s.sealIDToken(sess.ID, id.IDToken), RefreshedAt: now}
+		IDToken: idToken, RefreshedAt: now}
 	err = s.st.UpdateSession(ctx, sess.ID, up)
 	if errors.Is(err, store.ErrSessionNotFound) { // logged out meanwhile
-		// The logout revoked the token it read; this refresh's rotated one
-		// would otherwise stay valid at the provider.
-		if refreshToken != sess.RefreshToken && s.revokeURL != "" {
-			if rt, err := s.openRefreshToken(sess.ID, refreshToken); err == nil {
-				if err := s.revoke(ctx, rt); err != nil {
-					s.logf("auth: refresh after logout: subject=%q: revoking the rotated refresh token: %v", sess.Subject, err)
-				}
-			}
-		}
 		s.clearSessionCookie(w)
 		s.unauthenticated(w, r)
 		return sess, false
@@ -237,10 +241,8 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 		s.serverError(w, r, "saving refreshed session", err)
 		return sess, false
 	}
-	sess.Name, sess.Email, sess.RefreshToken, sess.RefreshedAt = id.Name, id.Email, refreshToken, now
-	if up.IDToken != "" {
-		sess.IDToken = up.IDToken
-	}
+	stored = true
+	sess.Name, sess.Email, sess.RefreshToken, sess.RefreshedAt, sess.IDToken = id.Name, id.Email, refreshToken, now, idToken
 	sess.Username = id.Username
 	sess.RefreshRetryAt, sess.RefreshFailedAt = time.Time{}, time.Time{}
 	return sess, true
@@ -315,14 +317,33 @@ func wantsEventStream(r *http.Request) bool {
 	return false
 }
 
-// endSession deletes a session and clears its cookie, even if the browser
-// has gone. A failed delete still expires on its own.
+// endSession ends a session (see end) and clears its cookie, even if the
+// browser has gone. A failed delete still expires on its own.
 func (s *Service) endSession(w http.ResponseWriter, r *http.Request, sess store.Session) {
-	if err := s.st.DeleteSession(context.WithoutCancel(r.Context()), sess.ID); err != nil {
-		s.logf("auth: deleting session of subject=%q: %v", sess.Subject, err)
+	if _, _, err := s.end(context.WithoutCancel(r.Context()), sess.ID); err != nil {
+		s.logf("auth: ending the session of subject=%q: %v", sess.Subject, err)
 	}
 	s.clearSessionCookie(w)
 }
+
+// EndExpiredSessions ends the sessions expired at now (see end), a batch at
+// a time while ctx lasts, and returns how many it ended.
+func (s *Service) EndExpiredSessions(ctx context.Context, now time.Time) (int64, error) {
+	var total int64
+	for {
+		n, err := s.st.EndExpiredSessions(ctx, now, expiredBatch, s.revokeURL != "")
+		total += int64(n)
+		if n > 0 {
+			s.kickRevocations()
+		}
+		if err != nil || n < expiredBatch {
+			return total, err
+		}
+	}
+}
+
+// expiredBatch is how many sessions EndExpiredSessions ends per query.
+const expiredBatch = 100
 
 func (s *Service) serverError(w http.ResponseWriter, r *http.Request, what string, err error) {
 	s.logf("auth: %s: %v", what, err)

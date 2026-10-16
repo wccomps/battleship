@@ -28,15 +28,12 @@ func agentEnabled(v string) bool {
 // freeVMID is the lowest VMID in lo..hi that no listed VM, no VM the user
 // can't see (VMIDHeld) and nothing in taken holds.
 func (p Planner) freeVMID(ctx context.Context, vms []proxmox.VM, lo, hi int, taken map[int]bool) (int, error) {
-	listed := map[int]bool{}
-	for _, vm := range vms {
-		listed[vm.VMID] = true
-	}
+	use := newVMIDUse(p.API, vms)
 	for id := lo; id <= hi; id++ {
-		if listed[id] || taken[id] {
+		if taken[id] {
 			continue
 		}
-		held, err := p.API.VMIDHeld(ctx, id)
+		held, err := use.inUse(ctx, id)
 		if err != nil {
 			return 0, fmt.Errorf("checking whether VMID %d is free: %w", id, err)
 		}
@@ -111,14 +108,16 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		it.Supersedes = &Source{VMID: newest.VMID, Node: newest.Node, Name: newest.Name}
 		it.Steps = append(it.Steps, StepRetire)
 	}
-	_, _, isTeam := p.Naming.ParseVMName(src.Name)
+	srcKind, srcTeam, _ := p.Naming.Classify(src)
 	switch {
 	case version > MaxImageVersion:
 		it.Blocked = fmt.Sprintf("family %s is at v%d, the last version a base image name holds; register it as a new family", req.Family, MaxImageVersion)
 	case src.Template:
 		it.Blocked = src.Name + " is a template; register the VM it was made from, or open the family for editing"
-	case isTeam:
+	case srcKind == TeamVMKind:
 		it.Blocked = src.Name + " is a team VM"
+	case srcKind == OutsideBlock:
+		it.Blocked = src.Name + " " + outsideBlock(src, srcTeam)
 	case src.Status != "stopped":
 		it.Blocked = fmt.Sprintf("%s is %s; shut it down first so the copy is consistent", src.Name, src.Status)
 	case len(vmsNamed(vms, it.Name)) > 0:
@@ -135,7 +134,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		}
 	}
 	return &Plan{Kind: KindImageRegister, Config: ConfigHash(KindImageRegister, p.Cfg), Items: []Item{it},
-		Locks: []string{"family:" + req.Family, "vmid:" + strconv.Itoa(vmid)}}, nil
+		Locks: []string{"family:" + req.Family}}, nil
 }
 
 // ImageEdit plans a working copy of a family's newest version, every NIC on
@@ -175,7 +174,7 @@ func (p Planner) ImageEdit(ctx context.Context, req ImageRequest) (*Plan, error)
 		}
 	}
 	return &Plan{Kind: KindImageEdit, Config: ConfigHash(KindImageEdit, p.Cfg), Items: []Item{it},
-		Locks: []string{"family:" + req.Family, "vmid:" + strconv.Itoa(vmid)}}, nil
+		Locks: []string{"family:" + req.Family}}, nil
 }
 
 // imageItem finds req.Image for deprecate and delete.
@@ -214,5 +213,5 @@ func (p Planner) ImageDelete(ctx context.Context, req ImageRequest) (*Plan, erro
 	}
 	return &Plan{Kind: KindImageDelete, Config: ConfigHash(KindImageDelete, p.Cfg),
 		Items: []Item{{Name: im.Name, VMID: im.VMID, Node: im.Node, Steps: []Step{StepDelete}}},
-		Locks: []string{"family:" + im.Family, "vmid:" + strconv.Itoa(im.VMID)}}, nil
+		Locks: []string{"family:" + im.Family}}, nil
 }

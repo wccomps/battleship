@@ -96,12 +96,12 @@ func TestRefreshTokenIsSealedAtRest(t *testing.T) {
 		if !strings.HasPrefix(stored, "v1:") {
 			t.Errorf("%s: stored refresh token %q has no v1: prefix", when, stored)
 		}
-		for _, rt := range h.idp.RefreshTokens() {
+		for _, rt := range h.liveTokens() {
 			if strings.Contains(stored, rt) || strings.Contains(stored, strings.TrimPrefix(rt, "rt-")) {
 				t.Errorf("%s: the stored value contains the provider's refresh token", when)
 			}
 		}
-		if rt := b.refreshToken(); !slices.Contains(h.idp.RefreshTokens(), rt) {
+		if rt := b.refreshToken(); !slices.Contains(h.liveTokens(), rt) {
 			t.Errorf("%s: the stored value opens to %q, not a live refresh token", when, rt)
 		}
 	}

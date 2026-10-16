@@ -58,7 +58,7 @@ func TestEnvCreatePlansSlotOne(t *testing.T) {
 	if oak.VMID%100 == teak.VMID%100 || oak.Node != "birch" || oak.Guest.OS != ImageWindows || LastOctet(oak.Guest.IP) == 10 {
 		t.Errorf("oak = %+v", oak)
 	}
-	for _, k := range []string{"slot:01", "domain:kilo.alpha", "vmid:2100"} {
+	for _, k := range []string{"slot:01", "domain:kilo.alpha"} {
 		if !slices.Contains(plan.Locks, k) {
 			t.Errorf("locks %v lack %s", plan.Locks, k)
 		}

@@ -1,6 +1,7 @@
 package pods
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -25,7 +26,7 @@ func TestFindMastersRequiresExactTag(t *testing.T) {
 	}
 }
 
-func TestFindTeamVMsFiltersByTeamAndHost(t *testing.T) {
+func TestFindForTeamsFiltersByTeamAndHost(t *testing.T) {
 	n := NewNaming(config.Default().Naming)
 	vms := []proxmox.VM{
 		{VMID: 10121, Name: "team01-teak"},
@@ -34,9 +35,9 @@ func TestFindTeamVMsFiltersByTeamAndHost(t *testing.T) {
 		{VMID: 500, Name: "pool-01-vpn"},
 		{VMID: 10199, Name: "team01-teak.tpl"},
 	}
-	got := FindTeamVMs(vms, n, []string{"01"}, []string{"TEA"})
+	got := findTeamVMs(vms, n, []string{"01"}, []string{"TEA"})
 	if len(got) != 1 || got[0].Name != "team01-teak" {
-		t.Errorf("FindTeamVMs = %+v", got)
+		t.Errorf("findForTeams = %+v", got)
 	}
 }
 
@@ -101,15 +102,15 @@ func TestMatchesHostBlankFilters(t *testing.T) {
 	}
 
 	// Empty filter in list matches nothing
-	got := FindTeamVMs(vms, n, []string{"01"}, []string{""})
+	got := findTeamVMs(vms, n, []string{"01"}, []string{""})
 	if len(got) != 0 {
-		t.Errorf("FindTeamVMs with blank filter: %+v, want empty", got)
+		t.Errorf("findForTeams with blank filter: %+v, want empty", got)
 	}
 
 	// Mix of blank and valid filters keeps only valid matches
-	got = FindTeamVMs(vms, n, []string{"01"}, []string{"teak", " "})
+	got = findTeamVMs(vms, n, []string{"01"}, []string{"teak", " "})
 	if len(got) != 1 || got[0].Name != "team01-teak" {
-		t.Errorf("FindTeamVMs with blank+valid filters: %+v, want team01-teak", got)
+		t.Errorf("findForTeams with blank+valid filters: %+v, want team01-teak", got)
 	}
 }
 
@@ -297,14 +298,14 @@ func TestTeamsWithVMs(t *testing.T) {
 	if got := TeamsWithVMs(nil, n); len(got) != 0 {
 		t.Errorf("TeamsWithVMs(no VMs) = %v, want none", got)
 	}
-	// AllTeamVMs is what FindTeamVMs finds for every team.
-	if got, want := AllTeamVMs(vms, n), FindTeamVMs(vms, n, TeamsWithVMs(vms, n), nil); !reflect.DeepEqual(got, want) || len(got) != 4 {
+	// AllTeamVMs is what findForTeams finds for every team.
+	if got, want := vmsOf(n, AllTeamVMs(vms, n)), findTeamVMs(vms, n, TeamsWithVMs(vms, n), nil); !reflect.DeepEqual(got, want) || len(got) != 4 {
 		t.Errorf("AllTeamVMs = %v, want %v", got, want)
 	}
 	// Every team VM's team is in TeamsWithVMs, so "all" leaves none behind.
 	all := TeamsWithVMs(vms, n)
 	for _, vm := range vms {
-		if team, _, ok := n.ParseVMName(vm.Name); ok && !vm.Template && !n.IsTemplateName(vm.Name) && len(FindTeamVMs([]proxmox.VM{vm}, n, all, nil)) != 1 {
+		if team, _, ok := n.ParseVMName(vm.Name); ok && !vm.Template && !n.IsTemplateName(vm.Name) && len(findTeamVMs([]proxmox.VM{vm}, n, all, nil)) != 1 {
 			t.Errorf("%s (team %s) is not covered by TeamsWithVMs %v", vm.Name, team, all)
 		}
 	}
@@ -319,4 +320,22 @@ func TestFindMastersRefusesInvalidPattern(t *testing.T) {
 			t.Errorf("FindMasters(%q) accepted invalid UTF-8", pattern)
 		}
 	}
+}
+
+func findTeamVMs(vms []proxmox.VM, n Naming, teams, hosts []string) []proxmox.VM {
+	team, _ := findForTeams(vms, n, teams, hosts)
+	return vmsOf(n, team)
+}
+
+// vmsOf is the VMs of named VMs, checking each carries its name's team and
+// host.
+func vmsOf(n Naming, named []NamedVM) []proxmox.VM {
+	var out []proxmox.VM
+	for _, v := range named {
+		if team, host, _ := n.ParseVMName(v.Name); team != v.Team || host != v.Host {
+			panic(fmt.Sprintf("%s carries team %q host %q, its name gives %q %q", v.Name, v.Team, v.Host, team, host))
+		}
+		out = append(out, v.VM)
+	}
+	return out
 }

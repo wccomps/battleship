@@ -18,14 +18,10 @@ const claimLockID = 727071
 var beforeClaimUpdate func(id int64)
 
 // Claim starts the oldest pending job nothing blocks (see blocksSQL), or
-// returns nil. Overlapping jobs run in creation order.
-func (s *Store) Claim(ctx context.Context, worker string) (*Job, error) {
-	return s.claim(ctx, worker, nil)
-}
-
-// ClaimJob is Claim for one job: nil unless that job was claimable.
-func (s *Store) ClaimJob(ctx context.Context, id int64, worker string) (*Job, error) {
-	return s.claim(ctx, worker, &id)
+// returns nil. Overlapping jobs run in creation order. ReapStale reaps it
+// once it has no heartbeat for staleAfter, which must be positive.
+func (s *Store) Claim(ctx context.Context, worker string, staleAfter time.Duration) (*Job, error) {
+	return s.claim(ctx, worker, staleAfter)
 }
 
 // blocksSQL holds when job o keeps pending job j waiting: their lock keys
@@ -35,8 +31,11 @@ func (s *Store) ClaimJob(ctx context.Context, id int64, worker string) (*Job, er
 const blocksSQL = `(o.lock_writes && j.lock_writes OR o.lock_writes && j.lock_reads OR o.lock_reads && j.lock_writes)
 	AND (o.status = 'running' OR (o.status = 'pending' AND o.id < j.id))`
 
-// claim starts the oldest runnable pending job or, if only is set, that job.
-func (s *Store) claim(ctx context.Context, worker string, only *int64) (*Job, error) {
+// claim starts the oldest runnable pending job.
+func (s *Store) claim(ctx context.Context, worker string, staleAfter time.Duration) (*Job, error) {
+	if staleAfter <= 0 {
+		return nil, fmt.Errorf("claiming a job: stale_after %v isn't positive", staleAfter)
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -47,9 +46,9 @@ func (s *Store) claim(ctx context.Context, worker string, only *int64) (*Job, er
 	}
 	var id int64
 	err = tx.QueryRow(ctx, `SELECT j.id FROM jobs j
-		WHERE j.status = 'pending' AND ($1::bigint IS NULL OR j.id = $1)
+		WHERE j.status = 'pending'
 		  AND NOT EXISTS (SELECT 1 FROM jobs o WHERE `+blocksSQL+`)
-		ORDER BY j.id LIMIT 1`, only).Scan(&id)
+		ORDER BY j.id LIMIT 1`).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -60,7 +59,8 @@ func (s *Store) claim(ctx context.Context, worker string, only *int64) (*Job, er
 		beforeClaimUpdate(id)
 	}
 	job, err := scanJob(tx.QueryRow(ctx, `UPDATE jobs SET status = 'running', claimed_by = $2,
-		started_at = now(), heartbeat_at = now() WHERE id = $1 AND status = 'pending' AND NOT cancel_requested RETURNING `+jobColumns, id, worker))
+		started_at = now(), heartbeat_at = now(), stale_after = make_interval(secs => $3)
+		WHERE id = $1 AND status = 'pending' AND NOT cancel_requested RETURNING `+jobColumns, id, worker, staleAfter.Seconds()))
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, nil
@@ -158,8 +158,9 @@ func endItems(ctx context.Context, tx pgx.Tx, jobIDs []int64, stopped bool) erro
 	return err
 }
 
-// ReapStale marks running jobs with no heartbeat for after as interrupted
-// and returns their IDs.
+// ReapStale marks running jobs with no heartbeat for their stale_after
+// (see Claim; after for jobs an older battleship claimed without one) as
+// interrupted and returns their IDs.
 func (s *Store) ReapStale(ctx context.Context, after time.Duration) ([]int64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -168,7 +169,7 @@ func (s *Store) ReapStale(ctx context.Context, after time.Duration) ([]int64, er
 	defer tx.Rollback(ctx) //nolint:errcheck
 	rows, err := tx.Query(ctx, `UPDATE jobs SET status = 'interrupted', finished_at = now(),
 			error = 'its worker stopped sending heartbeats; re-run it to finish'
-		WHERE status = 'running' AND heartbeat_at < now() - make_interval(secs => $1)
+		WHERE status = 'running' AND heartbeat_at < now() - COALESCE(stale_after, make_interval(secs => $1))
 		RETURNING id`, after.Seconds())
 	if err != nil {
 		return nil, err

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/wccomps/battleship/internal/config"
@@ -29,17 +28,12 @@ func envCluster() *podstest.Fake {
 }
 
 // clash is whether two plans' jobs wait for each other, by the lock rule:
-// equal keys clash unless both are reads, and "read:K" clashes with K.
+// one changes what the other changes or reads.
 func clash(a, b *pods.Plan) bool {
-	for _, x := range LockKeys(a) {
-		for _, y := range LockKeys(b) {
-			xr, yr := strings.HasPrefix(x, "read:"), strings.HasPrefix(y, "read:")
-			if !(xr && yr) && strings.TrimPrefix(x, "read:") == strings.TrimPrefix(y, "read:") {
-				return true
-			}
-		}
+	meet := func(x, y []string) bool {
+		return slices.ContainsFunc(x, func(k string) bool { return slices.Contains(y, k) })
 	}
-	return false
+	return meet(writeKeys(a), writeKeys(b)) || meet(writeKeys(a), readKeys(b)) || meet(readKeys(a), writeKeys(b))
 }
 
 // Jobs that touch the same VM serialize, whatever their kinds: a deploy
@@ -58,7 +52,7 @@ func TestJobsTouchingOneVMShareALock(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !clash(deploy, dns) {
-		t.Errorf("deploy of teak %v and Set DNS %v share no lock", LockKeys(deploy), LockKeys(dns))
+		t.Errorf("deploy of teak %v and Set DNS %v share no lock", writeKeys(deploy), writeKeys(dns))
 	}
 	del, err := p.ImageDelete(ctx, pods.ImageRequest{Image: "debian-12-v1"})
 	if err != nil {
@@ -73,12 +67,12 @@ func TestJobsTouchingOneVMShareALock(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !clash(add, del) {
-		t.Errorf("adding a host from debian-12-v1 %v and deleting it %v share no lock", LockKeys(add), LockKeys(del))
+		t.Errorf("adding a host from debian-12-v1 %v and deleting it %v share no lock", writeKeys(add), writeKeys(del))
 	}
 	// A deploy of another environment's hosts doesn't wait for this one.
 	other, err := p.Deploy(ctx, pods.DeployRequest{Pattern: "gw.kilo.alpha", Teams: []string{"02"}})
 	if err == nil && clash(other, deploy) {
-		t.Errorf("deploys of different masters to different teams share a lock: %v, %v", LockKeys(other), LockKeys(deploy))
+		t.Errorf("deploys of different masters to different teams share a lock: %v, %v", writeKeys(other), writeKeys(deploy))
 	}
 }
 
@@ -92,11 +86,11 @@ func TestCloningAnImageIsShared(t *testing.T) {
 	retire := &pods.Plan{Kind: pods.KindImageRegister, Items: []pods.Item{{Name: "debian-12-v2", VMID: 8002, Source: &pods.Source{VMID: 150}, Supersedes: &pods.Source{VMID: 8001}}}}
 	switch {
 	case clash(src(2101), src(2201)):
-		t.Errorf("two clones of one image wait for each other: %v, %v", LockKeys(src(2101)), LockKeys(src(2201)))
+		t.Errorf("two clones of one image wait for each other: %v, %v", readKeys(src(2101)), readKeys(src(2201)))
 	case !clash(src(2101), del):
-		t.Errorf("a clone %v and the image's delete %v don't wait for each other", LockKeys(src(2101)), LockKeys(del))
+		t.Errorf("a clone %v and the image's delete %v don't wait for each other", writeKeys(src(2101)), writeKeys(del))
 	case !clash(src(2101), retire):
-		t.Errorf("a clone %v and a register retiring the image %v don't wait for each other", LockKeys(src(2101)), LockKeys(retire))
+		t.Errorf("a clone %v and a register retiring the image %v don't wait for each other", writeKeys(src(2101)), writeKeys(retire))
 	}
 }
 
@@ -107,8 +101,8 @@ func TestDeployLocksTheMasterOnlyWhenBuilding(t *testing.T) {
 	}{{false, false, true}, {true, true, true}, {true, false, false}} {
 		plan := &pods.Plan{Kind: pods.KindDeploy, Teams: []string{"01"},
 			Templates: []pods.TemplateSpec{{Name: "teak.kilo.alpha.tpl", VMID: 9001, MasterVMID: 2101, Exists: c.exists, Rebuild: c.rebuild}}}
-		if got := slices.Contains(LockKeys(plan), "vmid:2101"); got != c.locked {
-			t.Errorf("template exists %v, rebuild %v: master locked %v, want %v (%v)", c.exists, c.rebuild, got, c.locked, LockKeys(plan))
+		if got := slices.Contains(writeKeys(plan), "vmid:2101"); got != c.locked {
+			t.Errorf("template exists %v, rebuild %v: master locked %v, want %v (%v)", c.exists, c.rebuild, got, c.locked, writeKeys(plan))
 		}
 	}
 }

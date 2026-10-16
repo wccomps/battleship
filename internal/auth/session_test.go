@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/wccomps/battleship/internal/auth"
 	"github.com/wccomps/battleship/internal/auth/authtest"
+	"github.com/wccomps/battleship/internal/store"
 )
 
 func TestAnonymousRequests(t *testing.T) {
@@ -58,10 +60,90 @@ func TestIdleExpiry(t *testing.T) {
 		}
 	}
 	h.clock.Advance(30 * time.Minute)
+	live := h.liveTokens()
 	wantLoginRedirect(t, b.do(http.MethodGet, "/private", nil, nil), "/private")
 	h.sessionGone(token)
 	if !strings.Contains(h.logs.String(), `session expired: subject="sub-alice"`) {
 		t.Errorf("logs = %q, want the expiry", h.logs.String())
+	}
+	if !slices.Equal(h.revoked(), live) || len(live) != 1 {
+		t.Errorf("revoked %v; the expired session held %v", h.revoked(), live)
+	}
+}
+
+// A refresh the provider answered with a rotated token but an ID token
+// battleship refuses ends the session and leaves no token live.
+func TestRejectedRefreshRevokesBothTokens(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	h.clock.Advance(5 * time.Minute)
+	h.idp.Set(func(f *authtest.Behavior) { f.MutateIDToken = func(c map[string]any) { c["sub"] = "sub-mallory" } })
+	wantLoginRedirect(t, b.do(http.MethodGet, "/private", nil, nil), "/private")
+	if live := h.liveTokens(); len(live) != 0 {
+		t.Errorf("refresh tokens live after the refresh was refused: %v (revoked %v)", live, h.revoked())
+	}
+}
+
+// One sweep ends every expired session, however many batches that takes.
+func TestSweepEndsEveryExpiredSession(t *testing.T) {
+	h := newHarness(t)
+	for i := range 250 {
+		id := fmt.Sprintf("swept-%03d", i)
+		if err := h.st.CreateSession(context.Background(), store.Session{ID: id, Subject: "sub-" + id, RefreshToken: "sealed",
+			CSRF: "c", CreatedAt: h.clock.Now(), LastSeen: h.clock.Now(), RefreshedAt: h.clock.Now(), ExpiresAt: h.clock.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := h.svc.EndExpiredSessions(context.Background(), h.clock.Now())
+	if err != nil || n != 250 {
+		t.Fatalf("EndExpiredSessions = %d, %v; want all 250", n, err)
+	}
+	if left := h.countSessions(); left != 0 {
+		t.Errorf("%d sessions left after the sweep", left)
+	}
+	_ = h.revoked() // the revocations (of tokens that don't open) finish
+}
+
+// A refresh whose token the provider rotated but whose userinfo it then
+// couldn't serve, past the grace period, ends the session leaving no token
+// live: neither the stored one nor the rotated one.
+func TestRefreshPastGraceRevokesTheRotatedToken(t *testing.T) {
+	h := newHarness(t) // session_refresh 5m: grace is 15m, idle 30m
+	b := h.browser()
+	b.login(alice)
+	h.clock.Advance(16 * time.Minute)
+	h.idp.Set(func(f *authtest.Behavior) {
+		f.NoIDTokenOnRefresh, f.UserinfoStatus = true, http.StatusServiceUnavailable
+	})
+	wantLoginRedirect(t, b.do(http.MethodGet, "/private", nil, nil), "/private")
+	if h.idp.Refreshes() != 1 {
+		t.Fatalf("refreshed %d times, want 1", h.idp.Refreshes())
+	}
+	if live := h.liveTokens(); len(live) != 0 {
+		t.Errorf("refresh tokens live after the session ended: %v (revoked %v)", live, h.revoked())
+	}
+}
+
+// The sweep of expired sessions revokes their refresh tokens too.
+func TestExpiredSessionsSweptAreRevoked(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	live := h.liveTokens()
+	h.clock.Advance(13 * time.Hour) // past session_max, with no request
+	// A sweep out of time ends nothing; the next one will.
+	done, cancel := context.WithCancel(context.Background())
+	cancel()
+	if n, err := h.svc.EndExpiredSessions(done, h.clock.Now()); n != 0 || len(h.revoked()) != 0 {
+		t.Fatalf("a sweep out of time ended %d sessions (%v), revoked %v", n, err, h.revoked())
+	}
+	n, err := h.svc.EndExpiredSessions(context.Background(), h.clock.Now())
+	if err != nil || n != 1 {
+		t.Fatalf("EndExpiredSessions = %d, %v", n, err)
+	}
+	if !slices.Equal(h.revoked(), live) || len(h.liveTokens()) != 0 {
+		t.Errorf("revoked %v of %v; live %v", h.revoked(), live, h.liveTokens())
 	}
 }
 
@@ -164,7 +246,7 @@ func TestRefreshRereadsIdentity(t *testing.T) {
 		t.Errorf("/private = %q, want the new name", resp.body)
 	}
 	sess := b.session()
-	if rt := b.refreshToken(); rt == firstRT || !slices.Contains(h.idp.RefreshTokens(), rt) {
+	if rt := b.refreshToken(); rt == firstRT || !slices.Contains(h.liveTokens(), rt) {
 		t.Errorf("refresh token not rotated: %q", rt)
 	}
 	if !sess.RefreshedAt.Equal(h.clock.Now()) {
@@ -436,7 +518,7 @@ func TestRefreshSurvivesClientDisconnect(t *testing.T) {
 	h.mux.Load().ServeHTTP(httptest.NewRecorder(), req)
 	h.idp.Set(func(f *authtest.Behavior) { f.OnRefresh = nil })
 
-	if rt := b.refreshToken(); !slices.Contains(h.idp.RefreshTokens(), rt) {
+	if rt := b.refreshToken(); !slices.Contains(h.liveTokens(), rt) {
 		t.Fatalf("stored refresh token %q is no longer valid at the provider", rt)
 	}
 	h.clock.Advance(5 * time.Minute)

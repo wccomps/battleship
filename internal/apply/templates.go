@@ -136,7 +136,7 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 		}
 		b.node = cur.Node
 		return e.finishTemplate(ctx, spec, cur.Node)
-	case spec.Exists && !spec.Rebuild:
+	case !spec.Builds():
 		return fmt.Errorf("template %s (%d) no longer exists", name, spec.VMID)
 	}
 	e.mu.Lock()
@@ -331,7 +331,7 @@ func (e *Executor) settleCopy(vmid int, err error) {
 }
 
 // teamVMUsing returns a team VM for host that currently exists. Rebuilding
-// deletes the template, which would break its linked clones.
+// deletes the template, which would break team VMs linked to it.
 func (e *Executor) teamVMUsing(host string) (proxmox.VM, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

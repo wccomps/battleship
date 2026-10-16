@@ -67,7 +67,7 @@ type SessionUpdate struct {
 	Name         string
 	Email        string
 	RefreshToken string // the provider may rotate it
-	IDToken      string // sealed; empty keeps the stored one (a refresh may bring none)
+	IDToken      string // sealed
 	RefreshedAt  time.Time
 }
 
@@ -230,7 +230,7 @@ func (s *Store) UpdateSession(ctx context.Context, id string, u SessionUpdate) e
 	tag, err := s.pool.Exec(ctx, `UPDATE sessions
 		SET name = $2, email = $3, refresh_token = $4, refreshed_at = $5,
 			refresh_retry_at = NULL, refresh_failed_at = NULL, username = $6,
-			id_token_sealed = CASE WHEN $7 = '' THEN id_token_sealed ELSE $7 END
+			id_token_sealed = $7
 		WHERE id = $1`, id, u.Name, u.Email, u.RefreshToken, u.RefreshedAt, u.Username, u.IDToken)
 	if err != nil {
 		return fmt.Errorf("updating session: %w", err)
@@ -241,19 +241,93 @@ func (s *Store) UpdateSession(ctx context.Context, id string, u SessionUpdate) e
 	return nil
 }
 
-// DeleteSession removes a session; a missing one is not an error.
-func (s *Store) DeleteSession(ctx context.Context, id string) error {
-	if _, err := s.pool.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, id); err != nil {
-		return fmt.Errorf("deleting session: %w", err)
+// EndedSession is a session as it was when removed: its ID and its
+// tokens, still sealed.
+type EndedSession struct {
+	ID, RefreshToken, IDToken string
+}
+
+// EndSession removes a session and returns it as it was then (a refresh may
+// have just rotated its tokens), or ok false if it was already gone. With
+// revoke, it queues the refresh token for revocation in the same statement.
+func (s *Store) EndSession(ctx context.Context, id string, revoke bool) (_ EndedSession, ok bool, err error) {
+	rows, err := s.pool.Query(ctx, `WITH ended AS (DELETE FROM sessions WHERE id = $1 RETURNING id, refresh_token, id_token_sealed),
+		queued AS (INSERT INTO revocations (session_id, refresh_token) SELECT id, refresh_token FROM ended WHERE $2)
+		SELECT id, refresh_token, id_token_sealed FROM ended`, id, revoke)
+	if err != nil {
+		return EndedSession{}, false, fmt.Errorf("ending session: %w", err)
+	}
+	ended, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByPos[EndedSession])
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return EndedSession{}, false, nil
+	case err != nil:
+		return EndedSession{}, false, fmt.Errorf("ending session: %w", err)
+	}
+	return ended, true, nil
+}
+
+// EndExpiredSessions removes up to limit sessions expired at now, oldest
+// first, as EndSession does, and returns how many it removed. Sessions
+// another call is removing are skipped.
+func (s *Store) EndExpiredSessions(ctx context.Context, now time.Time, limit int, revoke bool) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `WITH ended AS (DELETE FROM sessions WHERE id IN (
+			SELECT id FROM sessions WHERE expires_at <= $1 ORDER BY expires_at LIMIT $2 FOR UPDATE SKIP LOCKED)
+		RETURNING id, refresh_token),
+		queued AS (INSERT INTO revocations (session_id, refresh_token) SELECT id, refresh_token FROM ended WHERE $3)
+		SELECT count(*) FROM ended`, now, limit, revoke).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("ending expired sessions: %w", err)
+	}
+	return n, nil
+}
+
+// Revocation is a queued refresh token (see EndSession).
+type Revocation struct {
+	ID           int64
+	SessionID    string
+	RefreshToken string // sealed for SessionID
+	Attempts     int    // tries before this one
+}
+
+// QueueRevocation queues a sealed refresh token for revocation.
+func (s *Store) QueueRevocation(ctx context.Context, sessionID, refreshToken string) error {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO revocations (session_id, refresh_token) VALUES ($1, $2)`, sessionID, refreshToken); err != nil {
+		return fmt.Errorf("queueing a revocation: %w", err)
 	}
 	return nil
 }
 
-// DeleteExpiredSessions removes sessions expired at now and returns the count.
-func (s *Store) DeleteExpiredSessions(ctx context.Context, now time.Time) (int64, error) {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM sessions WHERE expires_at <= $1`, now)
+// LeaseRevocations takes up to limit queued revocations that are due, for
+// lease: another caller doesn't get them until it runs out (or Retry sets
+// a new time). Each counts as an attempt.
+func (s *Store) LeaseRevocations(ctx context.Context, limit int, lease time.Duration) ([]Revocation, error) {
+	rows, err := s.pool.Query(ctx, `UPDATE revocations SET attempts = attempts + 1, next_at = now() + make_interval(secs => $2)
+		WHERE id IN (SELECT id FROM revocations WHERE next_at <= now() ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED)
+		RETURNING id, session_id, refresh_token, attempts - 1`, limit, lease.Seconds())
 	if err != nil {
-		return 0, fmt.Errorf("deleting expired sessions: %w", err)
+		return nil, fmt.Errorf("leasing revocations: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	revs, err := pgx.CollectRows(rows, pgx.RowToStructByPos[Revocation])
+	if err != nil {
+		return nil, fmt.Errorf("leasing revocations: %w", err)
+	}
+	return revs, nil
+}
+
+// DoneRevocation removes a revocation that was sent, or given up on.
+func (s *Store) DoneRevocation(ctx context.Context, id int64) error {
+	if _, err := s.pool.Exec(ctx, `DELETE FROM revocations WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("removing a revocation: %w", err)
+	}
+	return nil
+}
+
+// RetryRevocation makes a leased revocation due again after wait.
+func (s *Store) RetryRevocation(ctx context.Context, id int64, wait time.Duration) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE revocations SET next_at = now() + make_interval(secs => $2) WHERE id = $1`, id, wait.Seconds()); err != nil {
+		return fmt.Errorf("rescheduling a revocation: %w", err)
+	}
+	return nil
 }

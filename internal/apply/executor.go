@@ -122,8 +122,9 @@ type Result struct {
 // so rerunning a plan resumes or converges it.
 //
 // An Executor must not Run concurrently; OnEvent is called from many
-// goroutines. Cleanup assumes one run per lock key (team or template) at a
-// time, which the job system enforces when a database is configured.
+// goroutines. Cleanup assumes no other run changes the VMs it does at the
+// same time, which the job system's lock keys enforce when a database is
+// configured.
 type Executor struct {
 	API     pods.API
 	Cfg     config.Config
@@ -136,15 +137,14 @@ type Executor struct {
 	// Halt, if set, ends a cancel's grace when closed (e.g. on shutdown), so
 	// the run still stops within StopBudget.
 	Halt <-chan struct{}
-	// Held, if set, is asked before every change the run sends, cleanup and
-	// template builds included: it returns the context to send the change
-	// with (the job system bounds it to end before another worker could
-	// take the job over) and a func to call once the call returns, or an
-	// error that holds the change back. The job system says no once it
-	// can't be sure the job still holds its locks.
-	Held func(context.Context) (context.Context, context.CancelFunc, error)
+	// Held, if set, is asked before every change except StopTask (cleanup
+	// and template builds included). It returns when to stop waiting for the
+	// change's answer, or an error that holds the change back (see the job
+	// system's lease).
+	Held func() (time.Time, error)
 
-	// api wraps API so no step makes a change after a stop (see stepContext).
+	// api wraps API so no change is sent after a stop (see stepContext) or
+	// once Held says no.
 	api pods.API
 
 	naming     pods.Naming
@@ -167,9 +167,6 @@ type Executor struct {
 	// left is how each item, by name, last left its VM's config across rounds;
 	// absent means untouched (see leftAt).
 	left map[string]Left
-	// guestRuns are setup scripts started in guests and not yet seen to
-	// exit, by VMID: the agent's PID (see exec).
-	guestRuns map[int]int
 }
 
 // cloneState is what a run knows about the outcome of a template clone.
@@ -208,12 +205,11 @@ func (e *Executor) init() {
 		e.lim = NewLimits(e.Cfg.Concurrency)
 	}
 	e.owned = map[int]*ownedVM{}
-	e.api = guardedAPI{API: e.API, held: e.Held}
+	e.api = guardedAPI{Reads: e.API, changes: e.API, held: e.Held}
 	e.leftovers = map[int]leftover{}
 	e.asked = map[int][]string{}
 	e.mastersStopped = map[string]string{}
 	e.left = map[string]Left{}
-	e.guestRuns = map[int]int{}
 }
 
 // noteMasterStopped records a master a template build left stopped.
