@@ -119,8 +119,9 @@ const envReads = 8
 
 // Environments reads every slot: the VMs in its pool with their notes, and
 // the other VMs on its bridges. Templates never run, so they hold no slot;
-// team-named VMs (see Classify) are taken to be on team bridges, so they
-// aren't read. It also returns the VM listing it read.
+// team VMs (see Classify) are on team bridges, so they aren't read, but a
+// VM only named like one may be anywhere. It also returns the VM listing it
+// read.
 func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM, error) {
 	vms, err := p.API.ClusterVMs(ctx)
 	if err != nil {
@@ -138,7 +139,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 	var read []proxmox.VM
 	for _, vm := range vms {
 		_, inSlot := byPool[vm.Pool]
-		if kind, _, _ := p.Naming.Classify(vm); inSlot || (!vm.Template && kind == NotTeamNamed) {
+		if kind, _, _ := p.Naming.Classify(vm); inSlot || (!vm.Template && kind != TeamVMKind && kind != TeamTemplate) {
 			read = append(read, vm)
 		}
 	}

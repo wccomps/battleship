@@ -180,7 +180,7 @@ type Plan struct {
 	// it are stale.
 	Config string `json:"config,omitempty"`
 	// Locks are lock keys beyond teams, templates and VMs (slot:NN,
-	// domain:…, family:…), so jobs over the same slot or family wait.
+	// domain:…, family:…), so jobs over the same slot, domain or family wait.
 	Locks []string `json:"locks,omitempty"`
 	// Notices are what a person should know the plan leaves alone, such as
 	// VMs named like team VMs that aren't; nothing acts on them.

@@ -331,7 +331,7 @@ func (e *Executor) settleCopy(vmid int, err error) {
 }
 
 // teamVMUsing returns a team VM for host that currently exists. Rebuilding
-// deletes the template, which would break its linked clones.
+// deletes the template, which would break team VMs linked to it.
 func (e *Executor) teamVMUsing(host string) (proxmox.VM, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

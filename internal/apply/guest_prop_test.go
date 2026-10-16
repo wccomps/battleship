@@ -14,7 +14,7 @@ import (
 )
 
 func checkLastLines(t interface{ Fatalf(string, ...any) }, s string, n int) {
-	// A line ends at \n or \r: a terminal returns the cursor at either.
+	// A line ends at \n or \r (a bare \r rewrites the line on a terminal).
 	var lines []string
 	for _, l := range strings.Split(strings.ReplaceAll(s, "\r", "\n"), "\n") {
 		if l = strings.TrimSpace(l); l != "" {

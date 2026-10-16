@@ -198,8 +198,7 @@ func MasterSets(vms []proxmox.VM, n Naming, tag string) (sets []MasterSet, other
 	return sets, others
 }
 
-// AllTeamVMs is every non-template team VM, as findForTeams finds them,
-// sorted by name.
+// AllTeamVMs is every team VM, as findForTeams finds them, sorted by name.
 func AllTeamVMs(vms []proxmox.VM, n Naming) []proxmox.VM {
 	var out []proxmox.VM
 	for _, vm := range vms {
@@ -211,7 +210,7 @@ func AllTeamVMs(vms []proxmox.VM, n Naming) []proxmox.VM {
 	return out
 }
 
-// TeamsWithVMs is the teams with non-template team VMs, sorted and unique.
+// TeamsWithVMs is the teams with team VMs, sorted and unique.
 // "All teams" means these, so acting on them leaves none of the caller's
 // team VMs behind.
 func TeamsWithVMs(vms []proxmox.VM, n Naming) []string {

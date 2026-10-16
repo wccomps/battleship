@@ -122,8 +122,9 @@ type Result struct {
 // so rerunning a plan resumes or converges it.
 //
 // An Executor must not Run concurrently; OnEvent is called from many
-// goroutines. Cleanup assumes one run per lock key (team or template) at a
-// time, which the job system enforces when a database is configured.
+// goroutines. Cleanup assumes no other run changes the VMs it does at the
+// same time, which the job system's lock keys enforce when a database is
+// configured.
 type Executor struct {
 	API     pods.API
 	Cfg     config.Config
@@ -165,8 +166,9 @@ type Executor struct {
 	// left is how each item, by name, last left its VM's config across rounds;
 	// absent means untouched (see leftAt).
 	left map[string]Left
-	// guestRuns are setup scripts started in guests and not yet seen to
-	// exit, by VMID: the agent's PID (see exec).
+	// guestRuns are setup scripts started in guests and not known to have
+	// ended (exited, or status unreadable), by VMID: the agent's PID (see
+	// exec).
 	guestRuns map[int]int
 }
 

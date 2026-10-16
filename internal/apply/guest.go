@@ -108,9 +108,8 @@ func (e *Executor) exec(ctx context.Context, it *pods.Item, cmd []string, input 
 	prev, running := e.guestRuns[it.VMID]
 	e.mu.Unlock()
 	if running {
-		// Only a previous copy seen still running keeps this one out; one
-		// that exited, or whose status can't be read (a guest restart lost
-		// its PID, say), is left to the guest lock.
+		// One that exited, or whose status can't be read (a guest restart
+		// lost its PID, say), is left to the guest lock.
 		switch _, err := e.waitExec(ctx, it, prev); {
 		case errors.Is(err, errStillRunning):
 			return "", fmt.Errorf("the previous run of the setup script was still running after another %s; not starting a second copy", execLimit)

@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/wccomps/battleship/internal/config"
@@ -53,6 +54,18 @@ func TestEnvironmentsReadsSlots(t *testing.T) {
 	}
 	if !envs[2].Free() {
 		t.Errorf("slot 3 = %+v; templates don't hold a slot", envs[2])
+	}
+
+	// A VM named like a team VM but outside every team's VMIDs is someone's
+	// own: on a slot's bridge, it holds the slot. A team VM is never read.
+	f.Add(proxmox.VM{VMID: 8100, Name: "team05-test", Node: "alder"}, map[string]string{"net0": "virtio=BC:24:11:00:00:06,bridge=devint03"})
+	f.Add(proxmox.VM{VMID: 10521, Name: "team05-web", Node: "alder"}, map[string]string{"net0": "virtio=BC:24:11:00:00:07,bridge=devint03"})
+	envs, _, err = NewPlanner(f, envConfig()).Environments(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envs[2].Free() || !slices.Equal(envs[2].Users, []string{"team05-test"}) {
+		t.Errorf("slot 3 = %+v; the stray team-named VM on its bridge holds it, the team VM isn't read", envs[2])
 	}
 }
 

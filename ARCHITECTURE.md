@@ -22,7 +22,11 @@ form ──> preview ──> confirm ──> stored job ──> worker claims it
    job, so overlapping jobs run in the order they were made. Two jobs clash
    when one changes something the other changes or reads (teams,
    templates, VMs, slots, domains, families: their lock keys); jobs that
-   only read a VM, such as clones of one base image, run together.
+   only read a VM, such as clones of one base image, run together. The
+   worker keeps the claim with heartbeats. Once none has landed for the
+   claimer's `stale_after`, any worker reaps the job (`interrupted`), which
+   frees its locks; from half that, the worker sends Proxmox nothing more
+   for it.
 4. **Re-plan.** The worker plans once more; if the cluster changed since the
    preview, the job ends `stale` and nothing runs.
 5. **Run.** The executor (`apply.Executor`) runs each item's steps, records
