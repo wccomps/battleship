@@ -113,8 +113,8 @@ func (s *Service) callback(w http.ResponseWriter, r *http.Request) {
 
 	// Once the login has succeeded at the provider, the browser's old
 	// session is ended (see end). Revoking its refresh token assumes the
-	// provider revokes only that token, as Authentik does; one that ends the
-	// whole client session on revocation (Keycloak) would end the new
+	// provider revokes only that token, as Authentik does; a provider that
+	// ends the client's whole session on revocation would end the new
 	// session too.
 	old, err := r.Cookie(s.names.session)
 	hadOld := err == nil

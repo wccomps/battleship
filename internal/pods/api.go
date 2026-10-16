@@ -14,8 +14,9 @@ type API interface {
 	Changes
 }
 
-// Reads are the API calls that change nothing on the cluster: reads, task
-// waits, and StopTask, which only stops a task a run started.
+// Reads are the API calls still allowed once a run must send no more
+// changes: reads, task waits, and StopTask, which only stops a task the run
+// started.
 type Reads interface {
 	ClusterVMs(ctx context.Context) ([]proxmox.VM, error)
 	OnlineNodes(ctx context.Context) ([]string, error)

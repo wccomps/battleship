@@ -88,10 +88,11 @@ func NewWithURL(t testing.TB) (*store.Store, string) {
 // urls are the databases of the Stores New made, for ClaimJob.
 var urls sync.Map // *store.Store -> string
 
-// ClaimJob starts job id for worker as Claim would if it were the oldest
+// ClaimJob starts job id for worker, as Claim would if it were the oldest
 // claimable job, or returns nil if it isn't claimable (not pending, cancel
 // requested, or waiting for another job; see Store.Blockers): for tests
-// that need one job running beside others.
+// that need one job running beside others. Unlike Claim it isn't atomic:
+// don't race it against other claims.
 func ClaimJob(s *store.Store, id int64, worker string, staleAfter time.Duration) (*store.Job, error) {
 	u, ok := urls.Load(s)
 	if !ok {

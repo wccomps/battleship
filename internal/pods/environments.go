@@ -24,7 +24,7 @@ type Slot struct {
 	FirstVMID int
 }
 
-// LastVMID is the last VMID of the slot's block, FirstVMID+99.
+// LastVMID is the last VMID of the slot's block.
 func (s Slot) LastVMID() int { return s.FirstVMID + 99 }
 
 // ExpandSlot replaces {slot} with n as two digits.

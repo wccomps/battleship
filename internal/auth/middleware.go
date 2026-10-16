@@ -186,8 +186,10 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 		return sess, true
 	}
 	id, refreshToken, err := s.refresh(ctx, sess)
-	// A token the provider rotated to is stored, or revoked: nothing else
-	// would ever revoke it.
+	// A token the provider rotated to is stored, or queued for revocation
+	// (nothing else would ever revoke it). Unlike an ended session's token,
+	// it is queued in a statement of its own, so a crash or a database error
+	// between the rotation and the queueing leaves it to expire.
 	stored := refreshToken == "" || refreshToken == sess.RefreshToken
 	defer func() {
 		if !stored {
