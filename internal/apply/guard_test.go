@@ -86,7 +86,7 @@ func TestHeldHoldsBackEveryChange(t *testing.T) {
 					inner.calls++
 				}
 			}()
-			out = reflect.ValueOf(guardedAPI{API: inner, held: func(ctx context.Context) (context.Context, context.CancelFunc, error) { return ctx, func() {}, errGone }}).MethodByName(m.Name).Call(args)
+			out = reflect.ValueOf(guardedAPI{API: inner, held: func() (time.Time, error) { return time.Time{}, errGone }}).MethodByName(m.Name).Call(args)
 		}()
 		passed := inner.calls > 0
 		if notChanges[m.Name] != passed {
@@ -101,30 +101,29 @@ func TestHeldHoldsBackEveryChange(t *testing.T) {
 	}
 }
 
-// Every change is sent with Held's context, and done once it returns.
+// Every change is sent with Held's deadline, released once it returns.
 func TestHeldBoundsEveryChange(t *testing.T) {
-	type key struct{}
+	deadline := time.Now().Add(time.Hour)
 	apiType := reflect.TypeFor[pods.API]()
 	for i := range apiType.NumMethod() {
 		m := apiType.Method(i)
 		if notChanges[m.Name] {
 			continue
 		}
-		var released bool
-		inner := &ctxAPI{key: key{}, released: &released}
-		g := guardedAPI{API: inner, held: func(ctx context.Context) (context.Context, context.CancelFunc, error) {
-			return context.WithValue(ctx, key{}, "bounded"), func() { released = true }, nil
-		}}
+		inner := &ctxAPI{}
+		g := guardedAPI{API: inner, held: func() (time.Time, error) { return deadline, nil }}
 		args := []reflect.Value{reflect.ValueOf(context.Background())}
 		for j := 1; j < m.Type.NumIn(); j++ {
 			args = append(args, reflect.Zero(m.Type.In(j)))
 		}
 		reflect.ValueOf(g).MethodByName(m.Name).Call(args)
-		if !inner.bounded {
-			t.Errorf("%s: sent without Held's context", m.Name)
-		}
-		if !released || inner.releasedFirst {
-			t.Errorf("%s: done called %v, before the call returned %v", m.Name, released, inner.releasedFirst)
+		switch got, ok := inner.ctx.Deadline(); {
+		case !ok || !got.Equal(deadline):
+			t.Errorf("%s: sent with deadline %v, want Held's", m.Name, got)
+		case inner.errAtCall != nil:
+			t.Errorf("%s: its context was done before the call: %v", m.Name, inner.errAtCall)
+		case inner.ctx.Err() == nil:
+			t.Errorf("%s: its context wasn't released after the call", m.Name)
 		}
 	}
 }
@@ -151,19 +150,16 @@ func TestExecutorUsesTheGuardedAPI(t *testing.T) {
 	}
 }
 
-// ctxAPI records whether each change was sent with Held's context, and
-// whether Held's done ran before the change returned.
+// ctxAPI records the context each change was sent with, and whether it
+// was already done then.
 type ctxAPI struct {
 	pods.API
-	key           any
-	bounded       bool
-	releasedFirst bool
-	released      *bool
+	ctx       context.Context
+	errAtCall error
 }
 
 func (c *ctxAPI) see(ctx context.Context) {
-	c.bounded = ctx.Value(c.key) == "bounded"
-	c.releasedFirst = c.released != nil && *c.released
+	c.ctx, c.errAtCall = ctx, ctx.Err()
 }
 
 func (c *ctxAPI) SetVMConfig(ctx context.Context, node string, vmid int, changes map[string]string) error {

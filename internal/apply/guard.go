@@ -79,19 +79,20 @@ func mayChange(ctx context.Context) error {
 // mayChange. Reads, task waits and StopTask pass through.
 type guardedAPI struct {
 	pods.API
-	held func(context.Context) (context.Context, context.CancelFunc, error)
+	held func() (time.Time, error)
 }
 
-// may refuses a change if the run may no longer hold its locks (see
-// Executor.Held), then as mayChange does. Call done when the change's call
-// returns.
+// may refuses a change if the run may no longer hold its locks, and else
+// bounds its request by Held's deadline (see Executor.Held); then as
+// mayChange. Call done when the change's call returns.
 func (g guardedAPI) may(ctx context.Context) (_ context.Context, done context.CancelFunc, _ error) {
 	done = func() {}
 	if g.held != nil {
-		var err error
-		if ctx, done, err = g.held(ctx); err != nil {
+		deadline, err := g.held()
+		if err != nil {
 			return ctx, done, err
 		}
+		ctx, done = context.WithDeadline(ctx, deadline)
 	}
 	if err := mayChange(ctx); err != nil {
 		done()

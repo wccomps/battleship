@@ -80,7 +80,7 @@ func TestClaimNextLeasesBeforeTheClaim(t *testing.T) {
 	if err != nil || job == nil {
 		t.Fatalf("claimNext = %v, %v", job, err)
 	}
-	if _, wall := l.since(); job.StartedAt == nil || wall.After(*job.StartedAt) {
+	if wall := l.wall; job.StartedAt == nil || wall.After(*job.StartedAt) {
 		t.Errorf("lease from %v, claim stamped %v: the lease started after the claim", wall, job.StartedAt)
 	}
 	// The claim carries this worker's stale_after, which reapers honour.
@@ -917,5 +917,38 @@ func TestWorkerLogsAnOutcomeItCannotRecord(t *testing.T) {
 	defer mu.Unlock()
 	if !strings.Contains(logs.String(), "not recording its outcome: ") {
 		t.Errorf("logs = %q, want the unrecorded outcome", logs.String())
+	}
+}
+
+// A sleep that the beats after it can't renew (the database is gone too)
+// still stops the run at once: only the wall clock shows the gap.
+func TestWorkerStopsAfterWallClockGapWithFailingBeats(t *testing.T) {
+	st := storetest.New(t)
+	f := teamVMs()
+	f.gate = make(chan struct{}) // tasks hang until cancelled
+	id := submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
+	w := newWorker(st, f)
+	w.Cfg.Jobs.StaleAfter = 10 * time.Second // the timer won't fire during the test
+	var skew atomic.Int64
+	w.now = func() time.Time { return time.Now().Add(time.Duration(skew.Load())) }
+	var calls atomic.Int32
+	w.beat = func(ctx context.Context, jobID int64, worker string) (bool, error) {
+		if calls.Add(1) == 1 {
+			return w.Store.Heartbeat(ctx, jobID, worker)
+		}
+		skew.Store(int64(time.Hour)) // the laptop slept, and woke to no database
+		return false, errors.New("db down")
+	}
+	j := claim(t, st)
+
+	done := make(chan struct{})
+	go func() { w.runJob(bg, j); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("job kept running after the wall clock jumped past the threshold")
+	}
+	if got := job(t, st, id); !strings.Contains(got.Error, "lost contact with the database") {
+		t.Errorf("job = %s: %s", got.Status, got.Error)
 	}
 }
