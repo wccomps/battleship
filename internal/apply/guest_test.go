@@ -94,7 +94,7 @@ func TestGuestExecIsSentOnce(t *testing.T) {
 
 // A script that outlasts the limit keeps running in the guest (the agent
 // can't stop it), so a retry waits for it to exit before starting another:
-// two copies never change the guest at once.
+// this run never has two copies changing the guest at once.
 func TestGuestScriptRetryWaitsForTheRunningOne(t *testing.T) {
 	limit := int(execLimit / execPoll)
 	for _, c := range []struct {
