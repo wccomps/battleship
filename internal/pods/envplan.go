@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -88,17 +90,31 @@ func (p Planner) slotHeld(ctx context.Context, slot Slot, vms []proxmox.VM) (boo
 	if slices.ContainsFunc(vms, func(vm proxmox.VM) bool { return vm.VMID >= slot.FirstVMID && vm.VMID <= last }) {
 		return true, nil
 	}
+	// One VMID held is enough: errSlotHeld stops the rest.
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(envReads)
 	for id := slot.FirstVMID; id <= last; id++ {
-		held, err := p.API.VMIDHeld(ctx, id)
-		if err != nil {
-			return false, fmt.Errorf("checking whether dev slot %s is free (VMID %d): %w", slot.Name, id, err)
-		}
-		if held {
-			return true, nil
-		}
+		g.Go(func() error {
+			held, err := p.API.VMIDHeld(gctx, id)
+			switch {
+			case held:
+				return errSlotHeld
+			case err != nil && gctx.Err() == nil:
+				return fmt.Errorf("checking whether dev slot %s is free (VMID %d): %w", slot.Name, id, err)
+			}
+			return nil
+		})
 	}
-	return false, nil
+	switch err := g.Wait(); {
+	case errors.Is(err, errSlotHeld):
+		return true, nil
+	case err != nil:
+		return false, err
+	}
+	return false, ctx.Err() // a stopped check isn't a free slot
 }
+
+var errSlotHeld = errors.New("slot holds a VM")
 
 // EnvAdd plans adding hosts to the environment with req.Domain. Hosts that
 // already exist there are resumed.

@@ -62,3 +62,19 @@ func TestPropEnvCreateSkipsSlotsWithHiddenVMs(t *testing.T) {
 		}
 	})
 }
+
+// A slot that can't be checked isn't taken as free, nor is one whose check
+// was stopped.
+func TestEnvCreateNeverGuessesASlotIsFree(t *testing.T) {
+	f := envFake()
+	f.FailOn("vmid-held:2150", &proxmox.APIError{Status: 500, Message: "pveproxy busy"})
+	_, err := NewPlanner(f, envConfig()).EnvCreate(context.Background(), EnvRequest{Domain: "kilo.alpha", Router: HostSpec{Host: "gw", Family: "gw"}})
+	if err == nil || !strings.Contains(err.Error(), "dev slot 01") {
+		t.Errorf("EnvCreate with an unreadable VMID = %v, want an error naming slot 01", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := NewPlanner(envFake(), envConfig()).EnvCreate(ctx, EnvRequest{Domain: "kilo.alpha", Router: HostSpec{Host: "gw", Family: "gw"}}); err == nil {
+		t.Error("EnvCreate with a stopped context planned anyway")
+	}
+}
