@@ -91,7 +91,9 @@ func TestRefreshPastGraceRevokesTheRotatedToken(t *testing.T) {
 	b := h.browser()
 	b.login(alice)
 	h.clock.Advance(16 * time.Minute)
-	h.idp.Set(func(f *authtest.Behavior) { f.NoIDTokenOnRefresh, f.UserinfoStatus = true, http.StatusServiceUnavailable })
+	h.idp.Set(func(f *authtest.Behavior) {
+		f.NoIDTokenOnRefresh, f.UserinfoStatus = true, http.StatusServiceUnavailable
+	})
 	wantLoginRedirect(t, b.do(http.MethodGet, "/private", nil, nil), "/private")
 	if h.idp.Refreshes() != 1 {
 		t.Fatalf("refreshed %d times, want 1", h.idp.Refreshes())
