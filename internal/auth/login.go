@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -197,10 +198,14 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
+// revokeTimeout bounds the revocation a logout waits for: the session is
+// already gone, so a slow provider shouldn't hold the logout up for long.
+const revokeTimeout = 3 * time.Second
+
 // revoke asks the provider to revoke a refresh token (RFC 7009), as the
 // client, the way the token endpoint authenticates it.
 func (s *Service) revoke(ctx context.Context, refreshToken string) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), revokeTimeout)
 	defer cancel()
 	form := url.Values{"token": {refreshToken}, "token_type_hint": {"refresh_token"}}
 	if s.oauth.Endpoint.AuthStyle == oauth2.AuthStyleInParams {

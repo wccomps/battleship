@@ -29,7 +29,8 @@ type clusterModel struct {
 }
 
 // drawCluster draws a cluster with odd team VMs (unpadded, wrong pool,
-// duplicated, templates, outside the team's VMID block) and masters of this set and another.
+// duplicated, templates, outside the team's VMID block) and masters of
+// this set and another.
 func drawCluster(t *rapid.T) clusterModel {
 	var m clusterModel
 	hostPool := rapid.SliceOfNDistinct(rapid.StringMatching(`[a-z][a-z0-9]{0,4}(-[a-z0-9]{1,2})?`), 1, 8, rapid.ID).Draw(t, "hosts")
@@ -40,6 +41,7 @@ func drawCluster(t *rapid.T) clusterModel {
 	nVMs := rapid.IntRange(0, 40).Draw(t, "vm count")
 	seen := map[string]bool{}
 	offsets := map[int]int{} // next free clone offset of each team
+	naming := testConfig().Naming
 	for i := range nVMs {
 		vmid += rapid.IntRange(1, 3).Draw(t, "vmid step")
 		host := rapid.SampledFrom(hostPool).Draw(t, "host")
@@ -69,10 +71,12 @@ func drawCluster(t *rapid.T) clusterModel {
 		inBlock := rapid.IntRange(0, 5).Draw(t, label+" outside block") != 0
 		vmID := vmid
 		if inBlock {
-			vmID = 10000 + n*100 + offsets[n]
+			vmID = naming.CloneVMIDBase + n*naming.CloneVMIDTeamStride + offsets[n]
 			offsets[n]++
 		} else if rapid.Bool().Draw(t, label+" other team's block") {
-			vmID = 10000 + ((n+1)%46)*100 + 99 - i // in-block offsets stay below 40
+			// Teams run 0-45 here, so the next one's block exists; its
+			// in-block offsets stay below 40.
+			vmID = naming.CloneVMIDBase + ((n+1)%46)*naming.CloneVMIDTeamStride + 99 - i
 		}
 		vm := proxmox.VM{VMID: vmID, Name: name, Node: "n1",
 			Status: rapid.SampledFrom([]string{"running", "stopped", "paused"}).Draw(t, label+" status"),

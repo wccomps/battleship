@@ -1,6 +1,8 @@
 package auth_test
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,9 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"context"
-	"encoding/base64"
-	"encoding/json"
 	"github.com/wccomps/battleship/internal/auth"
 	"github.com/wccomps/battleship/internal/auth/authtest"
 	"github.com/wccomps/battleship/internal/config"
@@ -464,33 +463,40 @@ func TestLogoutHintsTheLatestIDToken(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	b.login(lena)
-	hints := func() string {
-		sess, err := h.st.Session(context.Background(), auth.HashToken(b.sessionToken()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return sess.IDToken
-	}
-	first := hints()
 	h.clock.Advance(5 * time.Minute)
 	b.do(http.MethodGet, "/private", nil, nil) // refreshes, with an ID token
-	second := hints()
-	if second == "" || second == first {
-		t.Fatalf("stored ID token after a refresh with one: %q (was %q)", second, first)
-	}
 	h.idp.Set(func(f *authtest.Behavior) { f.NoIDTokenOnRefresh = true })
 	h.clock.Advance(5 * time.Minute)
-	b.do(http.MethodGet, "/private", nil, nil)
-	if got := hints(); got != second {
-		t.Errorf("a refresh without an ID token changed the stored one")
-	}
-	if h.idp.Refreshes() != 2 {
-		t.Fatalf("refreshed %d times, want 2", h.idp.Refreshes())
+	b.do(http.MethodGet, "/private", nil, nil) // refreshes, without one
+	issued := h.idp.IDTokens()
+	if h.idp.Refreshes() != 2 || len(issued) != 2 || issued[0] == issued[1] {
+		t.Fatalf("refreshed %d times, issued %d distinct ID tokens; want 2 refreshes, the login's and the first refresh's tokens", h.idp.Refreshes(), len(issued))
 	}
 	resp := b.postForm("/auth/logout", url.Values{"csrf": {b.csrf()}}, nil)
 	loc, _ := url.Parse(resp.Header.Get("Location"))
-	if idTokenSubject(t, loc.Query().Get("id_token_hint")) != "sub-lena" {
-		t.Errorf("logout to %q, want lena's ID token as the hint", loc)
+	if got := loc.Query().Get("id_token_hint"); got != issued[1] {
+		t.Errorf("hint is the login's token %v, want the first refresh's", got == issued[0])
+	}
+}
+
+// A refresh that rotates the refresh token while the session is being
+// logged out revokes the new token too, so none stays live.
+func TestRefreshRacingLogoutRevokesTheRotatedToken(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	csrf := b.csrf() // before the clock moves: reading it may refresh
+	h.clock.Advance(5 * time.Minute)
+	h.idp.Set(func(f *authtest.Behavior) {
+		f.OnRefresh = func(*http.Request) bool {
+			// The logout lands while the provider is answering the refresh.
+			b.postForm("/auth/logout", url.Values{"csrf": {csrf}}, nil)
+			return false
+		}
+	})
+	b.do(http.MethodGet, "/private", nil, nil)
+	if live := h.idp.RefreshTokens(); len(live) != 0 {
+		t.Errorf("refresh tokens still live after logout: %v (revoked %v)", live, h.idp.Revoked())
 	}
 }
 

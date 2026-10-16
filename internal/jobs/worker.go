@@ -218,17 +218,31 @@ func (w *Worker) runClaimed(ctx context.Context, job *store.Job, claim *lease) {
 	// Finish refuses a job that is no longer this worker's.
 	finCtx, stopFin := context.WithTimeout(bg, 30*time.Second)
 	defer stopFin()
+	// An outcome the database won't take is logged whole, so what cleanup
+	// left (masters stopped, VMs to remove by hand) isn't lost with it.
 	switch err := w.Store.Finish(finCtx, job.ID, w.ID, outcome); {
 	case errors.Is(err, store.ErrLostClaim):
-		w.Logf("job %d: %v; not recording its outcome", job.ID, errLostClaim)
+		w.Logf("job %d: %v; not recording its outcome: %s", job.ID, errLostClaim, describeOutcome(outcome))
 		return
 	case err != nil:
-		w.Logf("job %d: recording outcome: %v", job.ID, err)
+		w.Logf("job %d: recording outcome: %v; the outcome was: %s", job.ID, err, describeOutcome(outcome))
 		return
 	}
 	if w.OnFinish != nil {
 		w.OnFinish(job, outcome)
 	}
+}
+
+// describeOutcome is an outcome for the log.
+func describeOutcome(o store.Outcome) string {
+	msg := string(o.Status)
+	if o.Error != "" {
+		msg += ": " + o.Error
+	}
+	if len(o.Summary) > 0 {
+		msg += "; summary " + string(o.Summary)
+	}
+	return msg
 }
 
 // heartbeat beats every Jobs.Heartbeat (and at once on wake) until done is

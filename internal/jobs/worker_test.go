@@ -863,3 +863,31 @@ func TestIdleWorkerWakesForNewJob(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// An outcome the database won't take (another worker reaped the job) is
+// logged, with its summary, rather than lost.
+func TestWorkerLogsAnOutcomeItCannotRecord(t *testing.T) {
+	st := storetest.New(t)
+	f := teamVMs()
+	submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
+	w := newWorker(st, f)
+	var mu sync.Mutex
+	var logs strings.Builder
+	w.Logf = func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		fmt.Fprintf(&logs, format+"\n", args...)
+	}
+	w.OnStart = func(*store.Job) {
+		// Another worker reaps it as the run starts.
+		if _, err := st.ReapStale(bg, -time.Hour); err != nil {
+			t.Error(err)
+		}
+	}
+	w.runJob(bg, claim(t, st))
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(logs.String(), "not recording its outcome: ") {
+		t.Errorf("logs = %q, want the unrecorded outcome", logs.String())
+	}
+}

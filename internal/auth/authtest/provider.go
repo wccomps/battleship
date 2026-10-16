@@ -49,6 +49,7 @@ type Provider struct {
 	refreshes int
 	requests  []url.Values // every token request's form
 	revoked   []string     // refresh tokens revoked at /revoke
+	idTokens  []string     // every ID token issued, in order
 	logouts   []url.Values // every end-session request's query
 	b         Behavior
 }
@@ -313,6 +314,13 @@ func (p *Provider) Revoked() []string {
 	return slices.Clone(p.revoked)
 }
 
+// IDTokens is every ID token issued, in order.
+func (p *Provider) IDTokens() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.idTokens)
+}
+
 // Logouts is every end-session request's query, in order.
 func (p *Provider) Logouts() []url.Values {
 	p.mu.Lock()
@@ -412,6 +420,7 @@ func (p *Provider) issue(w http.ResponseWriter, subject, nonce string, offline, 
 			return
 		}
 		resp["id_token"] = idToken
+		p.idTokens = append(p.idTokens, idToken)
 	}
 	if offline && !p.b.NoRefreshToken {
 		rt := "rt-" + randomToken()
