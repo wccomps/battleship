@@ -3,6 +3,7 @@ package pods
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -61,21 +62,41 @@ func TestPropTeamVMsAreNamedAndNumbered(t *testing.T) {
 			for _, it := range plan.Items {
 				got[it.VMID] = it
 			}
+			// The model: the asked teams' VMs are acted on unless in a known
+			// other pool; VMs with their names but not team VMs (outside the
+			// block) are listed blocked, unless a team VM has the name.
+			isTeam := map[int]bool{}
+			teamNames := map[string]bool{}
+			for _, vm := range vms {
+				for _, team := range asked {
+					if teamVMModel(cfg.Naming, vm, team) {
+						isTeam[vm.VMID], teamNames[vm.Name] = true, true
+					}
+				}
+			}
 			for _, vm := range vms {
 				it, in := got[vm.VMID]
-				var want bool
+				named := false
 				for _, team := range asked {
-					want = want || teamVMModel(cfg.Naming, vm, team)
+					host, ok := strings.CutPrefix(vm.Name, "team"+team+"-")
+					named = named || ok && host != "" && !vm.Template && !strings.HasSuffix(vm.Name, cfg.Naming.TemplateSuffix)
 				}
-				if in != want {
+				stray := named && !isTeam[vm.VMID] && !teamNames[vm.Name]
+				// Items are known by name: of strays sharing one, one is listed.
+				listed := slices.ContainsFunc(plan.Items, func(it Item) bool { return it.Name == vm.Name && it.VMID != vm.VMID })
+				if want := isTeam[vm.VMID] || stray && !listed; in != want && !(stray && listed) {
 					t.Fatalf("%s plan has %s (VMID %d, pool %q, template %v): %v, want %v", plan.Kind, vm.Name, vm.VMID, vm.Pool, vm.Template, in, want)
 				}
 				if !in {
 					continue
 				}
 				team := vm.Name[4:6]
-				if wrongPool := vm.Pool != "" && vm.Pool != "pool-"+team; (it.Blocked != "") != wrongPool {
-					t.Fatalf("%s of %s in pool %q: blocked %q", plan.Kind, vm.Name, vm.Pool, it.Blocked)
+				wantBlocked := stray || vm.Pool != "" && vm.Pool != "pool-"+team
+				if (it.Blocked != "") != wantBlocked {
+					t.Fatalf("%s of %s (VMID %d) in pool %q: blocked %q, want blocked %v", plan.Kind, vm.Name, vm.VMID, vm.Pool, it.Blocked, wantBlocked)
+				}
+				if stray && len(it.Steps) != 0 {
+					t.Fatalf("%s would act on %s outside the team's block: %v", plan.Kind, vm.Name, it.Steps)
 				}
 			}
 			if len(got) != len(plan.Items) {
@@ -86,7 +107,7 @@ func TestPropTeamVMsAreNamedAndNumbered(t *testing.T) {
 }
 
 // A deploy whose VM name is taken by a VM outside the team's block is
-// blocked, and says to deal with it in Proxmox: teardown won't touch it.
+// blocked, and says to deal with it in Proxmox: teardown lists it, blocked.
 func TestDeployBlocksNameTakenOutsideTeamBlock(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 8005, Name: "team01-teak", Node: "cedar", Pool: "dev-05"}, nil)
@@ -94,14 +115,51 @@ func TestDeployBlocksNameTakenOutsideTeamBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "the name is taken by VMID 8005, which is outside team 01's VMIDs, so it isn't a team VM; rename or remove it in Proxmox"; len(plan.Items) != 1 || plan.Items[0].Blocked != want {
+	if want := "has a team 01 name but is VMID 8005, outside the team's VMIDs, so it isn't a team VM; rename or remove it in Proxmox"; len(plan.Items) != 1 || plan.Items[0].Blocked != want {
 		t.Fatalf("items = %+v", plan.Items)
 	}
 	td, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(td.Items) != 0 {
-		t.Fatalf("teardown of team 01 = %+v, want nothing", td.Items)
+	if len(td.Items) != 1 || td.Items[0].Blocked == "" || len(td.Items[0].Steps) != 0 {
+		t.Fatalf("teardown of team 01 = %+v, want team01-teak listed, blocked", td.Items)
+	}
+}
+
+// A deploy leaves alone a team VM in a known pool other than the team's,
+// as teardown and power do.
+func TestDeployBlocksTeamVMInAnotherPool(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Pool: "dev-05"}, nil)
+	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "is in pool dev-05, not pool-01; move it back to the team pool in Proxmox first"; len(plan.Items) != 1 || plan.Items[0].Blocked != want {
+		t.Fatalf("items = %+v", plan.Items)
+	}
+}
+
+// Rebuilding a template is held back only by team VMs, not by any VM with
+// a team name.
+func TestRebuildIgnoresTeamNamesOutsideTheBlock(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 8005, Name: "team05-teak", Node: "cedar", Pool: "dev-05"}, nil)
+	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Templates[0].Blocked != "" {
+		t.Errorf("rebuild blocked by a VM outside every team's block: %q", plan.Templates[0].Blocked)
+	}
+	f.Add(proxmox.VM{VMID: 10521, Name: "team05-teak", Node: "cedar", Pool: "pool-05"}, nil)
+	plan, err = testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan.Templates[0].Blocked, "team05-teak") {
+		t.Errorf("rebuild not blocked by team 05's VM: %q", plan.Templates[0].Blocked)
 	}
 }

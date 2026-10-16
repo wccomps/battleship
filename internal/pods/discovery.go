@@ -56,7 +56,7 @@ func FindTeamVMs(vms []proxmox.VM, n Naming, teams, hosts []string) []proxmox.VM
 	}
 	var out []proxmox.VM
 	for _, vm := range vms {
-		team, host, ok := n.teamVM(vm)
+		team, host, ok := n.TeamVM(vm)
 		if !ok || !want[team] || !MatchesHost(host, hosts) {
 			continue
 		}
@@ -66,11 +66,11 @@ func FindTeamVMs(vms []proxmox.VM, n Naming, teams, hosts []string) []proxmox.VM
 	return out
 }
 
-// teamVM is the team and host of vm if it is a team VM: named as VMName
+// TeamVM is the team and host of vm if it is a team VM: named as VMName
 // names them, in that team's clone VMID block (where deploys put them), and
 // not a template. The name alone isn't enough: anyone can name a VM
 // "team05-test" in their own pool, and teardown would delete it.
-func (n Naming) teamVM(vm proxmox.VM) (team, host string, ok bool) {
+func (n Naming) TeamVM(vm proxmox.VM) (team, host string, ok bool) {
 	team, host, ok = n.ParseVMName(vm.Name)
 	if !ok || vm.Template || n.IsTemplateName(vm.Name) {
 		return "", "", false
@@ -172,12 +172,29 @@ func MasterSets(vms []proxmox.VM, n Naming, tag string) (sets []MasterSet, other
 	return sets, others
 }
 
+// namedOutsideBlock is the non-template VMs of teams, filtered by hosts,
+// that have a team VM's name but are outside the team's clone VMID block.
+func namedOutsideBlock(vms []proxmox.VM, n Naming, teams, hosts []string) []proxmox.VM {
+	var out []proxmox.VM
+	for _, vm := range vms {
+		team, host, ok := n.ParseVMName(vm.Name)
+		if !ok || vm.Template || n.IsTemplateName(vm.Name) || !slices.Contains(teams, team) || !MatchesHost(host, hosts) {
+			continue
+		}
+		if _, _, isTeamVM := n.TeamVM(vm); !isTeamVM {
+			out = append(out, vm)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
 // AllTeamVMs is every non-template team VM, as FindTeamVMs finds them,
 // sorted by name.
 func AllTeamVMs(vms []proxmox.VM, n Naming) []proxmox.VM {
 	var out []proxmox.VM
 	for _, vm := range vms {
-		if _, _, ok := n.teamVM(vm); ok {
+		if _, _, ok := n.TeamVM(vm); ok {
 			out = append(out, vm)
 		}
 	}
@@ -191,7 +208,7 @@ func AllTeamVMs(vms []proxmox.VM, n Naming) []proxmox.VM {
 func TeamsWithVMs(vms []proxmox.VM, n Naming) []string {
 	seen := map[string]bool{}
 	for _, vm := range vms {
-		if team, _, ok := n.teamVM(vm); ok {
+		if team, _, ok := n.TeamVM(vm); ok {
 			seen[team] = true
 		}
 	}

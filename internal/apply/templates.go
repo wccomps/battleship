@@ -338,7 +338,7 @@ func (e *Executor) teamVMUsing(host string) (proxmox.VM, bool) {
 	var best proxmox.VM
 	found := false
 	for _, vm := range e.present {
-		if _, h, ok := e.naming.ParseVMName(vm.Name); ok && h == host && !vm.Template && (!found || vm.VMID < best.VMID) {
+		if _, h, ok := e.naming.TeamVM(vm); ok && h == host && (!found || vm.VMID < best.VMID) {
 			best, found = vm, true
 		}
 	}

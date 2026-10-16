@@ -896,6 +896,23 @@ func TestRunDoesNotMutateThePlan(t *testing.T) {
 	}
 }
 
+// A VM with a team name outside every team's block appearing after
+// planning doesn't hold the rebuild back: it isn't a team VM.
+func TestRebuildIgnoresTeamNameOutsideBlockAtRunTime(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"02"}, Rebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Add(proxmox.VM{VMID: 8005, Name: "team01-teak", Node: "cedar", Pool: "dev-05"}, nil)
+
+	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
+	if len(res.Failed) != 0 || len(res.Succeeded) != 1 {
+		t.Errorf("result = %+v", res)
+	}
+}
+
 func TestRebuildRefusedWhenTeamVMsAppearAfterPlanning(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
