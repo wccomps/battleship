@@ -25,13 +25,14 @@ form ──> preview ──> confirm ──> stored job ──> worker claims it
    only read a VM, such as clones of one base image, run together. The
    worker keeps the claim with heartbeats. Once none has landed for the
    claimer's `stale_after`, any worker reaps the job (`interrupted`), which
-   frees its locks; from half that, the worker sends Proxmox nothing more
-   for it.
+   frees its locks. From half that, the worker stops the run and sends no
+   more changes for it until a heartbeat lands again.
 4. **Re-plan.** The worker plans once more; if the cluster changed since the
    preview, the job ends `stale` and nothing runs.
 5. **Run.** The executor (`apply.Executor`) runs each item's steps, records
    events, retries transient failures, and on a cancel or failure removes
-   what it half-built.
+   what it half-built (and reports what it couldn't, such as when the
+   claim is unsure).
 6. **Finish.** The worker records the outcome (`store.Finish`). Retrying a
    job's failed VMs previews and submits a new job for just those VMs.
 

@@ -1081,9 +1081,10 @@ func TestCancelledRunRemovesTeamVMItCreated(t *testing.T) {
 	}
 }
 
-// A run stopped because its job's claim became unsure (the job system
-// lost its database) sends nothing more, cleanup included: the job may
-// have been reaped and another job be rebuilding the same VMIDs. Cleanup reports what it left.
+// A run stopped because its job's claim became unsure (the job system lost
+// its database) sends no more changes, cleanup included: the job may have
+// been reaped and another job be rebuilding the same VMIDs. Cleanup
+// reports what it left.
 func TestUnsureClaimHoldsBackCleanup(t *testing.T) {
 	f, plan := newlyBuiltTeamVMFails(t)
 	ctx, cancel := context.WithCancel(context.Background())

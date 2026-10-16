@@ -37,7 +37,7 @@ const (
 	oidcRetryEvery  = 2 * time.Second
 	// cleanupEvery is how often expired sessions and previews are deleted.
 	cleanupEvery = time.Hour
-	// cleanupTimeout bounds each of a cleanup's database calls.
+	// cleanupTimeout bounds each of a cleanup's two sweeps.
 	cleanupTimeout = 30 * time.Second
 	// viewLinger keeps a viewer's grid polling after their last grid page
 	// closes, so a reload or a just-rendered page's stream can take it over.
@@ -225,6 +225,13 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	}
 	stopHTTP()
 	stopBackground()
+	// Requests and the session sweep have stopped: let the refresh token
+	// revocations they started finish.
+	revokeCtx, stopRevokes := context.WithDeadline(context.Background(), deadline)
+	if err := svc.WaitRevocations(revokeCtx); err != nil {
+		log.Warn("refresh token revocations still running at shutdown; those tokens expire on their own")
+	}
+	stopRevokes()
 
 	timeout := time.NewTimer(time.Until(deadline))
 	defer timeout.Stop()

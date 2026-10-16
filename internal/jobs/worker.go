@@ -372,15 +372,18 @@ var errClaimUnsure = errors.New("not sent to Proxmox: battleship lost contact wi
 // how long it waits for a change's answer.
 //
 // A job is reaped once its heartbeat stamp is StaleAfter old (the claimer's
-// StaleAfter, see store.Claim), and a stamp is never earlier than the start
+// StaleAfter, see store.Claim; a reaper older than migration 014 uses its
+// own), and a stamp is never earlier than the start
 // of the beat (or claim) that wrote it. The claim is sure while that start
 // is under StaleAfter/2 ago; no change is sent once it isn't. The wait for
 // a change's answer ends StaleAfter - margin after that start. Elapsed time
 // is the larger of the monotonic clock's (which stops while the machine
 // sleeps) and the wall clock's, assuming NTP never steps the wall clock
-// back by more than the margin while the machine sleeps. Giving up waiting
-// doesn't undo a request Proxmox already received, and tasks a change
-// started run on, under Proxmox's own VM locks.
+// back by more than the margin while the machine sleeps. The wait is a
+// context deadline, so a sleep delays it too; the next change is checked
+// against both clocks. Giving up waiting doesn't undo a request Proxmox
+// already received, and tasks a change started run on, under Proxmox's own
+// VM locks.
 type lease struct {
 	mu      sync.Mutex
 	mono    time.Time // start of the last successful beat, with a monotonic reading

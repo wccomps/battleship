@@ -111,7 +111,7 @@ func (s *Service) callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Once the login has succeeded at the provider, the browser's old
-	// session is dropped, and its refresh token revoked.
+	// session is ended (see end).
 	old, err := r.Cookie(s.names.session)
 	hadOld := err == nil
 	if hadOld && wellFormed(old.Value) {
@@ -195,12 +195,11 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
-// revokeTimeout bounds one revocation.
 const revokeTimeout = 3 * time.Second
 
-// end removes session id and has its refresh token revoked in the
-// background (see revokeLater), what naming the session in the log. It
-// returns the session as removed, or ok false if it was already gone.
+// end removes session id and has its refresh token revoked (see
+// revokeLater; what names it in the log). It returns the session as
+// removed, or ok false if it was already gone.
 func (s *Service) end(ctx context.Context, id, what string) (_ store.EndedSession, ok bool, _ error) {
 	ended, ok, err := s.st.EndSession(ctx, id)
 	if ok {
@@ -210,8 +209,10 @@ func (s *Service) end(ctx context.Context, id, what string) (_ store.EndedSessio
 }
 
 // revokeLater revokes the refresh token sealed for sessionID without
-// holding anyone up: the provider's copy outlives the session, and a
-// revocation that fails is logged and left to expire.
+// holding anyone up: the provider's copy outlives the session. At most
+// revokesAtOnce run at a time; one that fails is logged and the token left
+// to expire, and serve waits for those still running when it stops (see
+// WaitRevocations).
 func (s *Service) revokeLater(sessionID, sealed, what string) {
 	if s.revokeURL == "" || sealed == "" {
 		return
@@ -219,8 +220,25 @@ func (s *Service) revokeLater(sessionID, sealed, what string) {
 	s.revoking.Add(1)
 	go func() {
 		defer s.revoking.Done()
+		s.revokeSlots <- struct{}{}
+		defer func() { <-s.revokeSlots }()
 		s.revokeSealed(context.Background(), sessionID, sealed, what)
 	}()
+}
+
+// revokesAtOnce is how many revocations run at a time.
+const revokesAtOnce = 4
+
+// WaitRevocations waits, until ctx ends, for the revocations started so far.
+func (s *Service) WaitRevocations(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() { s.revoking.Wait(); close(done) }()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // revokeSealed revokes the refresh token sealed for sessionID, within ctx,
@@ -236,9 +254,9 @@ func (s *Service) revokeSealed(ctx context.Context, sessionID, sealed, what stri
 }
 
 // revoke asks the provider to revoke a refresh token (RFC 7009), as the
-// client: authenticating as the revocation endpoint lists, else as the
-// token endpoint does (see authStyle); where neither lists any, basic,
-// then post if refused with a 401.
+// client: authenticating as the revocation endpoint lists, or if it lists
+// none, as the token endpoint does (see authStyle); with no listed method
+// it knows, basic, then post if refused with a 401.
 func (s *Service) revoke(ctx context.Context, refreshToken string) error {
 	ctx, cancel := context.WithTimeout(ctx, revokeTimeout)
 	defer cancel()

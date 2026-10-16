@@ -67,6 +67,15 @@ func TestEnvironmentsReadsSlots(t *testing.T) {
 	if envs[2].Free() || !slices.Equal(envs[2].Users, []string{"team05-test"}) {
 		t.Errorf("slot 3 = %+v; the stray team-named VM on its bridge holds it, the team VM isn't read", envs[2])
 	}
+	// Nor does a name ending like a template's make a running VM one.
+	f.Add(proxmox.VM{VMID: 8101, Name: "team05-x.tpl", Node: "alder"}, map[string]string{"net0": "virtio=BC:24:11:00:00:08,bridge=devint02"})
+	envs, _, err = NewPlanner(f, envConfig()).Environments(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(envs[1].Users, "team05-x.tpl") {
+		t.Errorf("slot 2 users = %v; a VM only named like a template holds it", envs[1].Users)
+	}
 }
 
 func TestEnvironmentMixedDomains(t *testing.T) {

@@ -120,13 +120,13 @@ if [ -z "$iface" ]; then echo "no network interface has MAC $MAC" >&2; exit 2; f
 // wait ends the script, not the executor.
 const GuestLockWait = 4 * time.Minute
 
-// linuxLocked runs the script from stdin holding
-// /run/battleship-guest.lock for up to GuestLockWait. flock holds the lock
-// itself (-o), so a daemon the script starts (an ifup hook, say) doesn't
-// inherit it and keep later scripts out. Without a util-linux flock that
-// has -w, -E and -o (busybox's has none), the script runs unlocked. The
-// probe locks /dev/null, not the lock itself; exit 75 there still means
-// flock works. BATTLESHIP_LOCK and BATTLESHIP_LOCK_WAIT exist for tests.
+// linuxLocked runs the script from stdin holding /run/battleship-guest.lock,
+// waiting up to GuestLockWait for it. flock holds the lock itself (-o), so
+// a daemon the script starts (an ifup hook, say) doesn't inherit it and
+// keep later scripts out. Without a util-linux flock that has -w, -E and
+// -o (busybox's has none), the script runs unlocked. The probe locks
+// /dev/null, not the lock itself; exit 75 there still means flock works.
+// BATTLESHIP_LOCK and BATTLESHIP_LOCK_WAIT exist for tests.
 var linuxLocked = `lock="${BATTLESHIP_LOCK:-/run/battleship-guest.lock}"
 flock -w 0 -E 75 -o /dev/null true >/dev/null 2>&1
 case $? in 0|75) ;; *) exec /bin/sh -s ;; esac

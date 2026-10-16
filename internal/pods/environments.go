@@ -24,7 +24,7 @@ type Slot struct {
 	FirstVMID int
 }
 
-// LastVMID is the last VMID of the slot's block.
+// LastVMID is the last VMID of the slot's block, FirstVMID+99.
 func (s Slot) LastVMID() int { return s.FirstVMID + 99 }
 
 // ExpandSlot replaces {slot} with n as two digits.
@@ -139,7 +139,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 	var read []proxmox.VM
 	for _, vm := range vms {
 		_, inSlot := byPool[vm.Pool]
-		if kind, _, _ := p.Naming.Classify(vm); inSlot || (!vm.Template && kind != TeamVMKind && kind != TeamTemplate) {
+		if kind, _, _ := p.Naming.Classify(vm); inSlot || (!vm.Template && kind != TeamVMKind) {
 			read = append(read, vm)
 		}
 	}

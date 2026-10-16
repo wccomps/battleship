@@ -321,7 +321,6 @@ func TestFindMastersRefusesInvalidPattern(t *testing.T) {
 	}
 }
 
-// findTeamVMs is findForTeams' team VMs.
 func findTeamVMs(vms []proxmox.VM, n Naming, teams, hosts []string) []proxmox.VM {
 	team, _ := findForTeams(vms, n, teams, hosts)
 	return team

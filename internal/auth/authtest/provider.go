@@ -65,6 +65,7 @@ type Behavior struct {
 	AuthMethods        []string                          // non-nil: token_endpoint_auth_methods_supported in discovery
 	RevokeAuthMethods  []string                          // non-nil: revocation_endpoint_auth_methods_supported in discovery
 	RevokePostOnly     bool                              // the revocation endpoint refuses HTTP Basic client auth (401)
+	RevokeDelay        time.Duration                     // the revocation endpoint answers after this long
 	AdvertiseAlgs      []string                          // extra id_token_signing_alg_values_supported
 	KeyID              string                            // the signing key's ID, default "authtest"; change it to rotate
 	MutateIDToken      func(claims map[string]any)       // edits ID token claims before signing
@@ -294,6 +295,10 @@ func (p *Provider) revoke(w http.ResponseWriter, r *http.Request) {
 	if !basic {
 		id, secret = r.PostForm.Get("client_id"), r.PostForm.Get("client_secret")
 	}
+	p.mu.Lock()
+	delay := p.b.RevokeDelay
+	p.mu.Unlock()
+	time.Sleep(delay)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	switch {

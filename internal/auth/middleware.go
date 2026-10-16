@@ -9,11 +9,9 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/wccomps/battleship/internal/store"
-	"golang.org/x/sync/errgroup"
 )
 
 type ctxKey struct{}
@@ -329,43 +327,28 @@ func (s *Service) endSession(w http.ResponseWriter, r *http.Request, sess store.
 	s.clearSessionCookie(w)
 }
 
-// EndExpiredSessions revokes the refresh tokens of up to expiredBatch
-// sessions expired at now, while ctx lasts, then removes the ones it tried
-// (the rest wait for the next sweep), and returns how many it removed.
+// EndExpiredSessions ends the sessions expired at now, a batch at a time
+// while ctx lasts, has their refresh tokens revoked (see revokeLater), and
+// returns how many it ended.
 func (s *Service) EndExpiredSessions(ctx context.Context, now time.Time) (int64, error) {
-	expired, err := s.st.ExpiredSessions(context.WithoutCancel(ctx), now, expiredBatch) // ctx bounds the revocations
-	if err != nil {
-		return 0, err
+	var n int64
+	for {
+		ended, err := s.st.EndExpiredSessions(ctx, now, expiredBatch)
+		if err != nil {
+			return n, err
+		}
+		n += int64(len(ended))
+		for _, e := range ended {
+			s.revokeLater(e.ID, e.RefreshToken, fmt.Sprintf("expired session %.8s", e.ID))
+		}
+		if len(ended) < expiredBatch {
+			return n, nil
+		}
 	}
-	var mu sync.Mutex
-	var tried []string
-	var g errgroup.Group
-	g.SetLimit(expiredRevokes)
-	for _, e := range expired {
-		g.Go(func() error {
-			if ctx.Err() != nil {
-				return nil
-			}
-			if s.revokeURL != "" {
-				s.revokeSealed(ctx, e.ID, e.RefreshToken, fmt.Sprintf("expired session %.8s", e.ID))
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			tried = append(tried, e.ID)
-			return nil
-		})
-	}
-	_ = g.Wait()
-	if len(tried) == 0 {
-		return 0, ctx.Err()
-	}
-	return s.st.DeleteExpiredSessions(context.WithoutCancel(ctx), tried, now)
 }
 
-const (
-	expiredBatch   = 40 // sessions one sweep ends; at most expiredBatch/expiredRevokes × revokeTimeout
-	expiredRevokes = 4  // revocations a sweep sends at once
-)
+// expiredBatch is how many sessions EndExpiredSessions ends per query.
+const expiredBatch = 100
 
 func (s *Service) serverError(w http.ResponseWriter, r *http.Request, what string, err error) {
 	s.logf("auth: %s: %v", what, err)

@@ -22,8 +22,9 @@ type vmRef struct {
 	node string // where the run expected it; used when the listing is unusable
 }
 
-// cleanup leaves the cluster as Run found it, apart from finished work. It
-// touches only VMs this run created, re-checking each name:
+// cleanup leaves the cluster as Run found it, apart from finished work, as
+// far as it may change it (see Executor.Held). It touches only VMs this run
+// created, re-checking each name:
 //   - unfinished team VMs are removed;
 //   - a copy whose task failed or was cut off is removed, unless a later
 //     wait saw it finish OK (see stopCopy);

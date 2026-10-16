@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -558,6 +559,24 @@ func TestLogoutRevokesWithTheProvidersClientAuth(t *testing.T) {
 				t.Errorf("revoked %v, want %v; logs %s", h.revoked(), live, h.logs.String())
 			}
 		})
+	}
+}
+
+// WaitRevocations waits for a revocation still running, up to its ctx: what
+// serve does when it stops.
+func TestWaitRevocationsWaitsForTheRunningOne(t *testing.T) {
+	h := newHarness(t)
+	h.idp.Set(func(f *authtest.Behavior) { f.RevokeDelay = 300 * time.Millisecond })
+	b := h.browser()
+	b.login(alice)
+	b.postForm("/auth/logout", url.Values{"csrf": {b.csrf()}}, nil)
+	short, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := h.svc.WaitRevocations(short); !errors.Is(err, context.DeadlineExceeded) || len(h.idp.Revoked()) != 0 {
+		t.Fatalf("WaitRevocations with a revocation running = %v, revoked %v; want it still waiting", err, h.idp.Revoked())
+	}
+	if err := h.svc.WaitRevocations(context.Background()); err != nil || len(h.idp.Revoked()) != 1 {
+		t.Errorf("WaitRevocations = %v, revoked %v; want it done", err, h.idp.Revoked())
 	}
 }
 

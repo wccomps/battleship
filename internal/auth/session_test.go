@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/wccomps/battleship/internal/auth"
 	"github.com/wccomps/battleship/internal/auth/authtest"
+	"github.com/wccomps/battleship/internal/store"
 )
 
 func TestAnonymousRequests(t *testing.T) {
@@ -83,6 +85,26 @@ func TestRejectedRefreshRevokesBothTokens(t *testing.T) {
 	}
 }
 
+// One sweep ends every expired session, however many batches that takes.
+func TestSweepEndsEveryExpiredSession(t *testing.T) {
+	h := newHarness(t)
+	for i := range 250 {
+		id := fmt.Sprintf("swept-%03d", i)
+		if err := h.st.CreateSession(context.Background(), store.Session{ID: id, Subject: "sub-" + id, RefreshToken: "sealed",
+			CSRF: "c", CreatedAt: h.clock.Now(), LastSeen: h.clock.Now(), RefreshedAt: h.clock.Now(), ExpiresAt: h.clock.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := h.svc.EndExpiredSessions(context.Background(), h.clock.Now())
+	if err != nil || n != 250 {
+		t.Fatalf("EndExpiredSessions = %d, %v; want all 250", n, err)
+	}
+	if left := h.countSessions(); left != 0 {
+		t.Errorf("%d sessions left after the sweep", left)
+	}
+	_ = h.revoked() // the revocations (of tokens that don't open) finish
+}
+
 // A refresh whose token the provider rotated but whose userinfo it then
 // couldn't serve, past the grace period, ends the session leaving no token
 // live: neither the stored one nor the rotated one.
@@ -110,8 +132,7 @@ func TestExpiredSessionsSweptAreRevoked(t *testing.T) {
 	b.login(alice)
 	live := h.liveTokens()
 	h.clock.Advance(13 * time.Hour) // past session_max, with no request
-	// A sweep out of time leaves them for the next, rather than delete them
-	// unrevoked.
+	// A sweep out of time ends nothing; the next one will.
 	done, cancel := context.WithCancel(context.Background())
 	cancel()
 	if n, err := h.svc.EndExpiredSessions(done, h.clock.Now()); n != 0 || len(h.revoked()) != 0 {

@@ -67,6 +67,7 @@ type Service struct {
 	revokeURL     string           // provider token revocation URL (RFC 7009); "" if none
 	revokeStyle   oauth2.AuthStyle // how revoke authenticates (see authStyle)
 	revoking      sync.WaitGroup   // revocations in the background (revokeLater)
+	revokeSlots   chan struct{}    // one per revocation running (revokeLater)
 	secure        bool             // cookies get Secure (base_url is https)
 	names         cookieNames      // cookie names, from namesFor(secure)
 	origin        string           // base_url's origin, for the Origin check
@@ -114,19 +115,20 @@ func NewService(ctx context.Context, cfg config.Config, st *store.Store, opts Op
 	}
 
 	s := &Service{
-		cfg:        cfg,
-		st:         st,
-		now:        opts.Now,
-		logf:       opts.Logf,
-		render:     plainPage,
-		client:     &http.Client{Timeout: providerTimeout},
-		secure:     SecureBaseURL(w.BaseURL),
-		names:      namesFor(SecureBaseURL(w.BaseURL)),
-		origin:     normalOrigin(base),
-		loginKey:   seal.NewKey(cfg.OIDC.ClientSecret, loginStatePurpose),
-		refreshKey: seal.NewKey(cfg.OIDC.ClientSecret, refreshTokenPurpose),
-		ticketKey:  ticketKey(cfg),
-		pve:        opts.Proxmox,
+		cfg:         cfg,
+		st:          st,
+		now:         opts.Now,
+		logf:        opts.Logf,
+		render:      plainPage,
+		client:      &http.Client{Timeout: providerTimeout},
+		secure:      SecureBaseURL(w.BaseURL),
+		names:       namesFor(SecureBaseURL(w.BaseURL)),
+		origin:      normalOrigin(base),
+		loginKey:    seal.NewKey(cfg.OIDC.ClientSecret, loginStatePurpose),
+		refreshKey:  seal.NewKey(cfg.OIDC.ClientSecret, refreshTokenPurpose),
+		revokeSlots: make(chan struct{}, revokesAtOnce),
+		ticketKey:   ticketKey(cfg),
+		pve:         opts.Proxmox,
 	}
 	if s.now == nil {
 		s.now = time.Now
