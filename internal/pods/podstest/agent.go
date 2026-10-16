@@ -93,12 +93,26 @@ func (f *Fake) AgentExec(ctx context.Context, node string, vmid int, command []s
 	return pid, err
 }
 
+// ExecRunning is whether command pid is still running: it exits on the
+// status read after its last running one. Call it with f.Mu held, as
+// ExecHook is.
+func (f *Fake) ExecRunning(pid int) bool {
+	return f.ExecRunsFor != nil && f.polls[pid] <= f.ExecRunsFor(pid)
+}
+
 func (f *Fake) AgentExecStatus(ctx context.Context, node string, vmid, pid int) (proxmox.ExecStatus, error) {
 	var st proxmox.ExecStatus
 	err := f.agentCall(ctx, fmt.Sprintf("agent-status:%d", vmid), node, vmid, func(*Guest) error {
 		s, ok := f.execs[pid]
 		if !ok {
 			return &proxmox.APIError{Status: 500, Message: fmt.Sprintf("Agent error: Invalid parameter 'pid' %d", pid)}
+		}
+		if f.polls == nil {
+			f.polls = map[int]int{}
+		}
+		f.polls[pid]++
+		if f.ExecRunsFor != nil && f.polls[pid] <= f.ExecRunsFor(pid) {
+			s = proxmox.ExecStatus{}
 		}
 		st = s
 		return nil

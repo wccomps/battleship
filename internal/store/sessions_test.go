@@ -20,6 +20,7 @@ func newSession(id string) store.Session {
 		Name:         "Alice",
 		Email:        "alice@example.org",
 		RefreshToken: "refresh-1",
+		IDToken:      "id-1",
 		CSRF:         "csrf-1",
 		CreatedAt:    t0,
 		LastSeen:     t0,
@@ -228,6 +229,25 @@ func TestUpdateSession(t *testing.T) {
 	up.RefreshToken = ""
 	if err := s.UpdateSession(ctx, "hash-1", up); !errors.Is(err, store.ErrEmptySession) {
 		t.Errorf("UpdateSession without a refresh token err = %v, want ErrEmptySession", err)
+	}
+}
+
+// A refresh's ID token replaces the stored one; a refresh without one
+// keeps it.
+func TestUpdateSessionIDToken(t *testing.T) {
+	s := storetest.New(t)
+	createSession(t, s, newSession("hash-1"))
+	for _, c := range []struct{ sent, want string }{{"", "id-1"}, {"id-2", "id-2"}, {"", "id-2"}} {
+		if err := s.UpdateSession(ctx, "hash-1", store.SessionUpdate{RefreshToken: "r", IDToken: c.sent, RefreshedAt: t0}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Session(ctx, "hash-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.IDToken != c.want {
+			t.Errorf("after an update with ID token %q: %q, want %q", c.sent, got.IDToken, c.want)
+		}
 	}
 }
 

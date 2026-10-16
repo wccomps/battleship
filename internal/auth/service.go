@@ -63,6 +63,7 @@ type Service struct {
 	verifier      *oidc.IDTokenVerifier
 	oauth         oauth2.Config
 	endSessionURL string      // provider logout URL; "" if discovery lists none
+	revokeURL     string      // provider token revocation URL (RFC 7009); "" if none
 	secure        bool        // cookies get Secure (base_url is https)
 	names         cookieNames // cookie names, from namesFor(secure)
 	origin        string      // base_url's origin, for the Origin check
@@ -139,6 +140,7 @@ func NewService(ctx context.Context, cfg config.Config, st *store.Store, opts Op
 	}
 	var meta struct {
 		EndSession  string   `json:"end_session_endpoint"`
+		Revocation  string   `json:"revocation_endpoint"`
 		AuthMethods []string `json:"token_endpoint_auth_methods_supported"`
 		JWKSURI     string   `json:"jwks_uri"`
 		Algorithms  []string `json:"id_token_signing_alg_values_supported"`
@@ -146,8 +148,11 @@ func NewService(ctx context.Context, cfg config.Config, st *store.Store, opts Op
 	if err := provider.Claims(&meta); err != nil {
 		return nil, fmt.Errorf("oidc.issuer %s: reading discovery: %w", cfg.OIDC.Issuer, err)
 	}
-	if u, err := url.Parse(meta.EndSession); err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" {
+	if webURL(meta.EndSession) {
 		s.endSessionURL = meta.EndSession
+	}
+	if webURL(meta.Revocation) {
+		s.revokeURL = meta.Revocation
 	}
 	endpoint := provider.Endpoint()
 	switch {
@@ -190,6 +195,12 @@ func (s *Service) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /auth/logout", s.logout)
 	mux.HandleFunc("GET /auth/proxmox", s.proxmoxStart)
 	mux.HandleFunc("GET "+proxmoxCallbackPath, s.proxmoxCallback)
+}
+
+// webURL is whether a discovery endpoint is an absolute http(s) URL.
+func webURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != ""
 }
 
 // providerContext bounds a call to the identity provider and makes it use

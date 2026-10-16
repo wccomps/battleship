@@ -3,6 +3,7 @@ package jobs
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ func TestSubmitStoresPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if j.Status != store.StatusPending || j.Fingerprint != Fingerprint(p) || j.CreatedBy != "alice" || len(j.LockKeys) != 1 {
+	if j.Status != store.StatusPending || j.Fingerprint != Fingerprint(p) || j.CreatedBy != "alice" || !reflect.DeepEqual(j.LockKeys, LockKeys(p)) {
 		t.Errorf("job = %+v", j)
 	}
 }

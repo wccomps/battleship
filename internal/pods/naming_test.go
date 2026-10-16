@@ -3,6 +3,7 @@ package pods
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -251,18 +252,41 @@ func TestPropVMNames(t *testing.T) {
 		if gt, gh, ok := n.ParseVMName(near); ok && (len(gt) != 2 || gt[0] < '0' || gt[0] > '9' || gt[1] < '0' || gt[1] > '9' || n.VMName(gt, gh) != near) {
 			t.Fatalf("pattern %q: ParseVMName(%q) = %q, %q", n.cfg.VMName, near, gt, gh)
 		}
-		// Discovery finds exactly the team VMs that parse, of the teams asked.
-		vms := []proxmox.VM{{VMID: 1, Name: name}, {VMID: 2, Name: near}, {VMID: 3, Name: name, Template: true}, {VMID: 4, Name: name + n.cfg.TemplateSuffix}}
+		// Discovery finds exactly the team VMs that parse, of the teams asked,
+		// in the team's own clone VMID block.
+		vmid := func(label string) int { return rapid.SampledFrom(blockVMIDs(n.cfg, team)).Draw(t, label) }
+		vms := []proxmox.VM{{VMID: vmid("vmid 1"), Name: name}, {VMID: vmid("vmid 2"), Name: near},
+			{VMID: vmid("vmid 3"), Name: name, Template: true}, {VMID: vmid("vmid 4"), Name: name + n.cfg.TemplateSuffix}}
+		for i := range vms {
+			vms[i].Node = strconv.Itoa(i) // tells them apart; VMIDs may repeat
+		}
 		var want []proxmox.VM
 		for _, vm := range vms {
-			if gt, _, ok := n.ParseVMName(vm.Name); ok && gt == team && !vm.Template && !strings.HasSuffix(vm.Name, n.cfg.TemplateSuffix) {
+			if gt, _, ok := n.ParseVMName(vm.Name); ok && gt == team && !vm.Template && !strings.HasSuffix(vm.Name, n.cfg.TemplateSuffix) && inTeamBlock(n.cfg, team, vm.VMID) {
 				want = append(want, vm)
 			}
 		}
 		got := FindTeamVMs(vms, n, []string{team}, nil)
 		slices.SortFunc(want, func(a, b proxmox.VM) int { return strings.Compare(a.Name, b.Name) })
-		if !slices.EqualFunc(got, want, func(a, b proxmox.VM) bool { return a.VMID == b.VMID }) {
+		if !slices.EqualFunc(got, want, func(a, b proxmox.VM) bool { return a.Node == b.Node }) {
 			t.Fatalf("pattern %q: FindTeamVMs(%+v) = %+v, want %+v", n.cfg.VMName, vms, got, want)
 		}
 	})
+}
+
+// inTeamBlock is whether vmid is one of team's clone VMIDs: the first 100
+// of its stride from clone_vmid_base.
+func inTeamBlock(cfg config.Naming, team string, vmid int) bool {
+	t, _ := strconv.Atoi(team)
+	start := cfg.CloneVMIDBase + t*cfg.CloneVMIDTeamStride
+	return vmid >= start && vmid < start+100
+}
+
+// blockVMIDs are VMIDs in, at the edges of, and just outside team's clone
+// block, in the neighbouring teams' blocks, and far from any block.
+func blockVMIDs(cfg config.Naming, team string) []int {
+	t, _ := strconv.Atoi(team)
+	start := cfg.CloneVMIDBase + t*cfg.CloneVMIDTeamStride
+	return []int{start, start + 1, start + 50, start + 99, start + 100, start - 1, start + cfg.CloneVMIDTeamStride,
+		start - cfg.CloneVMIDTeamStride, 100, 8000, cfg.CloneVMIDBase - 1}
 }

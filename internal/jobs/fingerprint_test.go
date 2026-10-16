@@ -16,6 +16,7 @@ import (
 var fingerprinted = map[string]map[string]bool{
 	"Plan": {
 		"Kind": true, "Teams": true, "Templates": true, "Items": true, "Config": true, "Locks": true,
+		"Notices": false, // what the plan leaves alone; a new one changes nothing it does
 	},
 	"TemplateSpec": {
 		"Name": true, "VMID": true, "Exists": true, "Rebuild": true, "Blocked": true,

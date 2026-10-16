@@ -23,6 +23,8 @@ type identity struct {
 	Username string // preferred_username
 	Name     string
 	Email    string
+	// IDToken is the verified ID token it came from; empty if from userinfo.
+	IDToken string
 }
 
 // expect is what identify checks beyond the ID token's signature, issuer,
@@ -109,7 +111,7 @@ func (s *Service) identify(ctx context.Context, tok *oauth2.Token, want expect) 
 		if err := idt.Claims(&claims); err != nil {
 			return id, unverified("ID token claims: %v", err)
 		}
-		id.Subject = idt.Subject
+		id.Subject, id.IDToken = idt.Subject, raw
 		if want.subject != "" && id.Subject != want.subject {
 			return id, unverified("ID token is for subject %q, not %q", id.Subject, want.subject)
 		}

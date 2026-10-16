@@ -92,6 +92,51 @@ func TestGuestExecIsSentOnce(t *testing.T) {
 	}
 }
 
+// A script that outlasts the limit keeps running in the guest (the agent
+// can't stop it), so a retry waits for it to exit before starting another:
+// two copies never change the guest at once.
+func TestGuestScriptRetryWaitsForTheRunningOne(t *testing.T) {
+	limit := int(execLimit / execPoll)
+	for _, c := range []struct {
+		name     string
+		runsFor  int // status reads the first copy stays running for
+		execs    int
+		succeeds bool
+	}{
+		{"exits during the retry's wait", limit + 10, 2, true},
+		{"outlasts the retry's wait too", 2*limit + 10, 1, false},
+		{"exits in time", 3, 1, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := guestFake(t)
+			f.ExecRunsFor = func(pid int) int {
+				if pid == 1 {
+					return c.runsFor
+				}
+				return 0
+			}
+			apply := applied(f, "")
+			f.ExecHook = func(vmid int, cmd []string, in string) (int, string, string) {
+				for pid := 1; pid <= len(f.Execs)-1; pid++ {
+					if f.ExecRunning(pid) {
+						t.Errorf("exec %d started while exec %d still runs", len(f.Execs), pid)
+					}
+				}
+				return apply(vmid, cmd, in)
+			}
+			e := catalogExec(f)
+			e.Cfg.Retry.Rounds = 1
+			res := e.Run(context.Background(), &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{guestItem(pods.ImageLinux)}})
+			if len(f.Execs) != c.execs || (len(res.Succeeded) == 1) != c.succeeds {
+				t.Fatalf("%d execs, result %+v; want %d execs, success %v", len(f.Execs), res, c.execs, c.succeeds)
+			}
+			if err := res.Failed["oak.kilo.alpha"]; !c.succeeds && (err == nil || !strings.Contains(err.Error(), "not starting a second copy")) {
+				t.Errorf("failed = %v", err)
+			}
+		})
+	}
+}
+
 func TestVerifyStopsOnForbidden(t *testing.T) {
 	f := guestFake(t)
 	f.ExecHook = applied(f, "")

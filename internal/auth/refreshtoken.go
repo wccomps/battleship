@@ -15,6 +15,31 @@ func (s *Service) sealRefreshToken(sessionID, token string) string {
 	return s.refreshKey.Seal(sessionID, []byte(token))
 }
 
+// sealIDToken seals an ID token for session sessionID, apart from its
+// refresh token; "" stays "" (a refresh may bring no ID token).
+func (s *Service) sealIDToken(sessionID, token string) string {
+	if token == "" {
+		return ""
+	}
+	return s.refreshKey.Seal(idTokenLabel+sessionID, []byte(token))
+}
+
+// openIDToken reverses sealIDToken; "" if there is none or it won't open.
+func (s *Service) openIDToken(sessionID, stored string) string {
+	if stored == "" {
+		return ""
+	}
+	plain, err := s.refreshKey.Open(idTokenLabel+sessionID, stored)
+	if err != nil {
+		return ""
+	}
+	return string(plain)
+}
+
+// idTokenLabel binds an ID token's seal apart from the refresh token's, so
+// one can't be opened as the other.
+const idTokenLabel = "id token "
+
 // openRefreshToken reverses sealRefreshToken for the same session. An empty
 // token never opens.
 func (s *Service) openRefreshToken(sessionID, stored string) (string, error) {

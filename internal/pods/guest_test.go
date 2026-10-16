@@ -2,12 +2,16 @@ package pods
 
 import (
 	"encoding/base64"
+	"errors"
 	"flag"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 	"unicode/utf16"
 )
 
@@ -45,7 +49,7 @@ func linuxGuestScript(t *testing.T, name string, g Guest) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(cmd, " ") != "/bin/sh -s" {
+	if len(cmd) != 3 || cmd[0] != "/bin/sh" || cmd[1] != "-c" || cmd[2] != linuxLocked {
 		t.Errorf("command = %q", cmd)
 	}
 	golden(t, name, input)
@@ -140,5 +144,106 @@ func TestDNSOnlyScriptsLeaveTheRestAlone(t *testing.T) {
 		if !strings.Contains(script, g.DNS) || !strings.Contains(script, g.Domain) {
 			t.Errorf("%s DNS-only script lacks the server or domain", os)
 		}
+	}
+}
+
+// Two copies of a Linux script never run at once: the second waits for the
+// first's lock (one a stopped job left running), then runs. A daemon the
+// first starts doesn't keep the lock.
+func TestLinuxScriptsTakeTurns(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	if _, err := exec.LookPath("flock"); err != nil {
+		t.Skip("no flock")
+	}
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	body := "echo start >> \"$LOG\"; sleep 0.3; echo end >> \"$LOG\"; (sleep 5 </dev/null >/dev/null 2>&1 &)\n"
+	run := func(i int) {
+		c := exec.Command(sh, "-c", linuxLocked)
+		c.Env = append(os.Environ(), "BATTLESHIP_LOCK="+filepath.Join(dir, "lock"), "LOG="+log)
+		c.Stdin = strings.NewReader(body)
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Errorf("script %d: %v\n%s", i, err, out)
+		}
+	}
+	var wg sync.WaitGroup
+	for i := range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			time.Sleep(time.Duration(i) * 50 * time.Millisecond)
+			run(i)
+		}()
+	}
+	wg.Wait()
+	start := time.Now()
+	run(2) // the first two left sleeps running: they must not hold the lock
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("a third script waited %v behind the first two's background process", d)
+	}
+	b, _ := os.ReadFile(log)
+	if got := strings.Fields(string(b)); !slices.Equal(got, []string{"start", "end", "start", "end", "start", "end"}) {
+		t.Errorf("log = %q, want the runs one after the other", got)
+	}
+}
+
+// A script that can't get the lock in time exits 75 and says why.
+func TestLinuxScriptGivesUpOnAHeldLock(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	flock, err := exec.LookPath("flock")
+	if err != nil {
+		t.Skip("no flock")
+	}
+	lock := filepath.Join(t.TempDir(), "lock")
+	holder := exec.Command(flock, lock, "sleep", "3")
+	if err := holder.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Wait() //nolint:errcheck
+	time.Sleep(200 * time.Millisecond)
+	c := exec.Command(sh, "-c", linuxLocked)
+	c.Env = append(os.Environ(), "BATTLESHIP_LOCK="+lock, "BATTLESHIP_LOCK_WAIT=0.2")
+	c.Stdin = strings.NewReader("echo ran\n")
+	out, err := c.CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 75 || !strings.Contains(string(out), "still running") || strings.Contains(string(out), "ran") {
+		t.Errorf("err = %v, output %q; want exit 75 saying another script is still running", err, out)
+	}
+}
+
+// Where flock lacks -w, -E or -o (busybox, old util-linux) or is missing,
+// the script still runs, unlocked.
+func TestLinuxScriptRunsWithoutAUsableFlock(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	for name, fake := range map[string]string{
+		"busybox":  "#!/bin/sh\necho 'flock: unrecognized option: w' >&2\nexit 1\n",
+		"old":      "#!/bin/sh\ncase \"$*\" in *-E*) echo 'flock: invalid option -- E' >&2; exit 64;; esac\nexit 0\n",
+		"no flock": "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			bin := t.TempDir()
+			if fake != "" {
+				if err := os.WriteFile(filepath.Join(bin, "flock"), []byte(fake), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			c := exec.Command(sh, "-c", linuxLocked)
+			// Only the fake bin, plus sh itself for the exec.
+			c.Env = []string{"PATH=" + bin, "BATTLESHIP_LOCK=" + filepath.Join(t.TempDir(), "lock")}
+			c.Stdin = strings.NewReader("echo ran\n")
+			out, err := c.CombinedOutput()
+			if err != nil || strings.TrimSpace(string(out)) != "ran" {
+				t.Errorf("err = %v, output %q; want the script to run", err, out)
+			}
+		})
 	}
 }

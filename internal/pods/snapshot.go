@@ -71,6 +71,9 @@ func (p Planner) Snapshot(ctx context.Context, req SnapshotRequest) (*Plan, erro
 	}
 	for i := range plan.Items {
 		it := &plan.Items[i]
+		if it.Blocked != "" {
+			continue
+		}
 		snaps, err := p.API.Snapshots(ctx, it.Node, it.VMID)
 		switch {
 		case err != nil && ctx.Err() != nil:

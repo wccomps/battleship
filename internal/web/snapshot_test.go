@@ -98,7 +98,7 @@ func TestSnapshotPreviewAndConfirm(t *testing.T) {
 	if !reflect.DeepEqual(in, want) {
 		t.Errorf("inputs = %+v, want %+v", in, want)
 	}
-	if !reflect.DeepEqual(js[0].LockKeys, []string{"team:01"}) {
+	if !reflect.DeepEqual(js[0].LockKeys, []string{"team:01", "vmid:10101", "vmid:10102"}) {
 		t.Errorf("lock keys = %v", js[0].LockKeys)
 	}
 

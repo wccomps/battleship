@@ -130,8 +130,11 @@ func resetTargetModel(snaps []proxmox.Snapshot, snapshot string) (string, bool) 
 
 func checkReset(t interface{ Fatalf(string, ...any) }, vms map[string][]proxmox.Snapshot, snapshot string) {
 	f := podstest.New("n1")
-	vmid := 10101
+	n, offset := NewNaming(config.Default().Naming), 0
 	for name, snaps := range vms {
+		team, _, _ := n.ParseVMName(name)
+		vmid := n.CloneVMID(team, offset)
+		offset++
 		var names []string
 		times, states := map[string]int64{}, map[string]string{}
 		for _, s := range snaps {
@@ -140,7 +143,6 @@ func checkReset(t interface{ Fatalf(string, ...any) }, vms map[string][]proxmox.
 		}
 		f.Add(proxmox.VM{VMID: vmid, Name: name, Node: "n1"}, nil, names...)
 		f.VMs[vmid].SnapTimes, f.VMs[vmid].SnapStates = times, states
-		vmid++
 	}
 	plan, err := NewPlanner(f, config.Default()).Reset(context.Background(), []string{"01", "02"}, nil, snapshot)
 	if err != nil {

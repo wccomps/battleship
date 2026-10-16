@@ -216,9 +216,19 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 			sess.Subject, err, stamp(graceEnd))
 		return sess, true
 	}
-	up := store.SessionUpdate{Username: id.Username, Name: id.Name, Email: id.Email, RefreshToken: refreshToken, RefreshedAt: now}
+	up := store.SessionUpdate{Username: id.Username, Name: id.Name, Email: id.Email, RefreshToken: refreshToken,
+		IDToken: s.sealIDToken(sess.ID, id.IDToken), RefreshedAt: now}
 	err = s.st.UpdateSession(ctx, sess.ID, up)
 	if errors.Is(err, store.ErrSessionNotFound) { // logged out meanwhile
+		// The logout revoked the token it read; this refresh's rotated one
+		// would otherwise stay valid at the provider.
+		if refreshToken != sess.RefreshToken && s.revokeURL != "" {
+			if rt, err := s.openRefreshToken(sess.ID, refreshToken); err == nil {
+				if err := s.revoke(ctx, rt); err != nil {
+					s.logf("auth: refresh after logout: subject=%q: revoking the rotated refresh token: %v", sess.Subject, err)
+				}
+			}
+		}
 		s.clearSessionCookie(w)
 		s.unauthenticated(w, r)
 		return sess, false
@@ -228,6 +238,9 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 		return sess, false
 	}
 	sess.Name, sess.Email, sess.RefreshToken, sess.RefreshedAt = id.Name, id.Email, refreshToken, now
+	if up.IDToken != "" {
+		sess.IDToken = up.IDToken
+	}
 	sess.Username = id.Username
 	sess.RefreshRetryAt, sess.RefreshFailedAt = time.Time{}, time.Time{}
 	return sess, true

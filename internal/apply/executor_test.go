@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -895,6 +896,23 @@ func TestRunDoesNotMutateThePlan(t *testing.T) {
 	}
 }
 
+// A VM with a team name outside every team's block appearing after
+// planning doesn't hold the rebuild back: it isn't a team VM.
+func TestRebuildIgnoresTeamNameOutsideBlockAtRunTime(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"02"}, Rebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Add(proxmox.VM{VMID: 8005, Name: "team01-teak", Node: "cedar", Pool: "dev-05"}, nil)
+
+	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
+	if len(res.Failed) != 0 || len(res.Succeeded) != 1 {
+		t.Errorf("result = %+v", res)
+	}
+}
+
 func TestRebuildRefusedWhenTeamVMsAppearAfterPlanning(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
@@ -1060,6 +1078,39 @@ func TestCancelledRunRemovesTeamVMItCreated(t *testing.T) {
 	}
 	if f.VMs[9021] == nil || !f.VMs[9021].Template {
 		t.Error("finished template was not kept")
+	}
+}
+
+// A run stopped because its job's claim became unsure (the job system
+// lost its database) sends nothing more, cleanup included: another worker
+// may already be rebuilding the same VMIDs. Cleanup reports what it left.
+func TestUnsureClaimHoldsBackCleanup(t *testing.T) {
+	f, plan := newlyBuiltTeamVMFails(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	var unsure atomic.Bool
+	errUnsure := errors.New("not sent to Proxmox: claim unsure")
+	f.OnRecord = func(key string) {
+		if key == "setconfig:10121" {
+			unsure.Store(true)
+			cancel()
+		}
+	}
+	e := testExecutor(f, &recorder{})
+	e.Held = func(ctx context.Context) (context.Context, context.CancelFunc, error) {
+		if unsure.Load() {
+			return ctx, func() {}, errUnsure
+		}
+		return ctx, func() {}, nil
+	}
+	res := e.Run(ctx, plan)
+	if f.VMs[10121] == nil {
+		t.Error("cleanup deleted team01-teak although the claim was unsure")
+	}
+	if slices.ContainsFunc(f.Calls, func(k string) bool { return strings.HasPrefix(k, "delete:") || strings.HasPrefix(k, "power:") }) {
+		t.Errorf("calls after the claim became unsure: %v", f.Calls)
+	}
+	if err := res.CleanupFailed["team01-teak"]; !errors.Is(err, errUnsure) {
+		t.Errorf("CleanupFailed = %v, want team01-teak held back", res.CleanupFailed)
 	}
 }
 

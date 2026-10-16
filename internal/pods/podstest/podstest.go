@@ -130,9 +130,13 @@ type Fake struct {
 	// ExecHook, if set, runs each guest command, with Mu held, and gives its
 	// exit code and output; unset, commands exit 0 with no output.
 	ExecHook func(vmid int, command []string, input string) (code int, out, errOut string)
+	// ExecRunsFor, if set, is how many status reads command pid stays
+	// running for before it exits; unset, commands exit at once.
+	ExecRunsFor func(pid int) int
 	// Execs are the guest commands run, in order.
 	Execs   []ExecCall
 	execs   map[int]proxmox.ExecStatus // by PID
+	polls   map[int]int                // status reads, by PID
 	nextPID int
 }
 

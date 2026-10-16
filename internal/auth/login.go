@@ -4,9 +4,13 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -126,6 +130,7 @@ func (s *Service) callback(w http.ResponseWriter, r *http.Request) {
 		Name:         id.Name,
 		Email:        id.Email,
 		RefreshToken: sealedRT,
+		IDToken:      s.sealIDToken(HashToken(token), id.IDToken),
 		CSRF:         randomToken(),
 		CreatedAt:    now,
 		LastSeen:     now,
@@ -168,11 +173,63 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	s.clearSessionCookie(w)
 	s.logf("auth: logout: subject=%q", sess.Subject)
+	// The provider's copy of the refresh token outlives the session row, so
+	// revoke it. Logout goes on if that fails: the session is gone either way.
+	if rt, err := s.openRefreshToken(sess.ID, sess.RefreshToken); err == nil && s.revokeURL != "" {
+		if err := s.revoke(r.Context(), rt); err != nil {
+			s.logf("auth: logout: subject=%q: revoking the refresh token: %v", sess.Subject, err)
+		}
+	}
 	dest := "/"
 	if s.endSessionURL != "" {
 		dest = s.endSessionURL
+		// id_token_hint tells the provider whose session to end, so it can
+		// log the user out without asking which account.
+		if hint := s.openIDToken(sess.ID, sess.IDToken); hint != "" {
+			if u, err := url.Parse(dest); err == nil {
+				q := u.Query()
+				q.Set("id_token_hint", hint)
+				q.Set("client_id", s.cfg.OIDC.ClientID)
+				u.RawQuery = q.Encode()
+				dest = u.String()
+			}
+		}
 	}
 	http.Redirect(w, r, dest, http.StatusSeeOther)
+}
+
+// revokeTimeout bounds the revocation a logout waits for: the session is
+// already gone, so a slow provider shouldn't hold the logout up for long.
+const revokeTimeout = 3 * time.Second
+
+// revoke asks the provider to revoke a refresh token (RFC 7009), as the
+// client, the way the token endpoint authenticates it.
+func (s *Service) revoke(ctx context.Context, refreshToken string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), revokeTimeout)
+	defer cancel()
+	form := url.Values{"token": {refreshToken}, "token_type_hint": {"refresh_token"}}
+	if s.oauth.Endpoint.AuthStyle == oauth2.AuthStyleInParams {
+		form.Set("client_id", s.oauth.ClientID)
+		form.Set("client_secret", s.oauth.ClientSecret)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.revokeURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if s.oauth.Endpoint.AuthStyle != oauth2.AuthStyleInParams {
+		req.SetBasicAuth(url.QueryEscape(s.oauth.ClientID), url.QueryEscape(s.oauth.ClientSecret))
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("the provider answered %s", resp.Status)
+	}
+	return nil
 }
 
 func (s *Service) clearLoginCookie(w http.ResponseWriter) {

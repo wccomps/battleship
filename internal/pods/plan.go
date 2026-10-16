@@ -178,6 +178,9 @@ type Plan struct {
 	// Locks are lock keys beyond teams and templates (slot:NN, domain:…,
 	// family:…, vmid:N), so jobs over the same slot, family or VMIDs wait.
 	Locks []string `json:"locks,omitempty"`
+	// Notices are what a person should know the plan leaves alone, such as
+	// VMs named like team VMs that aren't; nothing acts on them.
+	Notices []string `json:"notices,omitempty"`
 }
 
 // ConfigHash identifies the settings that change what a plan of kind does
@@ -389,7 +392,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool,
 	case exists && rebuild:
 		// Rebuilding deletes the template, which would break its linked clones.
 		for _, vm := range vms {
-			if _, host, ok := p.Naming.ParseVMName(vm.Name); ok && host == spec.Host && !vm.Template {
+			if _, host, ok := p.Naming.TeamVM(vm); ok && host == spec.Host {
 				spec.Blocked = fmt.Sprintf("team VMs such as %s still use this template; tear them down first", vm.Name)
 				break
 			}
@@ -478,6 +481,10 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snap
 			it.Blocked = fmt.Sprintf("several VMs are named %s (VMIDs %s)", it.Name, vmidList(named))
 		} else if vm.Template {
 			it.Blocked = "is a template, not a team VM"
+		} else if t, in := p.Naming.TeamOfCloneVMID(vm.VMID); !in || t != team {
+			it.Blocked = outsideBlock(vm, team)
+		} else if want := p.Naming.Pool(team); vm.Pool != "" && vm.Pool != want {
+			it.Blocked = wrongPool(vm, want)
 		} else if want := p.Naming.CloneVMID(team, tpl.VMID); vm.VMID != want {
 			it.Blocked = fmt.Sprintf("exists as VMID %d, expected %d (built from a different template?); tear it down first", vm.VMID, want)
 		}
@@ -685,6 +692,9 @@ func (p Planner) Reset(ctx context.Context, teams, hosts []string, snapshot stri
 	}
 	for i := range plan.Items {
 		it := &plan.Items[i]
+		if it.Blocked != "" {
+			continue
+		}
 		snaps, err := p.API.Snapshots(ctx, it.Node, it.VMID)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -725,6 +735,16 @@ func (p Planner) Power(ctx context.Context, teams, hosts []string, action string
 	return plan, err
 }
 
+// outsideBlock is why a VM named like one of team's isn't treated as one.
+func outsideBlock(vm proxmox.VM, team string) string {
+	return fmt.Sprintf("has a team %s name but is VMID %d, outside the team's VMIDs, so it isn't a team VM; rename or remove it in Proxmox", team, vm.VMID)
+}
+
+// wrongPool is why a team VM in another pool is left alone.
+func wrongPool(vm proxmox.VM, want string) string {
+	return fmt.Sprintf("is in pool %s, not %s; move it back to the team pool in Proxmox first", vm.Pool, want)
+}
+
 func (p Planner) simple(ctx context.Context, kind Kind, teams, hosts []string, fill func(*Item)) (*Plan, []proxmox.VM, error) {
 	teams, err := normalizeTeams(teams)
 	if err != nil {
@@ -742,7 +762,19 @@ func (p Planner) simple(ctx context.Context, kind Kind, teams, hosts []string, f
 		team, host, _ := p.Naming.ParseVMName(vm.Name)
 		it := Item{Team: team, Host: host, Name: vm.Name, VMID: vm.VMID, Node: vm.Node}
 		fill(&it)
+		// Proxmox leaves the pool out when the viewer can't audit pools, so
+		// only a known, different pool blocks.
+		if want := p.Naming.Pool(team); vm.Pool != "" && vm.Pool != want {
+			it.Blocked = wrongPool(vm, want)
+		}
 		plan.Items = append(plan.Items, it)
+	}
+	// VMs with a team's name outside its block aren't team VMs: say so, so
+	// a teardown doesn't seem to miss them silently.
+	for _, vm := range namedOutsideBlock(vms, p.Naming, teams, hosts) {
+		team, _, _ := p.Naming.ParseVMName(vm.Name)
+		plan.Notices = append(plan.Notices, fmt.Sprintf("%s (VMID %d) has a team %s name but is outside the team's VMIDs, so it isn't a team VM and is left alone.",
+			vm.Name, vm.VMID, team))
 	}
 	sort.SliceStable(plan.Items, func(i, j int) bool { return plan.Items[i].Name < plan.Items[j].Name })
 	return plan, vms, nil

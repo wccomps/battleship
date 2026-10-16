@@ -320,6 +320,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		p.Warnings = append(p.Warnings, fmt.Sprintf("%d of the %d VMs asked for by name no longer exist or match the teams and hosts, so they are left out: %s.",
 			len(missing), len(in.VMs), strings.Join(missing, ", ")))
 	}
+	p.Warnings = append(p.Warnings, plan.Notices...)
 
 	switch {
 	case len(plan.Items) == 0:
@@ -334,7 +335,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		p.Nothing = "Every VM is blocked: nothing can run."
 	}
 	if p.Nothing != "" {
-		p.Warnings = nil // there is nothing to confirm
+		p.Warnings = slices.Clone(plan.Notices) // nothing to confirm, but say what was left alone
 	} else {
 		p.Capacity = capacityOf(opts.capacity, &p.Warnings)
 		p.Consequence = consequence(op.Kind, in, plan.Runnable())

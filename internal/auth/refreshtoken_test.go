@@ -49,3 +49,25 @@ func TestRefreshTokenOpensOldSeal(t *testing.T) {
 		t.Fatalf("round trip = %q, %v", again, err)
 	}
 }
+
+// An ID token's seal opens only as that session's ID token, and a refresh
+// token's never opens as an ID token, or the other way round.
+func TestIDTokenSealIsItsOwn(t *testing.T) {
+	s := &Service{refreshKey: seal.NewKey("client-secret", refreshTokenPurpose)}
+	idt := s.sealIDToken("sess-1", "id-abc")
+	if got := s.openIDToken("sess-1", idt); got != "id-abc" {
+		t.Errorf("openIDToken = %q, want id-abc", got)
+	}
+	if got := s.openIDToken("sess-2", idt); got != "" {
+		t.Errorf("opened another session's ID token: %q", got)
+	}
+	if got, err := s.openRefreshToken("sess-1", idt); err == nil {
+		t.Errorf("an ID token opened as a refresh token: %q", got)
+	}
+	if got := s.openIDToken("sess-1", s.sealRefreshToken("sess-1", "rt-abc")); got != "" {
+		t.Errorf("a refresh token opened as an ID token: %q", got)
+	}
+	if s.sealIDToken("sess-1", "") != "" || s.openIDToken("sess-1", "") != "" {
+		t.Error("no ID token should seal and open as none")
+	}
+}
