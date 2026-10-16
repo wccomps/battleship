@@ -14,13 +14,15 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// notChanges are the API methods allowed after a stop: reads, task waits
-// and StopTask. guardedAPI must refuse every other method then.
-var notChanges = map[string]bool{
-	"ClusterVMs": true, "OnlineNodes": true, "VMConfig": true, "Snapshots": true,
-	"CurrentStatus": true, "StorageContent": true, "VMIDHeld": true, "WaitTask": true, "StopTask": true,
-	"AgentPing": true, "AgentExecStatus": true, "AgentInterfaces": true, "AgentHostname": true,
-}
+// notChanges are the API methods allowed after a stop: pods.Reads.
+var notChanges = func() map[string]bool {
+	m := map[string]bool{}
+	reads := reflect.TypeFor[pods.Reads]()
+	for i := range reads.NumMethod() {
+		m[reads.Method(i).Name] = true
+	}
+	return m
+}()
 
 // countingAPI counts the calls that reach it.
 type countingAPI struct {
@@ -51,7 +53,7 @@ func TestGuardedAPIHoldsBackEveryChange(t *testing.T) {
 					inner.calls++
 				}
 			}()
-			out = reflect.ValueOf(guardedAPI{API: inner}).MethodByName(m.Name).Call(args)
+			out = reflect.ValueOf(guardedAPI{Reads: inner, changes: inner}).MethodByName(m.Name).Call(args)
 		}()
 		passed := inner.calls > 0
 		if notChanges[m.Name] != passed {
@@ -86,7 +88,7 @@ func TestHeldHoldsBackEveryChange(t *testing.T) {
 					inner.calls++
 				}
 			}()
-			out = reflect.ValueOf(guardedAPI{API: inner, held: func() (time.Time, error) { return time.Time{}, errGone }}).MethodByName(m.Name).Call(args)
+			out = reflect.ValueOf(guardedAPI{Reads: inner, changes: inner, held: func() (time.Time, error) { return time.Time{}, errGone }}).MethodByName(m.Name).Call(args)
 		}()
 		passed := inner.calls > 0
 		if notChanges[m.Name] != passed {
@@ -111,7 +113,7 @@ func TestHeldBoundsEveryChange(t *testing.T) {
 			continue
 		}
 		inner := &ctxAPI{}
-		g := guardedAPI{API: inner, held: func() (time.Time, error) { return deadline, nil }}
+		g := guardedAPI{Reads: inner, changes: inner, held: func() (time.Time, error) { return deadline, nil }}
 		args := []reflect.Value{reflect.ValueOf(context.Background())}
 		for j := 1; j < m.Type.NumIn(); j++ {
 			args = append(args, reflect.Zero(m.Type.In(j)))

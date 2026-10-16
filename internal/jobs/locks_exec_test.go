@@ -15,9 +15,11 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// changeLog is an API that records the VMID of every change sent through it.
+// changeLog is an API that records the VMID of every change sent through
+// it. It embeds only pods.Reads, so it can't miss a change method.
 type changeLog struct {
-	pods.API
+	pods.Reads
+	changes pods.Changes
 	mu      sync.Mutex
 	changed []int
 }
@@ -38,43 +40,43 @@ func (c *changeLog) take() []int {
 
 func (c *changeLog) SetVMConfig(ctx context.Context, node string, vmid int, ch map[string]string) error {
 	c.saw(vmid)
-	return c.API.SetVMConfig(ctx, node, vmid, ch)
+	return c.changes.SetVMConfig(ctx, node, vmid, ch)
 }
 func (c *changeLog) AgentExec(ctx context.Context, node string, vmid int, cmd []string, in string) (int, error) {
 	c.saw(vmid)
-	return c.API.AgentExec(ctx, node, vmid, cmd, in)
+	return c.changes.AgentExec(ctx, node, vmid, cmd, in)
 }
 func (c *changeLog) Clone(ctx context.Context, r proxmox.CloneRequest) (string, error) {
 	c.saw(r.NewVMID)
-	return c.API.Clone(ctx, r)
+	return c.changes.Clone(ctx, r)
 }
 func (c *changeLog) ConvertToTemplate(ctx context.Context, node string, vmid int) (string, error) {
 	c.saw(vmid)
-	return c.API.ConvertToTemplate(ctx, node, vmid)
+	return c.changes.ConvertToTemplate(ctx, node, vmid)
 }
 func (c *changeLog) RegenerateCloudInit(ctx context.Context, node string, vmid int) error {
 	c.saw(vmid)
-	return c.API.RegenerateCloudInit(ctx, node, vmid)
+	return c.changes.RegenerateCloudInit(ctx, node, vmid)
 }
 func (c *changeLog) CreateSnapshot(ctx context.Context, node string, vmid int, r proxmox.SnapshotRequest) (string, error) {
 	c.saw(vmid)
-	return c.API.CreateSnapshot(ctx, node, vmid, r)
+	return c.changes.CreateSnapshot(ctx, node, vmid, r)
 }
 func (c *changeLog) Rollback(ctx context.Context, node string, vmid int, snap string) (string, error) {
 	c.saw(vmid)
-	return c.API.Rollback(ctx, node, vmid, snap)
+	return c.changes.Rollback(ctx, node, vmid, snap)
 }
 func (c *changeLog) Power(ctx context.Context, node string, vmid int, action string) (string, error) {
 	c.saw(vmid)
-	return c.API.Power(ctx, node, vmid, action)
+	return c.changes.Power(ctx, node, vmid, action)
 }
 func (c *changeLog) Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration, force bool) (string, error) {
 	c.saw(vmid)
-	return c.API.Shutdown(ctx, node, vmid, timeout, force)
+	return c.changes.Shutdown(ctx, node, vmid, timeout, force)
 }
 func (c *changeLog) DeleteVM(ctx context.Context, node string, vmid int) (string, error) {
 	c.saw(vmid)
-	return c.API.DeleteVM(ctx, node, vmid)
+	return c.changes.DeleteVM(ctx, node, vmid)
 }
 
 var volumeVMID = regexp.MustCompile(`(?:^|[:/])(?:vm|base)-(\d+)-`)
@@ -84,7 +86,7 @@ func (c *changeLog) DeleteVolume(ctx context.Context, node, storage, volid strin
 		id, _ := strconv.Atoi(m[1])
 		c.saw(id)
 	}
-	return c.API.DeleteVolume(ctx, node, storage, volid)
+	return c.changes.DeleteVolume(ctx, node, storage, volid)
 }
 
 // Every VM a job changes is one of its lock keys, so jobs that change it
@@ -95,7 +97,7 @@ func TestJobsLockEveryVMTheyChange(t *testing.T) {
 	f := envCluster()
 	f.Add(proxmox.VM{VMID: 150, Name: "deb-fresh", Node: "alder", Status: "stopped"},
 		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:01:50,bridge=vmbr0"})
-	api := &changeLog{API: f}
+	api := &changeLog{Reads: f, changes: f}
 	p := pods.NewPlanner(f, cfg)
 	exec := &apply.Executor{API: api, Cfg: cfg, Sleep: func(ctx context.Context, d time.Duration) error { return ctx.Err() }}
 	host, err := pods.ParseHostSpec("oak=debian-12")

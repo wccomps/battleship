@@ -209,7 +209,7 @@ func (e *Executor) init() {
 		e.lim = NewLimits(e.Cfg.Concurrency)
 	}
 	e.owned = map[int]*ownedVM{}
-	e.api = guardedAPI{API: e.API, held: e.Held}
+	e.api = guardedAPI{Reads: e.API, changes: e.API, held: e.Held}
 	e.leftovers = map[int]leftover{}
 	e.asked = map[int][]string{}
 	e.mastersStopped = map[string]string{}
