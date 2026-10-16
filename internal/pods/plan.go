@@ -278,7 +278,10 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 	if len(nodes) == 0 {
 		return nil, fmt.Errorf("no online Proxmox nodes")
 	}
-	masters, untagged := FindMasters(vms, p.Naming, req.Pattern, p.Cfg.Deploy.MasterTag)
+	masters, untagged, err := FindMasters(vms, p.Naming, req.Pattern, p.Cfg.Deploy.MasterTag)
+	if err != nil {
+		return nil, err
+	}
 	var kept []proxmox.VM
 	for _, m := range masters {
 		if MatchesHost(Hostname(m.Name), req.Hosts) {
@@ -690,7 +693,7 @@ func (p Planner) Reset(ctx context.Context, teams, hosts []string, snapshot stri
 			it.Blocked = "cannot list snapshots: " + proxmox.Describe(err)
 			continue
 		}
-		names := SnapshotNames(snaps)
+		names := SnapshotNames(Finished(snaps))
 		has := "has none"
 		if len(names) > 0 {
 			has = "has: " + strings.Join(names, ", ")

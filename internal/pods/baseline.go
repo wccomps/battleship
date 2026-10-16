@@ -13,11 +13,15 @@ import (
 // BaselineSnapshot is what a reset naming no snapshot rolls back to:
 // deploy.snapshot_name if present, else the newest match of
 // deploy.baseline_patterns (latest snaptime, then greatest name, so
-// timestamped names sort right without snaptimes). ok is false if none.
+// timestamped names sort right without snaptimes). Unfinished snapshots
+// don't count. ok is false if none.
 func BaselineSnapshot(d config.Deploy, snaps []proxmox.Snapshot) (name string, ok bool) {
 	var best *proxmox.Snapshot
 	for i := range snaps {
 		s := &snaps[i]
+		if s.State != "" {
+			continue
+		}
 		if s.Name == d.SnapshotName {
 			return s.Name, true
 		}
@@ -35,8 +39,9 @@ func BaselineSnapshot(d config.Deploy, snaps []proxmox.Snapshot) (name string, o
 }
 
 // HasBaseline reports whether a VM with these snapshots has a baseline.
-func HasBaseline(d config.Deploy, names []string) bool {
-	return slices.ContainsFunc(names, func(n string) bool { return n == d.SnapshotName || matchesBaseline(d, n) })
+func HasBaseline(d config.Deploy, snaps []proxmox.Snapshot) bool {
+	_, ok := BaselineSnapshot(d, snaps)
+	return ok
 }
 
 func matchesBaseline(d config.Deploy, name string) bool {
@@ -62,6 +67,12 @@ func BaselineText(d config.Deploy) string {
 func NoBaseline(d config.Deploy) string {
 	names := append([]string{fmt.Sprintf("%q", d.SnapshotName)}, d.BaselinePatterns...)
 	return "no " + strings.Join(names, " or ") + " baseline snapshot"
+}
+
+// Finished drops snapshots still being taken or deleted, or whose task died
+// (snapstate set): Proxmox refuses to roll back to them.
+func Finished(snaps []proxmox.Snapshot) []proxmox.Snapshot {
+	return slices.DeleteFunc(slices.Clone(snaps), func(s proxmox.Snapshot) bool { return s.State != "" })
 }
 
 func SnapshotNames(snaps []proxmox.Snapshot) []string {

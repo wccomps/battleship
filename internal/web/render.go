@@ -125,9 +125,12 @@ type view struct {
 	Live string
 	// Initial is the user's initial, for the account button.
 	Initial string
-	// Refresh, if set, is a local URL the page goes on to at once.
-	Refresh string
+	// refresh, if set, is the URL the page goes on to at once; see Refresh.
+	refresh string
 }
+
+// Refresh is the URL the layout's page goes on to at once, if it is local.
+func (v view) Refresh() string { return localOnly(v.refresh) }
 
 // navItem is an entry of the top navigation.
 type navItem struct {
@@ -238,11 +241,21 @@ type message struct {
 }
 
 // AuthPage renders auth's own pages (login and sign-in errors, 401/403) in
-// this app's layout. New makes it the auth service's.
+// this app's layout. New makes it the auth service's. A link or refresh
+// that would leave the site is dropped.
 func (s *Server) AuthPage(w http.ResponseWriter, r *http.Request, p auth.Page) {
-	v := s.newView(w, r, p.Title, "", message{Status: p.Status, Message: sentence(p.Message), Link: p.Link, LinkText: p.LinkText, Waiting: p.Refresh != ""})
-	v.Refresh = p.Refresh
+	v := s.newView(w, r, p.Title, "", nil)
+	v.refresh = p.Refresh
+	v.Data = message{Status: p.Status, Message: sentence(p.Message), Link: localOnly(p.Link), LinkText: p.LinkText, Waiting: v.Refresh() != ""}
 	s.render(w, r, p.Status, "message", v)
+}
+
+// localOnly is u if it is a path on this site, else "".
+func localOnly(u string) string {
+	if auth.LocalURL(u) == nil {
+		return ""
+	}
+	return u
 }
 
 // sentence capitalises msg and adds a full stop, for lower-case messages like

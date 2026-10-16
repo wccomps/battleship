@@ -28,13 +28,14 @@ func isNetKey(k string) bool {
 // option is k=v.
 
 // splitOptions splits "head,k=v,k2=v2" into the head (volume or model=MAC)
-// and its options.
+// and its options, dropping any without a key (",,").
 func splitOptions(s string) (head string, opts map[string]string) {
 	parts := strings.Split(s, ",")
 	opts = map[string]string{}
 	for _, p := range parts[1:] {
-		k, v, _ := strings.Cut(p, "=")
-		opts[k] = v
+		if k, v, _ := strings.Cut(p, "="); k != "" {
+			opts[k] = v
+		}
 	}
 	return parts[0], opts
 }
@@ -200,6 +201,7 @@ func VolumeFile(vol string) string {
 
 // VolumeOwner is the VMID a volume's file name (vm-<vmid>-… or
 // base-<vmid>-…) names and whether it is a base volume; 0 for other files.
+// The VMID is plain decimal, as Proxmox writes it: no sign or leading zero.
 func VolumeOwner(vol string) (vmid int, base bool) {
 	file := VolumeFile(vol)
 	rest, base := strings.CutPrefix(file, "base-")
@@ -210,8 +212,11 @@ func VolumeOwner(vol string) (vmid int, base bool) {
 		}
 	}
 	digits, _, ok := strings.Cut(rest, "-")
+	if !ok || digits == "" || digits[0] == '0' || strings.Trim(digits, "0123456789") != "" {
+		return 0, false
+	}
 	n, err := strconv.Atoi(digits)
-	if !ok || err != nil {
+	if err != nil {
 		return 0, false
 	}
 	return n, base

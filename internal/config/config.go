@@ -467,8 +467,11 @@ func (c Config) Validate() error {
 		}
 	}
 
-	if !strings.Contains(c.Naming.VMName, "{host}") {
-		errs = append(errs, errors.New("naming.vm_name must contain {host}"))
+	// With {host} twice, a host containing the separator text between them
+	// could not be told apart from it, so names use {host} once to parse
+	// unambiguously.
+	if strings.Count(c.Naming.VMName, "{host}") != 1 {
+		errs = append(errs, errors.New("naming.vm_name must contain {host} once"))
 	}
 
 	if c.Naming.TemplateSuffix == "" {

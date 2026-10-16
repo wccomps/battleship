@@ -1,7 +1,10 @@
 package web
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -17,6 +20,39 @@ import (
 // to the identity provider (issuerOrigin).
 func contentSecurityPolicy(issuerOrigin string) string {
 	return "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self' " + issuerOrigin
+}
+
+// maxBody caps request bodies. The largest form, a confirm of a deploy of
+// every VM, is about 60 KB.
+const maxBody = 1 << 20
+
+// limitBody refuses a request body over maxBody with 413. It reads the body
+// before any handler, so nothing (such as auth's CSRF check, before it knows
+// there is a session) parses more.
+func (s *Server) limitBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > maxBody {
+			s.tooLarge(w, r)
+			return
+		}
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+		var tooBig *http.MaxBytesError
+		switch {
+		case errors.As(err, &tooBig):
+			s.tooLarge(w, r)
+			return
+		case err != nil:
+			w.WriteHeader(http.StatusBadRequest) // the client went away mid-body
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) tooLarge(w http.ResponseWriter, r *http.Request) {
+	s.errorPage(w, r, http.StatusRequestEntityTooLarge, "Request too large",
+		"This request sent more than 1 MiB, more than any of battleship's forms needs, so nothing was changed.", "/", "Go to the grid")
 }
 
 // secure sets the security headers on every response.

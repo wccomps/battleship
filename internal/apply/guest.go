@@ -123,16 +123,20 @@ func (e *Executor) exec(ctx context.Context, it *pods.Item, cmd []string, input 
 	return "", fmt.Errorf("the setup script was still running after %s", execLimit)
 }
 
+// lastLines is the last n non-blank lines of s, each trimmed (Windows
+// guests end lines with \r\n), joined with " / ".
 func lastLines(s string, n int) string {
-	lines := slices.DeleteFunc(strings.Split(strings.TrimSpace(s), "\n"), func(l string) bool { return strings.TrimSpace(l) == "" })
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimSpace(l)
 	}
-	return strings.Join(lines, " / ")
+	lines = slices.DeleteFunc(lines, func(l string) bool { return l == "" })
+	n = min(max(n, 0), len(lines))
+	return strings.Join(lines[len(lines)-n:], " / ")
 }
 
-// verifyGuest checks, through the agent, that net0 has the address and the
-// guest the host name.
+// verifyGuest checks, through the agent, that an interface with net0's MAC
+// has the address and the guest the host name.
 func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error) {
 	mac, err := e.mac(ctx, it)
 	if err != nil {
@@ -147,10 +151,12 @@ func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error)
 			return false, errors.Join(nerr, herr)
 		}
 		if nerr == nil && herr == nil {
+			// A VLAN subinterface (eth0.10) shares its parent's MAC; any
+			// interface with net0's MAC may hold the address.
 			var ips []string
 			for _, n := range nics {
-				if n.MAC == mac {
-					ips = n.IPs
+				if strings.EqualFold(n.MAC, mac) {
+					ips = append(ips, n.IPs...)
 				}
 			}
 			short, _, _ := strings.Cut(host, ".")

@@ -117,25 +117,26 @@ func loadWithStore(ctx context.Context, path string, d deps) (config.Config, *st
 	return cfg, st, closeStore, 0
 }
 
+// describeInputs is a stored job's inputs in brief, cleaned for printing.
 func describeInputs(raw json.RawMessage) string {
 	var in jobs.Inputs
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return "?"
 	}
 	if in.Kind.Teamless() {
-		return strings.TrimSpace(strings.Join([]string{in.Domain, in.Family, in.Image}, " "))
+		return strings.TrimSpace(cleanJoin([]string{in.Domain, in.Family, in.Image}, " "))
 	}
-	s := "teams " + in.Teams
+	s := "teams " + clean(in.Teams)
 	if len(in.Hosts) > 0 {
-		s += " hosts " + strings.Join(in.Hosts, ",")
+		s += " hosts " + cleanJoin(in.Hosts, ",")
 	}
 	switch {
 	case in.Pattern != "":
-		s = in.Pattern + " " + s
+		s = clean(in.Pattern) + " " + s
 	case in.Action != "":
-		s = in.Action + " " + s
+		s = clean(in.Action) + " " + s
 	case in.Kind == pods.KindSnapshot:
-		s = in.Snapshot + " " + s
+		s = clean(in.Snapshot) + " " + s
 	}
 	return s
 }
@@ -160,7 +161,7 @@ func listJobs(ctx context.Context, d deps, st *store.Store, n int) int {
 	tw := tabwriter.NewWriter(d.stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tSTATUS\tKIND\tWHAT\tBY\tCREATED")
 	for _, j := range list {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", j.ID, j.Status, j.Kind, describeInputs(j.Inputs), j.CreatedBy, when(&j.CreatedAt))
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", j.ID, clean(j.Status), clean(j.Kind), describeInputs(j.Inputs), clean(j.CreatedBy), when(&j.CreatedAt))
 	}
 	tw.Flush()
 	return 0
@@ -173,8 +174,8 @@ func showJob(ctx context.Context, d deps, st *store.Store, id int64) int {
 		return 1
 	}
 	w := d.stdout
-	fmt.Fprintf(w, "Job %d: %s %s (%s)\n", j.ID, j.Kind, describeInputs(j.Inputs), j.Status)
-	fmt.Fprintf(w, "Created by %s at %s; started %s; finished %s\n", j.CreatedBy, when(&j.CreatedAt), when(j.StartedAt), when(j.FinishedAt))
+	fmt.Fprintf(w, "Job %d: %s %s (%s)\n", j.ID, clean(j.Kind), describeInputs(j.Inputs), clean(j.Status))
+	fmt.Fprintf(w, "Created by %s at %s; started %s; finished %s\n", clean(j.CreatedBy), when(&j.CreatedAt), when(j.StartedAt), when(j.FinishedAt))
 	if j.Status == store.StatusPending {
 		if blockers, err := st.Blockers(ctx, id); err == nil && len(blockers) > 0 {
 			fmt.Fprintf(w, "Waiting for job(s) %s, which use the same teams or templates.\n", joinIDs(blockers))
@@ -183,12 +184,12 @@ func showJob(ctx context.Context, d deps, st *store.Store, id int64) int {
 	switch {
 	case !j.CancelRequested:
 	case j.Status == store.StatusRunning:
-		fmt.Fprintf(w, "Cancel requested by %s; the job is stopping.\n", j.CancelledBy)
+		fmt.Fprintf(w, "Cancel requested by %s; the job is stopping.\n", clean(j.CancelledBy))
 	case j.CancelCameTooLate():
-		fmt.Fprintf(w, "Cancel requested by %s came too late to stop anything.\n", j.CancelledBy)
+		fmt.Fprintf(w, "Cancel requested by %s came too late to stop anything.\n", clean(j.CancelledBy))
 	}
 	if j.Error != "" {
-		fmt.Fprintf(w, "Error: %s\n", j.Error)
+		fmt.Fprintf(w, "Error: %s\n", cleanLines(j.Error, "  "))
 	}
 	items, err := st.Items(ctx, id)
 	if err != nil {
@@ -198,7 +199,7 @@ func showJob(ctx context.Context, d deps, st *store.Store, id int64) int {
 	fmt.Fprintf(w, "\nVMs (%d):\n", len(items))
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	for _, it := range items {
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n", it.Name, orDash(it.VMID), it.Status, orDashStr(it.Step), it.Error)
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n", clean(it.Name), orDash(it.VMID), clean(it.Status), clean(orDashStr(it.Step)), cleanLines(it.Error, "      "))
 	}
 	tw.Flush()
 	events, err := st.Events(ctx, id, 0, 100000)
@@ -218,12 +219,12 @@ func showJob(ctx context.Context, d deps, st *store.Store, id int64) int {
 		if item == "" {
 			item = "job"
 		}
-		line := fmt.Sprintf("  %s %-8s %s", ev.At.Local().Format("15:04:05"), ev.Status, item)
+		line := fmt.Sprintf("  %s %-8s %s", ev.At.Local().Format("15:04:05"), clean(ev.Status), clean(item))
 		if ev.Step != "" {
-			line += " " + ev.Step
+			line += " " + clean(ev.Step)
 		}
 		if ev.Message != "" {
-			line += ": " + ev.Message
+			line += ": " + cleanLines(ev.Message, "      ")
 		}
 		fmt.Fprintln(w, line)
 	}

@@ -1,8 +1,14 @@
 package pods
 
 import (
+	"math"
 	"reflect"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
+
+	"pgregory.net/rapid"
 
 	"github.com/wccomps/battleship/internal/config"
 )
@@ -261,4 +267,152 @@ func TestLabelChanges(t *testing.T) {
 	if AddTag("base;linux", "deprecated") != "base;linux;deprecated" || AddTag("base;deprecated", "deprecated") != "base;deprecated" {
 		t.Error("AddTag")
 	}
+}
+
+// nicHeads are NIC models and MACs, some a character off.
+var nicHeads = []string{"virtio=BC:24:11:00:00:01", "e1000=bc:24:11:aa:bb:cc", "virtio", "virtio=", "virtio=BC:24:11:00:00:0",
+	"virtio=BC:24:11:00:00:011", "=BC:24:11:00:00:01", "virtio=BC-24-11-00-00-01", ""}
+
+// nicOptions are NIC options as Proxmox prints them, and malformed ones.
+var nicOptions = []string{"bridge=vmbr0", "tag=10", "firewall=1", "rate=10", "queues=4", "mtu=1500", "link_down=1",
+	"", "=", "=x", "tag=", "bridge=", "x=a=b", "firewall", "Tag=5", " tag=1"}
+
+// checkNIC checks that got is cur put on bridge: cur's model, its MAC if
+// it has a whole one, its options but tag, and the bridge, each option a
+// key=value with a key.
+func checkNIC(t interface{ Fatalf(string, ...any) }, cur, bridge, got string) {
+	curParts, parts := strings.Split(cur, ","), strings.Split(got, ",")
+	head := curParts[0]
+	if model, mac, ok := strings.Cut(head, "="); ok && len(mac) != 17 {
+		head = model
+	}
+	if parts[0] != head {
+		t.Fatalf("%q on %s: head %q, want %q", cur, bridge, parts[0], head)
+	}
+	want := map[string]string{}
+	for _, p := range curParts[1:] {
+		if k, v, _ := strings.Cut(p, "="); k != "" && k != "tag" {
+			want[k] = v
+		}
+	}
+	want["bridge"] = bridge
+	opts := map[string]string{}
+	var keys []string
+	for _, p := range parts[1:] {
+		k, v, ok := strings.Cut(p, "=")
+		if !ok || k == "" {
+			t.Fatalf("%q on %s = %q: option %q has no key", cur, bridge, got, p)
+		}
+		opts[k] = v
+		keys = append(keys, k)
+	}
+	if !slices.IsSorted(keys) || !reflect.DeepEqual(opts, want) || len(keys) != len(want) {
+		t.Fatalf("%q on %s = %q, want options %v", cur, bridge, got, want)
+	}
+}
+
+func checkNICChanges(t interface{ Fatalf(string, ...any) }, cur map[string]string, team string, interfaces int) {
+	nics := map[string]string{"net0": "vmbr9", "net1": "vmbr8", "net2": "vmbr7"}
+	got := NICChanges(cur, nics)
+	for k, v := range got {
+		checkNIC(t, cur[k], nics[k], v)
+	}
+	if again := NICChanges(applied(cur, got), nics); len(again) != 0 {
+		t.Fatalf("NICChanges(%q) = %q, then %q", cur, got, again)
+	}
+	net := config.Default().Network
+	got = NetworkChanges(net, cur, team, interfaces)
+	for _, k := range []string{"net0", "net1"} {
+		if v, ok := got[k]; ok {
+			bridge := Expand(net.IntBridge, team, "")
+			if interfaces >= 2 && k == "net0" {
+				bridge = Expand(net.ExtBridge, team, "")
+			}
+			checkNIC(t, cur[k], bridge, v)
+		}
+	}
+	if again := NetworkChanges(net, applied(cur, got), team, interfaces); len(again) != 0 {
+		t.Fatalf("NetworkChanges(%q) = %q, then %q", cur, got, again)
+	}
+}
+
+// Rewiring keeps a NIC's model, whole MAC and options but its VLAN tag,
+// writes only options with keys, and converges.
+func TestPropNICChanges(t *testing.T) {
+	for _, h := range nicHeads {
+		for _, o := range nicOptions {
+			checkNICChanges(t, map[string]string{"net0": h + "," + o + ",bridge=vmbr1", "net1": h + "," + o + "," + o}, "05", 2)
+		}
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		cur := map[string]string{}
+		for _, k := range []string{"net0", "net1", "net2"} {
+			if rapid.IntRange(0, 4).Draw(t, k+" missing") == 0 {
+				continue
+			}
+			head := rapid.OneOf(rapid.SampledFrom(nicHeads[:2]), rapid.SampledFrom(nicHeads)).Draw(t, k+" head")
+			opts := rapid.SliceOfN(rapid.OneOf(rapid.SampledFrom(nicOptions), rapid.StringMatching(`[a-z=_ ]{0,6}`)), 0, 5).Draw(t, k+" options")
+			cur[k] = strings.Join(append([]string{head}, opts...), ",")
+		}
+		checkNICChanges(t, cur, rapid.SampledFrom([]string{"01", "05", "99"}).Draw(t, "team"), rapid.IntRange(1, 3).Draw(t, "interfaces"))
+	})
+}
+
+// volumeOwnerModel reads "vm-<vmid>-" or "base-<vmid>-" at the start of a
+// volume's file name, the VMID in plain decimal.
+func volumeOwnerModel(vol string) (int, bool) {
+	if i := strings.Index(vol, ":"); i >= 0 {
+		vol = vol[i+1:]
+	}
+	file := vol[strings.LastIndex(vol, "/")+1:]
+	for _, prefix := range []string{"vm-", "base-"} {
+		if !strings.HasPrefix(file, prefix) {
+			continue
+		}
+		rest := file[len(prefix):]
+		end := strings.Index(rest, "-")
+		if end < 1 || rest[0] == '0' {
+			return 0, false
+		}
+		n := 0
+		for _, c := range rest[:end] {
+			if c < '0' || c > '9' || n > (math.MaxInt-int(c-'0'))/10 {
+				return 0, false
+			}
+			n = n*10 + int(c-'0')
+		}
+		return n, prefix == "base-"
+	}
+	return 0, false
+}
+
+// volumeVMIDs are VMIDs as volume names carry them, and near misses.
+var volumeVMIDs = []string{"100", "10105", "9005", "999999999", "+5", "-5", "0010105", "010105", "0", "00", "", " 5", "5 ", "\u0661\u0660\u0660",
+	"99999999999999999999", "1e3", "0x10", "10105x", "1_000"}
+
+func checkVolumeOwner(t interface{ Fatalf(string, ...any) }, vol string) {
+	n, base := VolumeOwner(vol)
+	wn, wbase := volumeOwnerModel(vol)
+	if n != wn || base != wbase {
+		t.Fatalf("VolumeOwner(%q) = %d, %v; want %d, %v", vol, n, base, wn, wbase)
+	}
+	if prefix := map[bool]string{true: "base-", false: "vm-"}[base]; n != 0 && !strings.HasPrefix(VolumeFile(vol), prefix+strconv.Itoa(n)+"-") {
+		t.Fatalf("VolumeOwner(%q) = %d, %v", vol, n, base)
+	}
+}
+
+// A volume belongs to the VMID its file name spells out, and to no other.
+func TestPropVolumeOwner(t *testing.T) {
+	for _, id := range volumeVMIDs {
+		for _, vol := range []string{"s:vm-" + id + "-disk-0", "s:base-" + id + "-disk-0.qcow2", "s:9005/base-9005-disk-0.qcow2/10105/vm-" + id + "-disk-0.qcow2"} {
+			checkVolumeOwner(t, vol)
+		}
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		vol := rapid.SampledFrom([]string{"competitions:", "local:", "", "s:9005/base-9005-disk-0.qcow2/10105/", "s:10105/", "a:b:"}).Draw(t, "storage") +
+			rapid.SampledFrom([]string{"vm-", "base-", "vm-", "base-", "VM-", "vm_", "", "basevm-", "vm--"}).Draw(t, "prefix") +
+			rapid.OneOf(rapid.SampledFrom(volumeVMIDs), rapid.StringMatching(`[0-9+-]{0,6}`), rapid.String()).Draw(t, "vmid") +
+			rapid.SampledFrom([]string{"-disk-0", "-disk-0.qcow2", "", "-cloudinit", "disk", "-"}).Draw(t, "rest")
+		checkVolumeOwner(t, vol)
+	})
 }

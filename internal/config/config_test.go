@@ -198,6 +198,20 @@ func TestValidateRanges(t *testing.T) {
 			wantErr: "proxmox.urls[1] must be an http(s) URL with a host and nothing after it",
 		},
 		{
+			name: "vm_name without host",
+			mutate: func(c *Config) {
+				c.Naming.VMName = "team{team}"
+			},
+			wantErr: "naming.vm_name must contain {host} once",
+		},
+		{
+			name: "vm_name with host twice",
+			mutate: func(c *Config) {
+				c.Naming.VMName = "{host}-{team}-{host}"
+			},
+			wantErr: "naming.vm_name must contain {host} once",
+		},
+		{
 			name: "workers zero",
 			mutate: func(c *Config) {
 				c.Concurrency.Workers = 0

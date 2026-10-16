@@ -8,48 +8,6 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-func TestWildcardRegexpIsAnchoredAndCaseInsensitive(t *testing.T) {
-	tests := map[string]struct {
-		pattern string
-		name    string
-		want    bool
-	}{
-		"case insensitive": {
-			pattern: "*.kilo.alpha",
-			name:    "Violet.Kilo.Alpha",
-			want:    true,
-		},
-		"anchored start": {
-			pattern: "*.kilo.alpha",
-			name:    "violet.kilo.alpha.old",
-			want:    false,
-		},
-		"anchored end": {
-			pattern: "*.kilo.alpha",
-			name:    "violet.kilo.alpha",
-			want:    true,
-		},
-		"no wildcards matches exactly": {
-			pattern: "teak",
-			name:    "Teak",
-			want:    true,
-		},
-		"wildcard star alone": {
-			pattern: "*",
-			name:    "anything",
-			want:    true,
-		},
-	}
-	for testName, tt := range tests {
-		t.Run(testName, func(t *testing.T) {
-			re := WildcardRegexp(tt.pattern)
-			if got := re.MatchString(tt.name); got != tt.want {
-				t.Errorf("WildcardRegexp(%q).MatchString(%q) = %v, want %v", tt.pattern, tt.name, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestFindMastersRequiresExactTag(t *testing.T) {
 	n := NewNaming(config.Default().Naming)
 	vms := []proxmox.VM{
@@ -58,7 +16,7 @@ func TestFindMastersRequiresExactTag(t *testing.T) {
 		{VMID: 3, Name: "c.x.tpl", Tags: "dev"},
 		{VMID: 4, Name: "d.x", Tags: "dev", Template: true},
 	}
-	masters, untagged := FindMasters(vms, n, "*.x", "dev")
+	masters, untagged, _ := FindMasters(vms, n, "*.x", "dev")
 	if len(masters) != 1 || masters[0].Name != "a.x" {
 		t.Errorf("masters = %+v", masters)
 	}
@@ -88,7 +46,7 @@ func TestFindMastersSkipsTeamClones(t *testing.T) {
 		{VMID: 1, Name: "teak.x", Tags: "dev"},
 		{VMID: 10121, Name: "team01-teak", Tags: "dev"},
 	}
-	masters, untagged := FindMasters(vms, n, "*", "dev")
+	masters, untagged, _ := FindMasters(vms, n, "*", "dev")
 	if len(masters) != 1 || masters[0].Name != "teak.x" {
 		t.Errorf("masters = %+v, want only teak.x", masters)
 	}
@@ -112,7 +70,7 @@ func TestFindMastersTagEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			vms := []proxmox.VM{{VMID: 1, Name: "a.x", Tags: tt.tags}}
-			masters, _ := FindMasters(vms, n, "*.x", "dev")
+			masters, _, _ := FindMasters(vms, n, "*.x", "dev")
 			if got := len(masters) > 0; got != tt.want {
 				t.Errorf("FindMasters found tag %q: %v, want %v", tt.tags, got, tt.want)
 			}
@@ -126,7 +84,7 @@ func TestFindMastersEmptySearchTag(t *testing.T) {
 		{VMID: 1, Name: "a.x", Tags: "dev"},
 		{VMID: 2, Name: "b.x", Tags: "other"},
 	}
-	masters, untagged := FindMasters(vms, n, "*.x", "")
+	masters, untagged, _ := FindMasters(vms, n, "*.x", "")
 	if len(masters) != 0 {
 		t.Errorf("FindMasters with empty search tag: masters = %+v, want empty", masters)
 	}
@@ -348,6 +306,17 @@ func TestTeamsWithVMs(t *testing.T) {
 	for _, vm := range vms {
 		if team, _, ok := n.ParseVMName(vm.Name); ok && !vm.Template && !n.IsTemplateName(vm.Name) && len(FindTeamVMs([]proxmox.VM{vm}, n, all, nil)) != 1 {
 			t.Errorf("%s (team %s) is not covered by TeamsWithVMs %v", vm.Name, team, all)
+		}
+	}
+}
+
+// FindMasters passes on the refusal of a pattern that isn't valid UTF-8.
+func TestFindMastersRefusesInvalidPattern(t *testing.T) {
+	n := NewNaming(config.Default().Naming)
+	vms := []proxmox.VM{{VMID: 1, Name: "dc.kilo", Tags: "dev"}}
+	for _, pattern := range []string{"\xff", "dc.\xc3", "*\xff*"} {
+		if _, _, err := FindMasters(vms, n, pattern, "dev"); err == nil {
+			t.Errorf("FindMasters(%q) accepted invalid UTF-8", pattern)
 		}
 	}
 }

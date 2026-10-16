@@ -2,8 +2,11 @@ package jobs
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"pgregory.net/rapid"
 
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -131,4 +134,97 @@ func TestFingerprintCoversVMs(t *testing.T) {
 		}
 		fps[fp] = strings.Join(vms, ",")
 	}
+}
+
+// teamVMModel reads the default naming, team{team}-{host}: two ASCII
+// digits and a host of one line.
+func teamVMModel(name string) (string, bool) {
+	rest, ok := strings.CutPrefix(name, "team")
+	if !ok || len(rest) < 4 || rest[2] != '-' || strings.Contains(rest, "\n") ||
+		rest[0] < '0' || rest[0] > '9' || rest[1] < '0' || rest[1] > '9' {
+		return "", false
+	}
+	return rest[:2], true
+}
+
+// narrowNames are team VM names, near misses and names of other teams.
+var narrowNames = []string{"team01-dc", "team01-web", "team02-dc", "team02-web", "team03-web", "team03-dc", "team01-nope",
+	"team1-dc", "TEAM01-dc", "team01-dc ", " team01-dc", "team100-dc", "team01-", "team01", "dc", "dc.kilo.alpha", "team01-dc,team02-dc",
+	"team0\u0661-dc", "team01-dc.kilo", "team01-d", "team02-w", "team01-dcx", "team01-DC"}
+
+// narrowCluster is twoTeams, team 03's web and a master dc.
+func narrowCluster() pods.Planner {
+	f := twoTeams()
+	f.addVM(proxmox.VM{VMID: 10302, Name: "team03-web", Node: "n1", Status: "running"})
+	f.addVM(proxmox.VM{VMID: 5001, Name: "dc.kilo.alpha", Node: "n1", Status: "stopped", Tags: "dev"})
+	return pods.NewPlanner(f, testCfg())
+}
+
+func checkNarrowing(t interface{ Fatalf(string, ...any) }, p pods.Planner, in Inputs, teams []string) {
+	wantErr := false
+	for _, name := range in.VMs {
+		team, ok := teamVMModel(name)
+		wantErr = wantErr || !ok || !slices.Contains(teams, team)
+	}
+	plan, err := BuildPlan(bg, p, in)
+	if (err != nil) != wantErr {
+		t.Fatalf("BuildPlan(%s, teams %q, vms %q) = %v, want error %v", in.Kind, in.Teams, in.VMs, err, wantErr)
+	}
+	if err != nil || len(in.VMs) == 0 {
+		return
+	}
+	// What the kind plans without VMs: the teams' VMs, or a deploy's dc.
+	var want []string
+	for _, name := range in.VMs {
+		team, _ := teamVMModel(name)
+		exists := slices.Contains([]string{"team01-dc", "team01-web", "team02-dc", "team02-web", "team03-web"}, name)
+		if in.Kind == pods.KindDeploy {
+			exists = name == "team"+team+"-dc"
+		}
+		if exists && !slices.Contains(want, name) {
+			want = append(want, name)
+		}
+	}
+	got := itemNames(plan)
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("%s of teams %q narrowed to %q: items %q, want %q", in.Kind, in.Teams, in.VMs, got, want)
+	}
+	var missing []string
+	for _, name := range in.VMs {
+		if !slices.Contains(want, name) && !slices.Contains(missing, name) {
+			missing = append(missing, name)
+		}
+	}
+	slices.Sort(missing)
+	if m := MissingVMs(in, plan); !slices.Equal(m, missing) {
+		t.Fatalf("MissingVMs(%q) = %q, want %q", in.VMs, m, missing)
+	}
+}
+
+// Naming VMs narrows a plan to exactly those VMs of its teams; a name that
+// isn't a VM of the teams is refused.
+func TestPropVMsNarrowWithinTeams(t *testing.T) {
+	p := narrowCluster()
+	kinds := []pods.Kind{pods.KindReset, pods.KindPower, pods.KindTeardown, pods.KindSnapshot, pods.KindDeploy}
+	inputs := func(kind pods.Kind, teams string, vms []string) Inputs {
+		return Inputs{Kind: kind, Teams: teams, VMs: vms, Action: "stop", Snapshot: "round2", Pattern: "dc.kilo.alpha"}
+	}
+	for _, kind := range kinds {
+		for _, name := range narrowNames {
+			checkNarrowing(t, p, inputs(kind, "1-2", []string{name}), []string{"01", "02"})
+			checkNarrowing(t, p, inputs(kind, "1-2", []string{"team01-dc", name, name}), []string{"01", "02"})
+		}
+	}
+	specs := map[string][]string{"1": {"01"}, "2": {"02"}, "1-2": {"01", "02"}, "1-3": {"01", "02", "03"}, "3,1": {"01", "03"}}
+	rapid.Check(t, func(t *rapid.T) {
+		spec := rapid.SampledFrom([]string{"1", "2", "1-2", "1-3", "3,1"}).Draw(t, "teams")
+		name := rapid.OneOf(rapid.SampledFrom(narrowNames[:7]), rapid.SampledFrom(narrowNames), rapid.StringMatching(`team[0-9]{1,3}-[a-z]{1,3}`))
+		vms := rapid.SliceOfN(name, 0, 4).Draw(t, "vms")
+		if len(vms) == 0 {
+			vms = nil
+		}
+		checkNarrowing(t, p, inputs(rapid.SampledFrom(kinds).Draw(t, "kind"), spec, vms), specs[spec])
+	})
 }

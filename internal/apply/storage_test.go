@@ -584,6 +584,32 @@ func TestLaterRunFreesLeftoversFromStorage(t *testing.T) {
 	}
 }
 
+// ...and only volumes whose names spell out the VMID, however the storage
+// lists them.
+func TestLaterRunFreesOnlyTheVMIDsOwnVolumes(t *testing.T) {
+	f := newCluster()
+	teakTeamVM(f)
+	plan := teardownTeam01(t, f)
+	cancelDuringDestroy(t, f, plan)
+	f.WaitGate = nil
+	others := []string{"competitions:10121/vm-010121-disk-2.qcow2", "competitions:10121/vm-+10121-disk-3.qcow2",
+		"competitions:10121/vm-1012-disk-4.qcow2", "competitions:10121/vm-101210-disk-5.qcow2", "competitions:10121/vm-10121x-disk-6.qcow2",
+		"competitions:10121/vm10121-disk-7.qcow2"}
+	f.Mu.Lock()
+	for _, v := range others {
+		f.Vols[v] = 10121
+	}
+	f.Mu.Unlock()
+	slices.Sort(others)
+
+	if res := testExecutor(f, &recorder{}).Run(context.Background(), plan); len(res.Failed) != 0 {
+		t.Fatalf("result = %+v", res)
+	}
+	if vols := f.VolumesOf(10121); !slices.Equal(vols, others) {
+		t.Errorf("volumes left = %q, want %q", vols, others)
+	}
+}
+
 // ...but never while another VM holds the VMID: the disks at it are that
 // VM's.
 func TestLaterRunLeavesAReusedVMIDsDisks(t *testing.T) {

@@ -1,9 +1,15 @@
 package pods
 
 import (
+	"fmt"
+	"slices"
+	"strings"
 	"testing"
 
+	"pgregory.net/rapid"
+
 	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/proxmox"
 )
 
 func TestNaming(t *testing.T) {
@@ -189,4 +195,74 @@ func TestParseVMNameLiteralTeamInHost(t *testing.T) {
 	if !ok || team != "01" || host != "{team}" {
 		t.Errorf("ParseVMName(team01-{team}) = (%q, %q, %v), want (01, {team}, true)", team, host, ok)
 	}
+}
+
+// namePieces are literal text for naming.vm_name patterns: separators and
+// regexp metacharacters.
+var namePieces = []string{"", "team", "-", ".", "_", "*", "(", ")", "[", "\\", "$", "^", "+", "?", "|", "{", "}", "{x}", "7", "a.b"}
+
+// vmHosts are host names and near misses: digits that touch the team,
+// empty, multi-line, separators.
+var vmHosts = []string{"dc", "teak", "web01", "1x", "12", "0", "a-01", "a.b", "", "\n", "a\nb", "dc\r", "{team}", "-", "x\xff", "\u0661\u0662"}
+
+// drawVMNaming draws a vm_name pattern with {team} and {host} once each.
+func drawVMNaming(t *rapid.T) Naming {
+	piece := rapid.SampledFrom(namePieces)
+	first, second := "{team}", "{host}"
+	if rapid.Bool().Draw(t, "host first") {
+		first, second = second, first
+	}
+	cfg := config.Default().Naming
+	cfg.VMName = piece.Draw(t, "prefix") + first + piece.Draw(t, "middle") + second + piece.Draw(t, "suffix")
+	return NewNaming(cfg)
+}
+
+func checkVMName(t interface{ Fatalf(string, ...any) }, n Naming, team, host string) {
+	name := n.VMName(team, host)
+	gt, gh, ok := n.ParseVMName(name)
+	if wantOK := host != "" && !strings.Contains(host, "\n"); ok != wantOK || ok && (gt != team || n.VMName(gt, gh) != name) {
+		t.Fatalf("pattern %q: ParseVMName(%q) = %q, %q, %v; want team %s, ok %v", n.cfg.VMName, name, gt, gh, ok, team, wantOK)
+	}
+}
+
+// Any pattern names each team's VMs so that the name parses back to the
+// team, and only names a team VM could have parse.
+func TestPropVMNames(t *testing.T) {
+	for _, pattern := range []string{"team{team}-{host}", "{host}{team}", "{team}{host}", "{host}.{team}.*", "({team})[{host}]", "{host}-{team}$"} {
+		cfg := config.Default().Naming
+		cfg.VMName = pattern
+		n := NewNaming(cfg)
+		for _, host := range vmHosts {
+			for _, team := range []string{"00", "05", "10", "99"} {
+				checkVMName(t, n, team, host)
+			}
+		}
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		n := drawVMNaming(t)
+		team := fmt.Sprintf("%02d", rapid.IntRange(0, 99).Draw(t, "team"))
+		host := rapid.OneOf(rapid.SampledFrom(vmHosts), rapid.StringMatching(`[a-z0-9.-]{1,8}`), rapid.String()).Draw(t, "host")
+		checkVMName(t, n, team, host)
+		// A name near one: any that parses is one VMName gives.
+		name := n.VMName(team, host)
+		i := rapid.IntRange(0, len(name)).Draw(t, "at")
+		near := rapid.SampledFrom([]string{name[:i] + name[min(i+1, len(name)):], name[:i] + "1" + name[i:], name[:i] + "x" + name[i:],
+			strings.Replace(name, team, team[1:], 1), strings.Replace(name, team, "1"+team, 1), name + "\n"}).Draw(t, "near")
+		if gt, gh, ok := n.ParseVMName(near); ok && (len(gt) != 2 || gt[0] < '0' || gt[0] > '9' || gt[1] < '0' || gt[1] > '9' || n.VMName(gt, gh) != near) {
+			t.Fatalf("pattern %q: ParseVMName(%q) = %q, %q", n.cfg.VMName, near, gt, gh)
+		}
+		// Discovery finds exactly the team VMs that parse, of the teams asked.
+		vms := []proxmox.VM{{VMID: 1, Name: name}, {VMID: 2, Name: near}, {VMID: 3, Name: name, Template: true}, {VMID: 4, Name: name + n.cfg.TemplateSuffix}}
+		var want []proxmox.VM
+		for _, vm := range vms {
+			if gt, _, ok := n.ParseVMName(vm.Name); ok && gt == team && !vm.Template && !strings.HasSuffix(vm.Name, n.cfg.TemplateSuffix) {
+				want = append(want, vm)
+			}
+		}
+		got := FindTeamVMs(vms, n, []string{team}, nil)
+		slices.SortFunc(want, func(a, b proxmox.VM) int { return strings.Compare(a.Name, b.Name) })
+		if !slices.EqualFunc(got, want, func(a, b proxmox.VM) bool { return a.VMID == b.VMID }) {
+			t.Fatalf("pattern %q: FindTeamVMs(%+v) = %+v, want %+v", n.cfg.VMName, vms, got, want)
+		}
+	})
 }

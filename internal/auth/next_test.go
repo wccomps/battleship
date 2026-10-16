@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -74,6 +76,47 @@ func TestSafeNextStaysOnSite(t *testing.T) {
 		}
 		if out != "/" && out != in {
 			t.Fatalf("safeNext(%q) = %q; it may only keep next or replace it with /", in, out)
+		}
+	})
+}
+
+// The Proxmox interstitial refreshes and links only to the route it was
+// asked on, whatever the query and Sec-Fetch-Mode.
+func TestPropInterstitialStaysLocal(t *testing.T) {
+	hostile := rapid.OneOf(rapid.String(), rapid.SampledFrom([]string{
+		"//evil.example", "javascript:alert(1)", ";url=https://evil.example", "\r\n", "%2F%2Fevil", "\\", "finish", "",
+	}))
+	rapid.Check(t, func(t *rapid.T) {
+		route := rapid.SampledFrom([]string{"/auth/proxmox", "/auth/proxmox/callback"}).Draw(t, "route")
+		r := httptest.NewRequest(http.MethodGet, route, nil)
+		if rapid.Bool().Draw(t, "raw query") {
+			r.URL.RawQuery = hostile.Draw(t, "query")
+		} else {
+			q := url.Values{}
+			for range rapid.IntRange(0, 3).Draw(t, "keys") {
+				q.Add(hostile.Draw(t, "key"), hostile.Draw(t, "value"))
+			}
+			r.URL.RawQuery = q.Encode()
+		}
+		if mode := rapid.SampledFrom([]string{"", "navigate", "cors", "no-cors", "other"}).Draw(t, "mode"); mode != "" {
+			r.Header.Set("Sec-Fetch-Mode", mode)
+		}
+		var shown *Page
+		s := &Service{render: func(_ http.ResponseWriter, _ *http.Request, p Page) { shown = &p }}
+		if !s.interstitialFirst(httptest.NewRecorder(), r) {
+			if shown != nil {
+				t.Fatalf("rendered %+v without saying so", shown)
+			}
+			return
+		}
+		if shown == nil {
+			t.Fatal("said it showed the interstitial but rendered nothing")
+		}
+		for _, to := range []string{shown.Refresh, shown.Link} {
+			u := LocalURL(to)
+			if u == nil || u.Path != route || u.Query().Get("finish") != "1" {
+				t.Fatalf("interstitial for %s?%s goes on to %q", route, r.URL.RawQuery, to)
+			}
 		}
 	})
 }

@@ -76,7 +76,7 @@ func (r rules) grid(in inputs) (teams, hosts []string, rows []Row) {
 		seen[host] = true
 	}
 	if pattern := strings.TrimSpace(r.cfg.Web.Templates); pattern != "" {
-		masters, _ := pods.FindMasters(in.vms, r.naming, pattern, r.cfg.Deploy.MasterTag)
+		masters, _, _ := pods.FindMasters(in.vms, r.naming, pattern, r.cfg.Deploy.MasterTag) // config.Validate checks the pattern
 		for _, m := range masters {
 			seen[pods.Hostname(m.Name)] = true
 		}
@@ -181,7 +181,7 @@ func supersedes(r store.ItemResult, s scanResult) bool {
 
 // configDrift judges a team VM by the rules a deploy converges it with. The
 // NIC count comes from the VM, since a clone has its template's NICs.
-func (r rules) configDrift(team string, cfg map[string]string, snaps []string) []Drift {
+func (r rules) configDrift(team string, cfg map[string]string, snaps []proxmox.Snapshot) []Drift {
 	var out []Drift
 	if net := pods.NetworkChanges(r.cfg.Network, cfg, team, pods.CountInterfaces(cfg)); len(net) > 0 {
 		parts := make([]string, 0, len(net))

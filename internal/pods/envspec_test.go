@@ -1,6 +1,7 @@
 package pods
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"unicode"
@@ -128,4 +129,173 @@ func TestPropUserNotes(t *testing.T) {
 			t.Fatalf("not idempotent: %q -> %q", got, UserNotes(got))
 		}
 	})
+}
+
+// safeFamily is a base-image family written out without regexps: 1-40
+// lower-case ASCII letters, digits and inner dashes, not ending in a
+// version Battleship would add (-v1 to -v9999).
+func safeFamily(f string) bool {
+	if len(f) == 0 || len(f) > 40 || f[0] == '-' || f[len(f)-1] == '-' {
+		return false
+	}
+	for i := range len(f) {
+		if c := f[i]; !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+			return false
+		}
+	}
+	i := strings.LastIndex(f, "-v")
+	if i < 0 || i == 0 {
+		return true
+	}
+	v := f[i+2:]
+	return !(len(v) >= 1 && len(v) <= 4 && v[0] != '0' && strings.Trim(v, "0123456789") == "")
+}
+
+// hostSpecParts are the pieces of "host=family:octet" near the edge of
+// valid, keyed by part; the first of each is valid.
+var hostSpecParts = map[string][]string{
+	"host": {"teak", "dc", "a", "x-1", strings.Repeat("a", 63), "Teak", "-teak", "teak-", "te.ak", "te_ak", "", " ", strings.Repeat("a", 64),
+		"te ak", "t\u0435ak", "teak\u00a0x"},
+	"family": {"debian-12", "win2022", "gw", "x-v0", "x-v01", "x-v10000", strings.Repeat("a", 40), "WIN 2022", "win 2022", "Win2022", "win2022-v1",
+		"x-v9999", "-x", "x-", "", " ", "debian_12", strings.Repeat("a", 41), "a=b", "debian-12\u00a0", "deb\u0131an"},
+	"octet": {"", ":10", ": 10 ", ":4", ":254", ":+10", ":007", ":3", ":255", ":0", ":", ":a", "::10", ":1e1", ":\u0661\u0660", ":-4", ": "},
+	"sep":   {"=", " = ", "==", "=:"},
+}
+
+// parseHostSpecModel is what ParseHostSpec should read from s.
+func parseHostSpecModel(s string) (HostSpec, bool) {
+	eq := strings.IndexByte(s, '=')
+	if eq < 0 {
+		return HostSpec{}, false
+	}
+	rest := s[eq+1:]
+	h := HostSpec{Host: strings.TrimSpace(s[:eq])}
+	octet, hasOctet := "", false
+	if c := strings.IndexByte(rest, ':'); c >= 0 {
+		rest, octet, hasOctet = rest[:c], strings.TrimSpace(rest[c+1:]), true
+	}
+	h.Family = strings.TrimSpace(rest)
+	if !safeLabel(h.Host) || !safeFamily(h.Family) {
+		return HostSpec{}, false
+	}
+	if hasOctet {
+		n, err := strconv.ParseInt(octet, 10, 64)
+		if err != nil || n < 4 || n > 254 {
+			return HostSpec{}, false
+		}
+		h.Octet = int(n)
+	}
+	return h, true
+}
+
+func checkHostSpec(t interface{ Fatalf(string, ...any) }, s string) {
+	got, err := ParseHostSpec(s)
+	want, ok := parseHostSpecModel(s)
+	if (err == nil) != ok || got != want {
+		t.Fatalf("ParseHostSpec(%q) = %+v, %v; want %+v, ok %v", s, got, err, want, ok)
+	}
+	if err == nil {
+		if again, err := ParseHostSpec(got.String()); err != nil || again != got {
+			t.Fatalf("ParseHostSpec(%q) = %+v, %v", got.String(), again, err)
+		}
+	}
+}
+
+// A host spec parses to a host name, a family CheckFamily takes and an
+// address octet in range, or not at all, and writes back the same.
+func TestPropParseHostSpec(t *testing.T) {
+	for _, s := range []string{"dc=WIN 2022", "dc=win2022-v1", "dc=x-v10000", "dc=a=b", "dc=win2022:+10", "dc=win2022:007", "dc==x", "dc=:10"} {
+		checkHostSpec(t, s)
+	}
+	for part, values := range hostSpecParts {
+		for _, v := range values {
+			parts := map[string]string{"host": "teak", "family": "debian-12", "octet": ":10", "sep": "="}
+			parts[part] = v
+			checkHostSpec(t, parts["host"]+parts["sep"]+parts["family"]+parts["octet"])
+		}
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		// Spoil one part; the rest are valid.
+		spoilt := rapid.SampledFrom([]string{"host", "family", "octet", "sep", "none", "any"}).Draw(t, "spoilt")
+		if spoilt == "any" {
+			checkHostSpec(t, rapid.String().Draw(t, "spec"))
+			return
+		}
+		s := ""
+		for _, part := range []string{"host", "sep", "family", "octet"} {
+			values := hostSpecParts[part]
+			if part != spoilt {
+				values = values[:1]
+				if part == "octet" {
+					values = []string{"", ":10", ": 20 "}
+				}
+			}
+			s += rapid.SampledFrom(values).Draw(t, part)
+		}
+		checkHostSpec(t, s)
+	})
+}
+
+// notesPieces build descriptions: battleship lines, near misses of them,
+// line breaks and what people write.
+var notesPieces = []string{"battleship: ip=192.168.100.10 os=linux", "  battleship: base=gw-v1", "\tbattleship:x", "Battleship: ip=1",
+	"battleship ip=1", "xbattleship:", "\u200bbattleship: ip=1", "battleship:\u2028ip=1\u0085os=x", "battleship:  ip=a=b\tdns=\u00a0x",
+	"\n", "\r\n", "\r", "  ", "\n\n", "Login: root", "pw: hunter2 "}
+
+// oneLine reports whether s is fields joined by single spaces, with no
+// line break or other space Fields would split on.
+func oneLine(s string) bool { return strings.Join(strings.Fields(s), " ") == s }
+
+// The battleship line written into any description reads back the same,
+// writing it twice changes nothing, and people's notes around it are kept.
+func TestPropNotesLineRoundTrip(t *testing.T) {
+	n := Notes{IP: "192.168.100.10", OS: "linux", Base: "a=b", DNS: "router"}
+	for _, a := range notesPieces {
+		for _, b := range notesPieces {
+			with := WithNotes(a+b, n)
+			if got, ok := ParseNotes(with); !ok || got != n || WithNotes(with, n) != with || UserNotes(with) != UserNotes(a+b) {
+				t.Errorf("WithNotes(%q) = %q, reads %+v", a+b, with, got)
+			}
+		}
+	}
+	value := rapid.StringMatching(`[A-Za-z0-9._:=-]{0,12}`)
+	rapid.Check(t, func(t *rapid.T) {
+		piece := rapid.OneOf(rapid.SampledFrom(notesPieces), rapid.SampledFrom(notesPieces), rapid.String())
+		desc := strings.Join(rapid.SliceOfN(piece, 0, 8).Draw(t, "pieces"), "")
+		if old, ok := ParseNotes(desc); ok && !oneLine(old.String()) {
+			t.Fatalf("ParseNotes(%q) = %+v, written %q", desc, old, old.String())
+		}
+		if c := (Notes{IP: editedNoteValue(t), OS: editedNoteValue(t), Base: value.Draw(t, "base"), DNS: editedNoteValue(t)}).Checked("192.168.100"); !oneLine(c.String()) {
+			t.Fatalf("Checked notes written %q", c.String())
+		}
+		n := Notes{IP: value.Draw(t, "ip"), OS: value.Draw(t, "os"), Base: value.Draw(t, "base"), DNS: value.Draw(t, "dns")}
+		with := WithNotes(desc, n)
+		if got, ok := ParseNotes(with); !ok || got != n {
+			t.Fatalf("ParseNotes(WithNotes(%q, %+v)) = %+v, %v", desc, n, got, ok)
+		}
+		if again := WithNotes(with, n); again != with {
+			t.Fatalf("WithNotes twice: %q, then %q", with, again)
+		}
+		if UserNotes(with) != UserNotes(desc) {
+			t.Fatalf("UserNotes(WithNotes(%q)) = %q, want %q", desc, UserNotes(with), UserNotes(desc))
+		}
+		cur := map[string]string{"description": desc, "tags": rapid.SampledFrom([]string{"", "dev", "Dev;kilo.alpha", "kilo.alpha,dev", " dev "}).Draw(t, "tags")}
+		tags := rapid.SampledFrom([]string{"", "dev", "dev;kilo.alpha", "kilo.alpha;router"}).Draw(t, "new tags")
+		for k, v := range LabelChanges(cur, tags, &n) {
+			if k == "delete" {
+				delete(cur, v)
+			} else {
+				cur[k] = v
+			}
+		}
+		if again := LabelChanges(cur, tags, &n); len(again) != 0 {
+			t.Fatalf("LabelChanges after applying them: %q", again)
+		}
+	})
+}
+
+// editedNoteValue draws a note value as people might edit it: spaces, line breaks
+// and script characters around address-like text.
+func editedNoteValue(t *rapid.T) string {
+	return rapid.SampledFrom([]string{"", "10", "192.168.100.10", "192.168.100.10\n", "dc\u2028x", "router", "windows", "a b", "x\u0085"}).Draw(t, "hostile")
 }

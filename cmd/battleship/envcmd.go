@@ -5,10 +5,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"strconv"
 	"strings"
 
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/web"
 )
 
 // stringList is a repeatable string flag.
@@ -19,19 +22,32 @@ func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
 
 // runImage handles battleship image register|edit|deprecate|delete.
 func runImage(ctx context.Context, args []string, d deps) int {
+	c, code, ok := parseImage(args, d.stderr)
+	if !ok {
+		return code
+	}
+	return validated(ctx, d, args[0], c)
+}
+
+// parseImage reads an image command's flags into the inputs the web form
+// would give (web.Normalize); if not ok, the command exits with code.
+func parseImage(args []string, stderr io.Writer) (c command, code int, ok bool) {
 	kinds := map[string]pods.Kind{"register": pods.KindImageRegister, "edit": pods.KindImageEdit,
 		"deprecate": pods.KindImageDeprecate, "delete": pods.KindImageDelete}
 	if len(args) == 0 || kinds[args[0]] == "" {
-		fmt.Fprintln(d.stderr, "usage: battleship image register|edit|deprecate|delete [flags]")
-		return 2
+		fmt.Fprintln(stderr, "usage: battleship image register|edit|deprecate|delete [flags]")
+		return c, 2, false
 	}
 	in := jobs.Inputs{Kind: kinds[args[0]]}
 	fs := flag.NewFlagSet("battleship image "+args[0], flag.ContinueOnError)
-	fs.SetOutput(d.stderr)
+	fs.SetOutput(stderr)
 	cfgPath, yes, queue := commonFlags(fs)
 	switch in.Kind {
 	case pods.KindImageRegister:
-		fs.IntVar(&in.VMID, "vm", 0, "VMID of the stopped, generalized VM to copy in (required)")
+		fs.Func("vm", "VMID of the stopped, generalized VM to copy in (required)", func(v string) (err error) {
+			in.VMID, err = strconv.Atoi(strings.TrimSpace(v)) // decimal, as the form reads it
+			return err
+		})
 		fs.StringVar(&in.Family, "family", "", "image family, e.g. debian-12; an existing family gets its next version (required)")
 		fs.StringVar(&in.ImageKind, "kind", "", "router, windows, linux or other (required for a new family)")
 	case pods.KindImageEdit:
@@ -41,27 +57,37 @@ func runImage(ctx context.Context, args []string, d deps) int {
 	}
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return 0
+			return c, 0, false
 		}
-		return 2
+		return c, 2, false
 	}
 	if in.Kind == pods.KindImageRegister && in.VMID == 0 {
-		fmt.Fprintln(d.stderr, "-vm is required: the VMID of the VM to register")
-		return 2
+		fmt.Fprintln(stderr, "-vm is required: the VMID of the VM to register")
+		return c, 2, false
 	}
-	return validated(ctx, d, args[0], *cfgPath, in, *yes, *queue)
+	return command{in: web.Normalize(in), cfgPath: *cfgPath, yes: *yes, queue: *queue}, 0, true
 }
 
 // runEnv handles battleship env create|add|dns.
 func runEnv(ctx context.Context, args []string, d deps) int {
+	c, code, ok := parseEnv(args, d.stderr)
+	if !ok {
+		return code
+	}
+	return validated(ctx, d, args[0], c)
+}
+
+// parseEnv reads an environment command's flags into the inputs the web
+// form would give (web.Normalize); if not ok, the command exits with code.
+func parseEnv(args []string, stderr io.Writer) (c command, code int, ok bool) {
 	kinds := map[string]pods.Kind{"create": pods.KindEnvCreate, "add": pods.KindEnvAdd, "dns": pods.KindEnvDNS}
 	if len(args) == 0 || kinds[args[0]] == "" {
-		fmt.Fprintln(d.stderr, "usage: battleship env create|add|dns [flags]")
-		return 2
+		fmt.Fprintln(stderr, "usage: battleship env create|add|dns [flags]")
+		return c, 2, false
 	}
 	in := jobs.Inputs{Kind: kinds[args[0]]}
 	fs := flag.NewFlagSet("battleship env "+args[0], flag.ContinueOnError)
-	fs.SetOutput(d.stderr)
+	fs.SetOutput(stderr)
 	cfgPath, yes, queue := commonFlags(fs)
 	fs.StringVar(&in.Domain, "domain", "", "the environment's domain, e.g. kilo.alpha (required)")
 	var hosts stringList
@@ -74,12 +100,12 @@ func runEnv(ctx context.Context, args []string, d deps) int {
 	}
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return 0
+			return c, 0, false
 		}
-		return 2
+		return c, 2, false
 	}
 	in.EnvHosts = hosts
-	return validated(ctx, d, args[0], *cfgPath, in, *yes, *queue)
+	return command{in: web.Normalize(in), cfgPath: *cfgPath, yes: *yes, queue: *queue}, 0, true
 }
 
 func commonFlags(fs *flag.FlagSet) (cfgPath *string, yes, queue *bool) {
@@ -88,11 +114,12 @@ func commonFlags(fs *flag.FlagSet) (cfgPath *string, yes, queue *bool) {
 		fs.Bool("queue", false, "queue the confirmed plan as a job and exit instead of following it")
 }
 
-// validated checks in before contacting anything, then plans and applies.
-func validated(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs, yes, queue bool) int {
-	if err := in.Validate(); err != nil {
+// validated checks c's inputs before contacting anything, then plans and
+// applies.
+func validated(ctx context.Context, d deps, cmd string, c command) int {
+	if err := c.in.Validate(); err != nil {
 		fmt.Fprintln(d.stderr, err)
 		return 2
 	}
-	return runPlanned(ctx, d, cmd, cfgPath, in, false, yes, queue)
+	return runPlanned(ctx, d, cmd, c.cfgPath, c.in, false, c.yes, c.queue)
 }

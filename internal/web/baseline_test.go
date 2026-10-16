@@ -42,6 +42,27 @@ func TestOldToolBaselines(t *testing.T) {
 		`no snapshot &#34;fresh_clone_20261002034615&#34; (has: fresh_clone_20260901000000)`)
 }
 
+// An unfinished snapshot (its task died) is neither the baseline nor a
+// reset target: the picker offers the pattern baseline and not it.
+func TestUnfinishedSnapshotNotOffered(t *testing.T) {
+	h := newHarness(t)
+	h.api.setSnapshots(10101, "initial", "fresh_clone_20261002034615", "before-scoring")
+	h.api.Mu.Lock()
+	h.api.VMs[10101].SnapStates = map[string]string{"initial": "prepare", "before-scoring": "delete"}
+	h.api.Mu.Unlock()
+	h.poll()
+	op := h.login(asOperator)
+
+	body := h.get(&op, "/reset?teams=1&hosts=dc").Body.String()
+	contains(t, "reset picker", body,
+		`<input type="radio" name="snapshot" value="" checked><span>baseline (fresh_clone_20261002034615)</span>`)
+	lacks(t, "reset picker", body, `value="initial"`, `value="before-scoring"`)
+
+	body = h.post(&op, "/reset/preview", url.Values{"teams": {"1"}, "hosts": {"dc"}, "snapshot": {"before-scoring"}}).Body.String()
+	contains(t, "explicit reset preview", body, "Every VM is blocked",
+		`no snapshot &#34;<span class="name">before-scoring</span>&#34; (has: fresh_clone_20261002034615)`)
+}
+
 // Proxmox leaves pool out when the user can't audit pools: the page says
 // it is unknown, and it isn't drift.
 func TestCellPageUnknownPool(t *testing.T) {

@@ -113,6 +113,8 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 	}
 	_, _, isTeam := p.Naming.ParseVMName(src.Name)
 	switch {
+	case version > MaxImageVersion:
+		it.Blocked = fmt.Sprintf("family %s is at v%d, the last version a base image name holds; register it as a new family", req.Family, MaxImageVersion)
 	case src.Template:
 		it.Blocked = src.Name + " is a template; register the VM it was made from, or open the family for editing"
 	case isTeam:

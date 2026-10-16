@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 
@@ -15,13 +16,30 @@ import (
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/store"
+	"github.com/wccomps/battleship/internal/web"
 )
 
 // runOp previews and applies (or queues) deploy, teardown, reset, power or
 // snapshot. With a database, an applied plan is queued as a job and followed
 // (see runQueued).
 func runOp(ctx context.Context, cmd string, args []string, d deps) int {
-	stderr := d.stderr
+	c, code, ok := parseOp(cmd, args, d.stderr)
+	if !ok {
+		return code
+	}
+	return runPlanned(ctx, d, cmd, c.cfgPath, c.in, c.all, c.yes, c.queue)
+}
+
+// command is a parsed command line that plans a job.
+type command struct {
+	in              jobs.Inputs
+	cfgPath         string
+	all, yes, queue bool // all: -teams all, resolved once the cluster is read
+}
+
+// parseOp reads a team operation's flags into the inputs the web form would
+// give (web.Normalize); if not ok, the command exits with code.
+func parseOp(cmd string, args []string, stderr io.Writer) (c command, code int, ok bool) {
 	fs := flag.NewFlagSet("battleship "+cmd, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	cfgPath := fs.String("config", "battleship.toml", "config file")
@@ -47,26 +65,27 @@ func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return 0
+			return c, 0, false
 		}
-		return 2
+		return c, 2, false
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintf(stderr, "unexpected argument %q (put flags before any other words)\n", fs.Arg(0))
-		return 2
+		return c, 2, false
 	}
 	all := isAllTeams(*teamSpec)
 	if all && cmd == "deploy" {
 		fmt.Fprintln(stderr, "-teams all is for teardown, power, reset and snapshot; name the teams to deploy, e.g. 1-32")
-		return 2
+		return c, 2, false
 	}
 	if _, err := pods.ParseTeams(*teamSpec); !all && (*teamSpec == "" || err != nil) {
 		fmt.Fprintf(stderr, "-teams: %v\n", orRequired(err))
-		return 2
+		return c, 2, false
 	}
 	in.Teams = *teamSpec
 	in.Hosts = jobs.SplitList(*hostSpec)
 	in.VMs = jobs.SplitList(*vmSpec)
+	in = web.Normalize(in)
 	hostsSet, vmsSet := false, false
 	fs.Visit(func(f *flag.Flag) {
 		hostsSet = hostsSet || f.Name == "hosts"
@@ -74,27 +93,27 @@ func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 	})
 	if hostsSet && len(in.Hosts) == 0 {
 		fmt.Fprintln(stderr, "-hosts is empty")
-		return 2
+		return c, 2, false
 	}
 	if vmsSet && len(in.VMs) == 0 {
 		fmt.Fprintln(stderr, "-vms is empty")
-		return 2
+		return c, 2, false
 	}
 	switch cmd {
 	case "deploy":
 		if in.Pattern == "" {
 			fmt.Fprintln(stderr, "-templates is required")
-			return 2
+			return c, 2, false
 		}
 	case "power":
 		if !pods.IsPowerAction(in.Action) {
 			fmt.Fprintf(stderr, "-action must be start, shutdown, stop or reboot (got %q)\n", in.Action)
-			return 2
+			return c, 2, false
 		}
 	case "snapshot":
 		if in.Snapshot == "" {
 			fmt.Fprintln(stderr, "-name is required")
-			return 2
+			return c, 2, false
 		}
 		check := in
 		if all {
@@ -102,11 +121,10 @@ func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 		}
 		if err := check.Validate(); err != nil {
 			fmt.Fprintln(stderr, err)
-			return 2
+			return c, 2, false
 		}
 	}
-
-	return runPlanned(ctx, d, cmd, *cfgPath, in, all, *yes, *queue)
+	return command{in: in, cfgPath: *cfgPath, all: all, yes: *yes, queue: *queue}, 0, true
 }
 
 // runPlanned plans in, prints the plan, asks, then queues or runs it.
@@ -134,7 +152,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	if all {
 		spec, says, err := resolveAllTeams(ctx, api, cfg)
 		if err != nil {
-			fmt.Fprintln(stderr, "-teams all:", proxmox.Describe(err))
+			fmt.Fprintln(stderr, "-teams all:", cleanLines(proxmox.Describe(err), "  "))
 			return 1
 		}
 		fmt.Fprintln(stdout, says)
@@ -143,7 +161,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	}
 	plan, err := jobs.BuildPlan(ctx, pods.NewPlanner(api, cfg), in)
 	if err != nil {
-		fmt.Fprintln(stderr, "planning:", proxmox.Describe(err))
+		fmt.Fprintln(stderr, "planning:", cleanLines(proxmox.Describe(err), "  "))
 		return 1
 	}
 
@@ -151,14 +169,14 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	if pods.NeedsCapacity(plan) {
 		// Advice only: overcommit may be deliberate, so it never stops the plan.
 		if c, err := pods.ReadCapacity(ctx, api, plan, cfg); err != nil {
-			fmt.Fprintln(stdout, "\nCapacity: couldn't read the cluster's resources:", proxmox.Describe(err))
+			fmt.Fprintln(stdout, "\nCapacity: couldn't read the cluster's resources:", cleanLines(proxmox.Describe(err), "  "))
 		} else {
 			printCapacity(stdout, c)
 		}
 	}
 	if missing := jobs.MissingVMs(in, plan); len(missing) > 0 {
 		fmt.Fprintf(stdout, "\n%d of the %d -vms no longer exist or match -teams/-hosts, so they are left out: %s\n",
-			len(missing), len(in.VMs), strings.Join(missing, ", "))
+			len(missing), len(in.VMs), cleanJoin(missing, ", "))
 	}
 	blocked := len(plan.Items) - len(plan.Runnable())
 	if blocked > 0 {
@@ -167,7 +185,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	if len(plan.Items) == 0 {
 		if len(in.Hosts) > 0 && cmd != "deploy" {
 			fmt.Fprintf(stdout, "\nNo VMs matched -hosts %s for teams %s; check the host names.\n",
-				strings.Join(in.Hosts, ","), in.Teams)
+				cleanJoin(in.Hosts, ","), clean(in.Teams))
 			return 1
 		}
 		fmt.Fprintln(stdout, "\nNothing to do.")

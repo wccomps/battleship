@@ -45,7 +45,7 @@ func runNodes(ctx context.Context, args []string, d deps) int {
 	}
 	nodes, err := lister.ClusterNodes(ctx)
 	if err != nil {
-		fmt.Fprintln(d.stderr, "listing nodes:", proxmox.Describe(err))
+		fmt.Fprintln(d.stderr, "listing nodes:", cleanLines(proxmox.Describe(err), "  "))
 		return 1
 	}
 	tw := tabwriter.NewWriter(d.stdout, 0, 4, 2, ' ', 0)

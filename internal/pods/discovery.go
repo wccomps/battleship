@@ -2,21 +2,14 @@ package pods
 
 import (
 	"maps"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
 	"unicode"
 
+	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
-
-// WildcardRegexp turns "*.kilo.alpha" into a case-insensitive, fully
-// anchored regexp.
-func WildcardRegexp(pattern string) *regexp.Regexp {
-	quoted := strings.ReplaceAll(regexp.QuoteMeta(pattern), `\*`, `.*`)
-	return regexp.MustCompile("(?i)^" + quoted + "$")
-}
 
 func hasTag(tags, tag string) bool {
 	if strings.TrimSpace(tag) == "" {
@@ -34,8 +27,11 @@ func hasTag(tags, tag string) bool {
 // sorted by name, plus untagged matches (to explain empty results). Team VM
 // names are skipped since clones inherit the tag; a custom naming.vm_name
 // must not match master names.
-func FindMasters(vms []proxmox.VM, n Naming, pattern, tag string) (masters, untagged []proxmox.VM) {
-	re := WildcardRegexp(pattern)
+func FindMasters(vms []proxmox.VM, n Naming, pattern, tag string) (masters, untagged []proxmox.VM, err error) {
+	re, err := config.WildcardRegexp(pattern)
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, vm := range vms {
 		_, _, isTeam := n.ParseVMName(vm.Name)
 		if vm.Template || n.IsTemplateName(vm.Name) || isTeam || !re.MatchString(vm.Name) {
@@ -48,7 +44,7 @@ func FindMasters(vms []proxmox.VM, n Naming, pattern, tag string) (masters, unta
 		}
 	}
 	sort.Slice(masters, func(i, j int) bool { return masters[i].Name < masters[j].Name })
-	return masters, untagged
+	return masters, untagged, nil
 }
 
 // FindTeamVMs returns non-template team VMs for teams, filtered by hosts
@@ -139,7 +135,7 @@ type MasterSet struct {
 // with nothing after the host (like "y" or "tern.") go in others, sorted
 // and unique.
 func MasterSets(vms []proxmox.VM, n Naming, tag string) (sets []MasterSet, others []string) {
-	masters, _ := FindMasters(vms, n, "*", tag)
+	masters, _, _ := FindMasters(vms, n, "*", tag)
 	index := map[string]int{}
 	for _, m := range masters {
 		host, set, _ := strings.Cut(m.Name, ".")

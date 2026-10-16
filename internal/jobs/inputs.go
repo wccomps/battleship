@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/wccomps/battleship/internal/pods"
@@ -49,6 +50,9 @@ const MaxSnapshotDescription = 500
 
 // Validate checks the inputs without contacting Proxmox.
 func (in Inputs) Validate() error {
+	if err := in.checkText(); err != nil {
+		return err
+	}
 	if in.Kind.Teamless() {
 		return errors.Join(in.validateTeamless()...)
 	}
@@ -86,6 +90,34 @@ func (in Inputs) Validate() error {
 		if strings.TrimSpace(v) == "" {
 			errs = append(errs, errors.New("vms must not contain blank entries"))
 			break
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// checkText rejects invalid UTF-8 and control characters in every string
+// field. Each value is one line: the form splits env hosts by line.
+func (in Inputs) checkText() error {
+	fields := []struct {
+		name   string
+		values []string
+	}{
+		{"teams", []string{in.Teams}}, {"hosts", in.Hosts}, {"vms", in.VMs}, {"pattern", []string{in.Pattern}},
+		{"snapshot", []string{in.Snapshot}}, {"description", []string{in.Description}}, {"action", []string{in.Action}},
+		{"domain", []string{in.Domain}}, {"router", []string{in.Router}}, {"env hosts", in.EnvHosts}, {"dns", []string{in.DNS}},
+		{"family", []string{in.Family}}, {"image kind", []string{in.ImageKind}}, {"image", []string{in.Image}},
+	}
+	var errs []error
+	for _, f := range fields {
+		for _, v := range f.values {
+			if !utf8.ValidString(v) || strings.ContainsFunc(v, unicode.IsControl) {
+				// Bounded: the error reaches pages and logs.
+				if len(v) > 100 {
+					v = v[:100] + "..."
+				}
+				errs = append(errs, fmt.Errorf("%s must be printable text, not %q", f.name, v))
+				break
+			}
 		}
 	}
 	return errors.Join(errs...)
