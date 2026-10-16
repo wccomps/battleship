@@ -24,6 +24,7 @@ type Session struct {
 	Name         string
 	Email        string
 	RefreshToken string // opaque to the store; auth seals it (see auth's refreshtoken.go)
+	IDToken      string // the latest ID token, sealed by auth; may be empty
 	CSRF         string // the token every state-changing request must carry
 	CreatedAt    time.Time
 	LastSeen     time.Time
@@ -66,11 +67,12 @@ type SessionUpdate struct {
 	Name         string
 	Email        string
 	RefreshToken string // the provider may rotate it
+	IDToken      string // sealed; empty keeps the stored one (a refresh may bring none)
 	RefreshedAt  time.Time
 }
 
 const sessionColumns = `id, subject, name, email, refresh_token, csrf,
-	created_at, last_seen, refreshed_at, expires_at, refresh_retry_at, refresh_failed_at, username`
+	created_at, last_seen, refreshed_at, expires_at, refresh_retry_at, refresh_failed_at, username, id_token_sealed`
 
 const sessionPVEColumns = `pve_user, pve_ticket_sealed, pve_csrf_sealed, pve_issued_at, pve_login_at,
 	pve_login_state, pve_login_next, pve_login_endpoint`
@@ -81,10 +83,10 @@ func (s *Store) CreateSession(ctx context.Context, sess Session) error {
 		return ErrEmptySession
 	}
 	_, err := s.pool.Exec(ctx, `INSERT INTO sessions (`+sessionColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		sess.ID, sess.Subject, sess.Name, sess.Email, sess.RefreshToken, sess.CSRF,
 		sess.CreatedAt, sess.LastSeen, sess.RefreshedAt, sess.ExpiresAt,
-		nullTime(sess.RefreshRetryAt), nullTime(sess.RefreshFailedAt), sess.Username)
+		nullTime(sess.RefreshRetryAt), nullTime(sess.RefreshFailedAt), sess.Username, sess.IDToken)
 	if err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
@@ -98,7 +100,7 @@ func (s *Store) Session(ctx context.Context, id string) (Session, error) {
 	var retry, failed, issued, loginAt *time.Time
 	err := s.pool.QueryRow(ctx, `SELECT `+sessionColumns+`, `+sessionPVEColumns+` FROM sessions WHERE id = $1`, id).Scan(
 		&x.ID, &x.Subject, &x.Name, &x.Email, &x.RefreshToken, &x.CSRF,
-		&x.CreatedAt, &x.LastSeen, &x.RefreshedAt, &x.ExpiresAt, &retry, &failed, &x.Username,
+		&x.CreatedAt, &x.LastSeen, &x.RefreshedAt, &x.ExpiresAt, &retry, &failed, &x.Username, &x.IDToken,
 		&x.PVE.User, &x.PVE.Ticket, &x.PVE.CSRF, &issued, &loginAt, &x.PVELoginState, &x.PVELoginNext, &x.PVELoginEndpoint)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, ErrSessionNotFound
@@ -227,8 +229,9 @@ func (s *Store) UpdateSession(ctx context.Context, id string, u SessionUpdate) e
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE sessions
 		SET name = $2, email = $3, refresh_token = $4, refreshed_at = $5,
-			refresh_retry_at = NULL, refresh_failed_at = NULL, username = $6
-		WHERE id = $1`, id, u.Name, u.Email, u.RefreshToken, u.RefreshedAt, u.Username)
+			refresh_retry_at = NULL, refresh_failed_at = NULL, username = $6,
+			id_token_sealed = CASE WHEN $7 = '' THEN id_token_sealed ELSE $7 END
+		WHERE id = $1`, id, u.Name, u.Email, u.RefreshToken, u.RefreshedAt, u.Username, u.IDToken)
 	if err != nil {
 		return fmt.Errorf("updating session: %w", err)
 	}

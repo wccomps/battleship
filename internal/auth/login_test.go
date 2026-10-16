@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"context"
+	"encoding/base64"
+	"encoding/json"
 	"github.com/wccomps/battleship/internal/auth"
 	"github.com/wccomps/battleship/internal/auth/authtest"
 	"github.com/wccomps/battleship/internal/config"
@@ -415,9 +418,17 @@ func TestLogout(t *testing.T) {
 	b := h.browser()
 	b.login(alice)
 	token := b.sessionToken()
+	live := h.idp.RefreshTokens()
 	resp := b.postForm("/auth/logout", url.Values{"csrf": {b.csrf()}}, nil)
-	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != h.idp.Issuer()+"end-session" {
+	loc, _ := url.Parse(resp.Header.Get("Location"))
+	if resp.StatusCode != http.StatusSeeOther || loc == nil || loc.Scheme+"://"+loc.Host+loc.Path != h.idp.Issuer()+"end-session" {
 		t.Errorf("logout = %d to %q, want 303 to the provider's end_session_endpoint", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	if q := loc.Query(); idTokenSubject(t, q.Get("id_token_hint")) != "sub-alice" || q.Get("client_id") != h.cfg.OIDC.ClientID {
+		t.Errorf("end-session query = %v, want alice's ID token as id_token_hint and the client ID", q)
+	}
+	if got := h.idp.Revoked(); len(live) != 1 || !slices.Equal(got, live) || len(h.idp.RefreshTokens()) != 0 {
+		t.Errorf("revoked %v of %v; still live %v", got, live, h.idp.RefreshTokens())
 	}
 	if c := resp.cookie(auth.SessionCookie); c == nil || c.MaxAge >= 0 {
 		t.Errorf("session cookie after logout = %+v, want it cleared", c)
@@ -426,6 +437,89 @@ func TestLogout(t *testing.T) {
 	wantLoginRedirect(t, b.do(http.MethodGet, "/private", nil, nil), "/private")
 	if !strings.Contains(h.logs.String(), `logout: subject="sub-alice"`) {
 		t.Errorf("logs = %q, want a logout line", h.logs.String())
+	}
+}
+
+// idTokenSubject is the sub of an unverified JWT, or "" if it isn't one.
+func idTokenSubject(t *testing.T, jwt string) string {
+	t.Helper()
+	parts := strings.Split(jwt, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	b, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var c struct {
+		Sub string `json:"sub"`
+	}
+	_ = json.Unmarshal(b, &c)
+	return c.Sub
+}
+
+// The hint is the latest ID token: a refresh's replaces the login's, and a
+// refresh without one keeps it.
+func TestLogoutHintsTheLatestIDToken(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(lena)
+	hints := func() string {
+		sess, err := h.st.Session(context.Background(), auth.HashToken(b.sessionToken()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sess.IDToken
+	}
+	first := hints()
+	h.clock.Advance(5 * time.Minute)
+	b.do(http.MethodGet, "/private", nil, nil) // refreshes, with an ID token
+	second := hints()
+	if second == "" || second == first {
+		t.Fatalf("stored ID token after a refresh with one: %q (was %q)", second, first)
+	}
+	h.idp.Set(func(f *authtest.Behavior) { f.NoIDTokenOnRefresh = true })
+	h.clock.Advance(5 * time.Minute)
+	b.do(http.MethodGet, "/private", nil, nil)
+	if got := hints(); got != second {
+		t.Errorf("a refresh without an ID token changed the stored one")
+	}
+	if h.idp.Refreshes() != 2 {
+		t.Fatalf("refreshed %d times, want 2", h.idp.Refreshes())
+	}
+	resp := b.postForm("/auth/logout", url.Values{"csrf": {b.csrf()}}, nil)
+	loc, _ := url.Parse(resp.Header.Get("Location"))
+	if idTokenSubject(t, loc.Query().Get("id_token_hint")) != "sub-lena" {
+		t.Errorf("logout to %q, want lena's ID token as the hint", loc)
+	}
+}
+
+// A provider that won't revoke, or has no revocation endpoint, doesn't stop
+// the logout.
+func TestLogoutWhenRevocationFails(t *testing.T) {
+	for name, set := range map[string]func(*authtest.Behavior){
+		"revocation fails": func(f *authtest.Behavior) { f.RevokeStatus = http.StatusInternalServerError },
+		"no revocation":    func(f *authtest.Behavior) { f.NoRevocation = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.idp.Set(set)
+			h.restart(h.cfg)
+			b := h.browser()
+			b.login(alice)
+			token := b.sessionToken()
+			resp := b.postForm("/auth/logout", url.Values{"csrf": {b.csrf()}}, nil)
+			if resp.StatusCode != http.StatusSeeOther {
+				t.Errorf("logout = %d", resp.StatusCode)
+			}
+			h.sessionGone(token)
+			if len(h.idp.Revoked()) != 0 {
+				t.Errorf("revoked %v", h.idp.Revoked())
+			}
+			if failed := strings.Contains(h.logs.String(), "revoking the refresh token"); failed != (name == "revocation fails") {
+				t.Errorf("logs = %q", h.logs.String())
+			}
+		})
 	}
 }
 

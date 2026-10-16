@@ -48,6 +48,8 @@ type Provider struct {
 	logins    int
 	refreshes int
 	requests  []url.Values // every token request's form
+	revoked   []string     // refresh tokens revoked at /revoke
+	logouts   []url.Values // every end-session request's query
 	b         Behavior
 }
 
@@ -58,6 +60,8 @@ type Behavior struct {
 	NoRefreshToken     bool                              // token responses carry no refresh_token
 	NoIDTokenOnRefresh bool                              // refresh responses carry no id_token
 	NoEndSession       bool                              // discovery lists no end_session_endpoint
+	NoRevocation       bool                              // discovery lists no revocation_endpoint
+	RevokeStatus       int                               // non-zero: the revocation endpoint fails with this status
 	AdvertiseAlgs      []string                          // extra id_token_signing_alg_values_supported
 	KeyID              string                            // the signing key's ID, default "authtest"; change it to rotate
 	MutateIDToken      func(claims map[string]any)       // edits ID token claims before signing
@@ -119,8 +123,12 @@ func NewProvider(t testing.TB, cfg *config.Config) *Provider {
 	mux.HandleFunc("POST /token", p.token)
 	mux.HandleFunc("GET /userinfo", p.userinfo)
 	mux.HandleFunc("GET /end-session", func(w http.ResponseWriter, r *http.Request) {
+		p.mu.Lock()
+		p.logouts = append(p.logouts, r.URL.Query())
+		p.mu.Unlock()
 		_, _ = w.Write([]byte("signed out of the test provider"))
 	})
+	mux.HandleFunc("POST /revoke", p.revoke)
 	p.srv = httptest.NewServer(mux)
 	t.Cleanup(p.srv.Close)
 	cfg.OIDC.Issuer = p.Issuer()
@@ -213,6 +221,9 @@ func (p *Provider) discovery(w http.ResponseWriter, _ *http.Request) {
 	if !p.b.NoEndSession {
 		doc["end_session_endpoint"] = p.srv.URL + "/end-session"
 	}
+	if !p.b.NoRevocation {
+		doc["revocation_endpoint"] = p.srv.URL + "/revoke"
+	}
 	p.mu.Unlock()
 	writeJSON(w, http.StatusOK, doc)
 }
@@ -264,6 +275,49 @@ func (p *Provider) authorize(w http.ResponseWriter, r *http.Request) {
 	p.mu.Unlock()
 	back.RawQuery = params.Encode()
 	http.Redirect(w, r, back.String(), http.StatusFound)
+}
+
+// revoke revokes a refresh token for the client (RFC 7009): it stops
+// working at the token endpoint.
+func (p *Provider) revoke(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+		return
+	}
+	id, secret, ok := r.BasicAuth()
+	if !ok {
+		id, secret = r.PostForm.Get("client_id"), r.PostForm.Get("client_secret")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	switch {
+	case p.b.RevokeStatus != 0:
+		writeJSON(w, p.b.RevokeStatus, map[string]string{"error": "server_error"})
+		return
+	case id != p.clientID || secret != p.clientSecret():
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_client"})
+		return
+	}
+	token := r.PostForm.Get("token")
+	if _, ok := p.refresh[token]; ok {
+		delete(p.refresh, token)
+		p.revoked = append(p.revoked, token)
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// Revoked is the refresh tokens the client revoked, in order.
+func (p *Provider) Revoked() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.revoked)
+}
+
+// Logouts is every end-session request's query, in order.
+func (p *Provider) Logouts() []url.Values {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.logouts)
 }
 
 func (p *Provider) token(w http.ResponseWriter, r *http.Request) {
