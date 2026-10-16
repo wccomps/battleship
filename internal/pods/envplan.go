@@ -47,21 +47,57 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	var slot *Environment
-	for i := range envs {
-		if envs[i].Domain == req.Domain {
-			return nil, fmt.Errorf("%s is already in dev slot %s; add hosts to it instead", req.Domain, envs[i].Slot.Name)
-		}
-		if slot == nil && envs[i].Free() {
-			slot = &envs[i]
+	for _, e := range envs {
+		if e.Domain == req.Domain {
+			return nil, fmt.Errorf("%s is already in dev slot %s; add hosts to it instead", req.Domain, e.Slot.Name)
 		}
 	}
+	var slot *Environment
+	var hidden []string // slots that look free but hold VMs this user can't see
+	for i := range envs {
+		if !envs[i].Free() {
+			continue
+		}
+		held, err := p.slotHeld(ctx, envs[i].Slot, vms)
+		if err != nil {
+			return nil, err
+		}
+		if !held {
+			slot = &envs[i]
+			break
+		}
+		hidden = append(hidden, envs[i].Slot.Name)
+	}
 	if slot == nil {
-		return nil, errors.New("every dev slot is in use; archive an environment to free one")
+		msg := "every dev slot is in use; archive an environment to free one"
+		if len(hidden) > 0 {
+			msg += fmt.Sprintf(" (dev slot %s holds VMs you can't see)", strings.Join(hidden, ", "))
+		}
+		return nil, errors.New(msg)
 	}
 	env := *slot
 	env.Domain = req.Domain
 	return p.envPlan(ctx, KindEnvCreate, env, append([]HostSpec{req.Router}, req.Hosts...), vms)
+}
+
+// slotHeld is whether any VMID in slot's block exists, listed or not: what a
+// user may see of a slot depends on their rights, but Proxmox reports any
+// VMID in use, so an environment never lands in a slot someone else uses.
+func (p Planner) slotHeld(ctx context.Context, slot Slot, vms []proxmox.VM) (bool, error) {
+	last := slot.FirstVMID + 99
+	if slices.ContainsFunc(vms, func(vm proxmox.VM) bool { return vm.VMID >= slot.FirstVMID && vm.VMID <= last }) {
+		return true, nil
+	}
+	for id := slot.FirstVMID; id <= last; id++ {
+		held, err := p.API.VMIDHeld(ctx, id)
+		if err != nil {
+			return false, fmt.Errorf("checking whether dev slot %s is free (VMID %d): %w", slot.Name, id, err)
+		}
+		if held {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // EnvAdd plans adding hosts to the environment with req.Domain. Hosts that
