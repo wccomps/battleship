@@ -49,7 +49,7 @@ func TestGuardedAPIHoldsBackEveryChange(t *testing.T) {
 					inner.calls++
 				}
 			}()
-			out = reflect.ValueOf(guardedAPI{inner}).MethodByName(m.Name).Call(args)
+			out = reflect.ValueOf(guardedAPI{API: inner}).MethodByName(m.Name).Call(args)
 		}()
 		passed := inner.calls > 0
 		if notChanges[m.Name] != passed {
@@ -60,6 +60,40 @@ func TestGuardedAPIHoldsBackEveryChange(t *testing.T) {
 			err, _ := out[len(out)-1].Interface().(error)
 			if !errors.Is(err, errHeldBack) {
 				t.Errorf("%s: err = %v, want errHeldBack", m.Name, err)
+			}
+		}
+	}
+}
+
+// Held refuses every change, outside steps too (cleanup, template builds),
+// and lets reads through.
+func TestHeldHoldsBackEveryChange(t *testing.T) {
+	errGone := errors.New("claim uncertain")
+	apiType := reflect.TypeFor[pods.API]()
+	for i := range apiType.NumMethod() {
+		m := apiType.Method(i)
+		inner := &countingAPI{}
+		args := []reflect.Value{reflect.ValueOf(context.Background())}
+		for j := 1; j < m.Type.NumIn(); j++ {
+			args = append(args, reflect.Zero(m.Type.In(j)))
+		}
+		var out []reflect.Value
+		func() {
+			defer func() {
+				if recover() != nil {
+					inner.calls++
+				}
+			}()
+			out = reflect.ValueOf(guardedAPI{API: inner, held: func() error { return errGone }}).MethodByName(m.Name).Call(args)
+		}()
+		passed := inner.calls > 0
+		if notChanges[m.Name] != passed {
+			t.Errorf("%s: passed through = %v, want %v", m.Name, passed, notChanges[m.Name])
+			continue
+		}
+		if !passed {
+			if err, _ := out[len(out)-1].Interface().(error); !errors.Is(err, errGone) {
+				t.Errorf("%s: err = %v, want Held's error", m.Name, err)
 			}
 		}
 	}

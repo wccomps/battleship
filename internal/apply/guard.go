@@ -75,82 +75,96 @@ func mayChange(ctx context.Context) error {
 	return nil
 }
 
-// guardedAPI is an API whose changes go through mayChange. Reads, task
-// waits and StopTask pass through.
-type guardedAPI struct{ pods.API }
+// guardedAPI is an API whose changes go through held, if set, then
+// mayChange. Reads, task waits and StopTask pass through.
+type guardedAPI struct {
+	pods.API
+	held func() error
+}
+
+// may refuses a change if the run may no longer hold its locks (see
+// Executor.Held), then as mayChange does.
+func (g guardedAPI) may(ctx context.Context) error {
+	if g.held != nil {
+		if err := g.held(); err != nil {
+			return err
+		}
+	}
+	return mayChange(ctx)
+}
 
 func (g guardedAPI) SetVMConfig(ctx context.Context, node string, vmid int, changes map[string]string) error {
-	if err := mayChange(ctx); err != nil {
+	if err := g.may(ctx); err != nil {
 		return err
 	}
 	return g.API.SetVMConfig(ctx, node, vmid, changes)
 }
 
 func (g guardedAPI) AgentExec(ctx context.Context, node string, vmid int, command []string, input string) (int, error) {
-	if err := mayChange(ctx); err != nil {
+	if err := g.may(ctx); err != nil {
 		return 0, err
 	}
 	return g.API.AgentExec(ctx, node, vmid, command, input)
 }
 
 func (g guardedAPI) Clone(ctx context.Context, r proxmox.CloneRequest) (string, error) {
-	if err := mayChange(ctx); err != nil {
+	if err := g.may(ctx); err != nil {
 		return "", err
 	}
 	return g.API.Clone(ctx, r)
 }
 
 func (g guardedAPI) ConvertToTemplate(ctx context.Context, node string, vmid int) (string, error) {
-	if err := mayChange(ctx); err != nil {
+	if err := g.may(ctx); err != nil {
 		return "", err
 	}
 	return g.API.ConvertToTemplate(ctx, node, vmid)
 }
 
 func (g guardedAPI) RegenerateCloudInit(ctx context.Context, node string, vmid int) error {
-	if err := mayChange(ctx); err != nil {
+	if err := g.may(ctx); err != nil {
 		return err
 	}
 	return g.API.RegenerateCloudInit(ctx, node, vmid)
 }
 
 func (g guardedAPI) CreateSnapshot(ctx context.Context, node string, vmid int, r proxmox.SnapshotRequest) (string, error) {
-	if err := mayChange(ctx); err != nil {
+	if err := g.may(ctx); err != nil {
 		return "", err
 	}
 	return g.API.CreateSnapshot(ctx, node, vmid, r)
 }
 
 func (g guardedAPI) Rollback(ctx context.Context, node string, vmid int, snapshot string) (string, error) {
-	if err := mayChange(ctx); err != nil {
+	if err := g.may(ctx); err != nil {
 		return "", err
 	}
 	return g.API.Rollback(ctx, node, vmid, snapshot)
 }
 
 func (g guardedAPI) Power(ctx context.Context, node string, vmid int, action string) (string, error) {
-	if err := mayChange(ctx); err != nil {
+	if err := g.may(ctx); err != nil {
 		return "", err
 	}
 	return g.API.Power(ctx, node, vmid, action)
 }
 
 func (g guardedAPI) Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration, forceStop bool) (string, error) {
-	if err := mayChange(ctx); err != nil {
+	if err := g.may(ctx); err != nil {
 		return "", err
 	}
 	return g.API.Shutdown(ctx, node, vmid, timeout, forceStop)
 }
 
 func (g guardedAPI) DeleteVM(ctx context.Context, node string, vmid int) (string, error) {
-	if err := mayChange(ctx); err != nil {
+	if err := g.may(ctx); err != nil {
 		return "", err
 	}
 	return g.API.DeleteVM(ctx, node, vmid)
 }
 
 func (g guardedAPI) DeleteVolume(ctx context.Context, node, storage, volid string) (string, error) {
-	if err := mayChange(ctx); err != nil {
+	if err := g.may(ctx); err != nil {
 		return "", err
 	}
 	return g.API.DeleteVolume(ctx, node, storage, volid)

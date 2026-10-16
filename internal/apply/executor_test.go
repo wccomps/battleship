@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1060,6 +1061,39 @@ func TestCancelledRunRemovesTeamVMItCreated(t *testing.T) {
 	}
 	if f.VMs[9021] == nil || !f.VMs[9021].Template {
 		t.Error("finished template was not kept")
+	}
+}
+
+// A run stopped because its job's claim became unsure (the job system
+// lost its database) sends nothing more, cleanup included: another worker
+// may already be rebuilding the same VMIDs. Cleanup reports what it left.
+func TestUnsureClaimHoldsBackCleanup(t *testing.T) {
+	f, plan := newlyBuiltTeamVMFails(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	var unsure atomic.Bool
+	errUnsure := errors.New("not sent to Proxmox: claim unsure")
+	f.OnRecord = func(key string) {
+		if key == "setconfig:10121" {
+			unsure.Store(true)
+			cancel()
+		}
+	}
+	e := testExecutor(f, &recorder{})
+	e.Held = func() error {
+		if unsure.Load() {
+			return errUnsure
+		}
+		return nil
+	}
+	res := e.Run(ctx, plan)
+	if f.VMs[10121] == nil {
+		t.Error("cleanup deleted team01-teak although the claim was unsure")
+	}
+	if slices.ContainsFunc(f.Calls, func(k string) bool { return strings.HasPrefix(k, "delete:") || strings.HasPrefix(k, "power:") }) {
+		t.Errorf("calls after the claim became unsure: %v", f.Calls)
+	}
+	if err := res.CleanupFailed["team01-teak"]; !errors.Is(err, errUnsure) {
+		t.Errorf("CleanupFailed = %v, want team01-teak held back", res.CleanupFailed)
 	}
 }
 

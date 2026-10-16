@@ -136,6 +136,11 @@ type Executor struct {
 	// Halt, if set, ends a cancel's grace when closed (e.g. on shutdown), so
 	// the run still stops within StopBudget.
 	Halt <-chan struct{}
+	// Held, if set, is asked before every change the run sends, cleanup and
+	// template builds included; an error holds the change back. The job
+	// system says no once it can't be sure the job still holds its locks,
+	// so a run another worker may have taken over changes nothing more.
+	Held func() error
 
 	// api wraps API so no step makes a change after a stop (see stepContext).
 	api pods.API
@@ -198,7 +203,7 @@ func (e *Executor) init() {
 		e.lim = NewLimits(e.Cfg.Concurrency)
 	}
 	e.owned = map[int]*ownedVM{}
-	e.api = guardedAPI{e.API}
+	e.api = guardedAPI{API: e.API, held: e.Held}
 	e.leftovers = map[int]leftover{}
 	e.asked = map[int][]string{}
 	e.mastersStopped = map[string]string{}
