@@ -80,7 +80,36 @@ type Environment struct {
 func (e Environment) Free() bool { return len(e.Hosts) == 0 && len(e.Users) == 0 }
 
 func (e Environment) HasRouter() bool {
-	return slices.ContainsFunc(e.Hosts, func(h EnvHost) bool { return h.Router })
+	_, ok := e.RouterHost()
+	return ok
+}
+
+// RouterHost is the environment's router, if it has one.
+func (e Environment) RouterHost() (EnvHost, bool) {
+	for _, h := range e.Hosts {
+		if h.Router {
+			return h, true
+		}
+	}
+	return EnvHost{}, false
+}
+
+// RouterName is its router's VM name, or "" if it has none.
+func (e Environment) RouterName() string {
+	h, _ := e.RouterHost()
+	return h.Name
+}
+
+// DNSChoices are what its DNS can be set to: DNSRouter, then each Windows
+// or Linux host with an address (see dnsAddress), by name.
+func (e Environment) DNSChoices() []string {
+	out := []string{DNSRouter}
+	for _, h := range e.Hosts {
+		if h.Notes.IP != "" && (h.Notes.OS == ImageWindows || h.Notes.OS == ImageLinux) {
+			out = append(out, strings.TrimSuffix(h.Name, "."+e.Domain))
+		}
+	}
+	return out
 }
 
 func (e Environment) Host(name string) (EnvHost, bool) {

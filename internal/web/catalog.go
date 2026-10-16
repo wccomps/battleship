@@ -47,6 +47,28 @@ func (s *Server) newCatalogPage(ctx context.Context) catalogPage {
 	return p
 }
 
+// Env is the environment the form's domain names, if it is one whose hosts
+// share that domain.
+func (p catalogPage) Env() *pods.Environment {
+	for i, e := range p.Envs {
+		if p.In.Domain != "" && e.Domain == p.In.Domain && !e.Mixed {
+			return &p.Envs[i]
+		}
+	}
+	return nil
+}
+
+// EnvDomains are the environments a form can pick from.
+func (p catalogPage) EnvDomains() []string {
+	var out []string
+	for _, e := range p.Envs {
+		if e.Domain != "" && !e.Mixed {
+			out = append(out, e.Domain)
+		}
+	}
+	return out
+}
+
 // CurrentImages are the versions that aren't deprecated.
 func (p catalogPage) CurrentImages() []pods.BaseImage {
 	return slices.DeleteFunc(slices.Clone(p.Images), func(im pods.BaseImage) bool { return im.Deprecated })
@@ -92,5 +114,8 @@ func (s *Server) teamlessForm(w http.ResponseWriter, r *http.Request, status int
 		p = s.withNotes(r.Context(), p)
 	}
 	p.Op, p.In, p.Error = op, in, problem
+	if (op.Kind == pods.KindEnvAdd || op.Kind == pods.KindEnvDNS) && in.Domain != "" && p.Env() == nil && p.Error == "" && p.ReadErr == "" {
+		p.Error = "There's no environment " + in.Domain + "; pick one."
+	}
 	s.render(w, r, status, "teamless", s.newView(w, r, op.Title, string(op.Kind), p))
 }

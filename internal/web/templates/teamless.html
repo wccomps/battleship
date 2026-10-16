@@ -2,26 +2,57 @@
 {{- $csrf := .CSRF}}
 {{- with .Data}}
 {{- $back := "/environments"}}{{if hasPrefix .Op.Path "/images"}}{{$back = "/images"}}{{end}}
+{{- if and (or (eq .Op.Kind "env-add") (eq .Op.Kind "env-dns")) (not .Env)}}
+<form class="sheet" method="get" action="{{.Op.Path}}" aria-labelledby="form-title">
+<div class="ph"><h1 id="form-title">{{opIcon (print .Op.Kind)}}{{.Op.Title}}</h1><span class="sp"></span>{{template "close" $back}}</div>
+<div class="pb form">
+{{- with .Error}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
+{{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
+{{- with .EnvDomains}}
+<div class="field">
+<label class="lbl" for="domain">Environment</label>
+<select class="inp" id="domain" name="domain" required>{{range .}}<option value="{{.}}">{{.}}</option>{{end}}</select>
+</div>
+{{- else}}{{if not .ReadErr}}
+<p class="say">No environments yet. <a class="btn sm" href="/environments/new">Create environment</a></p>
+{{- end}}{{end}}
+</div>
+<div class="pf">
+<a class="btn" href="{{$back}}">Cancel</a>
+{{- if .EnvDomains}}<button type="submit" class="btn pri">Next</button>{{end}}
+</div>
+</form>
+{{- else}}
 <form class="sheet" method="post" action="{{.Op.Path}}/preview" aria-labelledby="form-title">
 {{template "csrf" $csrf}}
 <div class="ph"><h1 id="form-title">{{opIcon (print .Op.Kind)}}{{.Op.Title}}</h1><span class="sp"></span>{{template "close" $back}}</div>
 <div class="pb form">
 {{- with .Error}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
 {{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
-{{- if or (eq .Op.Kind "env-create") (eq .Op.Kind "env-add") (eq .Op.Kind "env-dns")}}
+{{- if eq .Op.Kind "env-create"}}
 <div class="field">
 <label class="lbl" for="domain">Domain</label>
-<input class="inp" type="text" id="domain" name="domain" value="{{.In.Domain}}" required autocomplete="off" spellcheck="false" aria-describedby="domain-hint"{{if ne .Op.Kind "env-create"}} list="domains"{{end}}>
-<span class="hint" id="domain-hint">e.g. kilo.alpha{{if eq .Op.Kind "env-create"}} · takes the first free dev slot{{end}}</span>
-<datalist id="domains">{{range .Envs}}{{if and .Domain (not .Mixed)}}<option value="{{.Domain}}"></option>{{end}}{{end}}</datalist>
+<input class="inp" type="text" id="domain" name="domain" value="{{.In.Domain}}" required autocomplete="off" spellcheck="false" aria-describedby="domain-hint">
+<span class="hint" id="domain-hint">e.g. kilo.alpha · takes the first free dev slot</span>
 </div>
 {{- end}}
-{{- if or (eq .Op.Kind "env-create") (eq .Op.Kind "env-add")}}
+{{- with .Env}}
+<input type="hidden" name="domain" value="{{.Domain}}">
+<dl class="kv">
+<dt>Environment</dt><dd>{{names .Domain}} <span class="muted">· {{.Slot.Pool}}</span></dd>
+{{- if eq $.Data.Op.Kind "env-add"}}{{with .RouterName}}
+<dt>Router</dt><dd>{{names .}}</dd>
+{{- end}}{{end}}
+</dl>
+{{- end}}
+{{- if or (eq .Op.Kind "env-create") (and (eq .Op.Kind "env-add") (not .Env.HasRouter))}}
 <div class="field">
-<label class="lbl" for="router">Router <span class="muted">· name=image{{if eq .Op.Kind "env-add"}} · only if it has none{{end}}</span></label>
+<label class="lbl" for="router">Router <span class="muted">· name=image{{if eq .Op.Kind "env-add"}} · this environment has none; leave empty to add hosts only{{end}}</span></label>
 <input class="inp" type="text" id="router" name="router" value="{{.In.Router}}"{{if eq .Op.Kind "env-create"}} required{{end}} autocomplete="off" spellcheck="false" aria-describedby="router-hint">
 <span class="hint" id="router-hint">router images: {{range $i, $r := .Routers}}{{if $i}}, {{end}}{{$r.Family}}{{else}}none registered{{end}} · its LAN is .2</span>
 </div>
+{{- end}}
+{{- if or (eq .Op.Kind "env-create") (eq .Op.Kind "env-add")}}
 <div class="field">
 <label class="lbl" for="env-hosts">Hosts <span class="muted">· one per line, name=image or name=image:octet</span></label>
 <textarea class="inp" id="env-hosts" name="env_hosts" rows="6" spellcheck="false" aria-describedby="hosts-hint">{{range .In.EnvHosts}}{{.}}
@@ -41,8 +72,9 @@
 {{- if eq .Op.Kind "env-dns"}}
 <div class="field">
 <label class="lbl" for="dns">DNS server</label>
-<input class="inp" type="text" id="dns" name="dns" value="{{or .In.DNS "router"}}" required autocomplete="off" spellcheck="false" aria-describedby="dns-hint">
-<span class="hint" id="dns-hint">router, or a Windows or Linux host of this environment, e.g. dc</span>
+{{- $cur := or .In.DNS .Env.DNS}}
+<select class="inp" id="dns" name="dns" required aria-describedby="dns-hint">{{range .Env.DNSChoices}}<option value="{{.}}"{{if eq . $cur}} selected{{end}}>{{.}}</option>{{end}}</select>
+<span class="hint" id="dns-hint">the router, or a Windows or Linux host of this environment</span>
 </div>
 {{- end}}
 {{- if eq .Op.Kind "image-register"}}
@@ -82,6 +114,7 @@
 <button type="submit" class="btn pri">Preview</button>
 </div>
 </form>
+{{- end}}
 {{- end}}
 {{- end}}
 

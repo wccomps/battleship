@@ -107,6 +107,8 @@ func TestNewEnvironmentConfirmStoresJob(t *testing.T) {
 func TestImageFormsPrefill(t *testing.T) {
 	h := newHarness(t)
 	addImages(h)
+	h.api.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "dev;kilo.alpha;router"},
+		map[string]string{"description": "battleship: base=gw-v1 dns=router"})
 	sess := h.login(asLead)
 	for path, want := range map[string]string{
 		"/images/deprecate?image=debian-12-v1": `value="debian-12-v1"`,
@@ -140,6 +142,8 @@ func TestBrowserCatalogPages(t *testing.T) {
 				{"/images", "images"},
 				{"/environments/new", "env-new"},
 				{"/images/register", "image-register"},
+				{"/environments/add?domain=kilo.alpha", "env-add"},
+				{"/environments/dns?domain=kilo.alpha", "env-dns"},
 			} {
 				b.open(page.path)
 				b.noSideways(page.name)
@@ -271,5 +275,72 @@ func TestImagesPageOffersReadyVMs(t *testing.T) {
 	if !strings.Contains(form, `value="150"`) || !strings.Contains(form, `value="teak" required`) ||
 		!strings.Contains(form, `value="windows" checked`) {
 		t.Errorf("register form isn't filled in:\n%s", form)
+	}
+}
+
+// addEnv puts kilo.alpha in dev-01: a router (if router) and a Linux host.
+func addEnv(h *harness, router bool) {
+	if router {
+		h.api.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "dev;kilo.alpha;router", Status: "running"},
+			map[string]string{"description": "battleship: base=gw-v1 dns=router"})
+	}
+	h.api.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "dev;kilo.alpha;linux", Status: "running"},
+		map[string]string{"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1 dns=teak"})
+}
+
+// Opened from an environment, Add hosts names it rather than asking, and
+// asks for a router only when it has none.
+func TestAddHostsFormKnowsItsEnvironment(t *testing.T) {
+	for _, router := range []bool{true, false} {
+		h := newHarness(t)
+		addImages(h)
+		addEnv(h, router)
+		sess := h.login(asLead)
+		body := h.get(&sess, "/environments/add?domain=kilo.alpha").Body.String()
+		if !strings.Contains(body, `<input type="hidden" name="domain" value="kilo.alpha">`) || strings.Contains(body, `id="domain"`) {
+			t.Errorf("router %v: the domain isn't fixed:\n%s", router, body)
+		}
+		if hasInput := strings.Contains(body, `id="router"`); hasInput == router {
+			t.Errorf("router %v: router input shown = %v", router, hasInput)
+		}
+		if router && !strings.Contains(body, `<dt>Router</dt><dd><span class="name">gw.kilo.alpha</span></dd>`) {
+			t.Errorf("the environment's router isn't shown:\n%s", body)
+		}
+		// A refused preview keeps the environment fixed.
+		body = h.post(&sess, "/environments/add/preview", url.Values{"domain": {"kilo.alpha"}, "env_hosts": {""}}).Body.String()
+		if !strings.Contains(body, `<input type="hidden" name="domain" value="kilo.alpha">`) || !strings.Contains(body, `role="alert"`) {
+			t.Errorf("router %v: a refused preview loses the environment:\n%s", router, body)
+		}
+	}
+}
+
+// Without an environment, Add hosts and Set DNS ask which one, from a list.
+func TestEnvironmentFormsPickAnEnvironment(t *testing.T) {
+	h := newHarness(t)
+	addImages(h)
+	addEnv(h, true)
+	sess := h.login(asLead)
+	for _, path := range []string{"/environments/add", "/environments/dns", "/environments/add?domain=kilo.bravo"} {
+		body := h.get(&sess, path).Body.String()
+		if !strings.Contains(body, `method="get"`) || !strings.Contains(body, `<option value="kilo.alpha">kilo.alpha</option>`) ||
+			strings.Contains(body, `name="env_hosts"`) {
+			t.Errorf("%s doesn't ask for the environment:\n%s", path, body)
+		}
+		if bad := strings.Contains(path, "bravo"); bad != strings.Contains(body, "There&#39;s no environment kilo.bravo") {
+			t.Errorf("%s: says the environment is missing = %v", path, !bad)
+		}
+	}
+}
+
+// Set DNS offers the router and the hosts that can serve DNS, with the
+// current choice selected.
+func TestSetDNSFormListsChoices(t *testing.T) {
+	h := newHarness(t)
+	addImages(h)
+	addEnv(h, true)
+	sess := h.login(asLead)
+	body := h.get(&sess, "/environments/dns?domain=kilo.alpha").Body.String()
+	if !strings.Contains(body, `<option value="router">router</option><option value="teak" selected>teak</option></select>`) {
+		t.Errorf("DNS choices wrong:\n%s", body)
 	}
 }
