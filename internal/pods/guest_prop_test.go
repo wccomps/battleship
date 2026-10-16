@@ -150,7 +150,9 @@ func checkGuest(t interface {
 		t.Fatalf("GuestScript = %v, and differs from the template with the values quoted in", err)
 	}
 	if g.OS == ImageLinux {
-		if !slices.Equal(cmd, []string{"/bin/sh", "-s"}) || input != script {
+		// The command is fixed text; every value travels in the script on
+		// stdin, never in argv.
+		if !slices.Equal(cmd, []string{"/bin/sh", "-c", linuxLocked}) || input != script {
 			t.Fatalf("command %q doesn't run the script on stdin", cmd)
 		}
 		return

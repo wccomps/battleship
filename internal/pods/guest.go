@@ -74,7 +74,7 @@ func GuestCommand(g Guest, mac string) (command []string, input string, err erro
 		return []string{"powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
 			"-EncodedCommand", base64.StdEncoding.EncodeToString(b)}, "", nil
 	}
-	return []string{"/bin/sh", "-s"}, script, nil
+	return []string{"/bin/sh", "-c", linuxLocked}, script, nil
 }
 
 // quote single-quotes v for sh and PowerShell; Check has limited every
@@ -103,11 +103,8 @@ func GuestScript(g Guest, mac string) (string, error) {
 		quote(strings.ToLower(mac)), quote(g.IP), g.Prefix, quote(g.Gateway), quote(g.DNS), quote(g.Hostname), quote(g.Domain)) + linuxFindIface + linuxScript, nil
 }
 
-// linuxFindIface waits for any other battleship script in the guest to
-// finish (one a stopped or timed-out job left running), then sets $iface
-// to the NIC with $MAC.
+// linuxFindIface sets $iface to the NIC with $MAC.
 const linuxFindIface = `set -eu
-` + linuxLock + `
 iface=
 for d in /sys/class/net/*; do
 	if [ "$(cat "$d/address" 2>/dev/null)" = "$MAC" ]; then iface=${d##*/}; fi
@@ -115,13 +112,19 @@ done
 if [ -z "$iface" ]; then echo "no network interface has MAC $MAC" >&2; exit 2; fi
 `
 
-// linuxLock holds /run/battleship-guest.lock for the rest of the script,
-// waiting up to 4 minutes (under the executor's 5-minute limit) for a
-// running copy to exit.
-const linuxLock = `if command -v flock >/dev/null 2>&1; then
-	exec 9>"${BATTLESHIP_LOCK:-/run/battleship-guest.lock}"
-	if ! flock -w 240 9; then echo "another battleship setup script is still running in this guest" >&2; exit 75; fi
-fi`
+// linuxLocked runs the script from stdin holding
+// /run/battleship-guest.lock, waiting up to 4 minutes (under the
+// executor's 5-minute limit) for a copy a stopped or timed-out job left
+// running. flock holds the lock itself (-o), so a daemon the script starts
+// (an ifup hook, say) doesn't inherit it and keep later scripts out.
+// BATTLESHIP_LOCK and BATTLESHIP_LOCK_WAIT are for tests; the agent sets
+// neither.
+const linuxLocked = `lock="${BATTLESHIP_LOCK:-/run/battleship-guest.lock}"
+command -v flock >/dev/null 2>&1 || exec /bin/sh -s
+flock -w "${BATTLESHIP_LOCK_WAIT:-240}" -E 75 -o "$lock" /bin/sh -s
+rc=$?
+if [ "$rc" = 75 ]; then echo "another battleship setup script is still running in this guest" >&2; fi
+exit "$rc"`
 
 // windowsLock does the same with a machine-wide mutex, which Windows
 // releases when the process holding it exits.
