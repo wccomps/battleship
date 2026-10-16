@@ -63,6 +63,8 @@ type Behavior struct {
 	NoEndSession       bool                              // discovery lists no end_session_endpoint
 	NoRevocation       bool                              // discovery lists no revocation_endpoint
 	RevokeStatus       int                               // non-zero: the revocation endpoint fails with this status
+	AuthMethods        []string                          // non-nil: token_endpoint_auth_methods_supported in discovery
+	RevokePostOnly     bool                              // the revocation endpoint refuses HTTP Basic client auth (401)
 	AdvertiseAlgs      []string                          // extra id_token_signing_alg_values_supported
 	KeyID              string                            // the signing key's ID, default "authtest"; change it to rotate
 	MutateIDToken      func(claims map[string]any)       // edits ID token claims before signing
@@ -219,6 +221,9 @@ func (p *Provider) discovery(w http.ResponseWriter, _ *http.Request) {
 	}
 	p.mu.Lock()
 	doc["id_token_signing_alg_values_supported"] = append([]string{"RS256"}, p.b.AdvertiseAlgs...)
+	if p.b.AuthMethods != nil {
+		doc["token_endpoint_auth_methods_supported"] = p.b.AuthMethods
+	}
 	if !p.b.NoEndSession {
 		doc["end_session_endpoint"] = p.srv.URL + "/end-session"
 	}
@@ -285,13 +290,16 @@ func (p *Provider) revoke(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
 		return
 	}
-	id, secret, ok := r.BasicAuth()
-	if !ok {
+	id, secret, basic := r.BasicAuth()
+	if !basic {
 		id, secret = r.PostForm.Get("client_id"), r.PostForm.Get("client_secret")
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	switch {
+	case basic && p.b.RevokePostOnly:
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_client"})
+		return
 	case p.b.RevokeStatus != 0:
 		writeJSON(w, p.b.RevokeStatus, map[string]string{"error": "server_error"})
 		return

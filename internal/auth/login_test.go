@@ -535,6 +535,25 @@ func TestLoginAgainRevokesTheOldSessionsToken(t *testing.T) {
 	}
 }
 
+// Revocation authenticates the client as the provider takes it: listed
+// post, or, with nothing listed, basic and then post.
+func TestLogoutRevokesWithTheProvidersClientAuth(t *testing.T) {
+	for name, methods := range map[string][]string{"post listed": {"client_secret_post"}, "none listed": {}} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.idp.Set(func(f *authtest.Behavior) { f.AuthMethods, f.RevokePostOnly = methods, true })
+			h.restart(h.cfg)
+			b := h.browser()
+			b.login(alice)
+			live := h.idp.RefreshTokens()
+			b.postForm("/auth/logout", url.Values{"csrf": {b.csrf()}}, nil)
+			if !slices.Equal(h.idp.Revoked(), live) {
+				t.Errorf("revoked %v, want %v; logs %s", h.idp.Revoked(), live, h.logs.String())
+			}
+		})
+	}
+}
+
 // A provider that won't revoke, or has no revocation endpoint, doesn't stop
 // the logout.
 func TestLogoutWhenRevocationFails(t *testing.T) {

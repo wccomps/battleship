@@ -224,33 +224,54 @@ func (s *Service) revokeSealed(ctx context.Context, sessionID, sealed, format st
 }
 
 // revoke asks the provider to revoke a refresh token (RFC 7009), as the
-// client, the way the token endpoint authenticates it.
+// client, authenticating as the revocation endpoint lists (see authStyle);
+// with nothing listed, as oauth2 does: basic, then post if refused.
 func (s *Service) revoke(ctx context.Context, refreshToken string) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), revokeTimeout)
 	defer cancel()
+	styles := []oauth2.AuthStyle{s.revokeStyle}
+	if s.revokeStyle == oauth2.AuthStyleAutoDetect {
+		styles = []oauth2.AuthStyle{oauth2.AuthStyleInHeader, oauth2.AuthStyleInParams}
+	}
+	var status int
+	for _, style := range styles {
+		var err error
+		if status, err = s.revokeAs(ctx, refreshToken, style); err != nil {
+			return err
+		}
+		if status != http.StatusUnauthorized {
+			break
+		}
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("the provider answered %d %s", status, http.StatusText(status))
+	}
+	return nil
+}
+
+// revokeAs sends one revocation authenticated with style and returns the
+// provider's status.
+func (s *Service) revokeAs(ctx context.Context, refreshToken string, style oauth2.AuthStyle) (int, error) {
 	form := url.Values{"token": {refreshToken}, "token_type_hint": {"refresh_token"}}
-	if s.oauth.Endpoint.AuthStyle == oauth2.AuthStyleInParams {
+	if style == oauth2.AuthStyleInParams {
 		form.Set("client_id", s.oauth.ClientID)
 		form.Set("client_secret", s.oauth.ClientSecret)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.revokeURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if s.oauth.Endpoint.AuthStyle != oauth2.AuthStyleInParams {
+	if style != oauth2.AuthStyleInParams {
 		req.SetBasicAuth(url.QueryEscape(s.oauth.ClientID), url.QueryEscape(s.oauth.ClientSecret))
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("the provider answered %s", resp.Status)
-	}
-	return nil
+	return resp.StatusCode, nil
 }
 
 func (s *Service) clearLoginCookie(w http.ResponseWriter) {

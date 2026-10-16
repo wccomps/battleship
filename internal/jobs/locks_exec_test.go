@@ -118,7 +118,9 @@ func TestJobsLockEveryVMTheyChange(t *testing.T) {
 			return p.Deploy(ctx, pods.DeployRequest{Pattern: "teak.kilo.alpha", Teams: []string{"02"}, Rebuild: true})
 		}},
 		{"teardown", func() (*pods.Plan, error) { return p.Teardown(ctx, []string{"01", "02"}, nil) }},
-		{"env add", func() (*pods.Plan, error) { return p.EnvAdd(ctx, pods.EnvRequest{Domain: "kilo.alpha", Hosts: []pods.HostSpec{host}}) }},
+		{"env add", func() (*pods.Plan, error) {
+			return p.EnvAdd(ctx, pods.EnvRequest{Domain: "kilo.alpha", Hosts: []pods.HostSpec{host}})
+		}},
 		{"env dns", func() (*pods.Plan, error) { return p.EnvDNS(ctx, pods.EnvRequest{Domain: "kilo.alpha", DNS: "router"}) }},
 		{"image register", func() (*pods.Plan, error) {
 			return p.ImageRegister(ctx, pods.ImageRequest{VMID: 150, Family: "debian-12"})
