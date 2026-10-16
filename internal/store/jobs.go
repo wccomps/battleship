@@ -32,8 +32,7 @@ type Job struct {
 	Inputs          json.RawMessage
 	Plan            json.RawMessage
 	Fingerprint     string
-	LockKeys        []string // what it changes (see blocksSQL)
-	ReadKeys        []string // what it only reads (see blocksSQL)
+	LockKeys        []string
 	Status          string
 	CreatedBy       string
 	CreatedRole     string // the creator's battleship role, for jobs from before roles were removed
@@ -62,8 +61,8 @@ type NewJob struct {
 	Inputs      json.RawMessage
 	Plan        json.RawMessage
 	Fingerprint string
-	LockKeys    []string
-	ReadKeys    []string
+	LockKeys    []string // what it changes (see blocksSQL)
+	ReadKeys    []string // what it only reads (see blocksSQL)
 	CreatedBy   string
 	CreatedAs   string // the Proxmox user (or API token ID) it acts as
 	Items       []NewItem
@@ -107,13 +106,13 @@ type Event struct {
 	Message string
 }
 
-const jobColumns = `id, kind, inputs, plan, fingerprint, lock_keys, lock_reads, status, created_by, created_role, created_as, created_at,
+const jobColumns = `id, kind, inputs, plan, fingerprint, lock_keys, status, created_by, created_role, created_as, created_at,
 	started_at, finished_at, coalesce(claimed_by, ''), cancel_requested,
 	coalesce(cancelled_by, ''), summary, error`
 
 func scanJob(row pgx.Row) (Job, error) {
 	var j Job
-	err := row.Scan(&j.ID, &j.Kind, &j.Inputs, &j.Plan, &j.Fingerprint, &j.LockKeys, &j.ReadKeys, &j.Status, &j.CreatedBy,
+	err := row.Scan(&j.ID, &j.Kind, &j.Inputs, &j.Plan, &j.Fingerprint, &j.LockKeys, &j.Status, &j.CreatedBy,
 		&j.CreatedRole, &j.CreatedAs, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.ClaimedBy, &j.CancelRequested,
 		&j.CancelledBy, &j.Summary, &j.Error)
 	if errors.Is(err, pgx.ErrNoRows) {

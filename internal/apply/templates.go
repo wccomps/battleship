@@ -136,7 +136,7 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 		}
 		b.node = cur.Node
 		return e.finishTemplate(ctx, spec, cur.Node)
-	case spec.Exists && !spec.Rebuild:
+	case !spec.Builds():
 		return fmt.Errorf("template %s (%d) no longer exists", name, spec.VMID)
 	}
 	e.mu.Lock()

@@ -165,7 +165,7 @@ func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *
 		if t.Blocked != "" {
 			continue
 		}
-		if t.Exists && !t.Rebuild {
+		if !t.Builds() {
 			sources[t.Name] = vms[t.VMID]
 			continue
 		}

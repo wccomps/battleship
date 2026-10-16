@@ -50,20 +50,29 @@ func FindMasters(vms []proxmox.VM, n Naming, pattern, tag string) (masters, unta
 // FindTeamVMs returns non-template team VMs for teams, filtered by hosts
 // (see MatchesHost; all-blank filters match nothing).
 func FindTeamVMs(vms []proxmox.VM, n Naming, teams, hosts []string) []proxmox.VM {
-	want := map[string]bool{}
-	for _, t := range teams {
-		want[t] = true
-	}
-	var out []proxmox.VM
+	team, _ := findForTeams(vms, n, teams, hosts)
+	return team
+}
+
+// findForTeams is FindTeamVMs, and the OutsideBlock VMs of the same teams
+// and hosts (see Classify), each sorted by name.
+func findForTeams(vms []proxmox.VM, n Naming, teams, hosts []string) (team, outside []proxmox.VM) {
 	for _, vm := range vms {
-		team, host, ok := n.TeamVM(vm)
-		if !ok || !want[team] || !MatchesHost(host, hosts) {
+		kind, t, host := n.Classify(vm)
+		if !slices.Contains(teams, t) || !MatchesHost(host, hosts) {
 			continue
 		}
-		out = append(out, vm)
+		switch kind {
+		case TeamVMKind:
+			team = append(team, vm)
+		case OutsideBlock:
+			outside = append(outside, vm)
+		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
+	byName := func(a, b proxmox.VM) int { return strings.Compare(a.Name, b.Name) }
+	slices.SortStableFunc(team, byName)
+	slices.SortStableFunc(outside, byName)
+	return team, outside
 }
 
 // VMKind is what a VM is to team naming (see Naming.Classify).
@@ -193,19 +202,6 @@ func MasterSets(vms []proxmox.VM, n Naming, tag string) (sets []MasterSet, other
 	}
 	sort.Slice(sets, func(i, j int) bool { return sets[i].Name < sets[j].Name })
 	return sets, others
-}
-
-// namedOutsideBlock is the OutsideBlock VMs of teams (see Classify),
-// filtered by hosts.
-func namedOutsideBlock(vms []proxmox.VM, n Naming, teams, hosts []string) []proxmox.VM {
-	var out []proxmox.VM
-	for _, vm := range vms {
-		if kind, team, host := n.Classify(vm); kind == OutsideBlock && slices.Contains(teams, team) && MatchesHost(host, hosts) {
-			out = append(out, vm)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
 }
 
 // AllTeamVMs is every non-template team VM, as FindTeamVMs finds them,

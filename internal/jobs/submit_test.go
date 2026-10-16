@@ -30,7 +30,7 @@ func TestSubmitStoresPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if j.Status != store.StatusPending || j.Fingerprint != Fingerprint(p) || j.CreatedBy != "alice" || !reflect.DeepEqual(j.LockKeys, LockKeys(p)) {
+	if j.Status != store.StatusPending || j.Fingerprint != Fingerprint(p) || j.CreatedBy != "alice" || !reflect.DeepEqual(j.LockKeys, writeKeys(p)) {
 		t.Errorf("job = %+v", j)
 	}
 }

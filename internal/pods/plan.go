@@ -99,6 +99,10 @@ type Source struct {
 	Bridges []string `json:"bridges,omitempty"`
 }
 
+// Builds is whether a deploy builds the template from its master (it
+// doesn't exist yet, or is rebuilt) rather than reusing it.
+func (t TemplateSpec) Builds() bool { return !t.Exists || t.Rebuild }
+
 // TemplateSpec is a .tpl template a deploy clones from.
 type TemplateSpec struct {
 	Name       string `json:"name"` // teak.tango.delta.tpl
@@ -315,7 +319,7 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		if err != nil {
 			return nil, err
 		}
-		spec.WillStopMaster = spec.Blocked == "" && (!spec.Exists || spec.Rebuild) && m.Status == "running"
+		spec.WillStopMaster = spec.Blocked == "" && spec.Builds() && m.Status == "running"
 		plan.Templates = append(plan.Templates, spec)
 	}
 	p.blockDuplicateHosts(plan.Templates, req.Teams[0])
@@ -760,7 +764,8 @@ func (p Planner) simple(ctx context.Context, kind Kind, teams, hosts []string, f
 		return nil, nil, err
 	}
 	plan := &Plan{Kind: kind, Teams: teams, Config: ConfigHash(kind, p.Cfg)}
-	for _, vm := range FindTeamVMs(vms, p.Naming, teams, hosts) {
+	teamVMs, outside := findForTeams(vms, p.Naming, teams, hosts)
+	for _, vm := range teamVMs {
 		team, host, _ := p.Naming.TeamVM(vm)
 		it := Item{Team: team, Host: host, Name: vm.Name, VMID: vm.VMID, Node: vm.Node}
 		fill(&it)
@@ -773,7 +778,7 @@ func (p Planner) simple(ctx context.Context, kind Kind, teams, hosts []string, f
 	}
 	// VMs with a team's name outside its block aren't team VMs: say so, so
 	// a teardown doesn't seem to miss them silently.
-	for _, vm := range namedOutsideBlock(vms, p.Naming, teams, hosts) {
+	for _, vm := range outside {
 		_, team, _ := p.Naming.Classify(vm)
 		plan.Notices = append(plan.Notices, fmt.Sprintf("Left alone: %s %s.", vm.Name, outsideBlock(vm, team)))
 	}

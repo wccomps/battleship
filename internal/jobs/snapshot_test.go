@@ -90,18 +90,18 @@ func TestFingerprintOfOtherKindsUnchanged(t *testing.T) {
 
 // A snapshot job waits for, and holds up, any job on the same teams.
 func TestSnapshotLockKeysOverlapOtherJobs(t *testing.T) {
-	snap := LockKeys(&pods.Plan{Kind: pods.KindSnapshot, Teams: []string{"01", "02"}})
+	snap := writeKeys(&pods.Plan{Kind: pods.KindSnapshot, Teams: []string{"01", "02"}})
 	for _, other := range []*pods.Plan{
 		{Kind: pods.KindPower, Teams: []string{"02"}},
 		{Kind: pods.KindReset, Teams: []string{"01"}},
 		{Kind: pods.KindDeploy, Teams: []string{"01"}, Templates: []pods.TemplateSpec{{Name: "dc.x.tpl", VMID: 9001}}},
 		{Kind: pods.KindSnapshot, Teams: []string{"02", "03"}},
 	} {
-		if !slices.ContainsFunc(LockKeys(other), func(k string) bool { return slices.Contains(snap, k) }) {
-			t.Errorf("snapshot keys %v share none with %s keys %v", snap, other.Kind, LockKeys(other))
+		if !slices.ContainsFunc(writeKeys(other), func(k string) bool { return slices.Contains(snap, k) }) {
+			t.Errorf("snapshot keys %v share none with %s keys %v", snap, other.Kind, writeKeys(other))
 		}
 	}
-	if keys := LockKeys(&pods.Plan{Kind: pods.KindPower, Teams: []string{"03"}}); slices.ContainsFunc(keys, func(k string) bool { return slices.Contains(snap, k) }) {
+	if keys := writeKeys(&pods.Plan{Kind: pods.KindPower, Teams: []string{"03"}}); slices.ContainsFunc(keys, func(k string) bool { return slices.Contains(snap, k) }) {
 		t.Errorf("snapshot of 01-02 conflicts with power on 03: %v", keys)
 	}
 }

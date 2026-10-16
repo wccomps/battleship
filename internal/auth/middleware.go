@@ -245,7 +245,7 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 // session was logged out meanwhile: the logout revoked only the one it
 // deleted.
 func (s *Service) revokeRotated(ctx context.Context, sess store.Session, refreshToken string) {
-	if refreshToken != sess.RefreshToken {
+	if refreshToken != "" && refreshToken != sess.RefreshToken {
 		s.revokeSealed(ctx, sess.ID, refreshToken, "refresh after logout: subject=%q: revoking the rotated refresh token", sess.Subject)
 	}
 }

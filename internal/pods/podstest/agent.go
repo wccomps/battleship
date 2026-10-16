@@ -111,7 +111,7 @@ func (f *Fake) AgentExecStatus(ctx context.Context, node string, vmid, pid int) 
 			f.polls = map[int]int{}
 		}
 		f.polls[pid]++
-		if f.ExecRunsFor != nil && f.polls[pid] <= f.ExecRunsFor(pid) {
+		if f.ExecRunning(pid) {
 			s = proxmox.ExecStatus{}
 		}
 		st = s

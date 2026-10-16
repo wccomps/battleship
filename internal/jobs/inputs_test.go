@@ -134,7 +134,7 @@ func TestLockKeys(t *testing.T) {
 		Templates: []pods.TemplateSpec{{Name: "teak.x.tpl"}, {Name: "dc.x.tpl"}},
 	}
 	want := []string{"team:01", "team:02", "template:dc.x.tpl", "template:teak.x.tpl"}
-	if got := LockKeys(p); !reflect.DeepEqual(got, want) {
+	if got := writeKeys(p); !reflect.DeepEqual(got, want) {
 		t.Errorf("LockKeys = %v, want %v", got, want)
 	}
 }
@@ -166,11 +166,11 @@ func TestLockKeysCoverTemplateVMIDs(t *testing.T) {
 	a := &pods.Plan{Teams: []string{"01"}, Templates: []pods.TemplateSpec{{Name: "teak.a.tpl", VMID: 9021}}}
 	b := &pods.Plan{Teams: []string{"02"}, Templates: []pods.TemplateSpec{{Name: "teak.b.tpl", VMID: 9021}}}
 	shared := false
-	for _, k := range LockKeys(a) {
-		shared = shared || slices.Contains(LockKeys(b), k)
+	for _, k := range writeKeys(a) {
+		shared = shared || slices.Contains(writeKeys(b), k)
 	}
 	if !shared {
-		t.Errorf("lock keys %v and %v don't overlap, though both plans use VMID 9021", LockKeys(a), LockKeys(b))
+		t.Errorf("lock keys %v and %v don't overlap, though both plans use VMID 9021", writeKeys(a), writeKeys(b))
 	}
 }
 
@@ -214,11 +214,11 @@ func TestTeamlessInputsValidate(t *testing.T) {
 func TestTeamlessLockKeys(t *testing.T) {
 	plan := &pods.Plan{Kind: pods.KindEnvCreate, Locks: []string{"slot:05", "domain:kilo.alpha"},
 		Items: []pods.Item{{Name: "gw.kilo.alpha", VMID: 2500, Source: &pods.Source{VMID: 8000}}}}
-	keys := LockKeys(plan)
+	keys := writeKeys(plan)
 	if !slices.Equal(keys, []string{"domain:kilo.alpha", "slot:05", "vmid:2500"}) {
 		t.Errorf("LockKeys = %v", keys)
 	}
-	if reads := ReadKeys(plan); !slices.Equal(reads, []string{"vmid:8000"}) {
+	if reads := readKeys(plan); !slices.Equal(reads, []string{"vmid:8000"}) {
 		t.Errorf("ReadKeys = %v", reads)
 	}
 }

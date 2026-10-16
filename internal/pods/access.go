@@ -197,7 +197,7 @@ func cpuMapping(cpu string) string {
 
 // templateNeeds is what building t needs; nothing when it is reused.
 func templateNeeds(t TemplateSpec, cfg config.Config) []need {
-	if t.Exists && !t.Rebuild {
+	if !t.Builds() {
 		return nil
 	}
 	ns := []need{

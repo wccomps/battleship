@@ -135,16 +135,6 @@ func (e *Executor) exec(ctx context.Context, it *pods.Item, cmd []string, input 
 
 var errStillRunning = errors.New("still running")
 
-// scriptExitError is a setup script that exited non-zero.
-type scriptExitError struct {
-	code int
-	tail string // its last lines of output
-}
-
-func (e *scriptExitError) Error() string {
-	return fmt.Sprintf("the setup script exited %d: %s", e.code, e.tail)
-}
-
 // waitExec waits up to execLimit for pid to exit 0, and forgets it once it
 // has exited or can't be read (the guest restarted, say).
 func (e *Executor) waitExec(ctx context.Context, it *pods.Item, pid int) (string, error) {
@@ -166,7 +156,7 @@ func (e *Executor) waitExec(ctx context.Context, it *pods.Item, pid int) (string
 		if st.Exited {
 			forget()
 			if st.ExitCode != 0 {
-				return st.Out, &scriptExitError{st.ExitCode, lastLines(st.Err+"\n"+st.Out, 5)}
+				return st.Out, fmt.Errorf("the setup script exited %d: %s", st.ExitCode, lastLines(st.Err+"\n"+st.Out, 5))
 			}
 			return st.Out, nil
 		}

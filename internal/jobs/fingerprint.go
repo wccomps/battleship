@@ -104,25 +104,12 @@ func sourceFP(s *pods.Source) *fpSource {
 	return &fpSource{VMID: s.VMID, Node: s.Node, Name: s.Name}
 }
 
-// LockKeys are the lock keys of what a plan changes, so jobs that change
-// the same things run one at a time: its teams, templates and slot, domain
-// or family (Plan.Locks), and as vmid: keys the items' VMs, each template,
-// the image a register retires, and a master whose template the plan
-// builds (the build may stop it).
-func LockKeys(plan *pods.Plan) []string {
-	writes, _ := lockKeys(plan)
-	return writes
-}
-
-// ReadKeys are the vmid: keys of VMs a plan only copies (items' Sources)
-// and doesn't change. Jobs reading one VM run together; each waits only
-// for a job with it among its LockKeys (see store's blocksSQL).
-func ReadKeys(plan *pods.Plan) []string {
-	_, reads := lockKeys(plan)
-	return reads
-}
-
-func lockKeys(plan *pods.Plan) (writes, reads []string) {
+// LockKeys are what a plan changes and what it only reads, as lock keys
+// (see store's blocksSQL). It changes its teams, templates and Plan.Locks,
+// and as vmid: keys its items' VMs, each template, the image a register
+// retires, and a master whose template it builds (the build may stop it).
+// It only reads the VMs its items are copied from (their Sources).
+func LockKeys(plan *pods.Plan) (writes, reads []string) {
 	w, r := map[string]bool{}, map[string]bool{}
 	vmid := func(set map[string]bool, id int) {
 		if id != 0 {
@@ -135,7 +122,7 @@ func lockKeys(plan *pods.Plan) (writes, reads []string) {
 	for _, t := range plan.Templates {
 		w["template:"+t.Name] = true
 		vmid(w, t.VMID)
-		if !t.Exists || t.Rebuild {
+		if t.Builds() {
 			vmid(w, t.MasterVMID)
 		}
 	}
