@@ -68,7 +68,9 @@ func (w *Worker) runJob(ctx context.Context, job *store.Job) {
 }
 
 // The lease starts before the claim's heartbeat stamp, so it can't outlast
-// the claim however long Claim takes.
+// the claim however long Claim takes. It compares the worker's clock with
+// the database's now(), so it needs the database on this machine's clock,
+// as the test database (local here, a service container in CI) is.
 func TestClaimNextLeasesBeforeTheClaim(t *testing.T) {
 	st := storetest.New(t)
 	f := teamVMs()
