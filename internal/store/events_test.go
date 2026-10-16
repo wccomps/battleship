@@ -292,7 +292,7 @@ func TestAddEventRefusesJobsNotRunning(t *testing.T) {
 	}
 
 	id := create(t, s, "team:02")
-	if _, err := s.ClaimJob(ctx, id, "w", time.Hour); err != nil {
+	if _, err := storetest.ClaimJob(s, id, "w", time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Finish(ctx, id, "w", store.Outcome{Status: store.StatusInterrupted}); err != nil {
@@ -327,7 +327,7 @@ func TestAddEventRefusesJobsNotRunning(t *testing.T) {
 func TestAddEventRecordsStepOutcomes(t *testing.T) {
 	s := storetest.New(t)
 	id := create(t, s, "team:01")
-	if _, err := s.ClaimJob(ctx, id, "w", time.Hour); err != nil {
+	if _, err := storetest.ClaimJob(s, id, "w", time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	for _, ev := range []store.Event{

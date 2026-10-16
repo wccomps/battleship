@@ -21,12 +21,7 @@ var beforeClaimUpdate func(id int64)
 // returns nil. Overlapping jobs run in creation order. ReapStale reaps it
 // once it has no heartbeat for staleAfter, which must be positive.
 func (s *Store) Claim(ctx context.Context, worker string, staleAfter time.Duration) (*Job, error) {
-	return s.claim(ctx, worker, nil, staleAfter)
-}
-
-// ClaimJob is Claim for one job: nil unless that job was claimable.
-func (s *Store) ClaimJob(ctx context.Context, id int64, worker string, staleAfter time.Duration) (*Job, error) {
-	return s.claim(ctx, worker, &id, staleAfter)
+	return s.claim(ctx, worker, staleAfter)
 }
 
 // blocksSQL holds when job o keeps pending job j waiting: one changes
@@ -36,8 +31,8 @@ func (s *Store) ClaimJob(ctx context.Context, id int64, worker string, staleAfte
 const blocksSQL = `(o.lock_keys && j.lock_keys OR o.lock_keys && j.lock_reads OR o.lock_reads && j.lock_keys)
 	AND (o.status = 'running' OR (o.status = 'pending' AND o.id < j.id))`
 
-// claim starts the oldest runnable pending job or, if only is set, that job.
-func (s *Store) claim(ctx context.Context, worker string, only *int64, staleAfter time.Duration) (*Job, error) {
+// claim starts the oldest runnable pending job.
+func (s *Store) claim(ctx context.Context, worker string, staleAfter time.Duration) (*Job, error) {
 	if staleAfter <= 0 {
 		return nil, fmt.Errorf("claiming a job: stale_after %v isn't positive", staleAfter)
 	}
@@ -51,9 +46,9 @@ func (s *Store) claim(ctx context.Context, worker string, only *int64, staleAfte
 	}
 	var id int64
 	err = tx.QueryRow(ctx, `SELECT j.id FROM jobs j
-		WHERE j.status = 'pending' AND ($1::bigint IS NULL OR j.id = $1)
+		WHERE j.status = 'pending'
 		  AND NOT EXISTS (SELECT 1 FROM jobs o WHERE `+blocksSQL+`)
-		ORDER BY j.id LIMIT 1`, only).Scan(&id)
+		ORDER BY j.id LIMIT 1`).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

@@ -7,6 +7,8 @@ import (
 	"math/rand/v2"
 	"net/url"
 	"os"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -62,6 +64,7 @@ func NewWithURL(t testing.TB) (*store.Store, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	urls.Store(s, u.String())
 	t.Cleanup(func() {
 		s.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -80,4 +83,39 @@ func NewWithURL(t testing.TB) (*store.Store, string) {
 		t.Fatalf("migrating: %v", err)
 	}
 	return s, u.String()
+}
+
+// urls are the databases of the Stores New made, for ClaimJob.
+var urls sync.Map // *store.Store -> string
+
+// ClaimJob starts job id for worker as a claim does, whatever else is
+// pending or running: for tests that need one job running beside others.
+func ClaimJob(s *store.Store, id int64, worker string, staleAfter time.Duration) (*store.Job, error) {
+	u, ok := urls.Load(s)
+	if !ok {
+		return nil, fmt.Errorf("storetest.ClaimJob: not a storetest Store")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	conn, err := pgx.Connect(ctx, u.(string))
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+	tag, err := conn.Exec(ctx, `UPDATE jobs SET status = 'running', claimed_by = $2, started_at = now(), heartbeat_at = now(),
+		stale_after = make_interval(secs => $3) WHERE id = $1 AND status = 'pending'`, id, worker, staleAfter.Seconds())
+	if err != nil {
+		return nil, err
+	}
+	if tag.RowsAffected() != 1 {
+		return nil, fmt.Errorf("storetest.ClaimJob: job %d isn't pending", id)
+	}
+	if _, err := conn.Exec(ctx, `SELECT pg_notify('battleship_events', $1)`, strconv.FormatInt(id, 10)); err != nil {
+		return nil, err
+	}
+	j, err := s.Job(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &j, nil
 }

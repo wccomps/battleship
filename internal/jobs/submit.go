@@ -48,7 +48,7 @@ func Submit(ctx context.Context, st *store.Store, in Inputs, plan *pods.Plan, by
 	for i, it := range plan.Items {
 		items[i] = store.NewItem{Name: it.Name, Team: it.Team, VMID: it.VMID, Blocked: it.Blocked}
 	}
-	writes, reads := LockKeys(plan)
+	writes, reads := plan.LockKeys()
 	return st.CreateJob(ctx, store.NewJob{
 		Kind:        string(in.Kind),
 		Inputs:      inputs,

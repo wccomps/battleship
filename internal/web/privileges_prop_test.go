@@ -21,6 +21,7 @@ import (
 	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/status"
 	"github.com/wccomps/battleship/internal/store"
+	"github.com/wccomps/battleship/internal/store/storetest"
 )
 
 // allTeamsSpecs are ways to write every team of the harness (01-03).
@@ -211,7 +212,7 @@ func TestPropJobActionsFollowPrivileges(t *testing.T) {
 }
 
 func claim(t *rapid.T, h *harness, id int64) bool {
-	j, err := h.st.ClaimJob(context.Background(), id, "w1", time.Hour)
+	j, err := storetest.ClaimJob(h.st, id, "w1", time.Hour)
 	if err != nil {
 		t.Fatalf("claiming job %d: %v", id, err)
 	}

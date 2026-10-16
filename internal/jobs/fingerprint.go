@@ -4,9 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"maps"
-	"slices"
-	"strconv"
 
 	"github.com/wccomps/battleship/internal/pods"
 )
@@ -102,43 +99,4 @@ func sourceFP(s *pods.Source) *fpSource {
 		return nil
 	}
 	return &fpSource{VMID: s.VMID, Node: s.Node, Name: s.Name}
-}
-
-// LockKeys are what a plan changes and, apart, what it only reads (its
-// items' Sources), as lock keys (see store's blocksSQL). Besides its own
-// VMs, a plan changes the image a register retires and the master of a
-// template it builds (the build may stop it).
-func LockKeys(plan *pods.Plan) (writes, reads []string) {
-	w, r := map[string]bool{}, map[string]bool{}
-	vmid := func(set map[string]bool, id int) {
-		if id != 0 {
-			set["vmid:"+strconv.Itoa(id)] = true
-		}
-	}
-	for _, t := range plan.Teams {
-		w["team:"+t] = true
-	}
-	for _, t := range plan.Templates {
-		w["template:"+t.Name] = true
-		vmid(w, t.VMID)
-		if t.Builds() {
-			vmid(w, t.MasterVMID)
-		}
-	}
-	for _, it := range plan.Items {
-		vmid(w, it.VMID)
-		if it.Source != nil {
-			vmid(r, it.Source.VMID)
-		}
-		if it.Supersedes != nil {
-			vmid(w, it.Supersedes.VMID)
-		}
-	}
-	for _, k := range plan.Locks {
-		w[k] = true
-	}
-	for k := range w {
-		delete(r, k) // a VM the plan changes is locked as such
-	}
-	return slices.Sorted(maps.Keys(w)), slices.Sorted(maps.Keys(r))
 }

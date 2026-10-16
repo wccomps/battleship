@@ -1,6 +1,7 @@
 package pods
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -298,7 +299,7 @@ func TestTeamsWithVMs(t *testing.T) {
 		t.Errorf("TeamsWithVMs(no VMs) = %v, want none", got)
 	}
 	// AllTeamVMs is what findForTeams finds for every team.
-	if got, want := AllTeamVMs(vms, n), findTeamVMs(vms, n, TeamsWithVMs(vms, n), nil); !reflect.DeepEqual(got, want) || len(got) != 4 {
+	if got, want := vmsOf(n, AllTeamVMs(vms, n)), findTeamVMs(vms, n, TeamsWithVMs(vms, n), nil); !reflect.DeepEqual(got, want) || len(got) != 4 {
 		t.Errorf("AllTeamVMs = %v, want %v", got, want)
 	}
 	// Every team VM's team is in TeamsWithVMs, so "all" leaves none behind.
@@ -323,5 +324,18 @@ func TestFindMastersRefusesInvalidPattern(t *testing.T) {
 
 func findTeamVMs(vms []proxmox.VM, n Naming, teams, hosts []string) []proxmox.VM {
 	team, _ := findForTeams(vms, n, teams, hosts)
-	return team
+	return vmsOf(n, team)
+}
+
+// vmsOf is the VMs of named VMs, checking each carries its name's team and
+// host.
+func vmsOf(n Naming, named []NamedVM) []proxmox.VM {
+	var out []proxmox.VM
+	for _, v := range named {
+		if team, host, _ := n.ParseVMName(v.Name); team != v.Team || host != v.Host {
+			panic(fmt.Sprintf("%s carries team %q host %q, its name gives %q %q", v.Name, v.Team, v.Host, team, host))
+		}
+		out = append(out, v.VM)
+	}
+	return out
 }

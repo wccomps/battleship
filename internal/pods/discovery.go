@@ -47,10 +47,19 @@ func FindMasters(vms []proxmox.VM, n Naming, pattern, tag string) (masters, unta
 	return masters, untagged, nil
 }
 
+// NamedVM is a VM with the team and host its name gives (see Classify).
+type NamedVM struct {
+	proxmox.VM
+	Team, Host string
+}
+
+// WrongPool is Naming.WrongPool for the VM's team.
+func (v NamedVM) WrongPool(n Naming) (want string, wrong bool) { return n.WrongPool(v.VM, v.Team) }
+
 // findForTeams is the team VMs of teams, filtered by hosts (see
 // MatchesHost; all-blank filters match nothing), and the OutsideBlock VMs
 // of the same teams and hosts (see Classify), each sorted by name.
-func findForTeams(vms []proxmox.VM, n Naming, teams, hosts []string) (team, outside []proxmox.VM) {
+func findForTeams(vms []proxmox.VM, n Naming, teams, hosts []string) (team, outside []NamedVM) {
 	for _, vm := range vms {
 		kind, t, host := n.Classify(vm)
 		if !slices.Contains(teams, t) || !MatchesHost(host, hosts) {
@@ -58,12 +67,12 @@ func findForTeams(vms []proxmox.VM, n Naming, teams, hosts []string) (team, outs
 		}
 		switch kind {
 		case TeamVMKind:
-			team = append(team, vm)
+			team = append(team, NamedVM{vm, t, host})
 		case OutsideBlock:
-			outside = append(outside, vm)
+			outside = append(outside, NamedVM{vm, t, host})
 		}
 	}
-	byName := func(a, b proxmox.VM) int { return strings.Compare(a.Name, b.Name) }
+	byName := func(a, b NamedVM) int { return strings.Compare(a.Name, b.Name) }
 	slices.SortStableFunc(team, byName)
 	slices.SortStableFunc(outside, byName)
 	return team, outside
@@ -199,11 +208,11 @@ func MasterSets(vms []proxmox.VM, n Naming, tag string) (sets []MasterSet, other
 }
 
 // AllTeamVMs is every team VM, as findForTeams finds them, sorted by name.
-func AllTeamVMs(vms []proxmox.VM, n Naming) []proxmox.VM {
-	var out []proxmox.VM
+func AllTeamVMs(vms []proxmox.VM, n Naming) []NamedVM {
+	var out []NamedVM
 	for _, vm := range vms {
-		if _, _, ok := n.TeamVM(vm); ok {
-			out = append(out, vm)
+		if team, host, ok := n.TeamVM(vm); ok {
+			out = append(out, NamedVM{vm, team, host})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

@@ -135,7 +135,7 @@ func TestJobsLockEveryVMTheyChange(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: planning: %v", s.name, err)
 		}
-		writes, _ := LockKeys(plan)
+		writes, _ := plan.LockKeys()
 		exec.Run(ctx, plan)
 		changed := api.take()
 		if len(changed) == 0 && len(plan.Runnable()) > 0 {

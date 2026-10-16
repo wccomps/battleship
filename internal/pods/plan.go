@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -185,6 +186,45 @@ type Plan struct {
 	// Notices are what a person should know the plan leaves alone, such as
 	// VMs named like team VMs that aren't; nothing acts on them.
 	Notices []string `json:"notices,omitempty"`
+}
+
+// LockKeys are what a plan changes and, apart, what it only reads (its
+// items' Sources), as lock keys (see the store's blocksSQL). Besides its own
+// VMs, a plan changes the image a register retires and the master of a
+// template it builds (the build may stop it).
+func (plan *Plan) LockKeys() (writes, reads []string) {
+	w, r := map[string]bool{}, map[string]bool{}
+	vmid := func(set map[string]bool, id int) {
+		if id != 0 {
+			set["vmid:"+strconv.Itoa(id)] = true
+		}
+	}
+	for _, t := range plan.Teams {
+		w["team:"+t] = true
+	}
+	for _, t := range plan.Templates {
+		w["template:"+t.Name] = true
+		vmid(w, t.VMID)
+		if t.Builds() {
+			vmid(w, t.MasterVMID)
+		}
+	}
+	for _, it := range plan.Items {
+		vmid(w, it.VMID)
+		if it.Source != nil {
+			vmid(r, it.Source.VMID)
+		}
+		if it.Supersedes != nil {
+			vmid(w, it.Supersedes.VMID)
+		}
+	}
+	for _, k := range plan.Locks {
+		w[k] = true
+	}
+	for k := range w {
+		delete(r, k) // a VM the plan changes is locked as such
+	}
+	return slices.Sorted(maps.Keys(w)), slices.Sorted(maps.Keys(r))
 }
 
 // ConfigHash identifies the settings that change what a plan of kind does
@@ -766,19 +806,17 @@ func (p Planner) simple(ctx context.Context, kind Kind, teams, hosts []string, f
 	plan := &Plan{Kind: kind, Teams: teams, Config: ConfigHash(kind, p.Cfg)}
 	teamVMs, outside := findForTeams(vms, p.Naming, teams, hosts)
 	for _, vm := range teamVMs {
-		team, host, _ := p.Naming.TeamVM(vm)
-		it := Item{Team: team, Host: host, Name: vm.Name, VMID: vm.VMID, Node: vm.Node}
+		it := Item{Team: vm.Team, Host: vm.Host, Name: vm.Name, VMID: vm.VMID, Node: vm.Node}
 		fill(&it)
-		if want, wrong := p.Naming.WrongPool(vm, team); wrong {
-			it.Blocked = wrongPool(vm, want)
+		if want, wrong := vm.WrongPool(p.Naming); wrong {
+			it.Blocked = wrongPool(vm.VM, want)
 		}
 		plan.Items = append(plan.Items, it)
 	}
 	// VMs with a team's name outside its block aren't team VMs: say so, so
 	// a teardown doesn't seem to miss them silently.
 	for _, vm := range outside {
-		_, team, _ := p.Naming.Classify(vm)
-		plan.Notices = append(plan.Notices, fmt.Sprintf("Left alone: %s %s.", vm.Name, outsideBlock(vm, team)))
+		plan.Notices = append(plan.Notices, fmt.Sprintf("Left alone: %s %s.", vm.Name, outsideBlock(vm.VM, vm.Team)))
 	}
 	sort.SliceStable(plan.Items, func(i, j int) bool { return plan.Items[i].Name < plan.Items[j].Name })
 	return plan, vms, nil

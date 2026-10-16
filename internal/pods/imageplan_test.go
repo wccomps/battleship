@@ -37,7 +37,7 @@ func TestImageRegisterNewVersionRetiresPrevious(t *testing.T) {
 		it.Notes == nil || it.Notes.Source != "150" {
 		t.Errorf("item = %+v", it)
 	}
-	// The VMs it changes are its items'; jobs.LockKeys locks those.
+	// The VMs it changes are its items'; Plan.LockKeys locks those.
 	if !slices.Equal(plan.Locks, []string{"family:debian-12"}) {
 		t.Errorf("locks = %v", plan.Locks)
 	}

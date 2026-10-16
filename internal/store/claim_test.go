@@ -291,58 +291,6 @@ func TestFinishSetsItemOutcomes(t *testing.T) {
 	}
 }
 
-func TestClaimJobClaimsThatJob(t *testing.T) {
-	s := storetest.New(t)
-	j1 := create(t, s, "team:01")
-	j2 := create(t, s, "team:02")
-	got, err := s.ClaimJob(ctx, j2, "cli", time.Hour)
-	if err != nil || got == nil || got.ID != j2 || got.Status != store.StatusRunning || got.ClaimedBy != "cli" {
-		t.Fatalf("ClaimJob(%d) = %+v, %v", j2, got, err)
-	}
-	if j, _ := s.Job(ctx, j1); j.Status != store.StatusPending {
-		t.Errorf("job %d = %s, want still pending", j1, j.Status)
-	}
-}
-
-func TestClaimJobWaitsForOlderOverlappingJob(t *testing.T) {
-	s := storetest.New(t)
-	j1 := create(t, s, "team:01")
-	j2 := create(t, s, "team:01", "team:02")
-	if got, err := s.ClaimJob(ctx, j2, "cli", time.Hour); err != nil || got != nil {
-		t.Fatalf("ClaimJob behind pending job = %+v, %v; want nil, nil", got, err)
-	}
-	mustClaim(t, s, "w1") // j1 is now running
-	if got, err := s.ClaimJob(ctx, j2, "cli", time.Hour); err != nil || got != nil {
-		t.Fatalf("ClaimJob behind running job = %+v, %v; want nil, nil", got, err)
-	}
-	if err := s.Finish(ctx, j1, "w1", store.Outcome{Status: store.StatusSucceeded}); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.ClaimJob(ctx, j2, "cli", time.Hour); err != nil || got == nil || got.ID != j2 {
-		t.Fatalf("ClaimJob after blocker finished = %+v, %v; want job %d", got, err, j2)
-	}
-}
-
-func TestClaimJobDoesNotTakeOtherWork(t *testing.T) {
-	s := storetest.New(t)
-	j1 := create(t, s, "team:01")
-	j2 := create(t, s, "team:01")
-	// Claiming the older job must not start the newer one, and claiming the
-	// newer one must not start the older one in its place.
-	if got, err := s.ClaimJob(ctx, j2, "cli", time.Hour); err != nil || got != nil {
-		t.Fatalf("ClaimJob(%d) = %+v, %v; want nil, nil", j2, got, err)
-	}
-	if got, err := s.ClaimJob(ctx, j1, "cli", time.Hour); err != nil || got == nil || got.ID != j1 {
-		t.Fatalf("ClaimJob(%d) = %+v, %v", j1, got, err)
-	}
-	if j, _ := s.Job(ctx, j2); j.Status != store.StatusPending {
-		t.Errorf("job %d = %s, want pending", j2, j.Status)
-	}
-	if got := mustClaim(t, s, "w"); got != nil {
-		t.Errorf("Claim = %+v, want none while %d runs", got, j1)
-	}
-}
-
 // Finish leaves no item pending or running: unfinished ones become
 // interrupted, or not run if they never reached a step.
 func TestFinishInterruptsUnfinishedItems(t *testing.T) {

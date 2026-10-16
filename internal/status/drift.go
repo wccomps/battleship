@@ -48,8 +48,8 @@ func (s scanResults) put(name string, r scanResult) {
 
 // shownVMs picks, per name, the VM a cell shows (lowest VMID), in order of
 // first appearance.
-func shownVMs(vms []proxmox.VM) []proxmox.VM {
-	var out []proxmox.VM
+func shownVMs(vms []pods.NamedVM) []pods.NamedVM {
+	var out []pods.NamedVM
 	index := map[string]int{}
 	for _, vm := range vms {
 		if i, ok := index[vm.Name]; ok {
@@ -68,12 +68,12 @@ func shownVMs(vms []proxmox.VM) []proxmox.VM {
 // matching tagged masters get a column even if no team has them yet.
 func (r rules) grid(in inputs) (teams, hosts []string, rows []Row) {
 	teams = pods.TeamsWithVMs(in.vms, r.naming)
-	byCell := map[[2]string][]proxmox.VM{}
+	byCell := map[[2]string][]pods.NamedVM{}
 	seen := map[string]bool{}
 	for _, vm := range pods.AllTeamVMs(in.vms, r.naming) {
-		team, host, _ := r.naming.TeamVM(vm)
-		byCell[[2]string{team, host}] = append(byCell[[2]string{team, host}], vm)
-		seen[host] = true
+		key := [2]string{vm.Team, vm.Host}
+		byCell[key] = append(byCell[key], vm)
+		seen[vm.Host] = true
 	}
 	if pattern := strings.TrimSpace(r.cfg.Web.Templates); pattern != "" {
 		masters, _, _ := pods.FindMasters(in.vms, r.naming, pattern, r.cfg.Deploy.MasterTag) // config.Validate checks the pattern
@@ -98,7 +98,7 @@ func (r rules) grid(in inputs) (teams, hosts []string, rows []Row) {
 }
 
 // cell builds one cell from the VMs with its name.
-func (r rules) cell(team, host string, vms []proxmox.VM, in inputs) Cell {
+func (r rules) cell(team, host string, vms []pods.NamedVM, in inputs) Cell {
 	c := Cell{Team: team, Host: host, Name: r.naming.VMName(team, host), State: StateMissing}
 	if len(vms) == 0 {
 		return c
@@ -106,7 +106,7 @@ func (r rules) cell(team, host string, vms []proxmox.VM, in inputs) Cell {
 	vm := shownVMs(vms)[0]
 	c.Power, c.VMID, c.Node, c.Pool = vm.Status, vm.VMID, vm.Node, vm.Pool
 
-	if want, wrong := r.naming.WrongPool(vm, team); wrong {
+	if want, wrong := vm.WrongPool(r.naming); wrong {
 		c.Drift = append(c.Drift, Drift{Kind: DriftPool, Reason: fmt.Sprintf("in pool %q, expected %q", vm.Pool, want)})
 	}
 	if len(vms) > 1 {
