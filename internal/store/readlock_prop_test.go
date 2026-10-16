@@ -14,8 +14,8 @@ import (
 )
 
 // conflicts is the lock rule, written from its definition, over keys
-// spelled "read:K" for a read of K: two keys clash when equal, unless both
-// are reads; "read:K" also clashes with K.
+// spelled "read:K" for a read of K, as the store keeps them: two keys clash
+// when equal, unless both are reads; "read:K" also clashes with K.
 func conflicts(a, b []string) bool {
 	for _, x := range a {
 		for _, y := range b {
@@ -51,7 +51,7 @@ func TestPropClaimHonoursReadLocks(t *testing.T) {
 			nj := newJob(fmt.Sprintf("%sown:%d", ns, i)) // every job changes something
 			for _, k := range keys {
 				if r, ok := strings.CutPrefix(k, "read:"); ok {
-					nj.ReadKeys = append(nj.ReadKeys, ns+r)
+					nj.LockKeys = append(nj.LockKeys, "read:"+ns+r)
 				} else {
 					nj.LockKeys = append(nj.LockKeys, ns+k)
 				}

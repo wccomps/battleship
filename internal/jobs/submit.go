@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -54,12 +55,21 @@ func Submit(ctx context.Context, st *store.Store, in Inputs, plan *pods.Plan, by
 		Inputs:      inputs,
 		Plan:        planJSON,
 		Fingerprint: Fingerprint(plan),
-		LockKeys:    writes,
-		ReadKeys:    reads,
+		LockKeys:    storedLockKeys(writes, reads),
 		CreatedBy:   by.User,
 		CreatedAs:   by.Credential.User,
 		Items:       items,
 		Preview:     by.Preview,
 		Credential:  by.Seal.Seal(by.Credential),
 	})
+}
+
+// storedLockKeys is a plan's lock keys as the store keeps them: its writes,
+// and "read:"+K for each read (see store's blocksSQL and migration 013).
+func storedLockKeys(writes, reads []string) []string {
+	keys := slices.Clone(writes)
+	for _, k := range reads {
+		keys = append(keys, "read:"+k)
+	}
+	return keys
 }

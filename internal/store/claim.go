@@ -24,11 +24,11 @@ func (s *Store) Claim(ctx context.Context, worker string, staleAfter time.Durati
 	return s.claim(ctx, worker, staleAfter)
 }
 
-// blocksSQL holds when job o keeps pending job j waiting: one changes
-// what the other changes or reads (lock_keys against lock_keys or
-// lock_reads; two reads never clash), and o is running, or pending and
-// older.
-const blocksSQL = `(o.lock_keys && j.lock_keys OR o.lock_keys && j.lock_reads OR o.lock_reads && j.lock_keys)
+// blocksSQL holds when job o keeps pending job j waiting: their lock keys
+// conflict and o is running, or pending and older. Keys conflict when they
+// are equal, except that two "read:" keys never do: "read:K" conflicts only
+// with K (see migration 013).
+const blocksSQL = `(o.lock_writes && j.lock_writes OR o.lock_writes && j.lock_reads OR o.lock_reads && j.lock_writes)
 	AND (o.status = 'running' OR (o.status = 'pending' AND o.id < j.id))`
 
 // claim starts the oldest runnable pending job.

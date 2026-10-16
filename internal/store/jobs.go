@@ -61,8 +61,7 @@ type NewJob struct {
 	Inputs      json.RawMessage
 	Plan        json.RawMessage
 	Fingerprint string
-	LockKeys    []string // what it changes (see blocksSQL)
-	ReadKeys    []string // what it only reads (see blocksSQL)
+	LockKeys    []string // what it changes, and "read:"+K for what it only reads (see blocksSQL)
 	CreatedBy   string
 	CreatedAs   string // the Proxmox user (or API token ID) it acts as
 	Items       []NewItem
@@ -138,9 +137,9 @@ func (s *Store) CreateJob(ctx context.Context, nj NewJob) (int64, error) {
 		}
 	}
 	var id int64
-	err = tx.QueryRow(ctx, `INSERT INTO jobs (kind, inputs, plan, fingerprint, lock_keys, lock_reads, created_by, created_as)
-		VALUES ($1, $2, $3, $4, $5, COALESCE($8::text[], '{}'), $6, $7) RETURNING id`,
-		nj.Kind, nj.Inputs, nj.Plan, nj.Fingerprint, nj.LockKeys, nj.CreatedBy, nj.CreatedAs, nj.ReadKeys).Scan(&id)
+	err = tx.QueryRow(ctx, `INSERT INTO jobs (kind, inputs, plan, fingerprint, lock_keys, created_by, created_as)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+		nj.Kind, nj.Inputs, nj.Plan, nj.Fingerprint, nj.LockKeys, nj.CreatedBy, nj.CreatedAs).Scan(&id)
 	if err != nil {
 		return 0, err
 	}

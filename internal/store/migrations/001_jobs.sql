@@ -5,7 +5,7 @@ CREATE TABLE jobs (
     inputs           jsonb       NOT NULL,          -- what the user asked for; re-planned at run time
     plan             jsonb       NOT NULL,          -- the preview the user confirmed, for display
     fingerprint      text        NOT NULL,          -- must still match the plan at run time
-    lock_keys        text[]      NOT NULL,          -- what the job changes; see lock_reads (013) and blocksSQL
+    lock_keys        text[]      NOT NULL,          -- team:NN, template:<name>, vmid:<n>; overlapping jobs wait
     status           text        NOT NULL DEFAULT 'pending',
     created_by       text        NOT NULL,
     created_at       timestamptz NOT NULL DEFAULT now(),
