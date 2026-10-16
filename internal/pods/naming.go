@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/proxmox"
 )
 
 // Expand replaces {team} and {host} in a config pattern.
@@ -42,6 +43,14 @@ func (n Naming) VMName(team, host string) string { return Expand(n.cfg.VMName, t
 
 // Pool generates a pool name for a team. {host} is not used.
 func (n Naming) Pool(team string) string { return Expand(n.cfg.Pool, team, "") }
+
+// WrongPool is whether vm, a team's VM, is in a pool other than the team's,
+// and that pool. Proxmox leaves the pool out of /cluster/resources when the
+// viewer lacks Pool.Audit on it, so an empty pool is unknown, not wrong.
+func (n Naming) WrongPool(vm proxmox.VM, team string) (want string, wrong bool) {
+	want = n.Pool(team)
+	return want, vm.Pool != "" && vm.Pool != want
+}
 
 // CloneVMID is base + team*stride + templateVMID%100, e.g. team 01 from
 // template 9005 -> 10105. The planner ensures a plan's templates have

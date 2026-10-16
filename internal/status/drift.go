@@ -106,9 +106,7 @@ func (r rules) cell(team, host string, vms []proxmox.VM, in inputs) Cell {
 	vm := shownVMs(vms)[0]
 	c.Power, c.VMID, c.Node, c.Pool = vm.Status, vm.VMID, vm.Node, vm.Pool
 
-	// Proxmox leaves pool out of /cluster/resources when the viewer can't
-	// audit pools, so an empty pool is unknown, not drift.
-	if want := r.naming.Pool(team); vm.Pool != "" && vm.Pool != want {
+	if want, wrong := r.naming.WrongPool(vm, team); wrong {
 		c.Drift = append(c.Drift, Drift{Kind: DriftPool, Reason: fmt.Sprintf("in pool %q, expected %q", vm.Pool, want)})
 	}
 	if len(vms) > 1 {

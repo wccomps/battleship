@@ -489,7 +489,7 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snap
 			it.Blocked = "is a template, not a team VM"
 		} else if kind == OutsideBlock {
 			it.Blocked = outsideBlock(vm, team)
-		} else if want := p.Naming.Pool(team); vm.Pool != "" && vm.Pool != want {
+		} else if want, wrong := p.Naming.WrongPool(vm, team); wrong {
 			it.Blocked = wrongPool(vm, want)
 		} else if want := p.Naming.CloneVMID(team, tpl.VMID); vm.VMID != want {
 			it.Blocked = fmt.Sprintf("exists as VMID %d, expected %d (built from a different template?); tear it down first", vm.VMID, want)
@@ -769,9 +769,7 @@ func (p Planner) simple(ctx context.Context, kind Kind, teams, hosts []string, f
 		team, host, _ := p.Naming.TeamVM(vm)
 		it := Item{Team: team, Host: host, Name: vm.Name, VMID: vm.VMID, Node: vm.Node}
 		fill(&it)
-		// Proxmox leaves the pool out when the viewer lacks Pool.Audit on it, so
-		// only a known, different pool blocks.
-		if want := p.Naming.Pool(team); vm.Pool != "" && vm.Pool != want {
+		if want, wrong := p.Naming.WrongPool(vm, team); wrong {
 			it.Blocked = wrongPool(vm, want)
 		}
 		plan.Items = append(plan.Items, it)
