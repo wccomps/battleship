@@ -30,10 +30,9 @@ const leaseStale = time.Minute
 func newLeaseWorld() *leaseWorld {
 	epoch := time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
 	lw := &leaseWorld{real: epoch, mono: epoch, wall: epoch}
-	w := &Worker{now: func() time.Time { return lw.wall }}
+	w := &Worker{now: func() time.Time { return lw.wall }, monoNow: func() time.Time { return lw.mono }}
 	w.Cfg.Jobs.StaleAfter = leaseStale
 	lw.l = w.newLease()
-	lw.l.monoNow = func() time.Time { return lw.mono }
 	lw.beat()
 	return lw
 }

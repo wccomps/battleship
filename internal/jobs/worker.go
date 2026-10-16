@@ -66,8 +66,9 @@ type Worker struct {
 	onEvent func(apply.Event)
 	// beat sends a heartbeat; tests replace it. Nil means Store.Heartbeat.
 	beat func(ctx context.Context, jobID int64, worker string) (bool, error)
-	// now reads the wall clock for the heartbeat deadline; tests replace it.
-	now func() time.Time
+	// now and monoNow read the wall and the monotonic clock for a claim's
+	// lease; tests replace them.
+	now, monoNow func() time.Time
 
 	once sync.Once
 }
@@ -85,6 +86,9 @@ func (w *Worker) init() {
 		}
 		if w.now == nil {
 			w.now = time.Now
+		}
+		if w.monoNow == nil {
+			w.monoNow = time.Now
 		}
 	})
 }
@@ -253,8 +257,8 @@ func describeOutcome(o store.Outcome) string {
 func (w *Worker) heartbeat(ctx context.Context, jobID int64, claim *lease, cancel context.CancelCauseFunc, wake <-chan struct{}, done <-chan struct{}) {
 	t := time.NewTicker(w.Cfg.Jobs.Heartbeat)
 	defer t.Stop()
-	deadline := time.AfterFunc(claim.untilUnsure(), func() { cancel(errNoHeartbeat) })
-	defer deadline.Stop()
+	stopWatch := claim.watch(func() { cancel(errNoHeartbeat) })
+	defer stopWatch()
 	for {
 		select {
 		case <-done:
@@ -266,12 +270,8 @@ func (w *Worker) heartbeat(ctx context.Context, jobID int64, claim *lease, cance
 				continue
 			}
 		}
-		// The timer's clock stops while the machine sleeps; the lease
-		// also reads the wall clock.
-		if _, err := claim.held(); errors.Is(err, errClaimUnsure) {
-			cancel(errNoHeartbeat)
-		}
-		start := time.Now()
+		claim.check()
+		start := w.monoNow()
 		startWall := w.now().Round(0)
 		beatCtx, stopBeat := context.WithTimeout(ctx, w.Cfg.Jobs.Heartbeat)
 		stop, err := w.beat(beatCtx, jobID, w.ID)
@@ -285,7 +285,6 @@ func (w *Worker) heartbeat(ctx context.Context, jobID int64, claim *lease, cance
 			w.Logf("job %d: heartbeat: %v", jobID, err)
 		default:
 			claim.renew(start, startWall)
-			deadline.Reset(claim.untilUnsure())
 			if stop {
 				cancel(apply.ErrCancelRequested)
 			}
@@ -392,14 +391,39 @@ type lease struct {
 	stale   time.Duration
 	wallNow func() time.Time
 	monoNow func() time.Time
+	// onUnsure, set by watch, runs once the claim is unsure; timer fires it
+	// when that is due by the monotonic clock, check by the wall clock.
+	onUnsure func()
+	timer    *time.Timer
 }
 
-// newLease starts a lease now: call it before the claim it is for.
+// newLease starts a lease now with the worker's clocks: call it before the
+// claim it is for.
 func (w *Worker) newLease() *lease {
 	w.init()
-	l := &lease{stale: w.Cfg.Jobs.StaleAfter, wallNow: w.now, monoNow: time.Now}
+	l := &lease{stale: w.Cfg.Jobs.StaleAfter, wallNow: w.now, monoNow: w.monoNow}
 	l.renew(l.monoNow(), l.wallNow().Round(0))
 	return l
+}
+
+// watch runs onUnsure once the claim is unsure without a renewal (a timer,
+// so a beat hung on a dead connection can't delay it) until the returned
+// stop is called.
+func (l *lease) watch(onUnsure func()) (stop func()) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.onUnsure = onUnsure
+	elapsed, _ := l.elapsed()
+	l.timer = time.AfterFunc(l.stale/2-elapsed, onUnsure)
+	return func() { l.timer.Stop() }
+}
+
+// check runs onUnsure if the claim is unsure by the wall clock, which the
+// timer misses after the machine sleeps.
+func (l *lease) check() {
+	if _, err := l.held(); errors.Is(err, errClaimUnsure) && l.onUnsure != nil {
+		l.onUnsure()
+	}
 }
 
 // margin is how long before the earliest reap the wait for an answer ends.
@@ -409,6 +433,10 @@ func (l *lease) renew(mono, wall time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.mono, l.wall = mono, wall
+	if l.timer != nil {
+		elapsed, _ := l.elapsed()
+		l.timer.Reset(l.stale/2 - elapsed)
+	}
 }
 
 func (l *lease) lose() {
@@ -422,14 +450,6 @@ func (l *lease) lose() {
 func (l *lease) elapsed() (time.Duration, time.Time) {
 	monoNow := l.monoNow()
 	return max(monoNow.Sub(l.mono), l.wallNow().Round(0).Sub(l.wall)), monoNow
-}
-
-// untilUnsure is how long until the claim goes unsure without a beat.
-func (l *lease) untilUnsure() time.Duration {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	elapsed, _ := l.elapsed()
-	return l.stale/2 - elapsed
 }
 
 // held is when to stop waiting for a change sent now, or why no change may

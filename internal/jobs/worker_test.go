@@ -968,3 +968,20 @@ func TestStaleMessageWithMatchingCounts(t *testing.T) {
 		t.Errorf("staleMessage = %q", msg)
 	}
 }
+
+// Beats that land keep the claim sure: a job running far past StaleAfter/2
+// isn't stopped while they do.
+func TestWorkerKeepsALongJobWhileBeatsLand(t *testing.T) {
+	st := storetest.New(t)
+	f := teamVMs()
+	f.gate = make(chan struct{})
+	id := submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
+	w := newWorker(st, f)
+	// Beats get 100ms each, room even under the race detector.
+	w.Cfg.Jobs.Heartbeat, w.Cfg.Jobs.StaleAfter = 100*time.Millisecond, time.Second
+	go func() { time.Sleep(2 * time.Second); close(f.gate) }()
+	w.runJob(bg, claim(t, st))
+	if got := job(t, st, id); got.Status != store.StatusSucceeded {
+		t.Errorf("job = %s: %s", got.Status, got.Error)
+	}
+}
