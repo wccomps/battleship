@@ -88,7 +88,8 @@ naming the missing privilege.
 ## Base images and environments
 
 Base images are templates tagged `base` plus `router`, `windows`, `linux` or `other`, named `<family>-v<N>`.
-Install and generalize an OS on a VM in Proxmox, shut it down, then **Images → Register**
+Install and generalize an OS on a VM in the images pool, shut it down, then **Register** it from
+the Images page's ready list, which fills in the family (the name less `-build`) and kind
 (`battleship image register -vm 101 -family win2022 -kind windows`). A new version deprecates the previous one;
 **Open for editing** (`image edit -family`) makes a working copy to patch and register as the next version.
 
