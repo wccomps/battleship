@@ -2,7 +2,9 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/wccomps/battleship/internal/config"
@@ -26,9 +28,18 @@ func envCluster() *podstest.Fake {
 	return f
 }
 
-func shareKey(a, b *pods.Plan) bool {
-	ka := LockKeys(a)
-	return slices.ContainsFunc(LockKeys(b), func(k string) bool { return slices.Contains(ka, k) })
+// clash is whether two plans' jobs wait for each other, by the lock rule:
+// equal keys clash unless both are reads, and "read:K" clashes with K.
+func clash(a, b *pods.Plan) bool {
+	for _, x := range LockKeys(a) {
+		for _, y := range LockKeys(b) {
+			xr, yr := strings.HasPrefix(x, "read:"), strings.HasPrefix(y, "read:")
+			if !(xr && yr) && strings.TrimPrefix(x, "read:") == strings.TrimPrefix(y, "read:") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Jobs that touch the same VM serialize, whatever their kinds: a deploy
@@ -46,7 +57,7 @@ func TestJobsTouchingOneVMShareALock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !shareKey(deploy, dns) {
+	if !clash(deploy, dns) {
 		t.Errorf("deploy of teak %v and Set DNS %v share no lock", LockKeys(deploy), LockKeys(dns))
 	}
 	del, err := p.ImageDelete(ctx, pods.ImageRequest{Image: "debian-12-v1"})
@@ -61,12 +72,43 @@ func TestJobsTouchingOneVMShareALock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !shareKey(add, del) {
+	if !clash(add, del) {
 		t.Errorf("adding a host from debian-12-v1 %v and deleting it %v share no lock", LockKeys(add), LockKeys(del))
 	}
 	// A deploy of another environment's hosts doesn't wait for this one.
 	other, err := p.Deploy(ctx, pods.DeployRequest{Pattern: "gw.kilo.alpha", Teams: []string{"02"}})
-	if err == nil && shareKey(other, deploy) {
+	if err == nil && clash(other, deploy) {
 		t.Errorf("deploys of different masters to different teams share a lock: %v, %v", LockKeys(other), LockKeys(deploy))
+	}
+}
+
+// Only the image's own changes wait: clones of an image share it, and its
+// delete, or a register that retires it, waits for them.
+func TestCloningAnImageIsShared(t *testing.T) {
+	src := func(vmid int) *pods.Plan {
+		return &pods.Plan{Kind: pods.KindEnvAdd, Items: []pods.Item{{Name: fmt.Sprintf("h%d.x", vmid), VMID: vmid, Source: &pods.Source{VMID: 8001}}}}
+	}
+	del := &pods.Plan{Kind: pods.KindImageDelete, Items: []pods.Item{{Name: "debian-12-v1", VMID: 8001}}}
+	retire := &pods.Plan{Kind: pods.KindImageRegister, Items: []pods.Item{{Name: "debian-12-v2", VMID: 8002, Source: &pods.Source{VMID: 150}, Supersedes: &pods.Source{VMID: 8001}}}}
+	switch {
+	case clash(src(2101), src(2201)):
+		t.Errorf("two clones of one image wait for each other: %v, %v", LockKeys(src(2101)), LockKeys(src(2201)))
+	case !clash(src(2101), del):
+		t.Errorf("a clone %v and the image's delete %v don't wait for each other", LockKeys(src(2101)), LockKeys(del))
+	case !clash(src(2101), retire):
+		t.Errorf("a clone %v and a register retiring the image %v don't wait for each other", LockKeys(src(2101)), LockKeys(retire))
+	}
+}
+
+// A deploy locks a master only when it builds the master's template.
+func TestDeployLocksTheMasterOnlyWhenBuilding(t *testing.T) {
+	for _, c := range []struct {
+		exists, rebuild, locked bool
+	}{{false, false, true}, {true, true, true}, {true, false, false}} {
+		plan := &pods.Plan{Kind: pods.KindDeploy, Teams: []string{"01"},
+			Templates: []pods.TemplateSpec{{Name: "teak.kilo.alpha.tpl", VMID: 9001, MasterVMID: 2101, Exists: c.exists, Rebuild: c.rebuild}}}
+		if got := slices.Contains(LockKeys(plan), "vmid:2101"); got != c.locked {
+			t.Errorf("template exists %v, rebuild %v: master locked %v, want %v (%v)", c.exists, c.rebuild, got, c.locked, LockKeys(plan))
+		}
 	}
 }
