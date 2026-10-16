@@ -76,7 +76,7 @@ func TestPropertyPreviewOffersOnlyWhatTheUserMayDo(t *testing.T) {
 			rt.Fatal(err)
 		}
 		before := len(f.usedCreds())
-		j, err := st.ClaimJob(bg, id, "w1")
+		j, err := st.ClaimJob(bg, id, "w1", 0)
 		if err != nil || j == nil {
 			rt.Fatalf("claim: %v %v", j, err)
 		}

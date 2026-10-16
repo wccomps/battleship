@@ -23,7 +23,7 @@ func runJob(t *testing.T, s *store.Store, kind string, items []store.NewItem, st
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ClaimJob(ctx, id, "w"); err != nil {
+	if _, err := s.ClaimJob(ctx, id, "w", 0); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range started {
@@ -75,7 +75,7 @@ func TestLastItemResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ClaimJob(ctx, id5, "w"); err != nil {
+	if _, err := s.ClaimJob(ctx, id5, "w", 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -133,7 +133,7 @@ func TestLastItemResultsOrdersByFinish(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.ClaimJob(ctx, id, "w"); err != nil {
+		if _, err := s.ClaimJob(ctx, id, "w", 0); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.AddEvent(ctx, id, store.Event{At: time.Now(), Item: "team01-dc", Step: "clone", Status: "started"}); err != nil {
@@ -386,7 +386,7 @@ func TestLastItemResultsSkipsUntouchedInterruptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ClaimJob(ctx, rs, "w"); err != nil {
+	if _, err := s.ClaimJob(ctx, rs, "w", 0); err != nil {
 		t.Fatal(err)
 	}
 	for name, step := range map[string]string{"team01-dc": "rollback", "team01-web": "rollback", "team01-mail": "start"} {

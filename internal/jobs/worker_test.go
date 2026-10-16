@@ -83,11 +83,15 @@ func TestClaimNextLeasesBeforeTheClaim(t *testing.T) {
 	if _, wall := l.since(); job.StartedAt == nil || wall.After(*job.StartedAt) {
 		t.Errorf("lease from %v, claim stamped %v: the lease started after the claim", wall, job.StartedAt)
 	}
+	// The claim carries this worker's stale_after, which reapers honour.
+	if ids, err := st.ReapStale(bg, -time.Minute); err != nil || len(ids) != 0 {
+		t.Errorf("a reaper with a shorter stale_after reaped %v (%v)", ids, err)
+	}
 }
 
 func claim(t *testing.T, st *store.Store) *store.Job {
 	t.Helper()
-	j, err := st.Claim(bg, "w1")
+	j, err := st.Claim(bg, "w1", 0)
 	if err != nil || j == nil {
 		t.Fatalf("Claim = %v, %v", j, err)
 	}

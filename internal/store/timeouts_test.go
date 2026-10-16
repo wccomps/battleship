@@ -54,7 +54,7 @@ func TestClaimGivesUpOnAHeldLock(t *testing.T) {
 
 	start := time.Now()
 	done := make(chan error, 1)
-	go func() { _, err := s.Claim(ctx, "w"); done <- err }()
+	go func() { _, err := s.Claim(ctx, "w", 0); done <- err }()
 	select {
 	case err := <-done:
 		if err == nil {

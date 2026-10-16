@@ -80,7 +80,7 @@ func TestPropClaimHonoursReadLocks(t *testing.T) {
 					break
 				}
 			}
-			got, err := s.Claim(ctx, "w")
+			got, err := s.Claim(ctx, "w", 0)
 			if err != nil {
 				t.Fatal(err)
 			}

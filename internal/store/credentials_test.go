@@ -86,7 +86,7 @@ func TestCredentialDeletedOnEveryFinalStatus(t *testing.T) {
 		t.Run(status, func(t *testing.T) {
 			s := storetest.New(t)
 			id := createWithCred(t, s, t0, "team:01")
-			if _, err := s.ClaimJob(ctx, id, "w1"); err != nil {
+			if _, err := s.ClaimJob(ctx, id, "w1", 0); err != nil {
 				t.Fatal(err)
 			}
 			if !hasCred(t, s, id) {
@@ -116,7 +116,7 @@ func TestCredentialDeletedWhenAPendingJobIsCancelled(t *testing.T) {
 func TestCredentialKeptWhileARunningJobStops(t *testing.T) {
 	s := storetest.New(t)
 	id := createWithCred(t, s, t0, "team:01")
-	if _, err := s.ClaimJob(ctx, id, "w1"); err != nil {
+	if _, err := s.ClaimJob(ctx, id, "w1", 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RequestCancel(ctx, id, "lead"); err != nil {
@@ -130,7 +130,7 @@ func TestCredentialKeptWhileARunningJobStops(t *testing.T) {
 func TestCredentialDeletedWhenAJobIsReaped(t *testing.T) {
 	s := storetest.New(t)
 	id := createWithCred(t, s, t0, "team:01")
-	if _, err := s.ClaimJob(ctx, id, "w1"); err != nil {
+	if _, err := s.ClaimJob(ctx, id, "w1", 0); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(20 * time.Millisecond)
