@@ -126,8 +126,7 @@ const GuestLockWait = 4 * time.Minute
 // inherit it and keep later scripts out. Without a util-linux flock that
 // has -w, -E and -o (busybox's has none), the script runs unlocked. The
 // probe locks /dev/null, not the lock itself; exit 75 there still means
-// flock works. BATTLESHIP_LOCK and BATTLESHIP_LOCK_WAIT are for tests; the
-// agent sets neither.
+// flock works. BATTLESHIP_LOCK and BATTLESHIP_LOCK_WAIT exist for tests.
 var linuxLocked = `lock="${BATTLESHIP_LOCK:-/run/battleship-guest.lock}"
 flock -w 0 -E 75 -o /dev/null true >/dev/null 2>&1
 case $? in 0|75) ;; *) exec /bin/sh -s ;; esac

@@ -204,8 +204,7 @@ func (w *Worker) runClaimed(ctx context.Context, job *store.Job, claim *lease) {
 		outcome.Status = store.StatusCancelled
 	case errors.Is(cause, errNoHeartbeat):
 		// Stopped before another worker may reap it. Cleanup runs, but
-		// sends a change only while the claim is sure, each answered
-		// before the job could be reaped (see lease).
+		// sends a change only while the claim is sure (see lease).
 		if store.JobStatus(outcome.Status).RanNothing() {
 			break
 		}
@@ -370,17 +369,18 @@ func (w *Worker) jobCredential(ctx context.Context, jobID int64) (proxmox.Creden
 var errClaimUnsure = errors.New("not sent to Proxmox: battleship lost contact with its database, so the job may have been reaped and another job may be changing these VMs")
 
 // lease is whether this worker is sure it still holds a job's claim, and
-// by when a change it sends must be answered.
+// how long it waits for a change's answer.
 //
 // A job is reaped once its heartbeat stamp is StaleAfter old (the claimer's
 // StaleAfter, see store.Claim), and a stamp is never earlier than the start
 // of the beat (or claim) that wrote it. The claim is sure while that start
-// is under StaleAfter/2 ago, and a change's request must be answered by
-// StaleAfter - margin after it. Elapsed time is the larger of the
-// monotonic clock's (which stops while the machine sleeps) and the wall
-// clock's, assuming NTP never steps the wall clock back by more than the
-// margin while the machine sleeps. Proxmox tasks a change started run on
-// after its answer, under Proxmox's own VM locks.
+// is under StaleAfter/2 ago; no change is sent once it isn't. The wait for
+// a change's answer ends StaleAfter - margin after that start. Elapsed time
+// is the larger of the monotonic clock's (which stops while the machine
+// sleeps) and the wall clock's, assuming NTP never steps the wall clock
+// back by more than the margin while the machine sleeps. Giving up waiting
+// doesn't undo a request Proxmox already received, and tasks a change
+// started run on, under Proxmox's own VM locks.
 type lease struct {
 	mu      sync.Mutex
 	mono    time.Time // start of the last successful beat, with a monotonic reading
@@ -399,7 +399,7 @@ func (w *Worker) newLease() *lease {
 	return l
 }
 
-// margin is how long before the earliest reap a change must be answered.
+// margin is how long before the earliest reap the wait for an answer ends.
 func (l *lease) margin() time.Duration { return min(5*time.Second, l.stale/4) }
 
 func (l *lease) renew(mono, wall time.Time) {
@@ -429,8 +429,8 @@ func (l *lease) untilUnsure() time.Duration {
 	return l.stale/2 - elapsed
 }
 
-// held is the deadline for answering a change sent now, or why no change
-// may be sent: it is apply.Executor.Held.
+// held is when to stop waiting for a change sent now, or why no change may
+// be sent: it is apply.Executor.Held.
 func (l *lease) held() (time.Time, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -511,6 +511,11 @@ func staleMessage(then, now *pods.Plan) string {
 	}
 	if privilegesChanged(then, now) {
 		return "your Proxmox privileges changed since the preview, so it would now do something else; nothing was changed. Preview it again."
+	}
+	if len(then.Items) == len(now.Items) && len(then.Runnable()) == len(now.Runnable()) {
+		// Something the counts don't show: a VM, step or setting, or a
+		// battleship upgrade that plans the same job differently.
+		return "the plan no longer matches the preview (the cluster changed, or battleship was upgraded, since); nothing was changed. Preview it again."
 	}
 	return fmt.Sprintf("the cluster changed since the preview (it had %d VMs, %d runnable; now %d, %d runnable); nothing was changed. Preview it again.",
 		len(then.Items), len(then.Runnable()), len(now.Items), len(now.Runnable()))

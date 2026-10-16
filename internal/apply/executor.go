@@ -136,13 +136,13 @@ type Executor struct {
 	// Halt, if set, ends a cancel's grace when closed (e.g. on shutdown), so
 	// the run still stops within StopBudget.
 	Halt <-chan struct{}
-	// Held, if set, is asked before every change the run sends, cleanup and
-	// template builds included: the deadline for answering it, or an error
-	// that holds it back. The job system says no once it can't be sure the
-	// job is still claimed, and sets deadlines before it could be reaped.
+	// Held, if set, is asked before every change but StopTask, cleanup and
+	// template builds included: when to stop waiting for its answer, or an
+	// error that holds it back (see the job system's lease).
 	Held func() (time.Time, error)
 
-	// api wraps API so no step makes a change after a stop (see stepContext).
+	// api wraps API so no change is sent after a stop (see stepContext) or
+	// once Held says no.
 	api pods.API
 
 	naming     pods.Naming

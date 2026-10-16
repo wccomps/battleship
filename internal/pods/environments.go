@@ -21,7 +21,7 @@ type Slot struct {
 	Pool      string
 	IntBridge string
 	ExtBridge string
-	FirstVMID int // the block is FirstVMID to LastVMID
+	FirstVMID int
 }
 
 // LastVMID is the last VMID of the slot's block.
@@ -119,8 +119,8 @@ const envReads = 8
 
 // Environments reads every slot: the VMs in its pool with their notes, and
 // the other VMs on its bridges. Templates never run, so they hold no slot;
-// team VMs are on team bridges, so they aren't read. It also returns the
-// VM listing it read.
+// team-named VMs (see Classify) are taken to be on team bridges, so they
+// aren't read. It also returns the VM listing it read.
 func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM, error) {
 	vms, err := p.API.ClusterVMs(ctx)
 	if err != nil {

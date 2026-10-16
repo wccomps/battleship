@@ -104,11 +104,10 @@ func sourceFP(s *pods.Source) *fpSource {
 	return &fpSource{VMID: s.VMID, Node: s.Node, Name: s.Name}
 }
 
-// LockKeys are what a plan changes and what it only reads, as lock keys
-// (see store's blocksSQL). It changes its teams, templates and Plan.Locks,
-// and as vmid: keys its items' VMs, each template, the image a register
-// retires, and a master whose template it builds (the build may stop it).
-// It only reads the VMs its items are copied from (their Sources).
+// LockKeys are what a plan changes and, apart, what it only reads (its
+// items' Sources), as lock keys (see store's blocksSQL). Besides its own
+// VMs, a plan changes the image a register retires and the master of a
+// template it builds (the build may stop it).
 func LockKeys(plan *pods.Plan) (writes, reads []string) {
 	w, r := map[string]bool{}, map[string]bool{}
 	vmid := func(set map[string]bool, id int) {

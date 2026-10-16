@@ -84,7 +84,7 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 
 // slotHeld is whether any VMID in slot's block exists, listed or not: what a
 // user may see of a slot depends on their rights, but Proxmox reports any
-// VMID in use, so an environment never lands in a slot someone else uses.
+// VMID in use, so planning never picks a slot someone else uses.
 func (p Planner) slotHeld(ctx context.Context, slot Slot, vms []proxmox.VM) (bool, error) {
 	last := slot.LastVMID()
 	if slices.ContainsFunc(vms, func(vm proxmox.VM) bool { return vm.VMID >= slot.FirstVMID && vm.VMID <= last }) {

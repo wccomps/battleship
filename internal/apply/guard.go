@@ -82,9 +82,9 @@ type guardedAPI struct {
 	held func() (time.Time, error)
 }
 
-// may refuses a change if the run may no longer hold its locks, and else
-// bounds its request by Held's deadline (see Executor.Held); then as
-// mayChange. Call done when the change's call returns.
+// may refuses a change Held refuses, else bounds the wait for its answer by
+// Held's deadline; then refuses as mayChange does. Call done when the
+// change's call returns.
 func (g guardedAPI) may(ctx context.Context) (_ context.Context, done context.CancelFunc, _ error) {
 	done = func() {}
 	if g.held != nil {

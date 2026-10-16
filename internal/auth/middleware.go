@@ -219,7 +219,6 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 			sess.Subject, err, stamp(graceEnd))
 		return sess, true
 	}
-	// A refresh without an ID token keeps the session's last one.
 	idToken := sess.IDToken
 	if id.IDToken != "" {
 		idToken = s.sealIDToken(sess.ID, id.IDToken)

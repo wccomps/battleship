@@ -8,8 +8,8 @@ engine and one Postgres job queue.
 
 - **Every operation is a job.** You preview a plan, confirm it, and a worker
   runs it (a CLI run with no database runs itself). The worker plans again
-  first and refuses to run if the cluster changed. Jobs on the same teams or
-  templates run one at a time.
+  first and refuses to run if the cluster changed. Jobs that change the same
+  teams, templates or VMs run one at a time.
 - **Battleship holds no Proxmox credential.** Every call is made as the person
   who asked (their Proxmox ticket in the web app, their API token in the
   CLI), so Proxmox's ACLs decide what each person may do.

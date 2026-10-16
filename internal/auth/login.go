@@ -180,9 +180,9 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 	s.clearSessionCookie(w)
 	s.logf("auth: logout: subject=%q", sess.Subject)
 	if ok {
-		// The tokens as deleted, which a refresh may have rotated since sess
-		// was read. The provider's refresh token outlives the row, so revoke
-		// it; logout goes on if that fails.
+		// Revoke the tokens as deleted (a refresh may have rotated them
+		// since sess was read): the provider's outlive the row. Logout goes
+		// on if that fails.
 		s.revokeSealed(r.Context(), sess.ID, rt, "logout: subject=%q: revoking the refresh token", sess.Subject)
 		sess.IDToken = idt
 	}

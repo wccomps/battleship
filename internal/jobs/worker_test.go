@@ -954,3 +954,17 @@ func TestWorkerStopsAfterWallClockGapWithFailingBeats(t *testing.T) {
 		t.Errorf("job = %s: %s", got.Status, got.Error)
 	}
 }
+
+// A stale plan whose counts match the preview's says it no longer matches,
+// not that the cluster changed by counts that are the same.
+func TestStaleMessageWithMatchingCounts(t *testing.T) {
+	then := &pods.Plan{Kind: pods.KindImageDelete, Locks: []string{"family:x", "vmid:8001"}, Items: []pods.Item{{Name: "x-v1", VMID: 8001}}}
+	now := &pods.Plan{Kind: pods.KindImageDelete, Locks: []string{"family:x"}, Items: []pods.Item{{Name: "x-v1", VMID: 8001}}}
+	if msg := staleMessage(then, now); !strings.Contains(msg, "no longer matches the preview") || strings.Contains(msg, "runnable") {
+		t.Errorf("staleMessage = %q", msg)
+	}
+	now.Items = nil
+	if msg := staleMessage(then, now); !strings.Contains(msg, "it had 1 VMs, 1 runnable; now 0, 0 runnable") {
+		t.Errorf("staleMessage = %q", msg)
+	}
+}
