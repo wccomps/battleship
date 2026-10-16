@@ -86,7 +86,7 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 // user may see of a slot depends on their rights, but Proxmox reports any
 // VMID in use, so an environment never lands in a slot someone else uses.
 func (p Planner) slotHeld(ctx context.Context, slot Slot, vms []proxmox.VM) (bool, error) {
-	last := slot.FirstVMID + 99
+	last := slot.LastVMID()
 	if slices.ContainsFunc(vms, func(vm proxmox.VM) bool { return vm.VMID >= slot.FirstVMID && vm.VMID <= last }) {
 		return true, nil
 	}
@@ -223,7 +223,7 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 			ip.Blocked = "a VM named " + name + " already exists outside " + env.Slot.Pool
 			continue
 		default:
-			id, err := p.freeVMID(ctx, vms, env.Slot.FirstVMID, env.Slot.FirstVMID+99, taken)
+			id, err := p.freeVMID(ctx, vms, env.Slot.FirstVMID, env.Slot.LastVMID(), taken)
 			if err != nil {
 				ip.Blocked = "dev slot " + env.Slot.Name + " has " + err.Error()
 				continue

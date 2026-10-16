@@ -234,7 +234,6 @@ func (w *Worker) runClaimed(ctx context.Context, job *store.Job, claim *lease) {
 	}
 }
 
-// describeOutcome is an outcome for the log.
 func describeOutcome(o store.Outcome) string {
 	msg := string(o.Status)
 	if o.Error != "" {

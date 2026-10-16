@@ -18,8 +18,10 @@ form ──> preview ──> confirm ──> stored job ──> worker claims it
    matches the preview, then stores the job with the user's sealed Proxmox
    ticket (`jobs.Submit`).
 3. **Claim.** A worker (`jobs.Worker`, in every `battleship serve`) claims
-   the oldest pending job that shares no team or template with a running or
-   older pending job, so overlapping jobs run in the order they were made.
+   the oldest pending job that changes nothing a running or older pending
+   job changes or reads (teams, templates, VMs, slots, families: its lock
+   keys), so overlapping jobs run in the order they were made. Jobs that
+   only read a VM, such as clones of one base image, run together.
 4. **Re-plan.** The worker plans once more; if the cluster changed since the
    preview, the job ends `stale` and nothing runs.
 5. **Run.** The executor (`apply.Executor`) runs each item's steps, records

@@ -21,8 +21,11 @@ type Slot struct {
 	Pool      string
 	IntBridge string
 	ExtBridge string
-	FirstVMID int // the block is FirstVMID to FirstVMID+99
+	FirstVMID int // the block is FirstVMID to LastVMID
 }
+
+// LastVMID is the last VMID of the slot's block.
+func (s Slot) LastVMID() int { return s.FirstVMID + 99 }
 
 // ExpandSlot replaces {slot} with n as two digits.
 func ExpandSlot(pattern string, n int) string {
@@ -111,7 +114,7 @@ func (e Environment) DNS() string {
 	return DNSRouter
 }
 
-// envReads is how many VM configs Environments reads at once.
+// envReads is how many Proxmox reads environment planning makes at once.
 const envReads = 8
 
 // Environments reads every slot: the VMs in its pool with their notes, and

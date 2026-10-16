@@ -390,7 +390,9 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool,
 		spec.Interfaces, spec.GPU = p.describe(tcfg)
 		spec.CPU, spec.CloudInit, spec.Bridges = tcfg["cpu"], HasCloudInit(tcfg), NICBridges(tcfg)
 	case exists && rebuild:
-		// Rebuilding deletes the template, which would break its linked clones.
+		// Rebuilding deletes the template, which would break team VMs linked
+		// to it. Proxmox itself refuses to free a base disk any other linked
+		// clone still uses.
 		for _, vm := range vms {
 			if _, host, ok := p.Naming.TeamVM(vm); ok && host == spec.Host {
 				spec.Blocked = fmt.Sprintf("team VMs such as %s still use this template; tear them down first", vm.Name)
@@ -762,7 +764,7 @@ func (p Planner) simple(ctx context.Context, kind Kind, teams, hosts []string, f
 		team, host, _ := p.Naming.TeamVM(vm)
 		it := Item{Team: team, Host: host, Name: vm.Name, VMID: vm.VMID, Node: vm.Node}
 		fill(&it)
-		// Proxmox leaves the pool out when the viewer can't audit pools, so
+		// Proxmox leaves the pool out when the viewer lacks Pool.Audit on it, so
 		// only a known, different pool blocks.
 		if want := p.Naming.Pool(team); vm.Pool != "" && vm.Pool != want {
 			it.Blocked = wrongPool(vm, want)
