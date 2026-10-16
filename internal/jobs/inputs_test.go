@@ -216,10 +216,10 @@ func TestTeamlessLockKeys(t *testing.T) {
 		Items: []pods.Item{{Name: "gw.kilo.alpha", VMID: 2500, Source: &pods.Source{VMID: 8000}}}}
 	keys := writeKeys(plan)
 	if !slices.Equal(keys, []string{"domain:kilo.alpha", "slot:05", "vmid:2500"}) {
-		t.Errorf("LockKeys = %v", keys)
+		t.Errorf("writeKeys = %v", keys)
 	}
 	if reads := readKeys(plan); !slices.Equal(reads, []string{"vmid:8000"}) {
-		t.Errorf("ReadKeys = %v", reads)
+		t.Errorf("readKeys = %v", reads)
 	}
 }
 

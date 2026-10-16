@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -593,6 +594,48 @@ func TestRevocationIsRetriedThenDropped(t *testing.T) {
 	}
 	if !strings.Contains(h.logs.String(), "giving up after 5 tries") {
 		t.Errorf("logs = %q, want the revocation given up", h.logs.String())
+	}
+}
+
+// A drain cut off mid-revocation hands the token back due, its try
+// uncounted: shutting down doesn't spend tries.
+func TestRevocationCutOffIsNotATry(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	h.idp.Set(func(f *authtest.Behavior) { f.RevokeDelay = time.Second })
+	b.postForm("/auth/logout", url.Values{"csrf": {b.csrf()}}, nil)
+	cut, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := h.svc.DrainRevocations(cut); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("drain = %v, want it cut off", err)
+	}
+	revs, err := h.st.LeaseRevocations(context.Background(), 10, time.Hour)
+	if err != nil || len(revs) != 1 || revs[0].Attempts != 0 {
+		t.Fatalf("queue after the cut = %+v, %v; want the token due on its first try", revs, err)
+	}
+	if strings.Contains(h.logs.String(), "trying again") {
+		t.Errorf("logs = %q; a cut-off revocation isn't a failure", h.logs.String())
+	}
+}
+
+// A queued token that can't be opened (sealed under another client
+// secret) won't open on a retry either: it is dropped at once.
+func TestUnopenableRevocationIsDropped(t *testing.T) {
+	h := newHarness(t)
+	if err := h.st.QueueRevocation(context.Background(), "session-x", "not-a-sealed-token"); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.revoked(); len(got) != 0 {
+		t.Fatalf("revoked %v", got)
+	}
+	time.Sleep(50 * time.Millisecond) // past a retry's wait
+	revs, err := h.st.LeaseRevocations(context.Background(), 10, time.Hour)
+	if err != nil || len(revs) != 0 {
+		t.Fatalf("queue = %+v, %v; want the token dropped", revs, err)
+	}
+	if !strings.Contains(h.logs.String(), "dropping it") {
+		t.Errorf("logs = %q", h.logs.String())
 	}
 }
 

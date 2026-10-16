@@ -100,12 +100,13 @@ func (e *Executor) restart(ctx context.Context, it *pods.Item) error {
 // exec runs a command through the agent and waits for it to exit 0.
 //
 // The agent can't stop a command, so one that outlasts execLimit keeps
-// running in the guest; a retry runs the script again, and the guest lock
-// (see pods.GuestLockWait) makes it wait for the one still running.
+// running in the guest; a retry runs the script again. Where the guest
+// lock works (see pods.GuestLockWait), the new copy waits up to that long
+// for the one still running, then exits 75.
 func (e *Executor) exec(ctx context.Context, it *pods.Item, cmd []string, input string) (string, error) {
 	var pid int
-	// Sent once: a retry after a lost answer would run a second copy of the
-	// script alongside the first. The round retry reruns it instead.
+	// Sent once: a retry after a lost answer would start a second copy at
+	// once. The round retry reruns it instead.
 	if err := e.lim.Call(ctx, func() (err error) { pid, err = e.api.AgentExec(ctx, it.Node, it.VMID, cmd, input); return }); err != nil {
 		return "", err
 	}

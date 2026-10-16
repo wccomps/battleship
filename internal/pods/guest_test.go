@@ -219,17 +219,27 @@ func TestLinuxScriptGivesUpOnAHeldLock(t *testing.T) {
 	}
 }
 
-// Without flock or timeout, the script still runs, unlocked.
+// Without flock or a timeout that takes bare seconds, the script still
+// runs, unlocked.
 func TestLinuxScriptRunsWithoutTheLockTools(t *testing.T) {
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("no sh")
 	}
-	for name, tools := range map[string][]string{"neither": nil, "no timeout": {"flock"}, "no flock": {"timeout"}} {
+	const works = "#!/bin/sh\nexit 0\n"
+	// Busybox before 1.30 takes the time only as -t SECS, and runs a bare
+	// number as the command.
+	const oldBusybox = "#!/bin/sh\n[ \"$1\" = -t ] || { echo \"timeout: can't execute '$1'\" >&2; exit 127; }\nexit 0\n"
+	for name, tools := range map[string]map[string]string{
+		"neither":             nil,
+		"no timeout":          {"flock": works},
+		"no flock":            {"timeout": works},
+		"old busybox timeout": {"flock": works, "timeout": oldBusybox},
+	} {
 		t.Run(name, func(t *testing.T) {
 			bin := t.TempDir()
-			for _, tool := range tools {
-				if err := os.WriteFile(filepath.Join(bin, tool), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			for tool, script := range tools {
+				if err := os.WriteFile(filepath.Join(bin, tool), []byte(script), 0o755); err != nil {
 					t.Fatal(err)
 				}
 			}

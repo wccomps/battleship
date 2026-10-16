@@ -251,9 +251,8 @@ func describeOutcome(o store.Outcome) string {
 // heartbeat beats every Jobs.Heartbeat (and at once on wake) until done is
 // closed, renewing claim on each successful beat and cancelling the run on
 // a cancel request, a lost claim, or (errNoHeartbeat) once the claim is
-// unsure. A timer enforces the last so a beat hung on a dead connection
-// can't defer it. Beating continues afterwards to keep the job claimed
-// during cleanup.
+// unsure (see lease.watch). Beating continues afterwards to keep the job
+// claimed during cleanup.
 func (w *Worker) heartbeat(ctx context.Context, jobID int64, claim *lease, cancel context.CancelCauseFunc, wake <-chan struct{}, done <-chan struct{}) {
 	t := time.NewTicker(w.Cfg.Jobs.Heartbeat)
 	defer t.Stop()
@@ -370,19 +369,20 @@ var errClaimUnsure = errors.New("not sent to Proxmox: battleship lost contact wi
 // lease is whether this worker is sure it still holds a job's claim, and
 // how long it waits for a change's answer.
 //
-// A job is reaped once its heartbeat stamp is StaleAfter old (the claimer's
-// StaleAfter, see store.Claim; a reaper older than migration 014 uses its
-// own), and a stamp is never earlier than the start
-// of the beat (or claim) that wrote it. The claim is sure while that start
-// is under StaleAfter/2 ago; no change is sent once it isn't. The wait for
-// a change's answer ends StaleAfter - margin after that start. Elapsed time
-// is the larger of the monotonic clock's (which stops while the machine
-// sleeps) and the wall clock's, assuming NTP never steps the wall clock
-// back by more than the margin while the machine sleeps. The wait is a
-// context deadline, so a sleep delays it too; the next change is checked
-// against both clocks. Giving up waiting doesn't undo a request Proxmox
-// already received, and tasks a change started run on, under Proxmox's own
-// VM locks.
+// A job is reaped once its heartbeat stamp is StaleAfter old (the
+// claimer's StaleAfter, see store.Claim; a reaper older than migration 014
+// uses its own), and a stamp is never earlier than the start of the beat
+// (or claim) that wrote it. The claim is sure while that start is under
+// StaleAfter/2 ago; no change is sent once it isn't. The wait for a
+// change's answer ends StaleAfter - margin after that start.
+//
+// Elapsed time is the larger of the monotonic clock's (which stops while
+// the machine sleeps) and the wall clock's, assuming NTP never steps the
+// wall clock back by more than the margin while the machine sleeps. The
+// wait is a context deadline, so a sleep delays it too; the next change is
+// checked against both clocks. Giving up waiting doesn't undo a request
+// Proxmox already received, and tasks a change started run on, under
+// Proxmox's own VM locks.
 type lease struct {
 	mu      sync.Mutex
 	mono    time.Time // start of the last successful beat, with a monotonic reading
@@ -391,8 +391,9 @@ type lease struct {
 	stale   time.Duration
 	wallNow func() time.Time
 	monoNow func() time.Time
-	// onUnsure, set by watch, runs once the claim is unsure; timer fires it
-	// when that is due by the monotonic clock, check by the wall clock.
+	// onUnsure, set by watch, runs when the claim is unsure (perhaps more
+	// than once); timer fires it when that is due by the monotonic clock,
+	// check by the wall clock.
 	onUnsure func()
 	timer    *time.Timer
 }
@@ -406,9 +407,9 @@ func (w *Worker) newLease() *lease {
 	return l
 }
 
-// watch runs onUnsure once the claim is unsure without a renewal (a timer,
-// so a beat hung on a dead connection can't delay it) until the returned
-// stop is called.
+// watch runs onUnsure when the claim is unsure without a renewal (a timer,
+// so a beat hung on a dead connection can't delay it; see heartbeat), until
+// the returned stop is called. onUnsure must be safe to run more than once.
 func (l *lease) watch(onUnsure func()) (stop func()) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
