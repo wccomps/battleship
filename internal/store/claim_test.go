@@ -189,15 +189,15 @@ func TestCancelDuringClaimWins(t *testing.T) {
 func TestReapStaleInterruptsSilentJobs(t *testing.T) {
 	s := storetest.New(t)
 	id := create(t, s, "team:01")
-	if _, err := s.Claim(ctx, "w1", 10*time.Millisecond); err != nil {
+	if _, err := s.Claim(ctx, "w1", time.Second); err != nil {
 		t.Fatal(err)
 	}
 
 	if ids, err := s.ReapStale(ctx, time.Hour); err != nil || len(ids) != 0 {
 		t.Fatalf("ReapStale of a fresh job = %v, %v; want none", ids, err)
 	}
-	time.Sleep(20 * time.Millisecond)
-	ids, err := s.ReapStale(ctx, time.Hour) // the claim's 10ms, not the reaper's hour
+	time.Sleep(1100 * time.Millisecond)
+	ids, err := s.ReapStale(ctx, time.Hour) // the claim's second, not the reaper's hour
 	if err != nil || !reflect.DeepEqual(ids, []int64{id}) {
 		t.Fatalf("ReapStale = %v, %v; want [%d]", ids, err, id)
 	}
