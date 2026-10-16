@@ -88,8 +88,10 @@ func NewWithURL(t testing.TB) (*store.Store, string) {
 // urls are the databases of the Stores New made, for ClaimJob.
 var urls sync.Map // *store.Store -> string
 
-// ClaimJob starts job id for worker as a claim does, whatever else is
-// pending or running: for tests that need one job running beside others.
+// ClaimJob starts job id for worker as Claim would if it were the oldest
+// claimable job, or returns nil if it isn't claimable (not pending, cancel
+// requested, or waiting for another job; see Store.Blockers): for tests
+// that need one job running beside others.
 func ClaimJob(s *store.Store, id int64, worker string, staleAfter time.Duration) (*store.Job, error) {
 	u, ok := urls.Load(s)
 	if !ok {
@@ -97,18 +99,18 @@ func ClaimJob(s *store.Store, id int64, worker string, staleAfter time.Duration)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if blockers, err := s.Blockers(ctx, id); err != nil || len(blockers) > 0 {
+		return nil, err
+	}
 	conn, err := pgx.Connect(ctx, u.(string))
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close(ctx)
 	tag, err := conn.Exec(ctx, `UPDATE jobs SET status = 'running', claimed_by = $2, started_at = now(), heartbeat_at = now(),
-		stale_after = make_interval(secs => $3) WHERE id = $1 AND status = 'pending'`, id, worker, staleAfter.Seconds())
-	if err != nil {
+		stale_after = make_interval(secs => $3) WHERE id = $1 AND status = 'pending' AND NOT cancel_requested`, id, worker, staleAfter.Seconds())
+	if err != nil || tag.RowsAffected() == 0 {
 		return nil, err
-	}
-	if tag.RowsAffected() != 1 {
-		return nil, fmt.Errorf("storetest.ClaimJob: job %d isn't pending", id)
 	}
 	if _, err := conn.Exec(ctx, `SELECT pg_notify('battleship_events', $1)`, strconv.FormatInt(id, 10)); err != nil {
 		return nil, err

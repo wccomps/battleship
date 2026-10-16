@@ -86,16 +86,13 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 // what a user may see depends on their rights, but Proxmox reports any.
 // VMs on the slot's bridges count through Environments' Users instead.
 func (p Planner) slotHeld(ctx context.Context, slot Slot, vms []proxmox.VM) (bool, error) {
-	last := slot.LastVMID()
-	if slices.ContainsFunc(vms, func(vm proxmox.VM) bool { return vm.VMID >= slot.FirstVMID && vm.VMID <= last }) {
-		return true, nil
-	}
+	use := newVMIDUse(p.API, vms)
 	// errSlotHeld cancels gctx, which stops the rest.
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(envReads)
-	for id := slot.FirstVMID; id <= last; id++ {
+	for id := slot.FirstVMID; id <= slot.LastVMID(); id++ {
 		g.Go(func() error {
-			held, err := p.API.VMIDHeld(gctx, id)
+			held, err := use.inUse(gctx, id)
 			switch {
 			case held:
 				return errSlotHeld

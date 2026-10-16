@@ -609,10 +609,8 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	if err != nil {
 		return err
 	}
-	held := map[int]bool{}
-	for _, vm := range vms {
-		held[vm.VMID] = true
-	}
+	use := newVMIDUse(p.API, vms)
+	held := maps.Clone(use.listed) // and, as items are added, VMIDs already itemized
 	want := map[string]bool{}
 	for _, t := range plan.Teams {
 		want[t] = true
@@ -658,7 +656,7 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 			}
 			held[vmid] = true // one item per VMID, from the first node that lists it
 			// A VM the user can't see may hold it: the disks are its own.
-			if taken, err := p.API.VMIDHeld(ctx, vmid); err != nil || taken {
+			if taken, err := use.inUse(ctx, vmid); err != nil || taken {
 				if err != nil {
 					return fmt.Errorf("checking whether VMID %d is free: %w", vmid, err)
 				}
