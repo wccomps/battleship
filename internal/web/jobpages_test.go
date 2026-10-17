@@ -945,3 +945,55 @@ func TestDeployAndTeardownOpenAsPages(t *testing.T) {
 	body = h.get(&lead, "/logs/"+itoa(failed)).Body.String()
 	contains(t, "failed teardown", body, `<a class="btn pri" href="/teardown?teams=1">`, "Preview again</a>")
 }
+
+// A started item shows its first step running, before any step finished,
+// and the start isn't a log line.
+func TestJobPageShowsAStartedItemRunning(t *testing.T) {
+	h := newHarness(t)
+	h.poll()
+	id := h.submitJob(jobs.Inputs{Kind: pods.KindReset, Teams: "1", Hosts: []string{"dc"}, Snapshot: "initial"}, byOperator)
+	h.start(id)
+	op := h.login(asOperator)
+	before := h.get(&op, "/logs/"+itoa(id)).Body.String()
+	if strings.Contains(before, `class="pip run"`) {
+		t.Fatalf("an item shows running before it started:\n%s", before)
+	}
+	items, err := h.st.Items(context.Background(), id)
+	if err != nil || len(items) == 0 {
+		t.Fatalf("items = %v, %v", items, err)
+	}
+	h.event(id, items[0].Name, "stop", "started", "")
+	body := h.get(&op, "/logs/"+itoa(id)).Body.String()
+	if !strings.Contains(body, `class="pip run"`) {
+		t.Errorf("the started item's step isn't shown running:\n%s", body)
+	}
+	if strings.Contains(body, `<li id="ev-`) {
+		t.Errorf("the start is a log line:\n%s", body)
+	}
+}
+
+// An image or environment job's page goes back, and closes, to the page its
+// kind belongs to; others to the job list (back) and the grid (close).
+func TestJobPageGoesBackToItsList(t *testing.T) {
+	h := newHarness(t)
+	addImages(h)
+	addEnv(h, true)
+	h.poll()
+	op := h.login(asLead)
+	for in, want := range map[*jobs.Inputs][2]string{
+		{Kind: pods.KindImageDeprecate, Image: "debian-12-v1"}:       {`href="/images">`, "Images</a>"},
+		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"}: {`href="/environments">`, "Environments</a>"},
+		{Kind: pods.KindPower, Teams: "1", Action: "stop"}:           {`href="/logs">`, "Logs</a>"},
+	} {
+		id := h.submitJob(*in, byOperator)
+		page := h.get(&op, "/logs/"+itoa(id)).Body.String()
+		if !strings.Contains(page, `<a class="btn ghost back" `+want[0]) || !strings.Contains(page, want[1]) {
+			t.Errorf("%s: back link isn't %v:\n%s", in.Kind, want, page)
+		}
+		panel := h.panelGet(&op, "/logs/"+itoa(id), nil).Body.String()
+		home := map[pods.Kind]string{pods.KindImageDeprecate: "/images", pods.KindEnvDNS: "/environments", pods.KindPower: "/"}[in.Kind]
+		if !strings.Contains(panel, `href="`+home+`" data-close`) {
+			t.Errorf("%s: panel doesn't close to %s:\n%s", in.Kind, home, panel)
+		}
+	}
+}

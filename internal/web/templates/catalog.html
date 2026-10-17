@@ -62,7 +62,13 @@
 {{- with .Blocked}}<div class="meta">{{icon "warn"}} {{.}}</div>{{end}}</td>
 <td>{{with .Notes}}<div class="notes">{{.}}</div>{{else}}<span class="meta">none</span>{{end}}</td>
 <td class="act"><div class="acts">
-{{- if not .Blocked}}<a class="btn sm" href="/images/register?vmid={{.VMID}}{{with .Family}}&amp;family={{.}}{{end}}{{with .Kind}}&amp;image_kind={{.}}{{end}}">Register</a>{{end}}
+{{- if not .Blocked}}
+{{- if and .Family .Kind}}
+<form method="post" action="/images/register/preview">{{template "csrf" $.CSRF}}<input type="hidden" name="vmid" value="{{.VMID}}"><input type="hidden" name="family" value="{{.Family}}"><input type="hidden" name="image_kind" value="{{.Kind}}"><button class="btn sm" type="submit">Register</button></form>
+{{- else}}
+<a class="btn sm" href="/images/register?vmid={{.VMID}}{{with .Family}}&amp;family={{.}}{{end}}{{with .Kind}}&amp;image_kind={{.}}{{end}}">Register</a>
+{{- end}}
+{{- end}}
 </div></td>
 </tr>
 {{- end}}

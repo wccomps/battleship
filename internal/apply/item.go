@@ -43,6 +43,9 @@ func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tp
 		if ctx.Err() != nil {
 			return e.endItem(ctx, it, step, i, false, ctx.Err())
 		}
+		if i == 0 {
+			e.emit(it.Name, step, EventStarted, "")
+		}
 		sctx, done, sent := e.stepContext(ctx)
 		changed, err := e.runStep(sctx, kind, &it, step, tpl, exists)
 		done()

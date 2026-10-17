@@ -22,6 +22,9 @@ const (
 	EventSkipped EventStatus = "skipped" // already in the desired state
 	EventFailed  EventStatus = "failed"
 	EventInfo    EventStatus = "info"
+	// EventStarted: the item's first step began, so it shows as running while
+	// a long step (a clone) waits on Proxmox. Logs leave it out.
+	EventStarted EventStatus = "started"
 	EventBlocked EventStatus = "blocked" // the plan blocked this item; Message says why
 	// EventInterrupted: a stop (cancel, shutdown) cut the item off.
 	EventInterrupted EventStatus = "interrupted"
