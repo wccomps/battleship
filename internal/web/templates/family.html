@@ -11,6 +11,22 @@
 <dt>Built from</dt><dd><code>{{.Name}}</code> · VMID {{.VMID}} · {{.Status}}</dd>
 {{- end}}
 </dl>
+<div class="sec">
+<h2 class="sub">Details</h2>
+{{- with details .Details .Unreadable}}{{template "details" .}}{{else}}
+<p class="meta">None yet.</p>
+{{- end}}
+{{- with .Current}}
+<details class="dedit">
+<summary class="disc">Edit details</summary>
+<form method="post" action="/images/details/preview">{{template "csrf" $csrf}}<input type="hidden" name="family" value="{{$d.Family}}">
+{{template "details-fields" $d.Details}}
+<p class="hint">Written into the notes of <code>{{.Name}}</code>, which new hosts copy. Older versions keep theirs.</p>
+<button class="btn" type="submit"{{if not $d.MayDetails}} disabled{{end}}>Review details</button>
+</form>
+</details>
+{{- end}}
+</div>
 {{- with .Notes}}
 <div class="sec"><h2 class="sub">Notes</h2><div class="notes box">{{.}}</div></div>
 {{- end}}

@@ -277,6 +277,8 @@ func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
 			return "Deprecate " + runnable[0].Name
 		case pods.KindImageDelete:
 			return "Delete " + runnable[0].Name
+		case pods.KindImageDetails:
+			return "Save details of " + runnable[0].Name
 		}
 	}
 	vms := countVMs(n)

@@ -35,6 +35,7 @@ const (
 	KindImageEdit      Kind = "image-edit"
 	KindImageDeprecate Kind = "image-deprecate"
 	KindImageDelete    Kind = "image-delete"
+	KindImageDetails   Kind = "image-details"
 	KindEnvCreate      Kind = "env-create"
 	KindEnvAdd         Kind = "env-add"
 	KindEnvDNS         Kind = "env-dns"
@@ -45,7 +46,8 @@ const (
 // than team VMs.
 func (k Kind) Teamless() bool {
 	switch k {
-	case KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete, KindEnvCreate, KindEnvAdd, KindEnvDNS, KindEnvTeardown:
+	case KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete, KindImageDetails,
+		KindEnvCreate, KindEnvAdd, KindEnvDNS, KindEnvTeardown:
 		return true
 	}
 	return false
@@ -81,6 +83,7 @@ const (
 	StepLabel     Step = "label"              // set tags and the notes line
 	StepConvert   Step = "convert"            // make the VM a template
 	StepRetire    Step = "deprecate-previous" // tag the version this one replaces deprecated
+	StepDetails   Step = "details"            // write the details block in the notes (WithDetails)
 	StepWaitAgent Step = "wait-agent"
 	StepGuest     Step = "configure-guest"
 	StepVerify    Step = "verify"
@@ -113,10 +116,13 @@ type Source struct {
 	// Bridges are its NICs' bridges: Proxmox checks SDN.Use on them for a
 	// clone.
 	Bridges []string `json:"bridges,omitempty"`
-	// Base and Notes are the source's notes, for its review: the version it
-	// edits (ImageEdit), and user notes the copy keeps.
-	Base  string `json:"base,omitempty"`
-	Notes string `json:"notes,omitempty"`
+	// Base, Notes and Unreadable are the source's notes, for its review: the
+	// version it edits (ImageEdit), and the user notes the copy keeps, less
+	// their details block (see ParseDetails), or all of them when Unreadable
+	// says the block is.
+	Base       string `json:"base,omitempty"`
+	Notes      string `json:"notes,omitempty"`
+	Unreadable bool   `json:"details_unreadable,omitempty"`
 }
 
 // Builds is whether a deploy builds the template from its master (it
@@ -180,7 +186,7 @@ type Item struct {
 	// for its review. NICs maps NIC keys to the bridge the network step puts
 	// them on. Guest is what configure-guest sets inside the VM. Supersedes
 	// is the version a registered image replaces, tagged deprecated once it
-	// is a template.
+	// is a template. Details are what the details step writes.
 	Source     *Source           `json:"source,omitempty"`
 	Pool       string            `json:"pool,omitempty"`
 	Tags       string            `json:"tags,omitempty"`
@@ -188,8 +194,19 @@ type Item struct {
 	NICs       map[string]string `json:"nics,omitempty"`
 	Guest      *Guest            `json:"guest,omitempty"`
 	Supersedes *Source           `json:"supersedes,omitempty"`
+	Details    *ImageDetails     `json:"details,omitempty"`
 	// DNSWas is a Set DNS item's DNS server before the job, for its review.
 	DNSWas *DNSServer `json:"dns_was,omitempty"`
+	// DetailsWas is an image's details before an Edit details, for its
+	// review.
+	DetailsWas *DetailsWas `json:"details_was,omitempty"`
+}
+
+// DetailsWas is an image's details as its notes held them; Unreadable if
+// its block was (see ParseDetails), which the details step replaces.
+type DetailsWas struct {
+	Details    ImageDetails `json:"details"`
+	Unreadable bool         `json:"unreadable,omitempty"`
 }
 
 // DNSServer is a DNS choice as a host's notes record it (a host name, or

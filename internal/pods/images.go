@@ -41,8 +41,13 @@ type BaseImage struct {
 	VMID       int
 	Node       string
 	Deprecated bool
-	Notes      string // its Proxmox notes, for people: logins, what's installed
-	Source     int    // the VMID it was registered from, if its notes say
+	// Notes are its Proxmox notes for people, less their details block
+	// (see ParseDetails), which Details holds; all of them when Unreadable
+	// says the block is.
+	Notes      string
+	Details    ImageDetails
+	Unreadable bool
+	Source     int // the VMID it was registered from, if its notes say
 }
 
 // MaxImageVersion is the highest version a base image name carries.
@@ -182,7 +187,9 @@ func (p Planner) ReadNotes(ctx context.Context, images []BaseImage) []BaseImage 
 	}
 	p.eachConfig(ctx, vms, func(i int, cfg map[string]string, err error) {
 		if err == nil {
-			out[i].Notes = UserNotes(cfg["description"])
+			var derr error
+			out[i].Details, out[i].Notes, derr = ParseDetails(cfg["description"])
+			out[i].Unreadable = derr != nil
 			out[i].Source = sourceVMID(cfg["description"])
 		}
 	})

@@ -321,7 +321,7 @@ func TestRegisterReview(t *testing.T) {
 		`<dt>Becomes</dt><dd><code>elm-v1</code> <span class="meta">· new family</span> <a class="btn sm" href="/images/register?family=elm&amp;image_kind=router&amp;vmid=152">Change</a></dd>`,
 		`<dt>Kind</dt><dd>router <span class="meta">· offered as the router when creating environments</span></dd>`,
 		`<dt>Template</dt><dd>VMID 8004 on n1</dd>`,
-		`<dt>Notes</dt><dd><div class="notes box">root / opnsense`+"\nLAN .2</div></dd>",
+		`<h2 class="sub">Notes</h2><div class="notes box">root / opnsense`+"\nLAN .2</div>",
 		`<a class="btn first" href="/images" data-close>Back</a>`, "Register elm-v1</button>")
 	lacks(t, "the review", body, "will run", "<table")
 	if rec := h.post(&sess, action, fields); rec.Code != http.StatusSeeOther {

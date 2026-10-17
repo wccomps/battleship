@@ -40,6 +40,46 @@
 <a class="btn ghost sq" href="{{.}}" data-close aria-label="Close">{{icon "close"}}</a>
 {{- end}}
 
+{{/* details is an image's details (detailsView): the login first, then the
+     rest; or, for a block Battleship can't read, a note saying so above
+     the notes shown as they are. */}}
+{{define "details" -}}
+{{- if .Unreadable}}
+<p class="meta dunread">Details unreadable: the notes are shown as they are.</p>
+{{- else}}
+<dl class="kv dkv">
+{{- if .User}}
+<dt>Login</dt><dd class="login"><code>{{.User}}</code>{{with .Password}} <span class="meta">/</span> {{template "password" .}}{{end}}</dd>
+{{- end}}
+{{- range .Rows}}
+<dt>{{.Label}}</dt><dd>{{.Value}}</dd>
+{{- end}}
+</dl>
+{{- end}}
+{{- end}}
+
+{{/* password is hidden until its toggle is opened. Its Copy button, which
+     app.js shows where the clipboard can be written, copies it without
+     showing it. */}}
+{{define "password" -}}
+<span class="pw"><details><summary class="disc"><span class="show">Show password</span><span class="hide">Hide password</span></summary><code>{{.}}</code></details><button type="button" class="btn sm" data-copy hidden>{{icon "copy"}}<span aria-live="polite">Copy</span></button></span>
+{{- end}}
+
+{{/* details-fields are the details as form fields (formInputs reads them),
+     the login first as on the pages. */}}
+{{define "details-fields" -}}
+<input type="hidden" name="details" value="yes">
+<div class="dfields">
+<label class="field"><span class="lbl">Login user</span><input class="inp" type="text" name="detail_user" value="{{.User}}" maxlength="{{maxDetail}}" autocomplete="off" spellcheck="false" placeholder="e.g. Administrator"></label>
+<label class="field"><span class="lbl">Password</span><input class="inp" type="text" name="detail_password" value="{{.Password}}" maxlength="{{maxDetail}}" autocomplete="off" spellcheck="false"></label>
+<label class="field wide"><span class="lbl">OS</span><input class="inp" type="text" name="detail_os" value="{{.OS}}" maxlength="{{maxDetail}}" autocomplete="off" placeholder="e.g. Windows Server 2022 Standard"></label>
+<label class="field wide"><span class="lbl">Built</span><input class="inp" type="text" name="detail_built" value="{{.Built}}" maxlength="{{maxDetail}}" autocomplete="off" placeholder="e.g. 2026-10-14 from windows_server_2022.iso"></label>
+<label class="field wide"><span class="lbl">Generalized</span><input class="inp" type="text" name="detail_generalized" value="{{.Generalized}}" maxlength="{{maxDetail}}" autocomplete="off" placeholder="e.g. sysprep /oobe"></label>
+<label class="field wide"><span class="lbl">Installed</span><input class="inp" type="text" name="detail_installed" value="{{.Installed}}" maxlength="{{maxDetail}}" autocomplete="off" placeholder="e.g. QEMU guest agent, VirtIO drivers"></label>
+<label class="field wide"><span class="lbl">Licence</span><input class="inp" type="text" name="detail_licence" value="{{.Licence}}" maxlength="{{maxDetail}}" autocomplete="off" placeholder="e.g. 180-day evaluation from each clone's first boot"></label>
+</div>
+{{- end}}
+
 {{/* review is a review's sentence, then its facts or a row per VM (see
        reviewView). */}}
 {{define "review" -}}
@@ -47,9 +87,35 @@
 {{- with .Facts}}
 <dl class="kv">
 {{- range $f := .}}
-<dt>{{.Label}}</dt><dd>{{with .Code}}<code>{{.}}</code>{{end}}{{with .Text}}{{if $f.Code}} · {{end}}{{.}}{{end}}{{with .Meta}} <span class="meta">· {{.}}</span>{{end}}{{with .Change}} <a class="btn sm" href="{{.}}">Change</a>{{end}}{{with .Notes}}<div class="notes box">{{.}}</div>{{end}}</dd>
+<dt>{{.Label}}</dt><dd>{{with .Code}}<code>{{.}}</code>{{end}}{{with .Text}}{{if $f.Code}} · {{end}}{{.}}{{end}}{{with .Meta}} <span class="meta">· {{.}}</span>{{end}}{{with .Change}} <a class="btn sm" href="{{.}}">Change</a>{{end}}</dd>
 {{- end}}
 </dl>
+{{- end}}
+{{- if or .Details .DetailsSay}}
+<div class="sec">
+<h2 class="sub">Details</h2>
+{{- with .Details}}{{template "details" .}}{{end}}
+{{- with .DetailsSay}}<p class="meta">{{names .}}</p>{{end}}
+{{- with .EditDetails}}<p><button type="submit" class="btn sm" formaction="{{.}}" formnovalidate>{{icon "edit"}}Edit details</button></p>{{end}}
+</div>
+{{- end}}
+{{- with .Changes}}
+<div class="tscroll">
+<table class="tbl dchg">
+<thead><tr><th scope="col">Detail</th><th scope="col">Before</th><th scope="col">After</th></tr></thead>
+<tbody>
+{{- range .}}
+<tr{{if .Changed}} class="chg"{{end}}><th scope="row">{{.Label}}{{if .Changed}} <span class="chip">changed</span>{{end}}</th>
+{{- if .Password}}<td>{{with .Before}}{{template "password" .}}{{else}}—{{end}}</td><td>{{with .After}}{{template "password" .}}{{else}}<span class="meta">removed</span>{{end}}</td>
+{{- else}}<td>{{with .Before}}{{.}}{{else}}—{{end}}</td><td>{{with .After}}{{.}}{{else}}<span class="meta">removed</span>{{end}}</td>
+{{- end}}</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- end}}
+{{- with .Notes}}
+<div class="sec"><h2 class="sub">Notes</h2><div class="notes box">{{.}}</div></div>
 {{- end}}
 {{- $r := .}}
 {{- with .Rows}}

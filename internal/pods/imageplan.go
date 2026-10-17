@@ -17,6 +17,10 @@ type ImageRequest struct {
 	Family string // register, edit
 	Kind   string // register a new family; a new version keeps its family's
 	Image  string // deprecate, delete: e.g. debian-12-v1
+	// Details are what Edit details writes, and what register writes: nil
+	// is those of its source's notes (see RegisterDetails), and empty is
+	// none, the copy keeping its source's notes as they are.
+	Details *ImageDetails
 }
 
 // agentEnabled reads a VM's agent option ("1", "enabled=1,…", "1,fstrim…").
@@ -75,6 +79,11 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 	if err := CheckFamily(req.Family); err != nil {
 		return nil, err
 	}
+	if req.Details != nil {
+		if err := CheckDetails(*req.Details); err != nil {
+			return nil, err
+		}
+	}
 	vms, err := p.API.ClusterVMs(ctx)
 	if err != nil {
 		return nil, err
@@ -124,8 +133,21 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", src.Name, err)
 		}
-		it.Source.Bridges, it.Source.Base, it.Source.Notes = sourceBridges(cfg), baseNote(cfg), UserNotes(cfg["description"])
+		var derr error
+		it.Source.Bridges, it.Source.Base = sourceBridges(cfg), baseNote(cfg)
+		_, it.Source.Notes, derr = ParseDetails(cfg["description"])
+		it.Source.Unreadable = derr != nil
 		it.Blocked = agentBlock(src, cfg, kind)
+		if d, ok := RegisterDetails(cfg["description"]); ok && !d.Empty() && req.Details == nil {
+			it.Details = &d
+		}
+	}
+	if req.Details != nil && !req.Details.Empty() {
+		d := *req.Details
+		it.Details = &d
+	}
+	if it.Details != nil {
+		it.Steps = slices.Insert(it.Steps, slices.Index(it.Steps, StepLabel)+1, StepDetails)
 	}
 	return &Plan{Kind: KindImageRegister, Config: ConfigHash(KindImageRegister, p.Cfg), Items: []Item{it},
 		Locks: []string{"family:" + req.Family}}, nil
@@ -237,4 +259,37 @@ func (p Planner) ImageDelete(ctx context.Context, req ImageRequest) (*Plan, erro
 	return &Plan{Kind: KindImageDelete, Config: ConfigHash(KindImageDelete, p.Cfg),
 		Items: []Item{{Name: im.Name, VMID: im.VMID, Node: im.Node, Steps: []Step{StepDelete}}},
 		Locks: []string{"family:" + im.Family}}, nil
+}
+
+// ImageSetDetails plans writing details into the notes of a family's newest
+// version, the one new hosts are made from. Older versions keep theirs:
+// each is its own build, and hosts already made from them.
+func (p Planner) ImageSetDetails(ctx context.Context, req ImageRequest) (*Plan, error) {
+	if req.Details == nil {
+		return nil, fmt.Errorf("name the details to write")
+	}
+	d := *req.Details
+	if err := CheckDetails(d); err != nil {
+		return nil, err
+	}
+	vms, err := p.API.ClusterVMs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	newest, ok := Newest(BaseImages(vms), req.Family)
+	if !ok {
+		return nil, fmt.Errorf("family %q has no version that isn't deprecated", req.Family)
+	}
+	cfg, err := p.API.VMConfig(ctx, newest.Node, newest.VMID)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", newest.Name, err)
+	}
+	was, _, err := ParseDetails(cfg["description"])
+	it := Item{Name: newest.Name, VMID: newest.VMID, Node: newest.Node, Steps: []Step{StepDetails}, Details: &d,
+		DetailsWas: &DetailsWas{Details: was, Unreadable: err != nil}}
+	if err == nil && was == d {
+		it.Blocked = "the details of " + newest.Name + " are already these"
+	}
+	return &Plan{Kind: KindImageDetails, Config: ConfigHash(KindImageDetails, p.Cfg), Items: []Item{it},
+		Locks: []string{"family:" + req.Family}}, nil
 }

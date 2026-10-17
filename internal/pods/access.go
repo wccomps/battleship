@@ -155,6 +155,7 @@ var offerPrivileges = map[Kind][]string{
 	KindImageEdit:      {"VM.Clone"},
 	KindImageDeprecate: {"VM.Config.Options"},
 	KindImageDelete:    {"VM.Allocate"},
+	KindImageDetails:   {"VM.Config.Options"},
 	KindEnvCreate:      {"VM.Clone"},
 	KindEnvAdd:         {"VM.Clone"},
 	KindEnvDNS:         {"VM.GuestAgent.Unrestricted"},
@@ -305,7 +306,7 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config) []need {
 			ns = append(ns, one(VMPath(it.VMID), "VM.Allocate"))
 		case StepFreeDisks:
 			ns = append(ns, one("/storage/"+cfg.Deploy.Storage, "Datastore.Allocate"))
-		case StepLabel:
+		case StepLabel, StepDetails:
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Options"))
 		case StepConvert:
 			ns = append(ns, one(VMPath(it.VMID), "VM.Allocate"))
