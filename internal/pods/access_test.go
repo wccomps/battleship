@@ -88,6 +88,7 @@ func TestRollbackAcceptsEitherSnapshotPrivilege(t *testing.T) {
 // need.
 func TestDeployNeeds(t *testing.T) {
 	cfg := config.Default()
+	cfg.Images.Pool = "images"
 	tpl := TemplateSpec{Name: "teak.x.tpl", Host: "teak", VMID: 9021, MasterVMID: 121, MasterName: "teak.x", Interfaces: 2,
 		CloudInit: true, CPU: "custom-lab-baseline,flags=+aes"}
 	item := Item{Team: "01", Host: "teak", Name: "team01-teak", VMID: 10121, Template: tpl.Name,
@@ -95,7 +96,8 @@ func TestDeployNeeds(t *testing.T) {
 	plan := &Plan{Kind: KindDeploy, Teams: []string{"01"}, Templates: []TemplateSpec{tpl}, Items: []Item{item}}
 	everything := grants{
 		"/vms/121":                  {"VM.Clone"},
-		"/vms/9021":                 {"VM.Clone", "VM.Allocate"},
+		"/vms/9021":                 {"VM.Clone"},
+		"/pool/images":              {"VM.Allocate"},
 		"/storage/competitions":     {"Datastore.AllocateSpace"},
 		"/mapping/cpu/lab-baseline": {"Mapping.Use"},
 		"/pool/pool-01": {"VM.Allocate", "VM.Config.Network", "VM.Config.Cloudinit", "VM.Config.Disk",
@@ -131,6 +133,49 @@ func TestDeployNeeds(t *testing.T) {
 			if !found {
 				t.Errorf("without %s on %s, blocked = %v", priv, path, blocked(plan))
 			}
+		}
+	}
+}
+
+// A build copies the master into the images pool, which, as Proxmox
+// checks a clone, needs VM.Allocate on the pool or on the new VMID; a
+// rebuild deletes the old template first, which needs it on that VMID.
+func TestTemplateBuildNeedsAllocateInImagesPool(t *testing.T) {
+	cfg := config.Default()
+	cfg.Images.Pool = "images"
+	base := grants{"/vms/121": {"VM.Clone"}, "/storage/competitions": {"Datastore.AllocateSpace"}}
+	with := func(path string) grants {
+		g := grants{path: {"VM.Allocate"}}
+		for p, v := range base {
+			g[p] = v
+		}
+		return g
+	}
+	cases := []struct {
+		name    string
+		rebuild bool
+		acc     grants
+		want    string
+	}{
+		{"pool grant", false, with("/pool/images"), ""},
+		{"VMID grant", false, with("/vms/9021"), ""},
+		{"neither", false, base, "you don't have VM.Allocate on /pool/images"},
+		{"another pool", false, with("/pool/pool-01"), "you don't have VM.Allocate on /pool/images"},
+		{"rebuild, pool grant only", true, with("/pool/images"), "you don't have VM.Allocate on /vms/9021"},
+		{"rebuild, VMID grant", true, with("/vms/9021"), ""},
+	}
+	for _, c := range cases {
+		tpl := TemplateSpec{Name: "teak.x.tpl", Host: "teak", VMID: 9021, MasterVMID: 121, Interfaces: 1, Exists: c.rebuild, Rebuild: c.rebuild}
+		item := Item{Team: "01", Name: "team01-teak", VMID: 10121, Template: tpl.Name, Steps: []Step{StepClone}}
+		plan := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{tpl}, Items: []Item{item}}
+		if err := BlockUnpermitted(context.Background(), plan, c.acc, cfg); err != nil {
+			t.Fatal(err)
+		}
+		if got := plan.Templates[0].Blocked; got != c.want {
+			t.Errorf("%s: template blocked %q, want %q", c.name, got, c.want)
+		}
+		if c.want != "" && plan.Items[0].Blocked != "template teak.x.tpl: "+c.want {
+			t.Errorf("%s: item blocked %q", c.name, plan.Items[0].Blocked)
 		}
 	}
 }

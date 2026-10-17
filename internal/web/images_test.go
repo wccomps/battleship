@@ -137,6 +137,23 @@ func TestImagesPageCatalogue(t *testing.T) {
 	contains(t, "the page", body, `<dialog class="panel" id="panel"`)
 }
 
+// Deploys build their templates into the images pool: neither a converted
+// one, even tagged like a base image, nor one still being built shows on
+// the Images page.
+func TestImagesPageLeavesOutDeployTemplates(t *testing.T) {
+	h := newHarness(t)
+	addCatalog(h)
+	pool := h.cfg.Images.Pool
+	h.api.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta" + h.cfg.Naming.TemplateSuffix, Node: "n1", Pool: pool,
+		Template: true, Tags: "base;linux"}, map[string]string{"agent": "1", "ostype": "l26"})
+	h.api.Add(proxmox.VM{VMID: 9022, Name: "oak.tango.delta" + h.cfg.Naming.TemplateSuffix, Node: "n1", Pool: pool,
+		Status: "stopped"}, map[string]string{"agent": "1", "ostype": "l26"})
+	sess := h.login(asLead)
+	body := h.get(&sess, "/images").Body.String()
+	contains(t, "the page", body, `<div class="nm">teak-build</div>`)
+	lacks(t, "the page", body, "tango.delta", "9021", "9022")
+}
+
 // The family page knows its state: an open edit copy is the primary way to
 // the next version, the build VM a second; without an edit copy it offers
 // to open one. Deprecate is only on the current version, Delete only on

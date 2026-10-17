@@ -288,8 +288,9 @@ func ConfigHash(kind Kind, c config.Config) string {
 			Snapshot         string
 			BaselinePatterns []string
 			Pool             string
+			TemplatePool     string
 		}{c.Network, c.Deploy.Storage, c.Deploy.Linked, c.Deploy.DiskMBpsRead, c.Deploy.DiskMBpsWrite,
-			c.Deploy.SnapshotName, c.Deploy.BaselinePatterns, c.Naming.Pool}
+			c.Deploy.SnapshotName, c.Deploy.BaselinePatterns, c.Naming.Pool, c.Images.Pool}
 	case KindTeardown, KindEnvTeardown:
 		v = c.Teardown.ShutdownTimeout
 	case KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete:

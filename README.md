@@ -77,6 +77,7 @@ naming the missing privilege.
 | Step | Privilege | Path |
 |---|---|---|
 | Clone | `VM.Clone`; `VM.Allocate`; `Datastore.AllocateSpace` | template; team pool; `/storage/<deploy.storage>` |
+| Build template | `VM.Clone`; `VM.Allocate`; `Datastore.AllocateSpace` | master; `<images.pool>` (rebuild: also the old template); `/storage/<deploy.storage>` |
 | Network | `VM.Config.Network`, `VM.Config.Cloudinit`; `SDN.Use` | VM; `/sdn/zones/<proxmox.sdn_zone>/<bridge>` |
 | Disk limits / CD-ROM | `VM.Config.Disk` / `VM.Config.CDROM` | VM |
 | Snapshot / roll back | `VM.Snapshot` (or `VM.Snapshot.Rollback`) | VM |

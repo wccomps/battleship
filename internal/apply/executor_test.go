@@ -87,8 +87,8 @@ func TestDeployFromScratch(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 	tpl := f.VMs[9021]
-	if tpl == nil || !tpl.Template || tpl.Name != "teak.tango.delta.tpl" {
-		t.Fatalf("template = %+v", tpl)
+	if tpl == nil || !tpl.Template || tpl.Name != "teak.tango.delta.tpl" || tpl.Pool != config.Default().Images.Pool {
+		t.Fatalf("template = %+v, want one in the images pool", tpl)
 	}
 	vm := f.VMs[10121]
 	if vm.Pool != "pool-01" || vm.Status != "running" || !reflect.DeepEqual(vm.Snapshots, []string{"initial"}) {
@@ -495,14 +495,28 @@ func TestRebuildDeletesOldTemplateOnItsNode(t *testing.T) {
 		t.Fatalf("failed: %v", res.Failed)
 	}
 	tpl := f.VMs[9021]
-	if tpl == nil || !tpl.Template || tpl.Node != "cedar" {
-		t.Errorf("rebuilt template = %+v, want a template on the master's node", tpl)
+	if tpl == nil || !tpl.Template || tpl.Node != "cedar" || tpl.Pool != config.Default().Images.Pool {
+		t.Errorf("rebuilt template = %+v, want a template on the master's node, in the images pool", tpl)
 	}
 	if f.VMs[10121] == nil {
 		t.Error("team01-teak was not cloned from the rebuilt template")
 	}
 	if n := f.Called("volume:"); n != 0 {
 		t.Errorf("%d blind volume deletes, want 0", n)
+	}
+}
+
+// A reused template stays where it is, in the images pool or not: moving
+// it is a rebuild's job.
+func TestReusedTemplateKeepsItsPool(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true, Pool: "birch"}, nil)
+	res := testExecutor(f, &recorder{}).Run(context.Background(), deployTeak(t, f, "01"))
+	if len(res.Failed) != 0 {
+		t.Fatalf("failed: %v", res.Failed)
+	}
+	if tpl := f.VMs[9021]; tpl.Pool != "birch" || f.Called("clone:9021") != 0 {
+		t.Errorf("template = %+v, master cloned %d times; want it reused where it was", tpl.VM, f.Called("clone:9021"))
 	}
 }
 

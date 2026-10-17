@@ -203,8 +203,11 @@ func templateNeeds(t TemplateSpec, cfg config.Config) []need {
 	}
 	ns := []need{
 		one(VMPath(t.MasterVMID), "VM.Clone"),
-		one(VMPath(t.VMID), "VM.Allocate"), // the copy, its conversion, and a rebuild's delete
+		on(t.VMID, cfg.Images.Pool, "VM.Allocate"), // the copy into the images pool, and its conversion
 		one("/storage/"+cfg.Deploy.Storage, "Datastore.AllocateSpace"),
+	}
+	if t.Rebuild {
+		ns = append(ns, one(VMPath(t.VMID), "VM.Allocate")) // deleting the old template, wherever it is
 	}
 	if m := cpuMapping(t.CPU); m != "" {
 		ns = append(ns, one(m, "Mapping.Use"))
