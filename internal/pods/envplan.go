@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -40,7 +39,7 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 		return nil, err
 	}
 	if req.Router.Host == "" {
-		return nil, errors.New("a new environment needs a router")
+		return nil, errNoRouter
 	}
 	envs, vms, err := p.Environments(ctx)
 	if err != nil {
@@ -63,7 +62,7 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 // take (slotState), or why none may.
 func (p Planner) firstOpenSlot(ctx context.Context, envs []Environment, vms []proxmox.VM, domain string) (Environment, error) {
 	if e, ok := EnvByDomain(envs, domain); ok {
-		return Environment{}, fmt.Errorf("%s is already in dev slot %s; add hosts to it instead", domain, e.Slot.Name)
+		return Environment{}, domainElsewhere(domain, e)
 	}
 	reserved, err := p.reserved(ctx)
 	if err != nil {
@@ -84,46 +83,35 @@ func (p Planner) firstOpenSlot(ctx context.Context, envs []Environment, vms []pr
 			hidden = append(hidden, e.Slot.Name)
 		}
 	}
-	msg := "every dev slot is in use; archive an environment to free one"
+	msg := allSlotsInUse
 	if len(hidden) > 0 {
 		msg += fmt.Sprintf(" (dev slot %s holds VMs you can't see)", strings.Join(hidden, ", "))
 	}
 	if len(queued) > 0 {
 		msg += fmt.Sprintf(" (a queued job will fill dev slot %s)", strings.Join(queued, ", "))
 	}
-	return Environment{}, errors.New(msg)
+	return Environment{}, EnvProblem{Field: FieldSlot, Why: msg}
 }
 
 // chosenSlot is the environment req.Domain is created in when req names
 // its slot: the slot, if a new environment may take it (slotState), or the
 // environment of that domain already there.
 func (p Planner) chosenSlot(ctx context.Context, envs []Environment, vms []proxmox.VM, req EnvRequest) (Environment, error) {
-	env, err := slotN(envs, req.Slot)
-	if err != nil {
-		return Environment{}, err
-	}
-	if e, ok := EnvByDomain(envs, req.Domain); ok && e.Slot.N != req.Slot {
-		return Environment{}, fmt.Errorf("%s is already in dev slot %s; add hosts to it instead", req.Domain, e.Slot.Name)
-	}
-	if env.Domain == req.Domain {
-		return env, nil
-	}
 	reserved, err := p.reserved(ctx)
 	if err != nil {
 		return Environment{}, err
 	}
-	st, err := p.slotState(ctx, env, reserved, vms)
-	switch {
+	env, resumed, err := chosenEnv(envs, reserved, req)
+	if err != nil || resumed {
+		return env, err
+	}
+	switch held, err := p.slotHeld(ctx, env.Slot, vms); {
 	case err != nil:
 		return Environment{}, err
-	case st == slotInUse:
-		return Environment{}, fmt.Errorf("dev slot %s is in use; choose a free one", env.Slot.Name)
-	case st == slotQueued:
-		return Environment{}, fmt.Errorf("a queued job will fill dev slot %s; choose another", env.Slot.Name)
-	case st == slotHidden:
-		return Environment{}, fmt.Errorf("dev slot %s holds VMs you can't see; choose another", env.Slot.Name)
+	case held:
+		return Environment{}, slotRefused(slotHidden, env.Slot)
 	}
-	return Environment{Slot: env.Slot, Domain: req.Domain, Gateway: env.Gateway}, nil
+	return env, nil
 }
 
 // slotState says whether a new environment may take a slot: one free
@@ -223,12 +211,11 @@ func (p Planner) EnvAdd(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := oneRouter(env, req); err != nil {
+		return nil, err
+	}
 	hosts := req.Hosts
 	if req.Router.Host != "" {
-		// The existing router may be named again, to resume a failed create.
-		if _, exists := env.Host(req.Router.Host + "." + env.Domain); env.HasRouter() && !exists {
-			return nil, fmt.Errorf("%s already has a router", req.Domain)
-		}
 		hosts = append([]HostSpec{req.Router}, hosts...)
 	}
 	if len(hosts) == 0 {
@@ -248,11 +235,12 @@ func (p Planner) findEnv(ctx context.Context, domain string) (Environment, []pro
 	if e, ok := EnvByDomain(envs, domain); ok {
 		return e, vms, nil
 	}
-	return Environment{}, nil, fmt.Errorf("no dev slot holds %s; create it first", domain)
+	return Environment{}, nil, noEnv(domain)
 }
 
 // envPlan plans hosts into env. The first router-kind host gets the slot's
-// WAN and LAN bridges; every other host the LAN.
+// WAN and LAN bridges; every other host the LAN. What checkHosts finds
+// blocks a host; so does what only the cluster tells.
 func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts []HostSpec, vms []proxmox.VM) (*Plan, error) {
 	images := BaseImages(vms)
 	dnsChoice := env.DNS()
@@ -261,9 +249,9 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		dnsChoice, dnsAddr = DNSRouter, env.Gateway // the chosen host is gone: fall back for new hosts
 	}
 	plan := p.envPlanIn(kind, env.Slot, env.Domain)
-	used := env.UsedOctets()
-	claimed := map[int]string{} // octet -> host, from this request
-	seen := map[string]bool{}
+	problems := checkHosts(env, images, hosts)
+	// Explicit addresses are claimed first, so picked ones avoid them.
+	used, _ := claimOctets(env, hosts)
 	taken := map[int]bool{}
 	for _, h := range env.Hosts {
 		taken[h.VMID] = true
@@ -280,42 +268,25 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		imageCfg[im.VMID] = c
 		return c, nil
 	}
-	// Explicit addresses first, so picked ones avoid them.
-	for _, h := range hosts {
-		if existing, ok := env.Host(h.Host + "." + env.Domain); ok && existing.Notes.IP != "" {
-			continue // a resumed host keeps its address
-		}
-		if h.Octet != 0 && !used[h.Octet] && claimed[h.Octet] == "" {
-			claimed[h.Octet] = h.Host
-		}
-	}
-	for o := range claimed {
-		used[o] = true
-	}
-	for _, h := range hosts {
+	for i, h := range hosts {
 		name := h.Host + "." + env.Domain
 		it := Item{Name: name, Host: h.Host, Pool: env.Slot.Pool}
 		plan.Items = append(plan.Items, it)
 		ip := &plan.Items[len(plan.Items)-1]
-		if seen[h.Host] {
-			ip.Blocked = "named twice"
-			continue
+		im, found := Newest(images, h.Family)
+		if found {
+			ip.Source, ip.Node = &Source{VMID: im.VMID, Node: im.Node, Name: im.Name}, im.Node
 		}
-		seen[h.Host] = true
-		im, ok := Newest(images, h.Family)
-		if !ok {
-			ip.Blocked = fmt.Sprintf("no usable base image of family %q", h.Family)
-			continue
-		}
-		ip.Source, ip.Node = &Source{VMID: im.VMID, Node: im.Node, Name: im.Name}, im.Node
 		existing, resumed := env.Host(name)
+		if resumed {
+			ip.VMID, ip.Node = existing.VMID, existing.Node
+		}
+		if why := problems[i].Why; why != "" {
+			ip.Blocked = why
+			continue
+		}
 		switch {
 		case resumed:
-			ip.VMID, ip.Node = existing.VMID, existing.Node
-			if why := resumeMismatch(existing, im, h.Family); why != "" {
-				ip.Blocked = name + " already exists " + why
-				continue
-			}
 		case len(vmsNamed(vms, name)) > 0:
 			ip.Blocked = "a VM named " + name + " already exists outside " + env.Slot.Pool
 			continue
@@ -339,10 +310,6 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		}
 		switch im.Kind {
 		case ImageRouter:
-			if env.HasRouter() && !resumed || slices.ContainsFunc(plan.Items[:len(plan.Items)-1], func(o Item) bool { return o.NICs["net1"] != "" }) {
-				ip.Blocked = "an environment has one router"
-				continue
-			}
 			if cfg["net1"] == "" {
 				ip.Blocked = "base image " + im.Name + " has one NIC; a router needs two (WAN on net0, LAN on net1)"
 				continue
@@ -362,18 +329,11 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 			ip.Steps = ip.Steps[1:]
 		}
 		if im.Kind == ImageWindows || im.Kind == ImageLinux {
-			if im.Kind == ImageWindows && len(h.Host) > MaxWindowsHostname {
-				ip.Blocked = fmt.Sprintf("Windows host names are at most %d characters", MaxWindowsHostname)
-				continue
-			}
 			octet := LastOctet(existing.Notes.IP)
 			switch {
 			case resumed && octet != 0:
-			case h.Octet != 0 && claimed[h.Octet] == h.Host:
+			case h.Octet != 0: // checkHosts found it claimed by this host
 				octet = h.Octet
-			case h.Octet != 0:
-				ip.Blocked = fmt.Sprintf("address .%d is already taken in %s", h.Octet, env.Domain)
-				continue
 			default:
 				o, ok := PickOctet(env.Domain, h.Host, used)
 				if !ok {
