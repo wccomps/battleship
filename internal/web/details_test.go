@@ -307,7 +307,7 @@ func TestEditNotesJob(t *testing.T) {
 	rec := h.post(&sess, "/images/details/preview", notesForm("win2022", edited, notes))
 	contains(t, "an unchanged review", rec.Body.String(), "The notes of <span class=\"name\">win2022-v1</span> already say this.")
 	lacks(t, "an unchanged review", rec.Body.String(), "/images/details/confirm")
-	// Only the free text changed: a job, its review saying the details stay.
+	// Clearing the free text alone is a change, which the review says.
 	_, _, body = h.preview(&sess, "/images/details", notesForm("win2022", edited, ""))
 	contains(t, "a review removing the notes", body, `<span class="chip">changed</span>`, `<div class="meta">After</div><p class="meta">None: removed.</p>`)
 
