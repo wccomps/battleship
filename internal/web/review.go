@@ -222,14 +222,7 @@ func (s *Server) envReview(op operation, in jobs.Inputs, plan *pods.Plan) *revie
 // networks it leaves alone.
 func (s *Server) teardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
 	r := &reviewView{Verb: "Tear down", Subject: in.Domain, Image: true, Addr: true, Deletes: true}
-	pool := "its slot"
-	for _, k := range plan.Locks {
-		if v, ok := strings.CutPrefix(k, "slot:"); ok {
-			if n, err := strconv.Atoi(v); err == nil {
-				pool = pods.ExpandSlot(s.cfg.Environments.Pool, n)
-			}
-		}
-	}
+	pool := poolOf(plan.Items)
 	deletes, blocked := 0, 0
 	var disks []string
 	for _, it := range plan.Items {
@@ -254,8 +247,8 @@ func (s *Server) teardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
 			disks = append(disks, strconv.Itoa(it.VMID))
 		}
 	}
-	for _, n := range plan.Notices {
-		r.Kept = append(r.Kept, strings.TrimPrefix(n, "Not touched: "))
+	for _, k := range plan.Kept {
+		r.Kept = append(r.Kept, k.Name+" is "+k.Why+".")
 	}
 	var say []string
 	if deletes > 0 {

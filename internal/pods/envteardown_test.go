@@ -65,8 +65,14 @@ func TestEnvTeardownDeletesOnlyItsOwnVMs(t *testing.T) {
 	if teak := plan.Items[2]; teak.VMID != 2101 || teak.Node != "alder" || teak.Notes.IP != "192.168.100.10" || teak.Notes.Base != "debian-12-v2" {
 		t.Errorf("teak = %+v notes %+v", teak, teak.Notes)
 	}
-	if !slices.Equal(plan.Notices, []string{"Not touched: stray is outside dev-01 but has a NIC on its networks."}) {
-		t.Errorf("notices = %q", plan.Notices)
+	if want := []KeptVM{{Name: "stray", Why: "outside dev-01 but has a NIC on its networks"}}; !slices.Equal(plan.Kept, want) || len(plan.Notices) != 0 {
+		t.Errorf("kept = %q, notices = %q", plan.Kept, plan.Notices)
+	}
+	if got := plan.Kept[0].String(); got != "Not touched: stray is outside dev-01 but has a NIC on its networks." {
+		t.Errorf("kept as a notice: %q", got)
+	}
+	if plan.Slot != "01" || slices.ContainsFunc(plan.Items, func(it Item) bool { return it.Pool != "dev-01" }) {
+		t.Errorf("slot %q, items %+v", plan.Slot, plan.Items)
 	}
 	if plan.Kind != KindEnvTeardown || plan.Config != ConfigHash(KindEnvTeardown, envConfig()) {
 		t.Errorf("plan = %+v", plan)
@@ -134,6 +140,9 @@ func TestEnvTeardownPlansWhatAFailedOneLeft(t *testing.T) {
 		if !strings.Contains(it.Blocked, "half-deleted") || !strings.Contains(it.Blocked, "qm destroy") {
 			t.Errorf("%s = %+v", it.Name, it)
 		}
+	}
+	if slices.ContainsFunc(plan.Items, func(it Item) bool { return it.Pool != "dev-01" }) {
+		t.Errorf("items %+v, want each in dev-01", plan.Items)
 	}
 	// By domain alone there is nothing of kilo.alpha left to find.
 	if _, err := NewPlanner(f, envConfig()).EnvTeardown(context.Background(), EnvRequest{Domain: "kilo.alpha"}); err == nil {

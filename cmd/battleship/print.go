@@ -127,6 +127,9 @@ func printPlan(w io.Writer, naming pods.Naming, plan *pods.Plan) {
 	for _, n := range plan.Notices {
 		fmt.Fprintln(w, "Note: "+clean(n))
 	}
+	for _, k := range plan.Kept {
+		fmt.Fprintln(w, "Note: "+clean(k.String()))
+	}
 }
 
 // printCapacity prints what the plan needs against what the cluster has

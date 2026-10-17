@@ -390,6 +390,17 @@ func TestPrintPlanShowsNotices(t *testing.T) {
 	}
 }
 
+// An environment teardown's kept VMs print as notes, cleaned: a VM name is
+// anyone's to choose.
+func TestPrintPlanShowsKeptVMs(t *testing.T) {
+	var buf bytes.Buffer
+	printPlan(&buf, pods.NewNaming(config.Default().Naming), &pods.Plan{Kind: pods.KindEnvTeardown,
+		Kept: []pods.KeptVM{{Name: "stray\x1b[2J", Why: "outside dev-01 but has a NIC on its networks"}}})
+	if want := `Note: Not touched: stray\x1b[2J is outside dev-01 but has a NIC on its networks.`; !strings.Contains(buf.String(), want) || strings.Contains(buf.String(), "\x1b") {
+		t.Errorf("want %q, cleaned:\n%q", want, buf.String())
+	}
+}
+
 func TestPrintCleanupSummary(t *testing.T) {
 	var out bytes.Buffer
 	printResult(&out, apply.Result{

@@ -94,7 +94,7 @@ func parseEnv(args []string, stderr io.Writer) (c command, code int, ok bool) {
 	switch in.Kind {
 	case pods.KindEnvCreate, pods.KindEnvAdd:
 		if in.Kind == pods.KindEnvCreate {
-			fs.StringVar(&in.Slot, "slot", "", "the dev slot to create it in, e.g. 02; it must be free (default: the first free one)")
+			fs.StringVar(&in.Slot, "slot", "", "the dev slot to create it in, e.g. 02: a free one, or the one already holding -domain, to resume it (default: the first free one)")
 		}
 		fs.StringVar(&in.Router, "router", "", "router as name=image, e.g. gw=opnsense (required to create)")
 		fs.Var(&hosts, "host", "host as name=image or name=image:octet, e.g. dc=win2022:10; repeat for each")

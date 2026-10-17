@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -271,8 +270,8 @@ func (in Inputs) EnvRequest() (pods.EnvRequest, error) {
 	req := pods.EnvRequest{Domain: strings.TrimSpace(in.Domain), DNS: strings.TrimSpace(in.DNS)}
 	var errs []error
 	if in.Slot != "" {
-		n, err := strconv.Atoi(in.Slot)
-		if err != nil || n < 1 || pods.SlotName(n) != in.Slot {
+		n, ok := pods.ParseSlotName(in.Slot)
+		if !ok {
 			errs = append(errs, fmt.Errorf("slot %q must be a dev slot's number, two digits like 02", in.Slot))
 		}
 		req.Slot = n

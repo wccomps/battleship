@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -34,6 +35,16 @@ func ExpandSlot(pattern string, n int) string {
 
 // SlotName is slot n's name: n as two digits.
 func SlotName(n int) string { return fmt.Sprintf("%02d", n) }
+
+// ParseSlotName is the slot number name stands for, if SlotName writes it
+// so: "02" is 2, while "2" and "002" are no slot's name.
+func ParseSlotName(name string) (int, bool) {
+	n, err := strconv.Atoi(name)
+	return n, err == nil && n >= 1 && SlotName(n) == name
+}
+
+// slotLock is the lock key of the slot named name.
+func slotLock(name string) string { return "slot:" + name }
 
 // Slots lists the configured slots; the config is validated, so the range
 // parses.
@@ -93,6 +104,15 @@ func EnvByDomain(envs []Environment, domain string) (Environment, bool) {
 		}
 	}
 	return Environment{}, false
+}
+
+// slotN is the environment of envs in slot n.
+func slotN(envs []Environment, n int) (Environment, error) {
+	i := slices.IndexFunc(envs, func(e Environment) bool { return e.Slot.N == n })
+	if i < 0 {
+		return Environment{}, fmt.Errorf("there's no dev slot %s", SlotName(n))
+	}
+	return envs[i], nil
 }
 
 func (e Environment) Free() bool {

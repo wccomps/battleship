@@ -401,9 +401,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 			p.AlreadyN, p.AlreadyWord = s.alreadyDone(ctx, in.Action, plan.Runnable())
 		}
 	}
-	if op.Kind != pods.KindEnvTeardown { // its review lists them as not touched
-		p.Warnings = append(p.Warnings, plan.Notices...) // what was left alone, even when nothing runs
-	}
+	p.Warnings = append(p.Warnings, plan.Notices...) // what was left alone, even when nothing runs
 	if p.Review = s.review(ctx, op, in, plan, p.Nothing); p.Review != nil {
 		p.Heading = p.Review.Verb + " " + p.Review.Subject
 		p.EditHref, p.Review.Retry = reviewBack(op, in), opts.retryOf

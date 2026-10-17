@@ -12,8 +12,9 @@ import (
 // EnvTeardown plans deleting the environment with req.Domain: each VM in its
 // slot's pool (Environment.Hosts), stopped cleanly and then deleted as a team
 // teardown does. VMs outside the pool on its networks (Users) are never
-// touched; the plan's notices name them. Its half-deleted VMs are listed
-// blocked, and disks gone VMs left in the slot's VMIDs are freed. req.Slot, if set (a retry's), names the slot, which may by then
+// touched; the plan keeps them (Kept). Its half-deleted VMs are listed
+// blocked, and disks gone VMs left in the slot's VMIDs are freed. Every
+// item carries the slot's pool. req.Slot, if set (a retry's), names the slot, which may by then
 // hold nothing of the domain but what a failed delete left.
 func (p Planner) EnvTeardown(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if err := CheckDomain(req.Domain); err != nil {
@@ -28,8 +29,7 @@ func (p Planner) EnvTeardown(ctx context.Context, req EnvRequest) (*Plan, error)
 		return nil, err
 	}
 	s := env.Slot
-	plan := &Plan{Kind: KindEnvTeardown, Config: ConfigHash(KindEnvTeardown, p.Cfg),
-		Locks: []string{"slot:" + s.Name, "domain:" + req.Domain}}
+	plan := p.envPlanIn(KindEnvTeardown, s, req.Domain)
 	listed := map[int]proxmox.VM{}
 	for _, vm := range vms {
 		listed[vm.VMID] = vm
@@ -39,7 +39,7 @@ func (p Planner) EnvTeardown(ctx context.Context, req EnvRequest) (*Plan, error)
 			continue // teardownEnv refuses a slot of mixed domains
 		}
 		notes := h.Notes
-		it := Item{Name: h.Name, Host: h.Host, VMID: h.VMID, Node: h.Node, Tags: h.Tags, Notes: &notes,
+		it := Item{Name: h.Name, Host: h.Host, VMID: h.VMID, Node: h.Node, Pool: s.Pool, Tags: h.Tags, Notes: &notes,
 			Steps: []Step{StepStop, StepDelete}}
 		if listed[h.VMID].Template {
 			it.Blocked = "is a template, not one of " + req.Domain + "'s VMs; move it out of " + s.Pool + " first"
@@ -47,17 +47,19 @@ func (p Planner) EnvTeardown(ctx context.Context, req EnvRequest) (*Plan, error)
 		plan.Items = append(plan.Items, it)
 	}
 	for _, h := range env.HalfDeleted {
-		plan.Items = append(plan.Items, halfDeletedItem(h.VMID, h.Node))
+		it := halfDeletedItem(h.VMID, h.Node)
+		it.Pool = s.Pool
+		plan.Items = append(plan.Items, it)
 	}
 	for _, u := range env.Users {
-		plan.Notices = append(plan.Notices, fmt.Sprintf("Not touched: %s is outside %s but has a NIC on its networks.", u, s.Pool))
+		plan.Kept = append(plan.Kept, KeptVM{Name: u, Why: "outside " + s.Pool + " but has a NIC on its networks"})
 	}
 	var cands []int
 	for id := s.FirstVMID; id <= s.LastVMID(); id++ {
 		cands = append(cands, id)
 	}
 	err = p.orphanedDisks(ctx, plan, vms, cands, func(vmid int, node string) Item {
-		return Item{Name: "disks-" + strconv.Itoa(vmid), VMID: vmid, Node: node, Steps: []Step{StepFreeDisks}}
+		return Item{Name: "disks-" + strconv.Itoa(vmid), VMID: vmid, Node: node, Pool: s.Pool, Steps: []Step{StepFreeDisks}}
 	})
 	if err != nil {
 		return nil, err
@@ -81,16 +83,16 @@ func teardownEnv(envs []Environment, req EnvRequest) (Environment, error) {
 			e.Slot.Name, req.Domain, e.Slot.Pool)
 	}
 	if req.Slot != 0 {
-		i := slices.IndexFunc(envs, func(e Environment) bool { return e.Slot.N == req.Slot })
+		env, err := slotN(envs, req.Slot)
 		switch {
-		case i < 0:
-			return Environment{}, fmt.Errorf("there's no dev slot %s", SlotName(req.Slot))
-		case envs[i].Mixed:
-			return Environment{}, mixed(envs[i])
-		case envs[i].Domain != "" && envs[i].Domain != req.Domain:
-			return Environment{}, fmt.Errorf("dev slot %s holds %s, not %s", envs[i].Slot.Name, envs[i].Domain, req.Domain)
+		case err != nil:
+			return Environment{}, err
+		case env.Mixed:
+			return Environment{}, mixed(env)
+		case env.Domain != "" && env.Domain != req.Domain:
+			return Environment{}, fmt.Errorf("dev slot %s holds %s, not %s", env.Slot.Name, env.Domain, req.Domain)
 		}
-		return envs[i], nil
+		return env, nil
 	}
 	if e, ok := EnvByDomain(envs, req.Domain); ok {
 		return e, nil

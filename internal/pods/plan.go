@@ -198,7 +198,20 @@ type Plan struct {
 	// Notices are what a person should know the plan leaves alone, such as
 	// VMs named like team VMs that aren't; nothing acts on them.
 	Notices []string `json:"notices,omitempty"`
+	// Slot is an environment plan's dev slot (SlotName); Locks holds it.
+	Slot string `json:"slot,omitempty"`
+	// Kept are the VMs an environment's teardown leaves alone, and why.
+	Kept []KeptVM `json:"kept,omitempty"`
 }
+
+// KeptVM is a VM a plan leaves alone: Why completes "Name is ...".
+type KeptVM struct {
+	Name string `json:"name"`
+	Why  string `json:"why"`
+}
+
+// String is the notice the CLI prints for it.
+func (k KeptVM) String() string { return "Not touched: " + k.Name + " is " + k.Why + "." }
 
 // LockKeys are what a plan changes and, apart, what it only reads (its
 // items' Sources), as lock keys (see the store's blocksSQL). Besides its own

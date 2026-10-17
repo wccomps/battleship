@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/store"
@@ -101,11 +100,7 @@ func envRetry(id int64, in Inputs, plan pods.Plan, planned map[string]pods.Item,
 		in.VMs = sortedUnique(names)
 	}
 	if (in.Kind == pods.KindEnvCreate || in.Kind == pods.KindEnvTeardown) && in.Slot == "" {
-		for _, k := range plan.Locks {
-			if slot, ok := strings.CutPrefix(k, "slot:"); ok {
-				in.Slot = slot
-			}
-		}
+		in.Slot = plan.Slot
 	}
 	return in, nil
 }

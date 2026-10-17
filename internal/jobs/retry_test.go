@@ -335,7 +335,7 @@ func TestPropRetryInputs(t *testing.T) {
 // A failed create is retried for its unfinished VMs, with its router and
 // hosts as asked and the slot it planned, so the planner resumes it there.
 func TestRetryInputsOfAnEnvironment(t *testing.T) {
-	plan := pods.Plan{Kind: pods.KindEnvCreate, Locks: []string{"slot:02", "domain:kilo.alpha"},
+	plan := pods.Plan{Kind: pods.KindEnvCreate, Slot: "02", Locks: []string{"slot:02", "domain:kilo.alpha"},
 		Items: []pods.Item{{Name: "gw.kilo.alpha", Host: "gw"}, {Name: "dc.kilo.alpha", Host: "dc"}, {Name: "web.kilo.alpha", Host: "web"}}}
 	orig := Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.alpha", Router: "gw=gw", EnvHosts: []string{"dc=win2022:10", "web=debian-12"}}
 	items := []store.Item{
@@ -371,7 +371,7 @@ func TestRetryInputsOfAnEnvironment(t *testing.T) {
 // what it deleted is gone, and what a failed delete left is planned anew
 // (a half-deleted VM, leftover disks), so its VMs aren't narrowed.
 func TestRetryInputsOfAnEnvironmentTeardown(t *testing.T) {
-	plan := pods.Plan{Kind: pods.KindEnvTeardown, Locks: []string{"slot:03", "domain:kilo.alpha"},
+	plan := pods.Plan{Kind: pods.KindEnvTeardown, Slot: "03", Locks: []string{"slot:03", "domain:kilo.alpha"},
 		Items: []pods.Item{{Name: "gw.kilo.alpha", Host: "gw"}, {Name: "dc.kilo.alpha", Host: "dc"}}}
 	orig := Inputs{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"}
 	items := []store.Item{
