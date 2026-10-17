@@ -12,8 +12,8 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// catalogPage is the data of the Images and Environments pages and of their
-// forms.
+// catalogPage is the data of the Environments page and of the image and
+// environment forms.
 type catalogPage struct {
 	Op       operation // set on forms
 	In       jobs.Inputs
@@ -25,8 +25,7 @@ type catalogPage struct {
 	Families []string         // every family, once
 	Kinds    []string
 	Subnet   string
-	ReadErr  string                   // why the cluster couldn't be read
-	Ready    []pods.RegisterCandidate // VMs to register from (the images page)
+	ReadErr  string // why the cluster couldn't be read
 	// Env is the environment an env-add or env-dns form works on; Picking,
 	// that the form must first ask which.
 	Env     *pods.Environment
@@ -99,34 +98,8 @@ func (p catalogPage) Carry() []field {
 	return slices.DeleteFunc(inputFields(p.In), func(f field) bool { return f.Name == fieldDomain })
 }
 
-// CurrentImages are the versions that aren't deprecated.
-func (p catalogPage) CurrentImages() []pods.BaseImage {
-	return slices.DeleteFunc(slices.Clone(p.Images), func(im pods.BaseImage) bool { return im.Deprecated })
-}
-
-// DeprecatedImages are the deprecated versions, which the images page folds
-// away.
-func (p catalogPage) DeprecatedImages() []pods.BaseImage {
-	return slices.DeleteFunc(slices.Clone(p.Images), func(im pods.BaseImage) bool { return !im.Deprecated })
-}
-
-// catalogView is a catalog page showing "images" or "environments".
-type catalogView struct {
-	catalogPage
-	Show string
-}
-
 func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, http.StatusOK, "catalog", s.newView(w, r, "Environments", "environments",
-		catalogView{s.newCatalogPage(r.Context()), "environments"}))
-}
-
-func (s *Server) imagesPage(w http.ResponseWriter, r *http.Request) {
-	p := s.newCatalogPage(r.Context())
-	planner := s.planner(r.Context())
-	p.Images = planner.ReadNotes(r.Context(), p.Images)
-	p.Ready = planner.RegisterCandidates(r.Context(), p.vms, p.Images)
-	s.render(w, r, http.StatusOK, "catalog", s.newView(w, r, "Images", "images", catalogView{p, "images"}))
+	s.render(w, r, http.StatusOK, "catalog", s.newView(w, r, "Environments", "environments", s.newCatalogPage(r.Context())))
 }
 
 // withNotes reads the notes of the images an environment form lists.

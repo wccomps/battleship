@@ -255,6 +255,9 @@ func (s *Server) volunteerRoutes(mux *http.ServeMux) {
 
 	mux.Handle("GET /environments", s.require(http.HandlerFunc(s.environmentsPage)))
 	mux.Handle("GET /images", s.require(http.HandlerFunc(s.imagesPage)))
+	// The image operations' paths are more specific, so they win over a
+	// family's; pods.ReservedFamilies keeps families from taking their names.
+	mux.Handle("GET /images/{family}", s.require(http.HandlerFunc(s.familyPage)))
 
 	// Job history lives at /logs so nobody looks there to start something.
 	mux.Handle("GET /logs", s.require(http.HandlerFunc(s.jobsPage)))

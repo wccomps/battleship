@@ -39,3 +39,13 @@
 {{define "close" -}}
 <a class="btn ghost sq" href="{{.}}" data-close aria-label="Close">{{icon "close"}}</a>
 {{- end}}
+
+{{/* review is a review's sentence and facts (see reviewView). */}}
+{{define "review" -}}
+<p class="say{{if .Blocked}} bad{{end}}">{{if .Blocked}}{{icon "blocked"}}{{else}}{{icon "copy"}}{{end}}<span>{{names .Say}}</span></p>
+<dl class="kv">
+{{- range $f := .Facts}}
+<dt>{{.Label}}</dt><dd>{{with .Code}}<code>{{.}}</code>{{end}}{{with .Text}}{{if $f.Code}} · {{end}}{{.}}{{end}}{{with .Meta}} <span class="meta">· {{.}}</span>{{end}}{{with .Change}} <a class="btn sm" href="{{.}}">Change</a>{{end}}{{with .Notes}}<div class="notes box">{{.}}</div>{{end}}</dd>
+{{- end}}
+</dl>
+{{- end}}

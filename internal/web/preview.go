@@ -61,6 +61,81 @@ type previewPage struct {
 	// Reselect, for a reset or snapshot of grid-ticked VMs, labels a button that
 	// posts them back to the operation's form to choose again.
 	Reselect string
+	// Review, if set, replaces the facts, consequence and table: a register's
+	// review.
+	Review *reviewView
+}
+
+// reviewView is a review that reads as a plan: one sentence saying what
+// will happen, then the facts of what will exist.
+type reviewView struct {
+	Verb, Subject string // the title: "Register teak-build"
+	Say           string // what confirming does, or why it can't
+	Blocked       bool
+	Facts         []reviewFact
+}
+
+// reviewFact is a labelled fact of a review: a name, text and a muted note,
+// a link to change it, or notes in a box.
+type reviewFact struct {
+	Label  string
+	Code   string
+	Text   string
+	Meta   string
+	Change string // the form, filled in, to change it
+	Notes  string
+}
+
+// kindUses says what each base-image kind is offered as.
+var kindUses = map[string]string{
+	pods.ImageRouter:  "offered as the router when creating environments",
+	pods.ImageWindows: "named and addressed through the guest agent",
+	pods.ImageLinux:   "named and addressed through the guest agent",
+	pods.ImageOther:   "cloned as it is; Battleship doesn't set its name or address",
+}
+
+// registerReview describes registering it: the source VM, the image it
+// becomes and how, its kind, where the template lands, and the source's
+// notes, which the copy keeps.
+func (s *Server) registerReview(ctx context.Context, op operation, in jobs.Inputs, it pods.Item) *reviewView {
+	src := pods.Source{Name: "?"}
+	if it.Source != nil {
+		src = *it.Source
+	}
+	var desc string
+	if cfg, err := s.apiFor(ctx).VMConfig(ctx, src.Node, src.VMID); err == nil {
+		desc = cfg["description"]
+	}
+	how := "next version"
+	if _, v, ok := pods.ParseImageName(it.Name); ok && v == 1 {
+		how = "new family"
+	}
+	if n, _ := pods.ParseNotes(desc); n.Base != "" {
+		if _, v, ok := pods.ParseImageName(n.Base); ok {
+			how = "edit copy of v" + strconv.Itoa(v)
+		}
+	}
+	r := &reviewView{Verb: "Register", Subject: src.Name,
+		Say: "Copies " + src.Name + " into a new template, " + it.Name + ". The build VM stays as it is."}
+	if it.Blocked != "" {
+		r.Say, r.Blocked = sentence(it.Blocked), true
+	}
+	r.Facts = append(r.Facts,
+		reviewFact{Label: "From", Code: src.Name, Text: "VMID " + strconv.Itoa(src.VMID) + " · " + src.Node},
+		reviewFact{Label: "Becomes", Code: it.Name, Meta: how, Change: formQuery(op, in)})
+	for _, k := range pods.Tags(it.Tags) {
+		if use, ok := kindUses[k]; ok {
+			r.Facts = append(r.Facts, reviewFact{Label: "Kind", Text: k, Meta: use})
+		}
+	}
+	r.Facts = append(r.Facts, reviewFact{Label: "Template", Text: "VMID " + strconv.Itoa(it.VMID) + " on " + it.Node})
+	if it.Supersedes != nil {
+		r.Facts = append(r.Facts, reviewFact{Label: "Replaces", Code: it.Supersedes.Name, Meta: "deprecated once this is registered"})
+	}
+	if notes := pods.UserNotes(desc); notes != "" {
+		r.Facts = append(r.Facts, reviewFact{Label: "Notes", Notes: notes})
+	}
+	return r
 }
 
 // capacityView is the preview's resource summary: a row per node memory or
@@ -185,7 +260,7 @@ func (s *Server) showPreview(w http.ResponseWriter, r *http.Request, code int, o
 			Nonce:       nonce,
 			Fingerprint: fp,
 			RetryOf:     opts.retryOf,
-			Button:      confirmLabel(op, in, len(plan.Runnable())),
+			Button:      confirmLabel(op, in, plan.Runnable()),
 			Danger:      destructive(in),
 		}
 		if op.Kind.TypedConfirm() {
@@ -226,8 +301,13 @@ func newNonce() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// confirmLabel is the confirm button's text, e.g. "Force stop 2 VMs".
-func confirmLabel(op operation, in jobs.Inputs, n int) string {
+// confirmLabel is the confirm button's text, e.g. "Force stop 2 VMs", or
+// for a register the image it makes: "Register teak-v2".
+func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
+	n := len(runnable)
+	if op.Kind == pods.KindImageRegister && n == 1 {
+		return "Register " + runnable[0].Name
+	}
 	vms := "1 VM"
 	if n != 1 {
 		vms = strconv.Itoa(n) + " VMs"
@@ -354,6 +434,10 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		}
 	}
 	p.Warnings = append(p.Warnings, plan.Notices...) // what was left alone, even when nothing runs
+	if op.Kind == pods.KindImageRegister && len(plan.Items) == 1 {
+		p.Review = s.registerReview(ctx, op, in, plan.Items[0])
+		p.Heading = p.Review.Verb + " " + p.Review.Subject
+	}
 
 	return p
 }

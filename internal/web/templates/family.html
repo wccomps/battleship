@@ -1,0 +1,61 @@
+{{define "content" -}}
+{{- $csrf := .CSRF}}
+{{- with .Data}}
+{{- $d := .}}
+<div class="sheet family" aria-labelledby="fam-title">
+<div class="ph"><h1 id="fam-title"><span class="vm">{{.Family}}</span><span class="chip">{{.Kind}}</span></h1><span class="sp"></span>{{template "close" "/images"}}</div>
+<div class="pb">
+<dl class="kv">
+<dt>Current</dt><dd>{{with .Current}}<code>{{.Name}}</code> · VMID {{.VMID}} · {{.Node}}{{else}}none <span class="meta">· every version is deprecated</span>{{end}}</dd>
+{{- with .Source}}
+<dt>Built from</dt><dd><code>{{.Name}}</code> · VMID {{.VMID}} · {{.Status}}</dd>
+{{- end}}
+</dl>
+{{- with .Notes}}
+<div class="sec"><h2 class="sub">Notes</h2><div class="notes box">{{.}}</div></div>
+{{- end}}
+<div class="sec next">
+<h2 class="sub">Next version · v{{.Next}}</h2>
+{{- with .Edit}}
+<div class="say">{{icon "done"}}<div><b><code>{{.Name}}</code> is open for editing</b> <span class="meta">(VMID {{.VMID}})</span><div class="meta">Register it when you've finished patching it.</div></div></div>
+{{- if .Blocked}}
+<p class="fix">{{icon "warn"}}<span>{{names .Blocked}}</span></p>
+{{- else}}
+<form method="post" action="/images/register/preview">{{template "csrf" $csrf}}<input type="hidden" name="vmid" value="{{.VMID}}"><input type="hidden" name="family" value="{{$d.Family}}">
+<button class="btn pri" type="submit"{{if not $d.MayClone}} disabled{{end}}>Register {{.Name}} as v{{$d.Next}}</button></form>
+{{- end}}
+{{- else}}{{with .Current}}
+<div class="say">{{icon "copy"}}<div><div>Open <code>{{.Name}}</code> for editing</div><div class="meta">Copies it as <code>{{$d.Family}}-edit</code> on the edit network, for you to patch and register here.</div></div></div>
+<form method="post" action="/images/edit/preview">{{template "csrf" $csrf}}<input type="hidden" name="family" value="{{$d.Family}}">
+<button class="btn{{if not $d.Source}} pri{{end}}" type="submit"{{if not $d.MayClone}} disabled{{end}}>Open for editing</button></form>
+{{- end}}{{end}}
+{{- with .Source}}
+<div class="say">{{icon "copy"}}<div><div>{{if $d.Edit}}Or copy{{else}}Copy{{end}} <code>{{.Name}}</code> in again</div><div class="meta">Use this after patching the build VM itself.</div></div></div>
+<form method="post" action="/images/register/preview">{{template "csrf" $csrf}}<input type="hidden" name="vmid" value="{{.VMID}}"><input type="hidden" name="family" value="{{$d.Family}}">
+<button class="btn{{if not $d.Edit}} pri{{end}}" type="submit"{{if not $d.MayClone}} disabled{{end}}>New version from {{.Name}}</button></form>
+{{- end}}
+{{- if not (or .Edit .Current .Source)}}
+<p class="meta">Its build VM is gone and no version is current: register a new build VM into this family from Images.</p>
+{{- end}}
+</div>
+<div class="sec">
+<h2 class="sub">Versions</h2>
+<ul class="vers">
+{{- range .Versions}}
+<li><code>v{{.Version}}</code>{{if .Current}}<span class="chip cur">current</span>{{else if .Deprecated}}<span class="chip">deprecated</span>{{end}}<span class="meta">{{.VMID}} · {{.Node}}</span><span class="sp"></span>
+{{- if .Current}}
+<form method="post" action="/images/deprecate/preview">{{template "csrf" $csrf}}<input type="hidden" name="image" value="{{.Name}}"><button class="btn sm" type="submit"{{if not .May}} disabled{{end}}>Deprecate</button></form>
+{{- else if .Deprecated}}
+<form method="post" action="/images/delete/preview">{{template "csrf" $csrf}}<input type="hidden" name="image" value="{{.Name}}"><button class="btn sm bad" type="submit"{{if not .May}} disabled{{end}}>Delete</button></form>
+{{- end}}</li>
+{{- end}}
+</ul>
+{{- range .Lacks}}
+<p class="lock">{{icon "lock"}}{{.}}</p>
+{{- end}}
+</div>
+</div>
+<div class="pf start"><a class="btn" href="/images" data-close>Back to Images</a></div>
+</div>
+{{- end}}
+{{- end}}

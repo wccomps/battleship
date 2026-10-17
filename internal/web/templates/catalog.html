@@ -1,82 +1,12 @@
 {{define "content" -}}
 {{- with .Data}}
 <div class="sheet">
-<div class="ph"><h1 id="form-title">{{if eq .Show "images"}}Base images{{else}}Environments{{end}}</h1><span class="sp"></span>
-{{- if eq .Show "images"}}
-<a class="btn pri" href="/images/register">Register base image</a>
-{{- else}}
+<div class="ph"><h1 id="form-title">Environments</h1><span class="sp"></span>
 <a class="btn pri" href="/environments/new">Create environment</a>
-{{- end}}
 </div>
 <div class="pb">
 {{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
-{{- if eq .Show "images"}}
-{{- if .Images}}
-{{- with .CurrentImages}}
-<div class="tscroll">
-<table class="tbl cards">
-<thead><tr><th scope="col">Image</th><th scope="col">Notes</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
-<tbody>
-{{- range .}}
-<tr>
-<td class="img"><div class="iname">{{names .Name}}</div>
-<div class="chips"><span class="chip">{{.Kind}}</span></div>
-<div class="meta">VMID {{.VMID}} · {{.Node}}</div></td>
-<td>{{with .Notes}}<div class="notes">{{.}}</div>{{else}}<span class="meta">none</span>{{end}}</td>
-<td class="act"><div class="acts">
-<a class="btn sm" href="/images/register?family={{.Family}}{{with .Source}}&amp;vmid={{.}}{{end}}" title="{{with .Source}}Copy VM {{.}} in again as the next version{{else}}Register the next version{{end}}">New version</a>
-<a class="btn sm" href="/images/edit?family={{.Family}}">Open for editing</a>
-<a class="btn sm" href="/images/deprecate?image={{.Name}}">Deprecate</a>
-<a class="btn sm bad" href="/images/delete?image={{.Name}}">Delete</a>
-</div></td>
-</tr>
-{{- end}}
-</tbody>
-</table>
-</div>
-{{- end}}
-{{- with .DeprecatedImages}}
-<details class="olds">
-<summary class="disc">Deprecated versions ({{len .}})</summary>
-<ul>
-{{- range .}}
-<li><span>{{names .Name}} <span class="meta">· {{.Kind}} · VMID {{.VMID}} · {{.Node}}</span></span><a class="btn sm bad" href="/images/delete?image={{.Name}}">Delete</a></li>
-{{- end}}
-</ul>
-</details>
-{{- end}}
-{{- else if not .ReadErr}}
-<p class="say">No base images yet. Install an OS on a VM in the images pool, generalize it, shut it down, then register it here.</p>
-{{- end}}
-{{- with .Ready}}
-<h2 class="sub" id="ready">VMs in the images pool</h2>
-<p class="meta">Register one to copy it in as a base image; the VM stays as it is.</p>
-<div class="tscroll">
-<table class="tbl cards" aria-labelledby="ready">
-<thead><tr><th scope="col">VM</th><th scope="col">Notes</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
-<tbody>
-{{- range .}}
-<tr>
-<td class="img"><div class="iname">{{names .Name}}</div>
-<div class="meta">VMID {{.VMID}} · {{.Node}}</div>
-{{- with .Blocked}}<div class="meta">{{icon "warn"}} {{.}}</div>{{end}}</td>
-<td>{{with .Notes}}<div class="notes">{{.}}</div>{{else}}<span class="meta">none</span>{{end}}</td>
-<td class="act"><div class="acts">
-{{- if not .Blocked}}
-{{- if and .Family .Kind}}
-<form method="post" action="/images/register/preview">{{template "csrf" $.CSRF}}<input type="hidden" name="vmid" value="{{.VMID}}"><input type="hidden" name="family" value="{{.Family}}"><input type="hidden" name="image_kind" value="{{.Kind}}"><button class="btn sm" type="submit">Register</button></form>
-{{- else}}
-<a class="btn sm" href="/images/register?vmid={{.VMID}}{{with .Family}}&amp;family={{.}}{{end}}{{with .Kind}}&amp;image_kind={{.}}{{end}}">Register</a>
-{{- end}}
-{{- end}}
-</div></td>
-</tr>
-{{- end}}
-</tbody>
-</table>
-</div>
-{{- end}}
-{{- else if .Envs}}
+{{- if .Envs}}
 <div class="tscroll">
 <table class="tbl cards">
 <thead><tr><th scope="col">Slot</th><th scope="col">Domain</th><th scope="col">Hosts</th><th scope="col">DNS</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>

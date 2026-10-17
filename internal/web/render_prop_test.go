@@ -108,9 +108,11 @@ func pageData(t *rapid.T, page string) any {
 	case "message":
 		return drawHostile[message](t, "message")
 	case "catalog":
-		p := drawHostile[catalogView](t, "catalog")
-		p.Show = rapid.SampledFrom([]string{"images", "environments"}).Draw(t, "show")
-		return p
+		return drawHostile[catalogPage](t, "catalog")
+	case "images":
+		return drawHostile[imagesView](t, "images")
+	case "family":
+		return drawHostile[familyView](t, "family")
 	case "teamless":
 		p := drawHostile[catalogPage](t, "teamless")
 		p.Op = rapid.SampledFrom(slices.DeleteFunc(slices.Clone(operations), func(o operation) bool { return !o.Kind.Teamless() })).Draw(t, "op")

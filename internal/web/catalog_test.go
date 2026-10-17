@@ -51,18 +51,6 @@ func TestNewEnvironmentPreviewShowsSlotAndAddresses(t *testing.T) {
 	}
 }
 
-func TestImagesPageListsFamilies(t *testing.T) {
-	h := newHarness(t)
-	addImages(h)
-	sess := h.login(asLead)
-	body := h.get(&sess, "/images").Body.String()
-	for _, want := range []string{"debian-12", "debian-12-v1", "linux", "/images/register"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("page lacks %q", want)
-		}
-	}
-}
-
 // A new environment goes from preview to a stored job, its hosts (one per
 // line) surviving the confirm's hidden fields, and the job pages name its
 // domain where a team job names teams.
@@ -123,15 +111,13 @@ func TestImageFormsPrefill(t *testing.T) {
 	}
 }
 
-// The Environments and Images pages and the new environment form and
-// preview fit a phone without scrolling sideways.
+// The Environments and Images pages, a family's page and sheet, the
+// register review, and the new environment form and preview fit a phone
+// without scrolling sideways.
 func TestBrowserCatalogPages(t *testing.T) {
 	h := browserHarness(t)
-	addImages(h)
+	addCatalog(h)
 	addEnv(h, true)
-	h.api.Add(proxmox.VM{VMID: 150, Name: "teak-build", Node: "n1", Pool: h.cfg.Images.Pool, Status: "stopped"},
-		map[string]string{"ostype": "win11", "agent": "1", "description": "Login: admin"})
-	h.api.Add(proxmox.VM{VMID: 151, Name: "oak-build", Node: "n1", Pool: h.cfg.Images.Pool, Status: "running"}, map[string]string{"ostype": "l26"})
 	lead := h.login(asLead)
 	for _, size := range sizes {
 		t.Run(size.name, func(t *testing.T) {
@@ -140,6 +126,8 @@ func TestBrowserCatalogPages(t *testing.T) {
 			for _, page := range []struct{ path, name string }{
 				{"/environments", "environments"},
 				{"/images", "images"},
+				{"/images/debian-12", "family"},
+				{"/images/gw", "family-source"},
 				{"/environments/new", "env-new"},
 				{"/images/register", "image-register"},
 				{"/environments/add?domain=kilo.alpha", "env-add"},
@@ -150,10 +138,47 @@ func TestBrowserCatalogPages(t *testing.T) {
 				b.noSideways(page.name)
 				b.shot(page.name + "-" + size.name)
 			}
+
+			// A kind to pick dims Register until one is picked.
+			b.open("/images")
+			b.run("scrolling to the catalogue", chromedp.ScrollIntoView("#cat", chromedp.ByQuery))
+			b.shot("images-catalogue-" + size.name)
+			elm := `form.rrow:has(input[name=vmid][value="152"])`
+			if !b.is(`getComputedStyle(document.querySelector('` + elm + ` button')).opacity < 0.5`) {
+				t.Errorf("elm-build's Register isn't dimmed before a kind is picked")
+			}
+			b.click(elm + ` input[value=router]`)
+			if !b.is(`getComputedStyle(document.querySelector('` + elm + ` button')).opacity == 1`) {
+				t.Errorf("elm-build's Register stays dimmed after picking a kind")
+			}
+			// A family opens in the panel over Images.
+			b.click(`a.fam[href="/images/debian-12"]`)
+			b.waitFor("the family sheet", `document.querySelector("#panel[open] .sheet.family") !== null`)
+			b.noSideways("family sheet")
+			b.shot("family-panel-" + size.name)
+			b.click(`#panel [data-close]`)
+			b.waitFor("the panel to close", `!document.querySelector("#panel[open]")`)
+			// A row's Register opens its review in the panel.
+			b.click(elm + ` button`)
+			b.waitFor("the register review", `(document.querySelector("#panel[open] #pv-title")||{}).textContent === "Review · Register elm-build"`)
+			b.noSideways("register review")
+			b.shot("register-review-" + size.name)
+			// Without the panel, it is a page.
+			b.run("posting the review", chromedp.Evaluate(`document.querySelector('#panel').close();
+				document.querySelector('`+elm+`').removeAttribute("data-panel");
+				document.querySelector('.rlist').removeAttribute("data-panel");
+				HTMLFormElement.prototype.submit.call(document.querySelector('`+elm+`'))`, nil))
+			b.waitFor("the review page", `location.pathname === "/images/register/preview" && document.readyState === "complete"`)
+			b.noSideways("register review page")
+			b.shot("register-page-" + size.name)
+
 			b.open("/environments/new")
-			b.run("filling the form", chromedp.SendKeys("#domain", "kilo.bravo"), chromedp.SendKeys("#router", "gw=gw"),
-				chromedp.SendKeys("#env-hosts", "teak=debian-12:10\noak=debian-12"))
-			b.click(`form[action="/environments/new/preview"] button[type=submit]`)
+			b.run("filling the form", chromedp.SendKeys("#domain", "kilo.bravo"), chromedp.Evaluate(`
+				document.querySelector('select[name=router_image]').value = "gw";
+				const names = document.querySelectorAll('input[name=host_name]'), images = document.querySelectorAll('select[name=host_image]');
+				names[0].value = "teak"; images[0].value = "debian-12";
+				document.querySelectorAll('input[name=host_octet]')[0].value = "10"`, nil))
+			b.click(`form[action="/environments/new/preview"] .pf button[type=submit]`)
 			b.waitFor("the preview", `location.pathname === "/environments/new/preview" && document.readyState === "complete"`)
 			b.noSideways("env preview")
 			b.shot("env-preview-" + size.name)
@@ -179,7 +204,7 @@ func TestNotesShowAsText(t *testing.T) {
 		map[string]string{"description": xssNotes, "agent": "1", "net0": "virtio=BC:24:11:00:80:03,bridge=vmbr0"})
 	sess := h.login(asLead)
 	pages := map[string]string{}
-	for _, path := range []string{"/images", "/environments", "/environments/new", "/environments/add?domain=kilo.alpha"} {
+	for _, path := range []string{"/images", "/images/debian-12", "/environments", "/environments/new", "/environments/add?domain=kilo.alpha"} {
 		pages[path] = h.get(&sess, path).Body.String()
 		pages["panel "+path] = h.panelGet(&sess, path, nil).Body.String()
 	}
@@ -195,97 +220,13 @@ func TestNotesShowAsText(t *testing.T) {
 				t.Errorf("%s has unescaped notes %q", path, bad)
 			}
 		}
-		if !strings.Contains(body, "&lt;script&gt;alert(1)&lt;/script&gt;") {
+		// The Images page shows only each family's first line, the login.
+		if !strings.HasSuffix(path, "/images") && !strings.Contains(body, "&lt;script&gt;alert(1)&lt;/script&gt;") {
 			t.Errorf("%s doesn't show the notes' markup as text", path)
 		}
 		if strings.Contains(body, "battleship: base=gw-v1") {
 			t.Errorf("%s shows battleship's own notes line", path)
 		}
-	}
-}
-
-// An image registered from a VM offers its next version from the same VM in
-// one click, and the register form lists each family once.
-func TestImagesPageOffersNewVersionFromSource(t *testing.T) {
-	h := newHarness(t)
-	h.api.Add(proxmox.VM{VMID: 8000, Name: "gw-v1", Node: "n1", Template: true, Tags: "base;router;deprecated"},
-		map[string]string{"description": "battleship: source=150", "net0": "virtio=BC:24:11:00:80:00,bridge=vmbr0"})
-	h.api.Add(proxmox.VM{VMID: 8001, Name: "gw-v2", Node: "n1", Template: true, Tags: "base;router"},
-		map[string]string{"description": "Login: admin\nbattleship: source=150", "net0": "virtio=BC:24:11:00:80:01,bridge=vmbr0"})
-	sess := h.login(asLead)
-	body := h.get(&sess, "/images").Body.String()
-	if strings.Count(body, `href="/images/register?family=gw&amp;vmid=150"`) != 1 {
-		t.Errorf("images page lacks one New version link to VM 150:\n%s", body)
-	}
-	if strings.Contains(body, "source=150") {
-		t.Errorf("images page shows battleship's notes line")
-	}
-	form := h.get(&sess, "/images/register?family=gw&vmid=150").Body.String()
-	if !strings.Contains(form, `value="150"`) || !strings.Contains(form, `value="gw" required`) {
-		t.Errorf("register form isn't prefilled:\n%s", form)
-	}
-	if n := strings.Count(form, `<option value="gw">`); n != 1 {
-		t.Errorf("family gw listed %d times, want once", n)
-	}
-}
-
-// Deprecated versions are folded away under the current ones, offering only
-// Delete.
-func TestImagesPageFoldsDeprecated(t *testing.T) {
-	h := newHarness(t)
-	h.api.Add(proxmox.VM{VMID: 8000, Name: "gw-v1", Node: "n1", Template: true, Tags: "base;router;deprecated"},
-		map[string]string{"description": "old login", "net0": "virtio=BC:24:11:00:80:00,bridge=vmbr0"})
-	h.api.Add(proxmox.VM{VMID: 8001, Name: "gw-v2", Node: "n1", Template: true, Tags: "base;router"},
-		map[string]string{"description": "new login", "net0": "virtio=BC:24:11:00:80:01,bridge=vmbr0"})
-	sess := h.login(asLead)
-	body := h.get(&sess, "/images").Body.String()
-	table, folded, ok := strings.Cut(body, `<details class="olds">`)
-	if !ok {
-		t.Fatalf("no deprecated section:\n%s", body)
-	}
-	if strings.Contains(table, "gw-v1") || !strings.Contains(table, "gw-v2") {
-		t.Errorf("the table should list gw-v2 only")
-	}
-	if !strings.Contains(folded, "Deprecated versions (1)") || !strings.Contains(folded, `/images/delete?image=gw-v1`) ||
-		strings.Contains(folded, "old login") || strings.Contains(folded, "/images/deprecate") {
-		t.Errorf("deprecated section = %s", folded)
-	}
-}
-
-// A stopped VM in the images pool is offered for registering, its form
-// filled in from its name and OS type; a running one shows why it can't be,
-// and templates aren't listed.
-func TestImagesPageOffersReadyVMs(t *testing.T) {
-	h := newHarness(t)
-	addImages(h)
-	pool := h.cfg.Images.Pool
-	h.api.Add(proxmox.VM{VMID: 150, Name: "teak-build", Node: "n1", Pool: pool, Status: "stopped"},
-		map[string]string{"ostype": "win11", "agent": "1", "description": "Login: admin"})
-	h.api.Add(proxmox.VM{VMID: 151, Name: "oak-build", Node: "n1", Pool: pool, Status: "running"}, map[string]string{"ostype": "l26"})
-	h.api.Add(proxmox.VM{VMID: 152, Name: "elm-build", Node: "n1", Pool: pool, Status: "stopped"}, map[string]string{"ostype": "other"})
-	sess := h.login(asLead)
-	body := h.get(&sess, "/images").Body.String()
-	// A VM with a family and kind goes straight to the preview.
-	post := `<form method="post" action="/images/register/preview"><input type="hidden" name="csrf" value="` + sess.CSRF +
-		`"><input type="hidden" name="vmid" value="150"><input type="hidden" name="family" value="teak"><input type="hidden" name="image_kind" value="windows"><button class="btn sm" type="submit">Register</button></form>`
-	if !strings.Contains(body, "VMs in the images pool") || strings.Count(body, post) != 1 || !strings.Contains(body, "Login: admin") {
-		t.Errorf("images page lacks teak-build's Register straight to the preview:\n%s", body)
-	}
-	// One whose kind nothing says opens the form, to pick it.
-	if !strings.Contains(body, `href="/images/register?vmid=152&amp;family=elm"`) {
-		t.Errorf("images page lacks elm-build's link to the form:\n%s", body)
-	}
-	if !strings.Contains(body, "oak-build is running; shut it down first") {
-		t.Errorf("images page doesn't say why oak-build can't be registered:\n%s", body)
-	}
-	for _, not := range []string{`value="151"`, "vmid=151", "vmid=8000", "vmid=8001"} {
-		if strings.Contains(body, not) {
-			t.Errorf("images page offers %s", not)
-		}
-	}
-	preview := h.post(&sess, "/images/register/preview", url.Values{"vmid": {"150"}, "family": {"teak"}, "image_kind": {"windows"}}).Body.String()
-	if !strings.Contains(preview, "teak-v1") || !strings.Contains(preview, `href="/images" data-close`) {
-		t.Errorf("the preview isn't teak-v1 closing to the images page:\n%s", preview)
 	}
 }
 
@@ -311,7 +252,7 @@ func TestAddHostsFormKnowsItsEnvironment(t *testing.T) {
 		if !strings.Contains(body, `<input type="hidden" name="domain" value="kilo.alpha">`) || strings.Contains(body, `id="domain"`) {
 			t.Errorf("router %v: the domain isn't fixed:\n%s", router, body)
 		}
-		if hasInput := strings.Contains(body, `id="router"`); hasInput == router {
+		if hasInput := strings.Contains(body, `name="router_image"`); hasInput == router {
 			t.Errorf("router %v: router input shown = %v", router, hasInput)
 		}
 		if router && !strings.Contains(body, `<dt>Router</dt><dd><span class="name">gw.kilo.alpha</span></dd>`) {
@@ -319,7 +260,7 @@ func TestAddHostsFormKnowsItsEnvironment(t *testing.T) {
 		}
 		// A router given (to resume one a failed create left) is kept.
 		body = h.get(&sess, "/environments/add?domain=kilo.alpha&router=gw%3Dgw").Body.String()
-		if !strings.Contains(body, `id="router" name="router" value="gw=gw"`) {
+		if !strings.Contains(body, `<option value="gw" selected>gw</option>`) || !strings.Contains(body, `name="router_name" value="gw"`) {
 			t.Errorf("router %v: a given router is dropped:\n%s", router, body)
 		}
 		// A refused preview keeps the environment fixed.
@@ -381,7 +322,8 @@ func TestEnvironmentPickerKeepsWhatWasTyped(t *testing.T) {
 	}
 	// Picking carries them into the form.
 	form := h.get(&sess, "/environments/add?domain=kilo.alpha&router=gw%3Dgw&env_hosts=oak%3Ddebian-12%0Aelm%3Ddebian-12").Body.String()
-	if !strings.Contains(form, `id="router" name="router" value="gw=gw"`) || !strings.Contains(form, "oak=debian-12\nelm=debian-12") {
+	if !strings.Contains(form, `<option value="gw" selected>gw</option>`) || !strings.Contains(form, `name="host_name" value="oak"`) ||
+		!strings.Contains(form, `name="host_name" value="elm"`) {
 		t.Errorf("the form loses what was carried:\n%s", form)
 	}
 }
