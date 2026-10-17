@@ -124,7 +124,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", src.Name, err)
 		}
-		it.Source.Bridges = sourceBridges(cfg)
+		it.Source.Bridges, it.Source.Base, it.Source.Notes = sourceBridges(cfg), baseNote(cfg), UserNotes(cfg["description"])
 		it.Blocked = agentBlock(src, cfg, kind)
 	}
 	return &Plan{Kind: KindImageRegister, Config: ConfigHash(KindImageRegister, p.Cfg), Items: []Item{it},

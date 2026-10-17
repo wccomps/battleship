@@ -289,19 +289,11 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
 
 // opIcon is the icon of an operation kind, or of a power action.
 func opIcon(kind string) template.HTML {
-	switch {
-	case pods.IsPowerAction(kind), kind == string(pods.KindReset), kind == string(pods.KindSnapshot),
-		kind == string(pods.KindDeploy), kind == string(pods.KindTeardown):
+	if op, ok := operationFor(pods.Kind(kind)); ok {
+		return icon(op.Icon)
+	}
+	if pods.IsPowerAction(kind) {
 		return icon(kind)
-	case kind == string(pods.KindPower):
-		return icon("shutdown")
-	case kind == string(pods.KindEnvCreate), kind == string(pods.KindEnvAdd),
-		kind == string(pods.KindImageRegister), kind == string(pods.KindImageEdit):
-		return icon("deploy")
-	case kind == string(pods.KindImageDelete):
-		return icon("teardown")
-	case kind == string(pods.KindEnvDNS), kind == string(pods.KindImageDeprecate):
-		return icon("reset")
 	}
 	return icon("reboot")
 }

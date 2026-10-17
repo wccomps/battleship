@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -283,11 +284,20 @@ func TestPropFamilyPath(t *testing.T) {
 // The register review says in one sentence what happens, lists where the
 // copy comes from and what it becomes, with a link to change it, and its
 // confirm names the image it makes. The hidden fields still confirm it.
+// It reads the source's notes from the plan, not from Proxmox again.
 func TestRegisterReview(t *testing.T) {
 	h := newHarness(t)
 	addCatalog(h)
 	sess := h.login(asLead)
+	h.api.Mu.Lock()
+	h.api.Calls = nil
+	h.api.Mu.Unlock()
 	action, fields, body := h.preview(&sess, "/images/register", url.Values{"vmid": {"152"}, "family": {"elm"}, "image_kind": {"router"}})
+	h.api.Mu.Lock()
+	if n := slices.Index(h.api.Calls, "config:152"); n < 0 || slices.Contains(h.api.Calls[n+1:], "config:152") {
+		t.Errorf("elm-build's config read %d times (want once, by the plan): %v", strings.Count(strings.Join(h.api.Calls, " "), "config:152 "), h.api.Calls)
+	}
+	h.api.Mu.Unlock()
 	contains(t, "the review", body, `<span class="eyebrow">Review ·</span> Register <span class="vm">elm-build</span>`,
 		"Copies <span class=\"name\">elm-build</span> into a new template, <span class=\"name\">elm-v1</span>. The build VM stays as it is.",
 		`<dt>From</dt><dd><code>elm-build</code> · VMID 152 · n1</dd>`,

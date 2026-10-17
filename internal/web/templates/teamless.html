@@ -4,7 +4,7 @@
 {{- $back := .Back}}
 <form class="sheet" method="post" action="{{.Op.Path}}/preview" aria-labelledby="form-title">
 {{template "csrf" $csrf}}
-{{- $machines := or (eq .Op.Kind "env-create") (eq .Op.Kind "env-add")}}
+{{- $machines := .Op.Machines}}
 {{- if $machines}}<button type="submit" class="sr" tabindex="-1" aria-hidden="true">Review</button>{{end}}
 <div class="ph"><h1 id="form-title">{{opIcon (print .Op.Kind)}}{{.Op.Title}}{{with .Env}}{{if eq $.Data.Op.Kind "env-add"}} to{{else}} for{{end}} <span class="vm">{{.Domain}}</span>{{end}}</h1><span class="sp"></span>{{template "close" $back}}</div>
 <div class="pb form">

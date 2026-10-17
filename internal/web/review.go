@@ -1,7 +1,6 @@
 package web
 
 import (
-	"context"
 	"slices"
 	"strconv"
 	"strings"
@@ -74,21 +73,21 @@ var kindUses = map[string]string{
 
 // review describes plan as an image or environment operation's review, or
 // is nil for a team operation. nothing, if set, is why nothing can run.
-func (s *Server) review(ctx context.Context, op operation, in jobs.Inputs, plan *pods.Plan, nothing string) *reviewView {
+func review(op operation, in jobs.Inputs, plan *pods.Plan, nothing string) *reviewView {
 	var r *reviewView
-	switch op.Kind {
-	case pods.KindImageRegister:
+	switch {
+	case op.Machines:
+		r = envReview(op, in, plan)
+	case op.Kind == pods.KindImageRegister:
 		if len(plan.Items) != 1 {
 			return nil
 		}
-		return s.registerReview(ctx, op, in, plan.Items[0])
-	case pods.KindEnvCreate, pods.KindEnvAdd:
-		r = envReview(op, in, plan)
-	case pods.KindEnvDNS:
+		return registerReview(op, in, plan.Items[0])
+	case op.Kind == pods.KindEnvDNS:
 		r = dnsReview(in, plan)
-	case pods.KindEnvTeardown:
+	case op.Kind == pods.KindEnvTeardown:
 		r = teardownReview(in, plan)
-	case pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete:
+	case op.Section == sectionImages:
 		r = imageReview(op, in, plan)
 	default:
 		return nil
@@ -102,24 +101,13 @@ func (s *Server) review(ctx context.Context, op operation, in jobs.Inputs, plan 
 // registerReview describes registering it: the source VM, the image it
 // becomes and how, its kind, where the template lands, and the source's
 // notes, which the copy keeps.
-func (s *Server) registerReview(ctx context.Context, op operation, in jobs.Inputs, it pods.Item) *reviewView {
+func registerReview(op operation, in jobs.Inputs, it pods.Item) *reviewView {
 	src := pods.Source{Name: "?"}
 	if it.Source != nil {
 		src = *it.Source
 	}
-	var desc string
-	if cfg, err := s.apiFor(ctx).VMConfig(ctx, src.Node, src.VMID); err == nil {
-		desc = cfg["description"]
-	}
-	how := "next version"
-	if _, v, ok := pods.ParseImageName(it.Name); ok && v == 1 {
-		how = "new family"
-	}
-	if n, _ := pods.ParseNotes(desc); n.Base != "" {
-		if _, v, ok := pods.ParseImageName(n.Base); ok {
-			how = "edit copy of v" + strconv.Itoa(v)
-		}
-	}
+	_, version, _ := pods.ParseImageName(it.Name)
+	how := registerHow(version, src.Base)
 	r := &reviewView{Verb: "Register", Subject: src.Name,
 		Say: "Copies " + src.Name + " into a new template, " + it.Name + ". The build VM stays as it is."}
 	if it.Blocked != "" {
@@ -137,8 +125,8 @@ func (s *Server) registerReview(ctx context.Context, op operation, in jobs.Input
 	if it.Supersedes != nil {
 		r.Facts = append(r.Facts, reviewFact{Label: "Replaces", Code: it.Supersedes.Name, Meta: "deprecated once this is registered"})
 	}
-	if notes := pods.UserNotes(desc); notes != "" {
-		r.Facts = append(r.Facts, reviewFact{Label: "Notes", Notes: notes})
+	if src.Notes != "" {
+		r.Facts = append(r.Facts, reviewFact{Label: "Notes", Notes: src.Notes})
 	}
 	return r
 }

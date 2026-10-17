@@ -53,18 +53,28 @@ func readyRows(cands []pods.RegisterCandidate, images []pods.BaseImage) []readyR
 	for i, c := range cands {
 		r := readyRow{RegisterCandidate: c}
 		if c.Family != "" {
-			version, how := 1, "new family"
+			version := 1
 			if latest, ok := pods.Latest(images, c.Family); ok {
-				version, how = latest.Version+1, "next version"
+				version = latest.Version + 1
 			}
-			if _, v, ok := pods.ParseImageName(c.Base); ok {
-				how = "edit copy of v" + strconv.Itoa(v)
-			}
-			r.Becomes, r.How = pods.ImageName(c.Family, version), how
+			r.Becomes, r.How = pods.ImageName(c.Family, version), registerHow(version, c.Base)
 		}
 		out[i] = r
 	}
 	return out
+}
+
+// registerHow says how registering makes version of a family from a VM
+// whose notes name base: as a new family, its next version, or as an edit
+// copy of base (see pods.ImageEdit).
+func registerHow(version int, base string) string {
+	switch _, v, ok := pods.ParseImageName(base); {
+	case ok:
+		return "edit copy of v" + strconv.Itoa(v)
+	case version == 1:
+		return "new family"
+	}
+	return "next version"
 }
 
 // catalogue groups images' families by kind, in pods.ImageKinds order, each
@@ -94,6 +104,12 @@ func firstLine(notes string) string {
 		}
 	}
 	return ""
+}
+
+// lacksOf is lacksLine for kind's operation, as its Doing says it.
+func lacksOf(kind pods.Kind, on string) string {
+	op, _ := operationFor(kind)
+	return lacksLine(op.Doing, kind, on)
 }
 
 // lacksLine names the privileges an action needs that the user lacks,
@@ -130,7 +146,7 @@ func (s *Server) imagesPage(w http.ResponseWriter, r *http.Request) {
 	p := imagesView{ReadErr: rd.err, Ready: readyRows(rd.cands, rd.images)}
 	p.Groups, p.Retired = catalogue(rd.images)
 	if len(p.Ready) > 0 && !s.mayRun(r.Context(), pods.KindImageRegister) {
-		p.Lacks = lacksLine("Registering", pods.KindImageRegister, "")
+		p.Lacks = lacksOf(pods.KindImageRegister, "")
 	}
 	s.render(w, r, http.StatusOK, "images", s.newView(w, r, "Images", "images", p))
 }
@@ -218,10 +234,10 @@ func (s *Server) familyPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if noDeprecate {
-		p.Lacks = append(p.Lacks, lacksLine("Deprecating", pods.KindImageDeprecate, p.Current.Name))
+		p.Lacks = append(p.Lacks, lacksOf(pods.KindImageDeprecate, p.Current.Name))
 	}
 	if noDelete {
-		p.Lacks = append(p.Lacks, lacksLine("Deleting", pods.KindImageDelete, "its versions"))
+		p.Lacks = append(p.Lacks, lacksOf(pods.KindImageDelete, "its versions"))
 	}
 	s.render(w, r, http.StatusOK, "family", s.newView(w, r, family, "images", p))
 }

@@ -323,7 +323,7 @@ func shapeOK(m *machineRow, what string) bool {
 	return false
 }
 
-// machineInputs reports whether form is an environment form's rows.
-func machineInputs(kind pods.Kind, form url.Values) bool {
-	return (kind == pods.KindEnvCreate || kind == pods.KindEnvAdd) && (form.Has(fieldHostName) || form.Has(fieldRouterImage))
+// machineInputs reports whether form is op's machine rows.
+func machineInputs(op operation, form url.Values) bool {
+	return op.Machines && (form.Has(fieldHostName) || form.Has(fieldRouterImage))
 }

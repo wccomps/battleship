@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -286,5 +288,52 @@ func TestQueuedRegisterReservesItsVMID(t *testing.T) {
 	}
 	if vmids[0] == vmids[1] {
 		t.Errorf("both registers planned VMID %d", vmids[0])
+	}
+}
+
+// An image or environment operation's form, review and job page mark its
+// section current in the nav; a team operation's form marks its Lead
+// button, and its job page Logs.
+func TestNavMarksTheSection(t *testing.T) {
+	h := newHarness(t)
+	addCatalog(h)
+	addEnvs(h)
+	h.poll()
+	sess := h.login(asLead)
+	current := regexp.MustCompile(`<a (?:class="btn[^"]*" )?href="([^"]*)" aria-current="page">`)
+	marked := func(body string) []string {
+		var out []string
+		for _, m := range current.FindAllStringSubmatch(body, -1) {
+			out = append(out, m[1])
+		}
+		return out
+	}
+	review := func(path string, form url.Values) string {
+		_, _, body := h.preview(&sess, path, form)
+		return body
+	}
+	envJob := h.submitJob(jobs.Inputs{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"}, byLead)
+	imageJob := h.submitJob(jobs.Inputs{Kind: pods.KindImageEdit, Family: "gw"}, byLead)
+	teamJob := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Action: "start"}, byLead)
+	for _, c := range []struct {
+		what, body string
+		want       []string
+	}{
+		{"Create", h.get(&sess, "/environments/new").Body.String(), []string{envsPath}},
+		{"Add hosts", h.get(&sess, "/environments/kilo.alpha/add").Body.String(), []string{envsPath}},
+		{"Set DNS", h.get(&sess, "/environments/kilo.alpha/dns").Body.String(), []string{envsPath}},
+		{"Set DNS's review", review("/environments/kilo.alpha/dns", url.Values{"dns": {"router"}}), []string{envsPath}},
+		{"Tear down's review", h.get(&sess, "/environments/kilo.alpha/teardown").Body.String(), []string{envsPath}},
+		{"an environment job", h.get(&sess, "/logs/"+itoa(envJob)).Body.String(), []string{envsPath}},
+		{"Register", h.get(&sess, "/images/register?vmid=152&family=elm").Body.String(), []string{"/images"}},
+		{"Edit's review", review("/images/edit", url.Values{"family": {"gw"}}), []string{"/images"}},
+		{"an image job", h.get(&sess, "/logs/"+itoa(imageJob)).Body.String(), []string{"/images"}},
+		{"Deploy", h.get(&sess, "/deploy").Body.String(), []string{"/deploy"}},
+		{"Power", h.get(&sess, "/power").Body.String(), nil},
+		{"a team job", h.get(&sess, "/logs/"+itoa(teamJob)).Body.String(), []string{logsPath}},
+	} {
+		if got := marked(c.body); !slices.Equal(got, c.want) {
+			t.Errorf("%s marks %q current, want %q", c.what, got, c.want)
+		}
 	}
 }

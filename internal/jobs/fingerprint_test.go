@@ -44,6 +44,9 @@ var fingerprinted = map[string]map[string]bool{
 		"VMID": true, "Node": true, "Name": true,
 		// Only decide the privileges needed, as TemplateSpec.Bridges.
 		"Bridges": false,
+		// What a register's review shows; the clone copies the notes as they
+		// are then.
+		"Base": false, "Notes": false,
 	},
 }
 

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"net/http"
 	"net/url"
@@ -13,35 +14,78 @@ import (
 	"github.com/wccomps/battleship/internal/pods"
 )
 
-// operation is something volunteers do to team VMs: a form (GET Path), a
-// preview (POST Path/preview) and a confirm (POST Path/confirm).
+// operation is something volunteers do to team VMs, environments or base
+// images: a form (GET Path), a preview (POST Path/preview) and a confirm
+// (POST Path/confirm).
 type operation struct {
 	Kind  pods.Kind
 	Path  string // e.g. "/reset"
 	Title string // e.g. "Deploy": the form's heading
+	// Label names its jobs where Title doesn't read as one: "Reset to
+	// snapshot", not "Reset".
+	Label string
+	Icon  string // its icon (opIcon)
 	Noun  string // e.g. "reset", for the confirm's summary: "reset of team 01"
 	Lead  string // the header button of deploy and teardown, which act on whole teams
+	// Section is the page an image or environment operation belongs to:
+	// its nav entry, and where its pages close to (listPage).
+	Section string
+	// Doing names it as what a privilege line says the user can't do:
+	// "Adding hosts needs …" (lacksLine).
+	Doing string
+	// Done is how a VM its job finished reads; "" is "Done".
+	Done string
+	// Machines is whether its form has machine rows (envForm); Formless,
+	// whether it has no form, and opens on its review.
+	Machines, Formless bool
 	// domain is the environment an operation on one (its Path has {domain})
 	// was opened for: see at.
 	domain string
 }
 
+const (
+	sectionImages       = "images"
+	sectionEnvironments = "environments"
+)
+
 // operations are the operation pages; the header shows deploy and teardown in
 // this order.
 var operations = []operation{
-	{Kind: pods.KindPower, Path: "/power", Title: "Power", Noun: "power action"},
-	{Kind: pods.KindReset, Path: "/reset", Title: "Reset", Noun: "reset"},
-	{Kind: pods.KindSnapshot, Path: "/snapshot", Title: "Take snapshot", Noun: "snapshot"},
-	{Kind: pods.KindDeploy, Path: "/deploy", Title: "Deploy", Noun: "deploy", Lead: "Deploy teams"},
-	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Noun: "teardown", Lead: "Tear down teams"},
-	{Kind: pods.KindEnvCreate, Path: "/environments/new", Title: "Create environment", Noun: "environment"},
-	{Kind: pods.KindEnvAdd, Path: "/environments/{domain}/add", Title: "Add hosts", Noun: "new hosts"},
-	{Kind: pods.KindEnvDNS, Path: "/environments/{domain}/dns", Title: "Set DNS", Noun: "DNS change"},
-	{Kind: pods.KindEnvTeardown, Path: "/environments/{domain}/teardown", Title: "Tear down", Noun: "teardown"},
-	{Kind: pods.KindImageRegister, Path: "/images/register", Title: "Register base image", Noun: "registration"},
-	{Kind: pods.KindImageEdit, Path: "/images/edit", Title: "Open for editing", Noun: "working copy"},
-	{Kind: pods.KindImageDeprecate, Path: "/images/deprecate", Title: "Deprecate base image", Noun: "deprecation"},
-	{Kind: pods.KindImageDelete, Path: "/images/delete", Title: "Delete base image", Noun: "deletion"},
+	{Kind: pods.KindPower, Path: "/power", Title: "Power", Icon: "shutdown", Noun: "power action"},
+	{Kind: pods.KindReset, Path: "/reset", Title: "Reset", Label: "Reset to snapshot", Icon: "reset", Noun: "reset"},
+	{Kind: pods.KindSnapshot, Path: "/snapshot", Title: "Take snapshot", Icon: "snapshot", Noun: "snapshot"},
+	{Kind: pods.KindDeploy, Path: "/deploy", Title: "Deploy", Icon: "deploy", Noun: "deploy", Lead: "Deploy teams", Done: "Ready"},
+	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Icon: "teardown", Noun: "teardown", Lead: "Tear down teams", Done: "Deleted"},
+	{Kind: pods.KindEnvCreate, Path: "/environments/new", Title: "Create environment", Icon: "deploy", Noun: "environment",
+		Section: sectionEnvironments, Doing: "Creating an environment", Done: "Ready", Machines: true},
+	{Kind: pods.KindEnvAdd, Path: "/environments/{domain}/add", Title: "Add hosts", Icon: "deploy", Noun: "new hosts",
+		Section: sectionEnvironments, Doing: "Adding hosts", Done: "Ready", Machines: true},
+	{Kind: pods.KindEnvDNS, Path: "/environments/{domain}/dns", Title: "Set DNS", Icon: "reset", Noun: "DNS change",
+		Section: sectionEnvironments, Doing: "Setting DNS"},
+	{Kind: pods.KindEnvTeardown, Path: "/environments/{domain}/teardown", Title: "Tear down", Icon: "teardown", Noun: "teardown",
+		Section: sectionEnvironments, Doing: "Tearing down an environment", Done: "Deleted", Formless: true},
+	{Kind: pods.KindImageRegister, Path: "/images/register", Title: "Register base image", Icon: "deploy", Noun: "registration",
+		Section: sectionImages, Doing: "Registering", Done: "Ready"},
+	{Kind: pods.KindImageEdit, Path: "/images/edit", Title: "Open for editing", Icon: "deploy", Noun: "working copy",
+		Section: sectionImages, Done: "Ready"},
+	{Kind: pods.KindImageDeprecate, Path: "/images/deprecate", Title: "Deprecate base image", Label: "Deprecate", Icon: "reset", Noun: "deprecation",
+		Section: sectionImages, Doing: "Deprecating"},
+	{Kind: pods.KindImageDelete, Path: "/images/delete", Title: "Delete base image", Icon: "teardown", Noun: "deletion",
+		Section: sectionImages, Doing: "Deleting", Done: "Deleted"},
+}
+
+// nav is the nav entry its pages mark current: its section, or for a team
+// operation its kind, which marks the header's Lead button (leadOps).
+func (o operation) nav() string { return cmp.Or(o.Section, string(o.Kind)) }
+
+// sectionName is its section's name, as the nav says it.
+func (o operation) sectionName() string {
+	for _, n := range nav(&auth.User{}) {
+		if n.Key == o.Section {
+			return n.Label
+		}
+	}
+	return ""
 }
 
 // page reports whether the operation opens as its own page rather than in
@@ -320,21 +364,40 @@ const envsPath = "/environments"
 func envHref(domain string) string { return envsPath + "#" + domain }
 
 // listPage is the page a job with inputs in belongs to, where closing its
-// form, preview or job page goes: Images, Environments at the environment
-// changed, or the grid.
+// form, preview or job page goes: its operation's section (Images, or
+// Environments at the environment it acted on), else the grid.
 func listPage(in jobs.Inputs) string {
-	switch in.Kind {
-	case pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete:
+	op, _ := operationFor(in.Kind)
+	switch op.Section {
+	case sectionImages:
 		return "/images"
-	case pods.KindEnvAdd, pods.KindEnvDNS, pods.KindEnvTeardown:
-		if pods.CheckDomain(in.Domain) == nil {
+	case sectionEnvironments:
+		if op.Kind.OnEnvironment() && pods.CheckDomain(in.Domain) == nil {
 			return envHref(in.Domain)
 		}
 		return envsPath
-	case pods.KindEnvCreate:
-		return envsPath
 	}
 	return "/"
+}
+
+// result is the page a finished job of op with inputs in shows its work
+// on: its environment or image family; nil for a team job, and for a
+// teardown, whose work is gone.
+func (o operation) result(in jobs.Inputs) *link {
+	switch {
+	case o.Kind.TearsDown():
+	case o.Section == sectionEnvironments && pods.CheckDomain(in.Domain) == nil:
+		return &link{envHref(in.Domain), "Open " + in.Domain}
+	case o.Section == sectionImages:
+		family := in.Family
+		if f, _, ok := pods.ParseImageName(in.Image); ok && family == "" {
+			family = f
+		}
+		if pods.CheckFamily(family) == nil {
+			return &link{familyHref(family), "Open " + family}
+		}
+	}
+	return nil
 }
 
 // nth is vs[i], or "" past its end.

@@ -138,7 +138,7 @@ func (s *Server) opPreview(op operation) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		form := postedForm(r)
 		in := op.scope(formInputs(op.Kind, form))
-		if machineInputs(op.Kind, form) {
+		if machineInputs(op, form) {
 			// Add host without JavaScript, or Review: the form again, with
 			// more rows or what is wrong with the fields.
 			p, ok := s.catalogForm(r, op, in, "")
@@ -179,7 +179,7 @@ func (s *Server) opPreview(op operation) http.Handler {
 // field it names, for a pods.EnvProblem on a form with machine rows.
 func (s *Server) planRefused(w http.ResponseWriter, r *http.Request, op operation, in jobs.Inputs, err error) {
 	var pr pods.EnvProblem
-	if errors.As(err, &pr) && (op.Kind == pods.KindEnvCreate || op.Kind == pods.KindEnvAdd) {
+	if errors.As(err, &pr) && op.Machines {
 		if p, ok := s.catalogForm(r, op, in, ""); ok {
 			_, rows := p.request()
 			p.mark(pr, rows)
@@ -229,7 +229,7 @@ func (s *Server) showPreview(w http.ResponseWriter, r *http.Request, code int, o
 			p.Confirm.TypedRE = regexp.QuoteMeta(p.Confirm.Typed)
 		}
 	}
-	s.render(w, r, code, "preview", s.newView(w, r, p.Heading, string(op.Kind), p))
+	s.render(w, r, code, "preview", s.newView(w, r, p.Heading, op.nav(), p))
 }
 
 // storePreview records a preview for this session and returns its nonce.
@@ -419,7 +419,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		}
 	}
 	p.Warnings = append(p.Warnings, plan.Notices...) // what was left alone, even when nothing runs
-	if p.Review = s.review(ctx, op, in, plan, p.Nothing); p.Review != nil {
+	if p.Review = review(op, in, plan, p.Nothing); p.Review != nil {
 		p.Heading = p.Review.Verb + " " + p.Review.Subject
 		p.EditHref = reviewBack(op, in)
 		if opts.retryOf > 0 {

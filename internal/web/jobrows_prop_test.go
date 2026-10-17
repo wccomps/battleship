@@ -166,7 +166,8 @@ func TestPropOpenStaysOnSite(t *testing.T) {
 			Family: rapid.OneOf(rapid.Just("debian-12"), rapid.Just(""), rapid.Custom(func(t *rapid.T) string { return hostile(t, "family") })).Draw(t, "family"),
 			Image:  rapid.OneOf(rapid.Just("win2022-v3"), rapid.Custom(func(t *rapid.T) string { return hostile(t, "image") })).Draw(t, "image"),
 		}
-		l := resultOf(in.Kind, in)
+		op, _ := operationFor(in.Kind)
+		l := op.result(in)
 		if l == nil {
 			return
 		}

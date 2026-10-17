@@ -79,17 +79,17 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !p.MayCreate {
-		p.Lacks = append(p.Lacks, lacksLine("Creating an environment", pods.KindEnvCreate, ""))
+		p.Lacks = append(p.Lacks, lacksOf(pods.KindEnvCreate, ""))
 	}
 	if slices.ContainsFunc(p.Envs, envBlock.Acts) {
 		if !p.MayAdd {
-			p.Lacks = append(p.Lacks, lacksLine("Adding hosts", pods.KindEnvAdd, ""))
+			p.Lacks = append(p.Lacks, lacksOf(pods.KindEnvAdd, ""))
 		}
 		if !p.MayDNS {
-			p.Lacks = append(p.Lacks, lacksLine("Setting DNS", pods.KindEnvDNS, ""))
+			p.Lacks = append(p.Lacks, lacksOf(pods.KindEnvDNS, ""))
 		}
 		if !p.MayTearDown {
-			p.Lacks = append(p.Lacks, lacksLine("Tearing down an environment", pods.KindEnvTeardown, ""))
+			p.Lacks = append(p.Lacks, lacksOf(pods.KindEnvTeardown, ""))
 		}
 	}
 	s.render(w, r, http.StatusOK, "catalog", s.newView(w, r, "Environments", "environments", p))

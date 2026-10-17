@@ -83,8 +83,8 @@ type snapshotPicker struct {
 func (s *Server) opForm(op operation) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		if op.Kind == pods.KindEnvTeardown {
-			s.teardownPreview(w, r, op, op.scope(formInputs(op.Kind, q)))
+		if op.Formless {
+			s.reviewPage(w, r, op, op.scope(formInputs(op.Kind, q)))
 			return
 		}
 		if op.Kind.Teamless() {
@@ -109,13 +109,13 @@ func (s *Server) opForm(op operation) http.Handler {
 		}
 		p := s.newFormPage(r.Context(), op, in, q.Has(fieldTeams) || grid)
 		p.FromGrid = grid
-		s.render(w, r, http.StatusOK, "opform", s.newView(w, r, op.Title, string(op.Kind), p))
+		s.render(w, r, http.StatusOK, "opform", s.newView(w, r, op.Title, op.nav(), p))
 	})
 }
 
-// teardownPreview is an environment teardown's page: it has nothing to
-// fill in, so it opens on its review.
-func (s *Server) teardownPreview(w http.ResponseWriter, r *http.Request, op operation, in jobs.Inputs) {
+// reviewPage is a formless operation's page, such as an environment's
+// teardown: it has nothing to fill in, so it opens on its review.
+func (s *Server) reviewPage(w http.ResponseWriter, r *http.Request, op operation, in jobs.Inputs) {
 	if err := in.Validate(); err != nil {
 		s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, sentence(err.Error()))
 		return
@@ -178,8 +178,8 @@ func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, 
 
 // renderForm shows the form again with a problem, keeping what was typed.
 func (s *Server) renderForm(w http.ResponseWriter, r *http.Request, status int, op operation, in jobs.Inputs, problem string) {
-	if op.Kind == pods.KindEnvTeardown { // it has no form: its review is its page
-		s.errorPage(w, r, status, "Can't tear down "+in.Domain, problem, listPage(in), "Back to Environments")
+	if op.Formless { // its review is its page
+		s.errorPage(w, r, status, "Can't "+strings.ToLower(op.Title)+" "+in.Domain, problem, listPage(in), "Back to "+op.sectionName())
 		return
 	}
 	if op.Kind.Teamless() {
@@ -188,7 +188,7 @@ func (s *Server) renderForm(w http.ResponseWriter, r *http.Request, status int, 
 	}
 	p := s.newFormPage(r.Context(), op, in, in.Teams != "")
 	p.Error = problem
-	s.render(w, r, status, "opform", s.newView(w, r, op.Title, string(op.Kind), p))
+	s.render(w, r, status, "opform", s.newView(w, r, op.Title, op.nav(), p))
 }
 
 // deploySets lists the template sets on the viewer's grid, matching the grid's

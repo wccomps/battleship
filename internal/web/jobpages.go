@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -68,35 +69,26 @@ type opLabel struct {
 
 // opLabelOf names the operation of a job of kind with inputs in.
 func opLabelOf(kind string, in jobs.Inputs) opLabel {
-	switch pods.Kind(kind) {
-	case pods.KindPower:
-		return opLabel{Icon: in.Action, Label: powerLabel(in.Action)}
-	case pods.KindReset:
-		return opLabel{Icon: "reset", Label: "Reset to snapshot", Detail: in.Snapshot}
-	case pods.KindSnapshot:
-		return opLabel{Icon: "snapshot", Label: "Take snapshot", Detail: in.Snapshot}
-	case pods.KindDeploy:
-		return opLabel{Icon: "deploy", Label: "Deploy", Detail: strings.TrimPrefix(in.Pattern, "*.")}
-	case pods.KindTeardown:
-		return opLabel{Icon: "teardown", Label: "Teardown"}
-	case pods.KindEnvCreate:
-		return opLabel{Icon: "deploy", Label: "Create environment", Detail: in.Domain}
-	case pods.KindEnvAdd:
-		return opLabel{Icon: "deploy", Label: "Add hosts", Detail: in.Domain}
-	case pods.KindEnvDNS:
-		return opLabel{Icon: "reset", Label: "Set DNS", Detail: in.Domain + " → " + in.DNS}
-	case pods.KindEnvTeardown:
-		return opLabel{Icon: "teardown", Label: "Tear down", Detail: in.Domain}
-	case pods.KindImageRegister:
-		return opLabel{Icon: "deploy", Label: "Register base image", Detail: in.Family}
-	case pods.KindImageEdit:
-		return opLabel{Icon: "deploy", Label: "Open for editing", Detail: in.Family}
-	case pods.KindImageDeprecate:
-		return opLabel{Icon: "reset", Label: "Deprecate", Detail: in.Image}
-	case pods.KindImageDelete:
-		return opLabel{Icon: "teardown", Label: "Delete base image", Detail: in.Image}
+	op, ok := operationFor(pods.Kind(kind))
+	if !ok {
+		return opLabel{Icon: kind, Label: kind}
 	}
-	return opLabel{Icon: kind, Label: kind}
+	l := opLabel{Icon: kind, Label: cmp.Or(op.Label, op.Title)}
+	switch {
+	case op.Kind == pods.KindPower:
+		l.Icon, l.Label = in.Action, powerLabel(in.Action)
+	case op.Kind == pods.KindReset, op.Kind == pods.KindSnapshot:
+		l.Detail = in.Snapshot
+	case op.Kind == pods.KindDeploy:
+		l.Detail = strings.TrimPrefix(in.Pattern, "*.")
+	case op.Kind == pods.KindEnvDNS:
+		l.Detail = in.Domain + " → " + in.DNS
+	case op.Section == sectionEnvironments:
+		l.Detail = in.Domain
+	case op.Section == sectionImages:
+		l.Detail = cmp.Or(in.Image, in.Family)
+	}
+	return l
 }
 
 func lookOf(looks map[string]statusLook, status string) statusLook {
@@ -461,17 +453,6 @@ func doingOf(step pods.Step, it pods.Item) string {
 	return string(step)
 }
 
-// doneWord is how a done VM of a job of kind reads.
-func doneWord(kind pods.Kind) string {
-	switch kind {
-	case pods.KindDeploy, pods.KindEnvCreate, pods.KindEnvAdd, pods.KindImageRegister, pods.KindImageEdit:
-		return "Ready"
-	case pods.KindTeardown, pods.KindEnvTeardown, pods.KindImageDelete:
-		return "Deleted"
-	}
-	return "Done"
-}
-
 // addressOf is the address a plan item sets or keeps, if known.
 func addressOf(it pods.Item) string {
 	switch {
@@ -583,7 +564,8 @@ func (s *Server) jobPage(w http.ResponseWriter, r *http.Request) {
 	for _, ev := range events {
 		v.LogOpen = v.LogOpen || ev.Err
 	}
-	view := s.newView(w, r, fmt.Sprintf("Log #%d", id), "logs", v)
+	op, _ := operationFor(pods.Kind(snap.job.Kind))
+	view := s.newView(w, r, fmt.Sprintf("Log #%d", id), cmp.Or(op.Section, "logs"), v)
 	if v.Live {
 		view.Live, view.Reload = "live", followEvery
 	}
@@ -657,6 +639,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	j, items := snap.job, snap.items
 	now := s.now()
 	in := readInputs(j)
+	op, _ := operationFor(pods.Kind(j.Kind))
 	v := jobView{
 		CSRF:       auth.CSRFToken(ctx),
 		ID:         j.ID,
@@ -665,7 +648,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 		Who:        whoShort(j.CreatedBy),
 		By:         j.CreatedBy,
 		Role:       actsAs(j),
-		Home:       listPage(jobs.Inputs{Kind: pods.Kind(j.Kind), Domain: in.Domain}),
+		Home:       listPage(jobs.Inputs{Kind: op.Kind, Domain: in.Domain}),
 		BackHref:   "/logs",
 		BackLabel:  "Logs",
 		Teams:      jobTeams(in),
@@ -701,7 +684,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	}
 	v.LogOpen = j.Status == store.StatusFailed || j.Status == store.StatusCompletedWithFailures
 	if j.Status == store.StatusSucceeded || j.Status == store.StatusCompletedWithFailures {
-		v.Open = resultOf(pods.Kind(j.Kind), in)
+		v.Open = op.result(in)
 	}
 	v.Summary = readSummary(j.Summary)
 	v.Items = jobItemsOf(j, items, now)
@@ -752,33 +735,10 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	if v.CanRetry {
 		v.StartAgain = ""
 	}
-	switch page, _, _ := strings.Cut(v.Home, "#"); page {
-	case "/images":
-		v.BackHref, v.BackLabel = v.Home, "Images"
-	case envsPath:
-		v.BackHref, v.BackLabel = v.Home, "Environments"
+	if op.Section != "" {
+		v.BackHref, v.BackLabel = v.Home, op.sectionName()
 	}
 	return v
-}
-
-// resultOf is the page a finished job's work shows on: its environment or
-// image family; nil for other kinds, and for a teardown, whose work is gone.
-func resultOf(kind pods.Kind, in jobs.Inputs) *link {
-	switch kind {
-	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS:
-		if pods.CheckDomain(in.Domain) == nil {
-			return &link{envHref(in.Domain), "Open " + in.Domain}
-		}
-	case pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete:
-		family := in.Family
-		if f, _, ok := pods.ParseImageName(in.Image); ok && family == "" {
-			family = f
-		}
-		if pods.CheckFamily(family) == nil {
-			return &link{familyHref(family), "Open " + family}
-		}
-	}
-	return nil
 }
 
 // foldAbove is the VM count above which the panel folds done rows into one
@@ -795,7 +755,8 @@ func jobItemsOf(j store.Job, items []store.Item, now time.Time) jobItems {
 	for _, it := range plan.Items {
 		planned[it.Name] = it
 	}
-	done := doneWord(pods.Kind(j.Kind))
+	op, _ := operationFor(pods.Kind(j.Kind))
+	done := cmp.Or(op.Done, "Done")
 	n := map[string]int{}
 	var order []string
 	for _, it := range items {

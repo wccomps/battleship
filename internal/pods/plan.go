@@ -113,6 +113,11 @@ type Source struct {
 	// Bridges are its NICs' bridges: Proxmox checks SDN.Use on them for a
 	// clone.
 	Bridges []string `json:"bridges,omitempty"`
+	// Base and Notes are a register's source's notes as planned, for its
+	// review: the version it is an edit copy of (see ImageEdit), if they
+	// say, and what people wrote, which the copy keeps.
+	Base  string `json:"base,omitempty"`
+	Notes string `json:"notes,omitempty"`
 }
 
 // Builds is whether a deploy builds the template from its master (it

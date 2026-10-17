@@ -131,7 +131,7 @@ func (s *Server) teamlessForm(w http.ResponseWriter, r *http.Request, status int
 }
 
 // catalogForm is the data of op's form for in, its machine rows read from
-// the request (machineRows); not ok if op's environment isn't there.
+// the request (newEnvForm); not ok if op's environment isn't there.
 func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, problem string) (catalogPage, bool) {
 	ctx := r.Context()
 	p := s.newCatalogPage(ctx)
@@ -148,7 +148,7 @@ func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, prob
 			}
 		}
 	}
-	if op.Kind == pods.KindEnvCreate || op.Kind == pods.KindEnvAdd {
+	if op.Machines {
 		form := r.URL.Query()
 		if r.Method == http.MethodPost {
 			form = postedForm(r)
@@ -159,10 +159,10 @@ func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, prob
 }
 
 func (s *Server) renderCatalogForm(w http.ResponseWriter, r *http.Request, status int, p catalogPage) {
-	if p.Op.Kind == pods.KindEnvCreate || p.Op.Kind == pods.KindEnvAdd {
+	if p.Op.Machines {
 		p = s.withNotes(r.Context(), p)
 	}
-	s.render(w, r, status, "teamless", s.newView(w, r, p.Op.Title, string(p.Op.Kind), p))
+	s.render(w, r, status, "teamless", s.newView(w, r, p.Op.Title, p.Op.nav(), p))
 }
 
 // Back is where the form's close and Cancel go.
