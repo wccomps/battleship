@@ -51,6 +51,8 @@ func classifyModel(patterns []string, err error) Meaning {
 		return Lapsed
 	case isAPI && status == 403:
 		return Forbidden
+	case isAPI && agentForgot(text):
+		return ExecGone
 	case isAPI && status == 400:
 		return Permanent
 	case isAPI && has("does not exist"):
@@ -82,6 +84,65 @@ var errorPhrases = []string{
 	"file-user_cfg", "cfs-lock 'file-user_cfg' error: got lock request timeout", "access permissions cleanup", "Access Permissions Cleanup", "access permission cleanup",
 	"base volume", "linked clone", "linked cloned", "base-volume", "linked  clone", "does not exist", "does not exists", "already exists", "already exist", "File exists",
 	"timeout", "got no worker upid", "connection refused", "boom", "Permission check failed (/vms/1, VM.Audit)", "", " ", "\n", "x", "é",
+	"Agent error: PID lld does not exist", "PID 1234 does not exist", "pid", "PID", "pid ", "Pid  lld", "lld", "rapid", "Invalid parameter 'pid'", "invalid parameter 'pid", "_pid",
+}
+
+// agentForgot is ExecGone's rule over lower-cased text: "invalid parameter
+// 'pid'", or "pid" not ending a word, spaces, at most one more word and
+// spaces, then "does not exist".
+func agentForgot(text string) bool {
+	if strings.Contains(text, "invalid parameter 'pid'") {
+		return true
+	}
+	for i := 0; i+3 <= len(text); i++ {
+		if text[i:i+3] != "pid" || i > 0 && strings.IndexByte("abcdefghijklmnopqrstuvwxyz0123456789_", text[i-1]) >= 0 {
+			continue
+		}
+		rest := text[i+3:]
+		after := strings.TrimLeft(rest, " ")
+		if len(after) == len(rest) {
+			continue
+		}
+		if strings.HasPrefix(after, "does not exist") {
+			return true
+		}
+		if word, tail, ok := strings.Cut(after, " "); ok && word != "" && strings.HasPrefix(strings.TrimLeft(tail, " "), "does not exist") {
+			return true
+		}
+	}
+	return false
+}
+
+// The agent's answer for a PID it no longer knows reads as ExecGone in
+// every form it takes, and not as the VM missing; other "does not exist"
+// answers keep their meaning.
+func TestPropExecGone(t *testing.T) {
+	c := NewClassifier([]string{"does not exist", "timeout"})
+	rapid.Check(t, func(t *rapid.T) {
+		pid := rapid.OneOf(rapid.SampledFrom([]string{"lld", "%lld", "-1", "0"}), rapid.Map(rapid.IntRange(1, 1<<30), func(n int) string { return fmt.Sprint(n) })).Draw(t, "pid")
+		msg := rapid.SampledFrom([]string{"", "Agent error: ", "agent error: ", "VM 2101 qmp command 'guest-exec-status' failed - "}).Draw(t, "prefix") +
+			rapid.SampledFrom([]string{"PID", "pid", "Pid"}).Draw(t, "word") +
+			strings.Repeat(" ", rapid.IntRange(1, 3).Draw(t, "spaces")) + pid + " " +
+			rapid.SampledFrom([]string{"does not exist", "DOES NOT EXIST", "does not exists"}).Draw(t, "verb") +
+			rapid.SampledFrom([]string{"", "\n", " (os error 87)"}).Draw(t, "suffix")
+		if rapid.Bool().Draw(t, "old agent") {
+			msg = rapid.SampledFrom([]string{"Agent error: Invalid parameter 'pid'", "invalid parameter 'pid' " + pid}).Draw(t, "old")
+		}
+		var err error = &APIError{Method: "GET", Path: "/nodes/alder/qemu/2101/agent/exec-status", Status: rapid.SampledFrom([]int{400, 500, 596}).Draw(t, "status"), Message: msg}
+		if rapid.Bool().Draw(t, "wrap") {
+			err = fmt.Errorf("configure-guest: %w", err)
+		}
+		if got := c.Classify(err); got != ExecGone || !IsExecGone(err) || IsNotFound(err) {
+			t.Fatalf("Classify(%q) = %v, want ExecGone", msg, got)
+		}
+		other := rapid.SampledFrom([]string{
+			"Configuration file 'nodes/alder/qemu-server/2101.conf' does not exist", "rapid " + pid + " does not exist",
+			"VM 2101 qmp command 'guest-ping' failed - QEMU guest agent is not running", "pid " + pid + " exists", "pidx " + pid + " does not exist",
+		}).Draw(t, "other")
+		if IsExecGone(&APIError{Status: 500, Message: other}) {
+			t.Fatalf("%q reads as ExecGone", other)
+		}
+	})
 }
 
 var errorPatterns = []string{"timeout", "file exists", "got no worker upid", "Is Locked", " Boom ", "", "  ", "linked", "exist", "é", "x"}
@@ -142,7 +203,7 @@ func TestPropClassifyMatchesRuleTable(t *testing.T) {
 // failed task anything but permanent (or transient for a 5xx), and a
 // 401/403 means that whatever the text says.
 func TestPropHostileTextCannotChangeTheMeaning(t *testing.T) {
-	phrases := []string{"locked", "linked clone", "base volume", "file-user_cfg", "access permissions cleanup", "does not exist", "already exists", "timeout", "exist"}
+	phrases := []string{"locked", "linked clone", "base volume", "file-user_cfg", "access permissions cleanup", "does not exist", "already exists", "timeout", "exist", "pid"}
 	clean := func(s string) bool {
 		s = strings.ToLower(s)
 		for _, p := range phrases {

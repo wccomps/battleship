@@ -103,6 +103,11 @@ const (
 	// Lapsed: 401, the credential expired or was revoked; nothing more can
 	// be done as the user until they log in again.
 	Lapsed
+	// ExecGone: the guest agent doesn't know the PID of a command it
+	// started, so it restarted since, with its guest or alone. QEMU's agent
+	// says "PID <pid> does not exist" (the Windows build prints the pid as
+	// "lld"), older ones "Invalid parameter 'pid'".
+	ExecGone
 )
 
 // ErrLocked marks an error the caller made for a VM it found locked by
@@ -137,6 +142,8 @@ func (c Classifier) Classify(err error) Meaning {
 		return Lapsed
 	case isAPI && apiErr.Status == 403:
 		return Forbidden
+	case isAPI && execGoneRE.MatchString(msg):
+		return ExecGone
 	case isAPI && apiErr.Status == 400:
 		return Permanent
 	case isAPI && strings.Contains(msg, "does not exist"):
@@ -161,6 +168,9 @@ func (c Classifier) Classify(err error) Meaning {
 	return Permanent
 }
 
+// execGoneRE matches lower-cased agent errors that mean ExecGone.
+var execGoneRE = regexp.MustCompile(`(^|[^a-z0-9_])pid +([^ ]+ +)?does not exist|invalid parameter 'pid'`)
+
 // IsLapsed reports whether err says Proxmox no longer accepts the
 // caller's credential (see Lapsed).
 func IsLapsed(err error) bool { return Classifier{}.Classify(err) == Lapsed }
@@ -172,6 +182,10 @@ func IsForbidden(err error) bool { return Classifier{}.Classify(err) == Forbidde
 // IsNotFound reports whether err says the VM's config does not exist on the
 // node asked (see the NotFound meaning).
 func IsNotFound(err error) bool { return Classifier{}.Classify(err) == NotFound }
+
+// IsExecGone reports whether err says the guest agent no longer knows a
+// command's PID (see ExecGone).
+func IsExecGone(err error) bool { return Classifier{}.Classify(err) == ExecGone }
 
 var permissionRE = regexp.MustCompile(`Permission check failed \(([^,]+), ([^)]+)\)`)
 

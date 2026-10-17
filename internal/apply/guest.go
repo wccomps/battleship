@@ -19,26 +19,92 @@ const (
 	verifyTries = 24              // two minutes at agentPoll: Windows applies an address with a delay
 	// A Windows guest can take minutes to finish a rename before it powers off.
 	restartShutdown = 10 * time.Minute
+	probePolls      = 15 // status reads of a setup state check, execPoll apart
+	guestReruns     = 2  // of a setup script the guest restarted under
 )
 
-// waitAgent waits for the guest agent to answer, up to
-// environments.agent_timeout. Attempts are counted, not timed.
+// errRestarted is a setup script the guest, or its agent, restarted under.
+var errRestarted = errors.New("the guest restarted while the setup script ran")
+
+// waitAgent waits for the guest agent to answer (see waitGuest).
 func (e *Executor) waitAgent(ctx context.Context, it *pods.Item) (bool, error) {
-	tries := max(1, int(e.Cfg.Environments.AgentTimeout/agentPoll))
+	return false, e.waitGuest(ctx, it, false)
+}
+
+// waitGuest waits for the guest agent to answer and, with setup on a
+// Windows guest, for first-boot setup to finish (see pods.SetupComplete),
+// up to environments.agent_timeout. The time is the sum of the waits, not
+// the clock. A restart can cut the setup check short; that counts as not
+// finished.
+func (e *Executor) waitGuest(ctx context.Context, it *pods.Item, setup bool) error {
+	setup = setup && it.Guest != nil && it.Guest.OS == pods.ImageWindows
+	var waited time.Duration
 	var err error
-	for range tries {
+	state, told := "", false
+	for {
 		if err = e.api.AgentPing(ctx, it.Node, it.VMID); err == nil {
-			return false, nil
+			if !setup {
+				return nil
+			}
+			if state, err = e.setupState(ctx, it, &waited); err == nil {
+				if pods.SetupComplete(state) {
+					return nil
+				}
+				if !told {
+					e.emit(it.Name, pods.StepGuest, EventInfo, "waiting for Windows to finish first-boot setup")
+					told = true
+				}
+			}
 		}
-		if ctx.Err() != nil || proxmox.IsForbidden(err) {
-			return false, err
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if proxmox.IsForbidden(err) {
+			return err
+		}
+		if waited >= e.Cfg.Environments.AgentTimeout {
+			break
 		}
 		if serr := e.Sleep(ctx, agentPoll); serr != nil {
-			return false, serr
+			return serr
 		}
+		waited += agentPoll
 	}
-	return false, fmt.Errorf("the guest agent didn't answer within %s (is qemu-guest-agent installed and running in the image?): %s",
+	if err == nil {
+		return fmt.Errorf("Windows didn't finish first-boot setup within %s (its ImageState is %s)",
+			e.Cfg.Environments.AgentTimeout, strings.TrimSpace(state))
+	}
+	return fmt.Errorf("the guest agent didn't answer within %s (is qemu-guest-agent installed and running in the image?): %s",
 		e.Cfg.Environments.AgentTimeout, proxmox.Describe(err))
+}
+
+// setupState runs pods.SetupStateCommand and returns its output, adding
+// the time it waits to waited.
+func (e *Executor) setupState(ctx context.Context, it *pods.Item, waited *time.Duration) (string, error) {
+	var pid int
+	if err := e.lim.Call(ctx, func() (err error) {
+		pid, err = e.api.AgentRead(ctx, it.Node, it.VMID, pods.SetupStateCommand)
+		return
+	}); err != nil {
+		return "", err
+	}
+	for range probePolls {
+		var st proxmox.ExecStatus
+		if err := e.lim.Call(ctx, func() (err error) { st, err = e.api.AgentExecStatus(ctx, it.Node, it.VMID, pid); return }); err != nil {
+			return "", err
+		}
+		if st.Exited {
+			if st.ExitCode != 0 {
+				return "", fmt.Errorf("reading the setup state exited %d: %s", st.ExitCode, lastLines(st.Err+"\n"+st.Out, 3))
+			}
+			return st.Out, nil
+		}
+		if err := e.Sleep(ctx, execPoll); err != nil {
+			return "", err
+		}
+		*waited += execPoll
+	}
+	return "", fmt.Errorf("reading the setup state took over %s", probePolls*execPoll)
 }
 
 // mac is the VM's net0 MAC, which the scripts find the NIC by.
@@ -54,8 +120,10 @@ func (e *Executor) mac(ctx context.Context, it *pods.Item) (string, error) {
 	return mac, nil
 }
 
-// configureGuest runs the setup script, and reboots if it renamed the
-// computer. The scripts are idempotent, so a retry runs them again.
+// configureGuest runs the setup script once the guest is ready (see
+// waitReady), and reboots if it renamed the computer. The scripts are
+// idempotent, so a retry runs them again, and so does a restart under one,
+// up to guestReruns times.
 func (e *Executor) configureGuest(ctx context.Context, it *pods.Item) (bool, error) {
 	mac, err := e.mac(ctx, it)
 	if err != nil {
@@ -65,7 +133,17 @@ func (e *Executor) configureGuest(ctx context.Context, it *pods.Item) (bool, err
 	if err != nil {
 		return false, err
 	}
-	out, err := e.exec(ctx, it, cmd, input)
+	var out string
+	for run := 0; ; run++ {
+		if err := e.waitReady(ctx, it); err != nil {
+			return run > 0, err
+		}
+		out, err = e.exec(ctx, it, cmd, input)
+		if !errors.Is(err, errRestarted) || run == guestReruns {
+			break
+		}
+		e.emit(it.Name, pods.StepGuest, EventInfo, "the guest restarted while the setup script ran; running it again once the guest is ready")
+	}
 	if err != nil {
 		return true, err
 	}
@@ -79,6 +157,14 @@ func (e *Executor) configureGuest(ctx context.Context, it *pods.Item) (bool, err
 		}
 	}
 	return true, nil
+}
+
+// waitReady is waitGuest with setup, ended by a stop at once: no command
+// is running for a cancel's grace to see end.
+func (e *Executor) waitReady(ctx context.Context, it *pods.Item) error {
+	ctx, cancel := ungraced(ctx)
+	defer cancel()
+	return e.waitGuest(ctx, it, true)
 }
 
 // restart shuts the guest down, waiting for it to finish applying the
@@ -103,6 +189,12 @@ func (e *Executor) restart(ctx context.Context, it *pods.Item) error {
 // running in the guest; a retry runs the script again. Where the guest
 // lock works (see pods.GuestLockWait), the new copy waits up to that long
 // for the one still running, then exits 75.
+//
+// A status read the agent answers with proxmox.ExecGone means it restarted
+// since it started the command: the error is errRestarted. Unlike a lost
+// answer to the exec, that leaves nothing to follow: the restart killed the
+// command, or, if only the agent restarted, the guest lock makes a rerun
+// wait for it.
 func (e *Executor) exec(ctx context.Context, it *pods.Item, cmd []string, input string) (string, error) {
 	var pid int
 	// Sent once: a retry after a lost answer would start a second copy at
@@ -113,6 +205,9 @@ func (e *Executor) exec(ctx context.Context, it *pods.Item, cmd []string, input 
 	for range int(execLimit / execPoll) {
 		var st proxmox.ExecStatus
 		if err := e.call(ctx, func() (err error) { st, err = e.api.AgentExecStatus(ctx, it.Node, it.VMID, pid); return }); err != nil {
+			if proxmox.IsExecGone(err) {
+				return "", fmt.Errorf("%w (%s)", errRestarted, proxmox.Describe(err))
+			}
 			return "", err
 		}
 		if st.Exited {

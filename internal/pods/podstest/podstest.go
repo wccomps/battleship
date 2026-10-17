@@ -133,7 +133,11 @@ type Fake struct {
 	// ExecRunsFor, if set, is how many status reads command pid stays
 	// running for before it exits; unset, commands exit at once.
 	ExecRunsFor func(pid int) int
-	// Execs are the guest commands run, in order.
+	// Restarts maps a PID to its guest restarting under that command: its
+	// next status read finds the agent restarted and the PID forgotten. PIDs
+	// count from 1 in the order commands start, setup state reads included.
+	Restarts map[int]Restart
+	// Execs are the guest commands run, in order, but setup state reads.
 	Execs   []ExecCall
 	execs   map[int]proxmox.ExecStatus // by PID
 	polls   map[int]int                // status reads, by PID

@@ -4,16 +4,33 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
 // Guest is what a VM's QEMU guest agent reports. An agent answers only
-// while Up and the VM is running.
+// while Up, not Down, and the VM is running.
 type Guest struct {
 	Up       bool
 	Hostname string
 	NICs     []proxmox.GuestNIC
+	// Down is how many more calls the agent fails, as while its guest
+	// restarts.
+	Down int
+	// SetupPending is how many more setup state reads (commands that name
+	// Windows setup's Setup\State key) print an unfinished ImageState
+	// before they print IMAGE_STATE_COMPLETE.
+	SetupPending int
+}
+
+// Restart is a guest restarting under a command (see Fake.Restarts).
+type Restart struct {
+	// Down and SetupPending are the guest's after the restart.
+	Down, SetupPending int
+	// Msg is the agent's error for the forgotten PID; "" means the Windows
+	// agent's, which prints the PID as "lld".
+	Msg string
 }
 
 // ExecCall is a command run through a guest agent.
@@ -48,6 +65,10 @@ func (f *Fake) guest(node string, vmid int) (*Guest, error) {
 	if g == nil || !g.Up || vm.Status != "running" {
 		return nil, agentDown(vmid)
 	}
+	if g.Down > 0 {
+		g.Down--
+		return nil, agentDown(vmid)
+	}
 	return g, nil
 }
 
@@ -74,13 +95,26 @@ func (f *Fake) AgentPing(ctx context.Context, node string, vmid int) error {
 	return f.agentCall(ctx, fmt.Sprintf("agent-ping:%d", vmid), node, vmid, func(*Guest) error { return nil })
 }
 
+// isSetupRead is whether command reads Windows setup's ImageState.
+func isSetupRead(command []string) bool {
+	return slices.ContainsFunc(command, func(a string) bool { return strings.Contains(a, `Setup\State`) })
+}
+
 func (f *Fake) AgentExec(ctx context.Context, node string, vmid int, command []string, input string) (int, error) {
 	var pid int
-	err := f.agentCall(ctx, fmt.Sprintf("agent-exec:%d", vmid), node, vmid, func(*Guest) error {
-		f.Execs = append(f.Execs, ExecCall{VMID: vmid, Command: slices.Clone(command), Input: input})
+	err := f.agentCall(ctx, fmt.Sprintf("agent-exec:%d", vmid), node, vmid, func(g *Guest) error {
 		st := proxmox.ExecStatus{Exited: true}
-		if f.ExecHook != nil {
-			st.ExitCode, st.Out, st.Err = f.ExecHook(vmid, command, input)
+		switch {
+		case isSetupRead(command) && g.SetupPending > 0:
+			g.SetupPending--
+			st.Out = "IMAGE_STATE_SPECIALIZE_RESEAL_TO_OOBE\r\n"
+		case isSetupRead(command):
+			st.Out = "IMAGE_STATE_COMPLETE\r\n"
+		default:
+			f.Execs = append(f.Execs, ExecCall{VMID: vmid, Command: slices.Clone(command), Input: input})
+			if f.ExecHook != nil {
+				st.ExitCode, st.Out, st.Err = f.ExecHook(vmid, command, input)
+			}
 		}
 		if f.execs == nil {
 			f.execs = map[int]proxmox.ExecStatus{}
@@ -102,7 +136,16 @@ func (f *Fake) ExecRunning(pid int) bool {
 
 func (f *Fake) AgentExecStatus(ctx context.Context, node string, vmid, pid int) (proxmox.ExecStatus, error) {
 	var st proxmox.ExecStatus
-	err := f.agentCall(ctx, fmt.Sprintf("agent-status:%d", vmid), node, vmid, func(*Guest) error {
+	err := f.agentCall(ctx, fmt.Sprintf("agent-status:%d", vmid), node, vmid, func(g *Guest) error {
+		if r, ok := f.Restarts[pid]; ok {
+			delete(f.Restarts, pid)
+			delete(f.execs, pid)
+			g.Down, g.SetupPending = r.Down, r.SetupPending
+			if r.Msg == "" {
+				r.Msg = "Agent error: PID lld does not exist"
+			}
+			return &proxmox.APIError{Status: 500, Message: r.Msg}
+		}
 		s, ok := f.execs[pid]
 		if !ok {
 			return &proxmox.APIError{Status: 500, Message: fmt.Sprintf("Agent error: Invalid parameter 'pid' %d", pid)}

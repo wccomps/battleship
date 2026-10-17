@@ -40,6 +40,18 @@ func (e *Executor) stepContext(ctx context.Context) (_ context.Context, done fun
 	return sctx, func() { cancel(nil) }, st.hasSent
 }
 
+// ungraced is ctx, also ended at once by a stop of the step's run, cancel
+// grace or not: for a wait that has nothing in flight to see end.
+func ungraced(ctx context.Context) (context.Context, context.CancelFunc) {
+	st, ok := ctx.Value(stepKey{}).(*stepState)
+	if !ok {
+		return context.WithCancel(ctx)
+	}
+	ctx, cancel := context.WithCancelCause(ctx)
+	stop := context.AfterFunc(st.run, func() { cancel(context.Cause(st.run)) })
+	return ctx, func() { stop(); cancel(nil) }
+}
+
 type stepKey struct{}
 
 // stepState is a step's run and whether it sent a change.
@@ -122,6 +134,13 @@ func (g guardedAPI) SetVMConfig(ctx context.Context, node string, vmid int, chan
 
 func (g guardedAPI) AgentExec(ctx context.Context, node string, vmid int, command []string, input string) (int, error) {
 	return guard(ctx, g, func(ctx context.Context) (int, error) { return g.changes.AgentExec(ctx, node, vmid, command, input) })
+}
+
+// AgentRead runs command, one that only reads, in the guest. It passes
+// through like a read, so it doesn't count as a change a cancel's grace
+// waits on.
+func (g guardedAPI) AgentRead(ctx context.Context, node string, vmid int, command []string) (int, error) {
+	return g.changes.AgentExec(ctx, node, vmid, command, "")
 }
 
 func (g guardedAPI) Clone(ctx context.Context, r proxmox.CloneRequest) (string, error) {
