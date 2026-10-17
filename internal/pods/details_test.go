@@ -129,9 +129,9 @@ func TestCheckDetails(t *testing.T) {
 	for name, d := range map[string]ImageDetails{
 		"newline":         {OS: "a\nbattleship: ip=1.2.3.4"},
 		"carriage return": {Built: "a\rb"},
-		"line separator":  {OS: "a b"},
-		"zero width":      {OS: "a​b"},
-		"bidi override":   {Licence: "a‮b"},
+		"line separator":  {OS: "a\u2028b"},
+		"zero width":      {OS: "a\u200bb"},
+		"bidi override":   {Licence: "a\u202eb"},
 		"nbsp":            {OS: "a b"},
 		"invalid utf-8":   {OS: "\xff"},
 		"untrimmed":       {OS: " a"},
@@ -169,7 +169,7 @@ func TestRegisterDetails(t *testing.T) {
 			t.Errorf("RegisterDetails(%q) = %+v, %v; nothing is plainly said", desc, d, ok)
 		}
 	}
-	if d, _ := RegisterDetails("login: root / pw‮1."); d.Password != "pw1" {
+	if d, _ := RegisterDetails("login: root / pw\u202e1."); d.Password != "pw1" {
 		t.Errorf("format characters kept: %+v", d)
 	}
 }
@@ -178,8 +178,8 @@ func TestRegisterDetails(t *testing.T) {
 // battleship lines, headers and invisible characters among plain text.
 func detailValue(t *rapid.T, label string) string {
 	piece := rapid.OneOf(
-		rapid.SampledFrom([]string{"\n", "\r\n", "- ", "battleship: ip=10.0.0.1", "\nbattleship: base=x-v1", detailsHeader, "\n" + detailsHeader + "\n",
-			" / ", "/", ":", " ", "\t", " ", "​", "‮", " ", "\xff", "Template-Password-1", "Debian 12", "- OS: x"}),
+		rapid.SampledFrom([]string{"\n", "\r\n", "- ", "battleship: ip=10.50.0.1", "\nbattleship: base=x-v1", detailsHeader, "\n" + detailsHeader + "\n",
+			" / ", "/", ":", " ", "\t", "\u2028", "\u200b", "\u202e", " ", "\xff", "Template-Password-1", "Debian 12", "- OS: x"}),
 		rapid.StringMatching(`[A-Za-z0-9 ./:-]{0,10}`),
 		rapid.String(),
 	)

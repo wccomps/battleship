@@ -248,7 +248,7 @@ func TestEditDetailsJob(t *testing.T) {
 	lacks(t, "an unchanged review", rec.Body.String(), "/images/details/confirm")
 
 	// Details that would break the block: the form again, saying why.
-	for _, bad := range []pods.ImageDetails{{OS: "a\nbattleship: ip=10.0.0.1"}, {User: "a / b", Password: "c"}, {OS: strings.Repeat("x", pods.MaxDetail+1)}} {
+	for _, bad := range []pods.ImageDetails{{OS: "a\nbattleship: ip=10.50.0.1"}, {User: "a / b", Password: "c"}, {OS: strings.Repeat("x", pods.MaxDetail+1)}} {
 		rec := h.post(&sess, "/images/details/preview", detailsForm("win2022", bad))
 		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `role="alert"`) {
 			t.Errorf("%+v: preview = %d\n%s", bad, rec.Code, rec.Body)

@@ -118,7 +118,7 @@ func TestDetailsStepWritesTheBlock(t *testing.T) {
 		return &pods.Plan{Kind: pods.KindImageDetails, Items: []pods.Item{{Name: "deb-v1", VMID: 8000, Node: "alder",
 			Steps: []pods.Step{pods.StepDetails}, Details: &d}}}
 	}
-	res := catalogExec(f).Run(context.Background(), plan(pods.ImageDetails{OS: "a\nbattleship: ip=10.0.0.1"}))
+	res := catalogExec(f).Run(context.Background(), plan(pods.ImageDetails{OS: "a\nbattleship: ip=10.50.0.1"}))
 	if len(res.Failed) != 1 || f.VMs[8000].Config["description"] != desc {
 		t.Errorf("bad details: result %+v, notes %q", res, f.VMs[8000].Config["description"])
 	}
