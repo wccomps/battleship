@@ -31,6 +31,10 @@ const (
 	// httpShutdownTimeout bounds the wait for requests in flight once the
 	// HTTP server stops; event streams end at once.
 	httpShutdownTimeout = 10 * time.Second
+	// jobStopReserve is how long before web.shutdown_timeout runs out serve
+	// stops jobs still running: the longest a stopped run takes, plus
+	// recording its outcome.
+	jobStopReserve = apply.StopBudget + jobs.DBCallTimeout
 	// oidcStartupWait is how long startup retries the identity provider, so a
 	// pod up before its network still starts; oidcRetryEvery is the pause between.
 	oidcStartupWait = 30 * time.Second
@@ -52,9 +56,10 @@ type serveDeps struct {
 	listen    func(network, addr string) (net.Listener, error)
 	log       *slog.Logger
 	// drain waits between failing readiness and stopping the HTTP server.
-	drain     func()
-	oidcWait  time.Duration
-	oidcRetry time.Duration
+	drain       func()
+	oidcWait    time.Duration
+	oidcRetry   time.Duration
+	stopReserve time.Duration
 }
 
 // runServe is "battleship serve": the web app, the status grid and the job
@@ -90,9 +95,13 @@ func runServe(ctx context.Context, args []string, d deps) int {
 // process's only LISTEN connection), hourly cleanup and HTTP server share one
 // Proxmox client and one set of limits.
 //
-// On the stop signal readiness fails and running jobs stop and clean up. After
-// a short drain the HTTP server stops; serve waits for the workers until
-// web.shutdown_timeout after the signal, then gives up with an error.
+// On the stop signal readiness fails and the workers claim no more jobs;
+// running jobs carry on (heartbeats included, so no other replica reaps
+// them) until jobStopReserve before web.shutdown_timeout runs out, when any
+// still running stop and clean up. After a short drain the HTTP server
+// stops; serve waits for the workers until web.shutdown_timeout after the
+// signal, then gives up with an error. Background loops, such as the ticket
+// renewer running jobs need, stop after the workers.
 func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	if d.listen == nil {
 		d.listen = net.Listen
@@ -105,6 +114,9 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	}
 	if d.oidcRetry <= 0 {
 		d.oidcRetry = oidcRetryEvery
+	}
+	if d.stopReserve <= 0 {
+		d.stopReserve = jobStopReserve
 	}
 	log := d.log
 	cantStart := func(err error) error {
@@ -180,8 +192,9 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	}
 	httpSrv.RegisterOnShutdown(app.CloseStreams)
 
-	// Background work stops after the HTTP server; the workers stop first,
-	// when the signal comes. Neither uses ctx, which the signal cancels.
+	// Background work stops after the workers, which stop claiming when the
+	// signal comes and stop their jobs only near the deadline. Neither uses
+	// ctx, which the signal cancels.
 	bgCtx, stopBackground := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopBackground()
 	var bg sync.WaitGroup
@@ -195,9 +208,10 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 		bg.Add(1)
 		go func() { defer bg.Done(); run(bgCtx) }()
 	}
-	workCtx, stopWorkers := context.WithCancel(context.WithoutCancel(ctx))
-	defer stopWorkers()
-	workersDone := startWorkers(workCtx, cfg, st, api, creds, lim, hub, log)
+	draining := make(chan struct{})
+	workCtx, stopJobs := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopJobs()
+	workersDone := startWorkers(workCtx, draining, cfg, st, api, creds, lim, hub, log)
 	served := make(chan error, 1)
 	go func() { served <- httpSrv.Serve(ln) }()
 	log.Info("serving", "listen", ln.Addr().String(), "workers", cfg.Web.Workers)
@@ -205,17 +219,36 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	var failure error
 	select {
 	case <-ctx.Done():
-		log.Info("shutting down", "shutdown_timeout", cfg.Web.ShutdownTimeout.String(),
-			"note", "readiness fails now; running jobs stop starting steps, clean up and end interrupted; a second signal exits at once, skipping their cleanup")
 	case err := <-served:
 		failure = fmt.Errorf("serving HTTP: %w", err)
-		log.Error("shutting down", "err", failure)
+		log.Error("serving HTTP failed", "err", failure)
 	}
 	start := time.Now()
 	deadline := start.Add(cfg.Web.ShutdownTimeout)
+	stopAt := deadline.Add(-d.stopReserve)
+	log.Info("shutting down", "shutdown_timeout", cfg.Web.ShutdownTimeout.String(),
+		"jobs_stopped_in", max(time.Until(stopAt), 0).Round(time.Second).String(),
+		"note", "readiness fails now and no new jobs are claimed; running jobs carry on until jobs_stopped_in, "+
+			"when any still running stop starting steps, clean up and end interrupted; a second signal exits at once, skipping their cleanup")
 
 	app.Drain()
-	stopWorkers()
+	close(draining)
+	go func() {
+		t := time.NewTimer(time.Until(stopAt))
+		defer t.Stop()
+		select {
+		case <-workersDone:
+			return
+		case <-t.C:
+		}
+		select {
+		case <-workersDone:
+		default:
+			log.Warn("shutdown deadline near: stopping running jobs so they clean up and end interrupted before it",
+				"left", time.Until(deadline).Round(time.Second).String(), "stop_reserve", d.stopReserve.String())
+		}
+		stopJobs()
+	}()
 	if failure == nil {
 		d.drain()
 	}
@@ -225,13 +258,13 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 		_ = httpSrv.Close()
 	}
 	stopHTTP()
-	stopBackground()
 
 	timeout := time.NewTimer(time.Until(deadline))
 	defer timeout.Stop()
 	select {
 	case <-workersDone:
 		log.Info("workers stopped", "took", time.Since(start).Round(time.Millisecond).String())
+		stopBackground()
 	case <-timeout.C:
 		keepStore = true
 		err := fmt.Errorf("jobs were still cleaning up when web.shutdown_timeout (%s) ran out; exiting anyway. "+
@@ -295,18 +328,20 @@ func connectAuth(ctx context.Context, cfg config.Config, st *store.Store, login 
 }
 
 // startWorkers starts cfg.Web.Workers job workers sharing api and lim, and
-// returns a channel closed once they all return, which they do once ctx is
-// done and their running jobs have ended. hub tells them of job changes and cancels.
-func startWorkers(ctx context.Context, cfg config.Config, st *store.Store, client pods.API, creds jobs.Credentials, lim *apply.Limits, hub *status.Hub, log *slog.Logger) <-chan struct{} {
+// returns a channel closed once they all return, which they do once draining
+// closes and their running jobs have ended; ctx done stops those jobs. hub
+// tells them of job changes and cancels.
+func startWorkers(ctx context.Context, draining <-chan struct{}, cfg config.Config, st *store.Store, client pods.API, creds jobs.Credentials, lim *apply.Limits, hub *status.Hub, log *slog.Logger) <-chan struct{} {
 	var wg sync.WaitGroup
 	for range cfg.Web.Workers {
 		id := jobs.NewWorkerID("serve")
 		wl := log.With("component", "worker", "worker", id)
 		w := &jobs.Worker{
 			Store: st, Cfg: cfg, ID: id, Limits: lim, Credentials: creds,
-			Bind: bindAs(client),
-			Logf: func(format string, args ...any) { wl.Warn(fmt.Sprintf(format, args...)) },
-			Hub:  hub,
+			Bind:     bindAs(client),
+			Logf:     func(format string, args ...any) { wl.Warn(fmt.Sprintf(format, args...)) },
+			Hub:      hub,
+			Draining: draining,
 			OnStart: func(j *store.Job) {
 				wl.Info("job started", "job", j.ID, "kind", j.Kind, "created_by", j.CreatedBy)
 			},
@@ -318,7 +353,13 @@ func startWorkers(ctx context.Context, cfg config.Config, st *store.Store, clien
 				if out.Error != "" {
 					attrs = append(attrs, "error", out.Error)
 				}
-				wl.Log(context.Background(), level, "job finished", attrs...)
+				msg := "job finished"
+				select {
+				case <-draining:
+					msg = "job finished during shutdown"
+				default:
+				}
+				wl.Log(context.Background(), level, msg, attrs...)
 			},
 		}
 		wg.Add(1)

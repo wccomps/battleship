@@ -5,19 +5,24 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/wccomps/battleship/internal/auth"
 	"github.com/wccomps/battleship/internal/auth/authtest"
@@ -130,10 +135,22 @@ type serveEnv struct {
 type serveOption func(*serveSetup)
 
 type serveSetup struct {
-	st    *store.Store
-	cfg   *config.Config
-	deps  *serveDeps
-	login bool // a login-capable provider instead of the stub
+	st     *store.Store
+	cfg    *config.Config
+	deps   *serveDeps
+	login  bool            // a login-capable provider instead of the stub
+	parent context.Context // also stops serve when done; nil means none
+}
+
+// withStopReserve replaces how long before web.shutdown_timeout runs out
+// serve stops running jobs.
+func withStopReserve(d time.Duration) serveOption {
+	return func(s *serveSetup) { s.deps.stopReserve = d }
+}
+
+// underContext also stops battleship serve when ctx is done.
+func underContext(ctx context.Context) serveOption {
+	return func(s *serveSetup) { s.parent = ctx }
 }
 
 // withConfig changes the config battleship serve gets.
@@ -222,7 +239,10 @@ func startServe(t *testing.T, opts ...serveOption) *serveEnv {
 	}
 	e.cfg = cfg
 
-	ctx, cancel := context.WithCancel(context.Background())
+	if setup.parent == nil {
+		setup.parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(setup.parent)
 	e.stop = cancel
 	go func() { e.done <- serve(ctx, cfg, d) }()
 	t.Cleanup(func() {
@@ -432,6 +452,257 @@ func TestServeShutdownGivesUpAfterTimeout(t *testing.T) {
 	// Let the abandoned job end, so it doesn't outlive the test's database.
 	release()
 	waitFor(t, "the abandoned job to end", func() bool { return !e.job(id).Active() })
+}
+
+// stopped waits for serve to return after e.stop, failing the test if that
+// takes longer than within.
+func (e *serveEnv) stopped(within time.Duration) error {
+	e.t.Helper()
+	select {
+	case err := <-e.done:
+		e.done <- err // for the cleanup
+		return err
+	case <-time.After(within):
+		e.t.Fatalf("battleship serve didn't return within %s", within)
+		return nil
+	}
+}
+
+// logged waits for a log line with msg.
+func (e *serveEnv) logged(msg string) {
+	e.t.Helper()
+	waitFor(e.t, "a "+msg+" log line", func() bool { return len(e.records(msg)) > 0 })
+}
+
+// heartbeatAt reads job id's heartbeat stamp straight from the database.
+func heartbeatAt(t *testing.T, dbURL string, id int64) time.Time {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := pgx.Connect(ctx, dbURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	var at time.Time
+	if err := conn.QueryRow(ctx, `SELECT heartbeat_at FROM jobs WHERE id = $1`, id).Scan(&at); err != nil {
+		t.Fatal(err)
+	}
+	return at
+}
+
+// A shutdown far from its deadline lets a running job finish as it would
+// have, and logs that it finished during the shutdown.
+func TestServeShutdownLetsRunningJobFinish(t *testing.T) {
+	e := startServe(t, withStopReserve(time.Second))
+	release := e.api.hold(false)
+	defer release()
+	id := e.submit(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Hosts: []string{"dc"}, Action: "start"})
+	signalled(t, e.api.waiting, "the job to wait for its Proxmox task")
+
+	e.stop()
+	e.logged("shutting down")
+	if j := e.job(id); j.Status != store.StatusRunning {
+		t.Fatalf("job = %s (%s) once shutting down, want still running", j.Status, j.Error)
+	}
+	release()
+	if err := e.stopped(20 * time.Second); err != nil {
+		t.Fatalf("serve = %v, want a clean stop", err)
+	}
+	if j := e.job(id); j.Status != store.StatusSucceeded {
+		t.Errorf("job = %s (%s), want succeeded: the shutdown let it finish", j.Status, j.Error)
+	}
+	fin := e.records("job finished during shutdown")
+	if len(fin) != 1 || fin[0]["job"] != float64(id) || fin[0]["status"] != store.StatusSucceeded {
+		t.Errorf("job finished during shutdown records = %v, want job %d succeeded", fin, id)
+	}
+	if recs := e.records("shutdown deadline near: stopping running jobs so they clean up and end interrupted before it"); len(recs) != 0 {
+		t.Errorf("deadline records = %v, want none: the job finished first", recs)
+	}
+}
+
+// Once shutting down, serve's workers claim nothing new, even while one of
+// them still runs a job; another replica takes the queue.
+func TestServeShutdownClaimsNoNewJobs(t *testing.T) {
+	e := startServe(t, withStopReserve(time.Second))
+	release := e.api.hold(false)
+	defer release()
+	running := e.submit(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Hosts: []string{"dc"}, Action: "start"})
+	signalled(t, e.api.waiting, "the job to wait for its Proxmox task")
+
+	e.stop()
+	e.logged("shutting down")
+	queued := e.submit(jobs.Inputs{Kind: pods.KindPower, Teams: "2", Hosts: []string{"dc"}, Action: "start"})
+	// The idle worker would claim it within a poll (50ms) or the hub's wake.
+	time.Sleep(time.Second)
+	if j := e.job(queued); j.Status != store.StatusPending || j.ClaimedBy != "" {
+		t.Fatalf("job queued during shutdown = %s, claimed by %q; want still pending for another replica", j.Status, j.ClaimedBy)
+	}
+	release()
+	if err := e.stopped(20 * time.Second); err != nil {
+		t.Fatalf("serve = %v, want a clean stop", err)
+	}
+	if j := e.job(running); j.Status != store.StatusSucceeded {
+		t.Errorf("running job = %s (%s), want succeeded", j.Status, j.Error)
+	}
+	if j := e.job(queued); j.Status != store.StatusPending || j.ClaimedBy != "" {
+		t.Errorf("job queued during shutdown = %s, claimed by %q once serve stopped; want still pending", j.Status, j.ClaimedBy)
+	}
+}
+
+// A job still running when the deadline nears is stopped then, so it
+// cleans up and ends interrupted before serve gives up.
+func TestServeShutdownStopsJobsNearDeadline(t *testing.T) {
+	e := startServe(t, withConfig(func(c *config.Config) { c.Web.ShutdownTimeout = 4 * time.Second }), withStopReserve(3*time.Second))
+	release := e.api.hold(false)
+	defer release()
+	id := e.submit(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Hosts: []string{"dc"}, Action: "start"})
+	signalled(t, e.api.waiting, "the job to wait for its Proxmox task")
+
+	err, took := e.shutdown(20 * time.Second)
+	if err != nil {
+		t.Fatalf("serve = %v, want a clean stop before web.shutdown_timeout", err)
+	}
+	if took < time.Second || took >= 4*time.Second {
+		t.Errorf("shutdown took %s, want from 1s (the deadline less the reserve) to under 4s (the deadline)", took)
+	}
+	j := e.job(id)
+	if j.Status != store.StatusInterrupted || !strings.Contains(j.Error, "shut down") {
+		t.Errorf("job = %s (%s), want interrupted by the shutdown", j.Status, j.Error)
+	}
+	if recs := e.records("shutdown deadline near: stopping running jobs so they clean up and end interrupted before it"); len(recs) != 1 {
+		t.Errorf("deadline records = %v, want 1", recs)
+	}
+	if fin := e.records("job finished during shutdown"); len(fin) != 1 || fin[0]["status"] != store.StatusInterrupted {
+		t.Errorf("job finished during shutdown records = %v, want it interrupted", fin)
+	}
+}
+
+// While a stopping replica finishes its job, it keeps heartbeating, so the
+// other replica's reaper leaves the job be; that replica runs new jobs.
+func TestServeShutdownKeepsJobClaimedWhileFinishing(t *testing.T) {
+	st, dbURL := storetest.NewWithURL(t)
+	fast := withConfig(func(c *config.Config) { c.Jobs.Heartbeat, c.Jobs.StaleAfter = 200*time.Millisecond, 2*time.Second })
+	a := startServe(t, onStore(st), fast, withStopReserve(time.Second))
+	release := a.api.hold(false)
+	defer release()
+	id := a.submit(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Hosts: []string{"dc"}, Action: "start"})
+	signalled(t, a.api.waiting, "the job to wait for its Proxmox task")
+	b := startServe(t, onStore(st), fast)
+
+	a.stop()
+	a.logged("shutting down")
+	claimer := a.job(id).ClaimedBy
+	// Three stale_afters: the other replica reaps a silent job within one.
+	last := heartbeatAt(t, dbURL, id)
+	beats := 0
+	for end := time.Now().Add(6 * time.Second); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
+		j := a.job(id)
+		if j.Status != store.StatusRunning || j.ClaimedBy != claimer {
+			t.Fatalf("job = %s (%s), claimed by %q; want still running on %s", j.Status, j.Error, j.ClaimedBy, claimer)
+		}
+		if at := heartbeatAt(t, dbURL, id); at.After(last) {
+			last, beats = at, beats+1
+		}
+	}
+	if beats < 10 {
+		t.Errorf("heartbeat stamp advanced %d times in 6s of shutdown, want about every 200ms", beats)
+	}
+
+	other := b.submit(jobs.Inputs{Kind: pods.KindPower, Teams: "2", Hosts: []string{"dc"}, Action: "start"})
+	waitFor(t, "the other replica to run the new job", func() bool { return !b.job(other).Active() })
+	if j := b.job(other); j.Status != store.StatusSucceeded || j.ClaimedBy == claimer || !isWorkerID(j.ClaimedBy, "serve") {
+		t.Errorf("new job = %s (%s), claimed by %q; want succeeded by the other replica", j.Status, j.Error, j.ClaimedBy)
+	}
+
+	release()
+	if err := a.stopped(20 * time.Second); err != nil {
+		t.Fatalf("serve = %v, want a clean stop", err)
+	}
+	if j := a.job(id); j.Status != store.StatusSucceeded {
+		t.Errorf("job = %s (%s), want succeeded", j.Status, j.Error)
+	}
+}
+
+// signalChildEnv makes TestServeSecondSignalExitsAtOnce's process the
+// child: serve under real signals, with a job running through the shutdown.
+const signalChildEnv = "BATTLESHIP_TEST_SIGNAL_CHILD_DB"
+
+// A second signal kills serve at once, even while it waits for a job.
+func TestServeSecondSignalExitsAtOnce(t *testing.T) {
+	if dbURL := os.Getenv(signalChildEnv); dbURL != "" {
+		signalChild(t, dbURL)
+		return
+	}
+	_, dbURL := storetest.NewWithURL(t)
+	cmd := exec.Command(os.Args[0], "-test.run=^TestServeSecondSignalExitsAtOnce$")
+	cmd.Env = append(os.Environ(), signalChildEnv+"="+dbURL)
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	lines := make(chan string, 100)
+	go func() {
+		s := bufio.NewScanner(out)
+		for s.Scan() {
+			lines <- s.Text()
+		}
+		close(lines)
+	}()
+	expect := func(want string) {
+		t.Helper()
+		for {
+			line, ok := <-lines
+			if !ok {
+				t.Fatalf("child ended before printing %q", want)
+			}
+			if line == want {
+				return
+			}
+		}
+	}
+	expect("job running")
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	expect("first signal handled")
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	select {
+	case <-exited:
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve didn't exit within 10s of a second signal")
+	}
+	ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	if !ok || !ws.Signaled() || ws.Signal() != syscall.SIGTERM {
+		t.Errorf("child ended %s, want killed by the second SIGTERM", cmd.ProcessState)
+	}
+}
+
+// signalChild runs serve under stopOnSignal with a job held, printing
+// progress for the parent, which kills it.
+func signalChild(t *testing.T, dbURL string) {
+	st, err := store.Open(context.Background(), dbURL, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, stop := stopOnSignal(func() { fmt.Println("first signal handled") })
+	defer stop()
+	e := startServe(t, onStore(st), underContext(ctx), withStopReserve(time.Second))
+	e.api.hold(false)
+	e.submit(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Hosts: []string{"dc"}, Action: "start"})
+	signalled(t, e.api.waiting, "the job to wait for its Proxmox task")
+	fmt.Println("job running")
+	time.Sleep(time.Minute)
+	t.Error("still running a minute after the job started; the parent should have killed it")
 }
 
 func TestServeReadinessFailsFirstOnShutdown(t *testing.T) {

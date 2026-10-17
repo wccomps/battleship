@@ -26,7 +26,10 @@ form ──> preview ──> confirm ──> stored job ──> worker claims it
    worker keeps the claim with heartbeats. Once none has landed for the
    claimer's `stale_after`, any worker reaps the job (`interrupted`), which
    frees its locks. From half that, the worker stops the run and sends no
-   more changes for it until a heartbeat lands again.
+   more changes for it until a heartbeat lands again. A replica shutting
+   down claims nothing new but keeps running, and heartbeating, the jobs it
+   has; only when `web.shutdown_timeout` is about to run out does it stop
+   them, early enough for their cleanup.
 4. **Re-plan.** The worker plans once more; if the cluster changed since the
    preview, the job ends `stale` and nothing runs.
 5. **Run.** The executor (`apply.Executor`) runs each item's steps, records

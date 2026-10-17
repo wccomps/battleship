@@ -12,8 +12,10 @@
 // command follows it, or with -queue exits once it is queued.
 //
 // battleship serve runs the volunteer web app and job workers in one process
-// per replica. On SIGTERM it fails readiness, stops running jobs cleanly and
-// exits within web.shutdown_timeout; a second signal exits at once.
+// per replica. On SIGTERM it fails readiness, claims no more jobs, lets
+// running jobs finish (stopping them cleanly if web.shutdown_timeout is about
+// to run out) and exits within web.shutdown_timeout; a second signal exits
+// at once.
 //
 //	battleship deploy   -config battleship.toml -templates '*.kilo.alpha' -teams 1-32
 //	battleship teardown -config battleship.toml -teams 1-32 -yes
@@ -41,20 +43,15 @@ import (
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
-	defer stop()
-	// After the first signal, restore default handling so a second one kills
-	// the process while the executor winds down.
 	serving := len(os.Args) > 1 && os.Args[1] == "serve"
-	go func() {
-		<-ctx.Done()
+	ctx, stop := stopOnSignal(func() {
 		if !serving {
 			fmt.Fprintln(os.Stderr, "Interrupting... finishing or removing anything half-built. "+
 				"Press Ctrl-C again to force quit (may leave half-built VMs and a stopped master). "+
 				"Proxmox tasks already started keep running.")
 		}
-		stop()
-	}()
+	})
+	defer stop()
 	fi, err := os.Stdin.Stat()
 	d := deps{
 		newAPI:      newProxmoxAPI,
@@ -66,6 +63,19 @@ func main() {
 		stderr:      os.Stderr,
 	}
 	os.Exit(run(ctx, os.Args[1:], d))
+}
+
+// stopOnSignal returns a context done at the first interrupt, SIGTERM or
+// SIGHUP. Default handling then comes back, so a second one kills the
+// process at once, while the executor winds down; onFirst runs after that.
+func stopOnSignal(onFirst func()) (context.Context, context.CancelFunc) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		<-ctx.Done()
+		stop()
+		onFirst()
+	}()
+	return ctx, stop
 }
 
 // newProxmoxAPI is the Proxmox client for p. It holds no credential: every

@@ -25,8 +25,8 @@ var (
 	errAuthLapsed = errors.New("authorization lapsed")
 )
 
-// DBCallTimeout bounds each worker claim/reap and each CLI database call, so a
-// dead connection can't stall either.
+// DBCallTimeout bounds each worker claim/reap, the recording of a job's
+// outcome and each CLI database call, so a dead connection can't stall them.
 const DBCallTimeout = 30 * time.Second
 
 // eventTimeoutFloor keeps a very short heartbeat interval (tests use 20ms) from
@@ -60,6 +60,10 @@ type Worker struct {
 	// cancel is requested. Nil: an idle worker looks for jobs every
 	// Jobs.Poll, and cancels wait for the next heartbeat.
 	Hub *status.Hub
+	// Draining, if set, stops the worker claiming jobs once closed: Run then
+	// returns when the job it is running, if any, ends (a claim already
+	// under way still runs its job). Only ctx stops that job early.
+	Draining <-chan struct{}
 
 	// onEvent, if set, also receives each progress event as it is recorded,
 	// from many goroutines; tests use it to act at a point in a run.
@@ -93,8 +97,8 @@ func (w *Worker) init() {
 	})
 }
 
-// Run claims and runs jobs until ctx is done, first reaping jobs whose
-// workers went silent each pass.
+// Run claims and runs jobs until ctx is done or Draining closes, first
+// reaping jobs whose workers went silent each pass.
 func (w *Worker) Run(ctx context.Context) error {
 	w.init()
 	idle := w.Cfg.Jobs.Poll
@@ -107,7 +111,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		// after reconnecting, so the timer is only for reaping.
 		idle = w.Cfg.Jobs.StaleAfter
 	}
-	for ctx.Err() == nil {
+	for ctx.Err() == nil && !w.draining() {
 		reapCtx, stopReap := context.WithTimeout(ctx, DBCallTimeout)
 		ids, err := w.Store.ReapStale(reapCtx, w.Cfg.Jobs.StaleAfter)
 		stopReap()
@@ -116,6 +120,9 @@ func (w *Worker) Run(ctx context.Context) error {
 			w.Logf("reaping stale jobs: %v", err)
 		case len(ids) > 0:
 			w.Logf("marked jobs %v interrupted: their workers stopped sending heartbeats", ids)
+		}
+		if w.draining() {
+			break
 		}
 		job, claim, err := w.claimNext(ctx)
 		if err != nil {
@@ -130,6 +137,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		t := time.NewTimer(idle)
 		select {
 		case <-ctx.Done():
+		case <-w.Draining:
 		case <-t.C:
 		case _, ok := <-changed:
 			if !ok { // the hub stopped: poll instead
@@ -139,6 +147,15 @@ func (w *Worker) Run(ctx context.Context) error {
 		t.Stop()
 	}
 	return nil
+}
+
+func (w *Worker) draining() bool {
+	select {
+	case <-w.Draining:
+		return true
+	default:
+		return false
+	}
 }
 
 // claimNext claims the next runnable job, if any, with its lease. The
@@ -220,7 +237,7 @@ func (w *Worker) runClaimed(ctx context.Context, job *store.Job, claim *lease) {
 	}
 	stopHeartbeat()
 	// Finish refuses a job that is no longer this worker's.
-	finCtx, stopFin := context.WithTimeout(bg, 30*time.Second)
+	finCtx, stopFin := context.WithTimeout(bg, DBCallTimeout)
 	defer stopFin()
 	// An outcome the database won't take is logged whole, so what cleanup
 	// left (masters stopped, VMs to remove by hand) isn't lost with it.

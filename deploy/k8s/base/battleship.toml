@@ -95,7 +95,9 @@ session_max = "12h"                # Authentik refresh token validity must be >=
 session_refresh = "5m"             # re-check the user with Authentik this often; while it is unreachable a session lasts up to 3x this
 status_poll = "5s"
 drift_scan = "2m"
-# Keep: a stopped job's worst case (14m) < this < terminationGracePeriodSeconds (960s).
+# On stop, running jobs finish until 14m30s (a stopped job's worst case, plus
+# recording it) before this runs out, then stop. Raise it to give them longer.
+# Keep: 14m30s < this < terminationGracePeriodSeconds (960s).
 shutdown_timeout = "15m"
 # CHANGE ME: the ingress controller pods' CIDR (usually the pod CIDR); only
 # these are believed for X-Forwarded-For / -Proto.

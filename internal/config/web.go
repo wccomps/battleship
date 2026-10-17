@@ -28,8 +28,10 @@ type Web struct {
 	SessionRefresh time.Duration `toml:"session_refresh"`
 	StatusPoll     time.Duration `toml:"status_poll"` // how often the grid reads the cluster's VMs
 	DriftScan      time.Duration `toml:"drift_scan"`  // how often every team VM's config and snapshots are checked
-	// ShutdownTimeout is how long serve waits for running jobs on stop. Keep
-	// it above apply.StopBudget (14m) and below terminationGracePeriodSeconds.
+	// ShutdownTimeout is how long serve waits for running jobs on stop. They
+	// run on until apply.StopBudget (14m) plus 30s before it runs out, then
+	// stop and clean up. Keep it above that and below
+	// terminationGracePeriodSeconds.
 	ShutdownTimeout time.Duration `toml:"shutdown_timeout"`
 	// TrustedProxies are the CIDRs of reverse proxies whose X-Forwarded-For
 	// and X-Forwarded-Proto headers are believed. Empty trusts none.

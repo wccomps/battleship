@@ -26,8 +26,10 @@ spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
 
-      # stopped job's worst case (14m) < web.shutdown_timeout (15m) < this (16m).
-      # Shorter SIGKILLs replicas mid-cleanup, leaving half-built VMs.
+      # A stopping replica lets running jobs finish until 14m30s (a stopped
+      # job's worst case, plus recording it) before web.shutdown_timeout (15m),
+      # then stops them. Keep this (16m) above web.shutdown_timeout: shorter
+      # SIGKILLs replicas mid-cleanup, leaving half-built VMs.
       # Raise it whenever you raise web.shutdown_timeout.
       terminationGracePeriodSeconds: 960
 
