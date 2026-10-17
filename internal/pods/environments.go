@@ -68,9 +68,6 @@ type EnvHost struct {
 	// UserNotes are its other notes, such as the logins its base image's
 	// notes carried over.
 	UserNotes string
-	// HalfDeleted: a failed destroy left it locked as destroyed, without its
-	// name, so it doesn't count toward the slot's domain.
-	HalfDeleted bool
 }
 
 // Environment is what a slot holds.
@@ -81,6 +78,10 @@ type Environment struct {
 	// Users are VMs outside its pool with a NIC on one of its bridges.
 	Users []string
 	Mixed bool // its VMs don't all share one domain
+	// HalfDeleted are VMs, in its pool or else its VMIDs, that a failed
+	// destroy left locked as destroyed, without their names. Only tearing it
+	// down acts on them; they aren't Hosts.
+	HalfDeleted []EnvHost
 }
 
 // EnvByDomain is the environment, of envs, whose hosts share domain (the
@@ -94,7 +95,9 @@ func EnvByDomain(envs []Environment, domain string) (Environment, bool) {
 	return Environment{}, false
 }
 
-func (e Environment) Free() bool { return len(e.Hosts) == 0 && len(e.Users) == 0 }
+func (e Environment) Free() bool {
+	return len(e.Hosts) == 0 && len(e.Users) == 0 && len(e.HalfDeleted) == 0
+}
 
 func (e Environment) HasRouter() bool { return e.RouterName() != "" }
 
@@ -193,7 +196,16 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 	}
 	var read []proxmox.VM
 	for _, vm := range vms {
-		_, inSlot := byPool[vm.Pool]
+		si, inSlot := byPool[vm.Pool]
+		if vm.Lock == "destroyed" {
+			if !inSlot {
+				si = slices.IndexFunc(slots, func(s Slot) bool { return vm.VMID >= s.FirstVMID && vm.VMID <= s.LastVMID() })
+			}
+			if si >= 0 { // its config is only the lock
+				envs[si].HalfDeleted = append(envs[si].HalfDeleted, EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node, Status: vm.Status})
+			}
+			continue
+		}
 		if kind, _, _ := p.Naming.Classify(vm); inSlot || (!vm.Template && kind != TeamVMKind) {
 			read = append(read, vm)
 		}
@@ -226,8 +238,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			n, has := ParseNotes(cfg["description"])
 			n = n.Checked(p.Cfg.Environments.Subnet)
 			envs[si].Hosts = append(envs[si].Hosts, EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node,
-				Status: vm.Status, Tags: vm.Tags, Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has, UserNotes: UserNotes(cfg["description"]),
-				HalfDeleted: vm.Lock == "destroyed"})
+				Status: vm.Status, Tags: vm.Tags, Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has, UserNotes: UserNotes(cfg["description"])})
 			continue
 		}
 		if vm.Template {
@@ -243,10 +254,10 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 		e := &envs[i]
 		sort.Slice(e.Hosts, func(a, b int) bool { return e.Hosts[a].Name < e.Hosts[b].Name })
 		sort.Strings(e.Users)
+		slices.SortFunc(e.HalfDeleted, func(a, b EnvHost) int { return a.VMID - b.VMID })
 		for _, h := range e.Hosts {
 			d := Domain(h.Name)
 			switch {
-			case h.HalfDeleted:
 			case d == "" || (e.Domain != "" && d != e.Domain):
 				e.Mixed = true
 			case e.Domain == "":

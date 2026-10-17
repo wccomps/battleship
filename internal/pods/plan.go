@@ -578,16 +578,11 @@ func (p Planner) Teardown(ctx context.Context, teams, hosts []string) (*Plan, er
 		return plan, err
 	}
 	p.halfDeleted(plan, vms)
-	want := map[string]bool{}
-	for _, t := range plan.Teams {
-		want[t] = true
-	}
-	err = p.orphanedDisks(ctx, plan, vms, func(held map[int]bool) []int { return p.orphanCandidates(plan.Teams, vms, held) },
-		func(vmid int, node string) (Item, bool) {
-			team, ok := p.Naming.TeamOfCloneVMID(vmid)
-			return Item{Team: team, Name: p.Naming.VMName(team, "disks-"+strconv.Itoa(vmid)), VMID: vmid, Node: node,
-				Steps: []Step{StepFreeDisks}}, ok && want[team]
-		})
+	err = p.orphanedDisks(ctx, plan, vms, p.orphanCandidates(plan.Teams, vms), func(vmid int, node string) Item {
+		team, _ := p.Naming.TeamOfCloneVMID(vmid) // a candidate is a team's clone VMID
+		return Item{Team: team, Name: p.Naming.VMName(team, "disks-"+strconv.Itoa(vmid)), VMID: vmid, Node: node,
+			Steps: []Step{StepFreeDisks}}
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -626,13 +621,12 @@ func HalfDeletedText(vmid int, node string) string {
 }
 
 // orphanedDisks adds a free-disks item, made by item, for each VMID of
-// candidates (given the VMIDs held) with disks on deploy.storage but no VM
-// (a teardown cut off before freeing them); item refuses VMIDs not the
-// plan's. It lists every node in storageNodes, so node-local storage is
-// covered. Proxmox shows a gone VM's disks only to users with
-// Datastore.Allocate, which freeing needs; others see none.
-func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM,
-	candidates func(held map[int]bool) []int, item func(vmid int, node string) (Item, bool)) error {
+// cands with disks on deploy.storage but no VM (a teardown cut off before
+// freeing them). Only volumes a candidate owns count, so a file of no VMID
+// (VolumeOwner 0) is never an item. It lists every node in storageNodes, so
+// node-local storage is covered. Proxmox shows a gone VM's disks only to
+// users with Datastore.Allocate, which freeing needs; others see none.
+func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM, cands []int, item func(vmid int, node string) Item) error {
 	nodes, err := p.API.OnlineNodes(ctx)
 	if err != nil {
 		return err
@@ -649,7 +643,7 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	// Each candidate is asked about on its own: one VMID takes a moment, while
 	// a whole listing runs qemu-img on every disk on the storage and outgrows
 	// Proxmox's proxy timeout once a few hundred VMs are deployed.
-	cands := candidates(held)
+	cands = slices.DeleteFunc(slices.Clone(cands), func(id int) bool { return held[id] })
 	listed := make([][]string, len(nodes))
 	var mu sync.Mutex
 	var g errgroup.Group
@@ -677,8 +671,7 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	for i, node := range nodes {
 		for _, v := range listed[i] {
 			vmid, _ := VolumeOwner(v)
-			it, ok := item(vmid, node)
-			if !ok || held[vmid] {
+			if !slices.Contains(cands, vmid) || held[vmid] {
 				continue
 			}
 			held[vmid] = true // one item per VMID, from the first node that lists it
@@ -689,7 +682,7 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 				}
 				continue
 			}
-			plan.Items = append(plan.Items, it)
+			plan.Items = append(plan.Items, item(vmid, node))
 		}
 	}
 	sort.SliceStable(plan.Items, func(i, j int) bool { return plan.Items[i].Name < plan.Items[j].Name })
@@ -699,18 +692,18 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 // orphanListings is how many storage listings run at once.
 const orphanListings = 8
 
-// orphanCandidates are the free VMIDs team VMs get when cloned from current
+// orphanCandidates are the VMIDs teams' VMs get when cloned from current
 // templates (CloneVMID), where a gone VM's disks would be. Disks of VMs
 // whose template is gone are only found by a whole-storage listing (more
 // than maxOrphanCandidates).
-func (p Planner) orphanCandidates(teams []string, vms []proxmox.VM, held map[int]bool) []int {
+func (p Planner) orphanCandidates(teams []string, vms []proxmox.VM) []int {
 	var out []int
 	for _, t := range teams {
 		for _, vm := range vms {
 			if !vm.Template || !p.Naming.IsTemplateName(vm.Name) {
 				continue
 			}
-			if id := p.Naming.CloneVMID(t, vm.VMID); !held[id] && !slices.Contains(out, id) {
+			if id := p.Naming.CloneVMID(t, vm.VMID); !slices.Contains(out, id) {
 				out = append(out, id)
 			}
 		}

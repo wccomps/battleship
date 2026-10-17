@@ -128,6 +128,9 @@ func envBlocks(envs []pods.Environment, subnet string) []envBlock {
 			}
 			b.Hosts = append(b.Hosts, row)
 		}
+		for _, h := range e.HalfDeleted {
+			b.Hosts = append(b.Hosts, envHostRow{Name: h.Name, Status: cmp.Or(h.Status, "unknown")})
+		}
 		slices.SortStableFunc(b.Hosts, hostOrder)
 		out = append(out, b)
 	}

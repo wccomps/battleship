@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"sort"
 	"strconv"
 
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -13,9 +12,8 @@ import (
 // EnvTeardown plans deleting the environment with req.Domain: each VM in its
 // slot's pool (Environment.Hosts), stopped cleanly and then deleted as a team
 // teardown does. VMs outside the pool on its networks (Users) are never
-// touched; the plan's notices name them. A VM a failed destroy left locked as
-// destroyed is listed blocked, and disks gone VMs left in the slot's VMIDs
-// are freed. req.Slot, if set (a retry's), names the slot, which may by then
+// touched; the plan's notices name them. Its half-deleted VMs are listed
+// blocked, and disks gone VMs left in the slot's VMIDs are freed. req.Slot, if set (a retry's), names the slot, which may by then
 // hold nothing of the domain but what a failed delete left.
 func (p Planner) EnvTeardown(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if err := CheckDomain(req.Domain); err != nil {
@@ -36,48 +34,34 @@ func (p Planner) EnvTeardown(ctx context.Context, req EnvRequest) (*Plan, error)
 	for _, vm := range vms {
 		listed[vm.VMID] = vm
 	}
-	itemized := map[int]bool{}
 	for _, h := range env.Hosts {
-		switch {
-		case h.HalfDeleted:
-			plan.Items = append(plan.Items, halfDeletedItem(h.VMID, h.Node))
-		case Domain(h.Name) == req.Domain:
-			notes := h.Notes
-			it := Item{Name: h.Name, Host: h.Host, VMID: h.VMID, Node: h.Node, Tags: h.Tags, Notes: &notes,
-				Steps: []Step{StepStop, StepDelete}}
-			if listed[h.VMID].Template {
-				it.Blocked = "is a template, not one of " + req.Domain + "'s VMs; move it out of " + s.Pool + " first"
-			}
-			plan.Items = append(plan.Items, it)
-		default:
+		if Domain(h.Name) != req.Domain {
 			continue // teardownEnv refuses a slot of mixed domains
 		}
-		itemized[h.VMID] = true
-	}
-	// A half-deleted VM may also have left the pool.
-	for _, vm := range vms {
-		if vm.Lock == "destroyed" && vm.VMID >= s.FirstVMID && vm.VMID <= s.LastVMID() && !itemized[vm.VMID] {
-			plan.Items = append(plan.Items, halfDeletedItem(vm.VMID, vm.Node))
+		notes := h.Notes
+		it := Item{Name: h.Name, Host: h.Host, VMID: h.VMID, Node: h.Node, Tags: h.Tags, Notes: &notes,
+			Steps: []Step{StepStop, StepDelete}}
+		if listed[h.VMID].Template {
+			it.Blocked = "is a template, not one of " + req.Domain + "'s VMs; move it out of " + s.Pool + " first"
 		}
+		plan.Items = append(plan.Items, it)
+	}
+	for _, h := range env.HalfDeleted {
+		plan.Items = append(plan.Items, halfDeletedItem(h.VMID, h.Node))
 	}
 	for _, u := range env.Users {
 		plan.Notices = append(plan.Notices, fmt.Sprintf("Not touched: %s is outside %s but has a NIC on its networks.", u, s.Pool))
 	}
-	err = p.orphanedDisks(ctx, plan, vms, func(held map[int]bool) []int {
-		var out []int
-		for id := s.FirstVMID; id <= s.LastVMID(); id++ {
-			if !held[id] {
-				out = append(out, id)
-			}
-		}
-		return out
-	}, func(vmid int, node string) (Item, bool) {
-		return Item{Name: "disks-" + strconv.Itoa(vmid), VMID: vmid, Node: node, Steps: []Step{StepFreeDisks}}, true
+	var cands []int
+	for id := s.FirstVMID; id <= s.LastVMID(); id++ {
+		cands = append(cands, id)
+	}
+	err = p.orphanedDisks(ctx, plan, vms, cands, func(vmid int, node string) Item {
+		return Item{Name: "disks-" + strconv.Itoa(vmid), VMID: vmid, Node: node, Steps: []Step{StepFreeDisks}}
 	})
 	if err != nil {
 		return nil, err
 	}
-	sort.SliceStable(plan.Items, func(i, j int) bool { return plan.Items[i].Name < plan.Items[j].Name })
 	return plan, nil
 }
 
