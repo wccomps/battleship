@@ -132,7 +132,7 @@ func (s *Store) Finish(ctx context.Context, jobID int64, worker string, o Outcom
 		return ErrLostClaim
 	}
 	for name, it := range o.Items {
-		if _, err := tx.Exec(ctx, `UPDATE job_items SET status = $3, error = $4, left_config = $5, updated_at = now()
+		if _, err := tx.Exec(ctx, `UPDATE job_items SET status = $3, error = $4, left_config = $5
 			WHERE job_id = $1 AND name = $2 AND status NOT IN `+keptOnOutcomeSQL, jobID, name, it.Status, it.Error, it.LeftConfig); err != nil {
 			return err
 		}
@@ -151,7 +151,7 @@ func (s *Store) Finish(ctx context.Context, jobID int64, worker string, o Outcom
 // unfinished items become ItemInterrupted.
 func endItems(ctx context.Context, tx pgx.Tx, jobIDs []int64, stopped bool) error {
 	_, err := tx.Exec(ctx, `UPDATE job_items SET
-			status = CASE WHEN step = '' THEN 'not run' ELSE 'interrupted' END, updated_at = now()
+			status = CASE WHEN step = '' THEN 'not run' ELSE 'interrupted' END
 		WHERE job_id = ANY($1) AND (
 			(step = '' AND status IN `+notRunNoStepSQL+`)
 			OR ($2 AND status IN `+unfinishedItemsSQL+`))`, jobIDs, stopped)

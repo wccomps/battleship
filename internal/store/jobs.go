@@ -92,10 +92,12 @@ type Item struct {
 	Status string
 	Error  string
 	// Steps maps step name to its last outcome (done, skipped, failed,
-	// interrupted) in its latest run: a retry round starts it afresh.
+	// interrupted) in its latest run: each attempt's started event, a retry
+	// round's too, starts it afresh.
 	Steps map[string]string
-	// StepAt is when its last step began or ended: the time of its last
-	// event other than an info line, which leaves it.
+	// StepAt is when its last step began or ended: the time, by the worker's
+	// clock, of its last event other than an info line; when it was created
+	// if it has none.
 	StepAt time.Time
 	// Note is its last info line since then, e.g. what a step waits for.
 	Note string
@@ -251,8 +253,9 @@ func (s *Store) Events(ctx context.Context, jobID, afterID int64, limit int) ([]
 var beforeEventCommit func(jobID int64, ev Event)
 
 // AddEvent records progress of a running job and moves its item to the
-// event's step. One job's events are serialized so their IDs follow commit
-// order. ErrNotActive (nothing stored) if the job isn't running.
+// event's step and status (see the item statuses). One job's events are
+// serialized so their IDs follow commit order. ErrNotActive (nothing
+// stored) if the job isn't running.
 func (s *Store) AddEvent(ctx context.Context, jobID int64, ev Event) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -282,7 +285,11 @@ func (s *Store) AddEvent(ctx context.Context, jobID int64, ev Event) error {
 				steps = CASE WHEN $4 = 'started' THEN '{}'
 					WHEN $3 <> '' AND $4 IN ('done', 'skipped', 'failed', 'interrupted')
 					THEN steps || jsonb_build_object($3::text, $4::text) ELSE steps END,
-				status = CASE WHEN status IN `+keptOnEventSQL+` THEN status ELSE 'running' END,
+				status = CASE WHEN status IN `+keptOnEventSQL+` THEN status
+					WHEN $4 = 'succeeded' THEN 'done'
+					WHEN $4 = 'failed' THEN 'failed'
+					WHEN status IN `+endedItemsSQL+` AND $4 <> 'started' THEN status
+					ELSE 'running' END,
 				error = CASE WHEN $4 = 'failed' THEN $5 ELSE error END,
 				note = CASE WHEN $4 = 'info' THEN $5 ELSE '' END,
 				updated_at = CASE WHEN $4 = 'info' THEN updated_at ELSE $6 END
@@ -348,11 +355,11 @@ func (s *Store) RequestCancel(ctx context.Context, jobID int64, by string) error
 	return tx.Commit(ctx)
 }
 
-// BusyVMs maps each VM that active jobs still have to work on to the oldest
-// such job's ID, at most limit entries. Blocked items aren't busy.
+// BusyVMs maps each VM that active jobs still have to work on (or retry) to
+// the oldest such job's ID, at most limit entries. Blocked items aren't busy.
 func (s *Store) BusyVMs(ctx context.Context, limit int) (map[string]int64, error) {
 	rows, err := s.pool.Query(ctx, `SELECT i.name, min(j.id) FROM jobs j JOIN job_items i ON i.job_id = j.id
-		WHERE j.status IN `+activeJobsSQL+` AND i.status IN `+unfinishedItemsSQL+`
+		WHERE j.status IN `+activeJobsSQL+` AND i.status IN `+busyItemsSQL+`
 		GROUP BY i.name ORDER BY i.name LIMIT $1`, limit)
 	if err != nil {
 		return nil, err

@@ -947,7 +947,7 @@ func (s *Server) jobEventsAfter(ctx context.Context, id, after int64) ([]eventVi
 		}
 		for _, ev := range evs {
 			after = ev.ID
-			if ev.Status == string(apply.EventSkipped) && ev.Message == "" || ev.Status == string(apply.EventStarted) {
+			if ev.Status == string(apply.EventSkipped) && ev.Message == "" || ev.Status == string(apply.EventStarted) || ev.Status == string(apply.EventSucceeded) {
 				continue
 			}
 			out = append(out, eventView{

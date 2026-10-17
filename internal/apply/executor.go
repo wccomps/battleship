@@ -22,10 +22,15 @@ const (
 	EventSkipped EventStatus = "skipped" // already in the desired state
 	EventFailed  EventStatus = "failed"
 	EventInfo    EventStatus = "info"
-	// EventStarted: the item's first step began, so it shows as running while
-	// a long step (a clone) waits on Proxmox. Logs leave it out.
+	// EventStarted: an attempt at the item began (its first step, or a gone
+	// VM's check), so it shows as running while a long step (a clone) waits
+	// on Proxmox. Every attempt, in every round, starts with one. Logs leave
+	// it out.
 	EventStarted EventStatus = "started"
-	EventBlocked EventStatus = "blocked" // the plan blocked this item; Message says why
+	// EventSucceeded: the item ran its last step; the web log leaves it out.
+	// An item's EventFailed (with its step) or EventInterrupted ends it too.
+	EventSucceeded EventStatus = "succeeded"
+	EventBlocked   EventStatus = "blocked" // the plan blocked this item; Message says why
 	// EventInterrupted: a stop (cancel, shutdown) cut the item off.
 	EventInterrupted EventStatus = "interrupted"
 )
@@ -332,6 +337,7 @@ func (e *Executor) runItems(ctx context.Context, kind pods.Kind, items []pods.It
 			run := func() error {
 				var err error
 				if clones && b.err != nil {
+					e.emit(it.Name, "", EventStarted, "")
 					err = e.endItem(ctx, it, "", -1, false, fmt.Errorf("template %s: %w", it.Template, b.err))
 				} else {
 					err = e.runItem(ctx, kind, it, b)

@@ -968,6 +968,30 @@ func TestJobPageShowsAStartedItemRunning(t *testing.T) {
 	}
 }
 
+// An item's succeeded event ends it done at once, and isn't a log line.
+func TestJobPageShowsASucceededItemDone(t *testing.T) {
+	h := newHarness(t)
+	h.poll()
+	id := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Hosts: []string{"dc"}, Action: "stop"}, byOperator)
+	h.start(id)
+	op := h.login(asOperator)
+	items, err := h.st.Items(context.Background(), id)
+	if err != nil || len(items) == 0 {
+		t.Fatalf("items = %v, %v", items, err)
+	}
+	h.event(id, items[0].Name, "power", "started", "")
+	h.event(id, items[0].Name, "power", "done", "")
+	before := strings.Count(h.get(&op, "/logs/"+itoa(id)).Body.String(), `<li id="ev-`)
+	h.event(id, items[0].Name, "", "succeeded", "")
+	body := h.get(&op, "/logs/"+itoa(id)).Body.String()
+	if n := strings.Count(body, `<li id="ev-`); n != before {
+		t.Errorf("%d log lines after the succeeded event, want %d:\n%s", n, before, body)
+	}
+	if items, _ = h.st.Items(context.Background(), id); items[0].Status != store.ItemDone {
+		t.Errorf("item = %+v, want done", items[0])
+	}
+}
+
 // An image or environment job's page goes back, and closes, to the page its
 // kind belongs to; others to the job list (back) and the grid (close).
 func TestJobPageGoesBackToItsList(t *testing.T) {

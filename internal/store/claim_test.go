@@ -244,7 +244,7 @@ func TestEventsUpdateItems(t *testing.T) {
 		}
 	}
 	items, _ := s.Items(ctx, id)
-	if items[0].Step != "delete" || items[0].Status != store.ItemRunning || items[0].Error != "boom" {
+	if items[0].Step != "delete" || items[0].Status != store.ItemFailed || items[0].Error != "boom" {
 		t.Errorf("teak = %+v", items[0])
 	}
 	if items[1].Status != store.ItemBlocked {
