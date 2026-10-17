@@ -256,17 +256,31 @@ func (b *browser) where() string {
 	return s + " errors: " + strings.Join(b.errs, "; ")
 }
 
-// waitFor waits until js is true.
+// waitFor waits until js is true. A check a navigation cuts off (such as a
+// form submit's just clicked) counts as false.
 func (b *browser) waitFor(what, js string) {
 	b.t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
-	for !b.is(js) {
-		if time.Now().After(deadline) {
+	for {
+		var ok bool
+		err := chromedp.Run(b.ctx, chromedp.Evaluate(js, &ok, func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithAwaitPromise(true) }))
+		switch {
+		case err == nil && ok:
+			b.settle()
+			return
+		case err != nil && !navigatedAway(err):
+			b.t.Fatalf("evaluating %s: %v", js, err)
+		case time.Now().After(deadline):
 			b.t.Fatalf("waiting for %s (%s); the tab shows %s", what, js, b.where())
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	b.settle()
+}
+
+// navigatedAway is whether err is an evaluation the page left before it
+// answered.
+func navigatedAway(err error) bool {
+	return strings.Contains(err.Error(), "Inspected target navigated or closed") || strings.Contains(err.Error(), "Execution context was destroyed")
 }
 
 // noSideways fails if the page scrolls sideways.
@@ -831,6 +845,17 @@ func TestBrowserTeardownForm(t *testing.T) {
 
 		})
 	}
+}
+
+// waitFor outlasts a check the page navigates away from: here the first
+// check itself leaves for /teardown.
+func TestBrowserWaitForOutlivesANavigation(t *testing.T) {
+	h, _ := bigHarness(t)
+	lead := h.login(asLead)
+	b := newBrowser(t, h, &lead, 1280, 800, false)
+	b.open("/")
+	b.waitFor("the teardown page", `location.pathname === "/teardown" || new Promise(() => { location.href = "/teardown" })`)
+	b.clean()
 }
 
 func TestBrowserGridSizes(t *testing.T) {
