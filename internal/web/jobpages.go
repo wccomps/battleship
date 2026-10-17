@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/auth"
@@ -317,6 +319,18 @@ type jobView struct {
 	Queued     string  // pending and waiting for no job: freeWorker
 	Items      jobItems
 	Live       bool // the job is active: the page follows it
+	// Elapsed is how long it has run ("3:12") or ran; Since, while it runs,
+	// is when it started in Unix ms, from which the script keeps it current.
+	Elapsed string
+	Since   int64
+	// Now is the server's clock in Unix ms when the page was drawn: the
+	// script reckons running times from it, not the browser's clock.
+	Now int64
+	// Open is where a finished environment or image job's result is: the
+	// environment or the family.
+	Open *link
+	// LogOpen unfolds the log: a line or the job failed.
+	LogOpen    bool
 	CanCancel  bool
 	AskCancel  bool // the job could be cancelled, but not by this viewer
 	CanRetry   bool
@@ -330,6 +344,9 @@ type jobView struct {
 	Events     []eventView
 	EventsHref string
 }
+
+// link is a button to a page.
+type link struct{ Href, Label string }
 
 // summaryView is what a finished job's summary adds to its items.
 type summaryView struct {
@@ -373,9 +390,17 @@ func (t jobItems) TallyText() string {
 type jobItemView struct {
 	Name  string
 	VMID  string
-	Step  string     // the last step it reported
 	Steps []stepView // its planned steps and how far it got; none if the plan can't be read
-	Look  statusLook
+	// Look is its status; a done VM's says its outcome and address, e.g.
+	// "Ready · 192.168.100.4".
+	Look statusLook
+	// Doing is a running VM's current step in words, and Note the info
+	// line it last logged on that step.
+	Doing, Note string
+	// For is how long it has been on that step ("2:31"), while the job
+	// runs; Since is when that step began, in Unix ms.
+	For   string
+	Since int64
 	Error string
 	Fold  bool // a done row the panel folds away
 
@@ -402,9 +427,85 @@ func (v jobItemView) StepsText() string {
 	return strings.Join(parts, ", ")
 }
 
+// stepDoing is each step in words, as a VM's current step.
+var stepDoing = map[pods.Step]string{
+	pods.StepClone:      "Cloning",
+	pods.StepNetwork:    "Setting the network",
+	pods.StepDiskLimits: "Setting disk limits",
+	pods.StepCDROM:      "Ejecting the install disc",
+	pods.StepSnapshot:   "Taking the snapshot",
+	pods.StepStart:      "Starting",
+	pods.StepStop:       "Stopping",
+	pods.StepDelete:     "Deleting",
+	pods.StepRollback:   "Rolling back",
+	pods.StepPower:      "Changing power",
+	pods.StepFreeDisks:  "Freeing leftover disks",
+	pods.StepLabel:      "Setting tags and notes",
+	pods.StepConvert:    "Making it a template",
+	pods.StepRetire:     "Deprecating the previous version",
+	pods.StepWaitAgent:  "Waiting for the guest agent",
+	pods.StepGuest:      "Setting up the guest",
+	pods.StepVerify:     "Checking the guest",
+}
+
+// powerDoing is a power step in words, by action.
+var powerDoing = map[string]string{"start": "Starting", "shutdown": "Shutting down", "stop": "Stopping", "reboot": "Rebooting"}
+
+// doingOf is step of it in words; a step without words reads as its name.
+func doingOf(step pods.Step, it pods.Item) string {
+	if w, ok := powerDoing[it.Action]; ok && step == pods.StepPower {
+		return w
+	}
+	if w, ok := stepDoing[step]; ok {
+		return w
+	}
+	return string(step)
+}
+
+// doneWord is how a done VM of a job of kind reads.
+func doneWord(kind pods.Kind) string {
+	switch kind {
+	case pods.KindDeploy, pods.KindEnvCreate, pods.KindEnvAdd, pods.KindImageRegister, pods.KindImageEdit:
+		return "Ready"
+	case pods.KindTeardown, pods.KindEnvTeardown, pods.KindImageDelete:
+		return "Deleted"
+	}
+	return "Done"
+}
+
+// addressOf is the address a plan item sets or keeps, if known.
+func addressOf(it pods.Item) string {
+	switch {
+	case it.Guest != nil && it.Guest.IP != "":
+		return it.Guest.IP
+	case it.Notes != nil:
+		return it.Notes.IP
+	}
+	return ""
+}
+
+// capital is s with its first letter upper case.
+func capital(s string) string {
+	if s == "" {
+		return ""
+	}
+	r, n := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(r)) + s[n:]
+}
+
+// clockText is d as a clock: "0:07", "3:12", "1:02:09".
+func clockText(d time.Duration) string {
+	s := max(int(d/time.Second), 0)
+	if s >= 3600 {
+		return fmt.Sprintf("%d:%02d:%02d", s/3600, s/60%60, s%60)
+	}
+	return fmt.Sprintf("%d:%02d", s/60, s%60)
+}
+
 // itemSteps is an item's planned steps: each one's reported outcome, the next
-// running, the rest waiting. A done item's unreported steps weren't needed
-// (an already-deleted VM's stop), except in old jobs that kept no outcomes.
+// running unless one failed, the rest waiting. A done item's unreported
+// steps weren't needed (an already-deleted VM's stop), except in old jobs
+// that kept no outcomes.
 func itemSteps(planned []pods.Step, it store.Item) []stepView {
 	pips := map[string]string{"done": "done", "skipped": "skip", "failed": "fail", "interrupted": "int"}
 	out := make([]stepView, 0, len(planned))
@@ -415,6 +516,7 @@ func itemSteps(planned []pods.Step, it store.Item) []stepView {
 		switch {
 		case ok:
 			v.State = pips[got]
+			running = running && got != "failed"
 		case running:
 			v.State, running = "run", false
 		case it.Status == store.ItemDone && len(it.Steps) == 0:
@@ -425,6 +527,16 @@ func itemSteps(planned []pods.Step, it store.Item) []stepView {
 		out = append(out, v)
 	}
 	return out
+}
+
+// stepsDone reports whether every one of steps is done or skipped.
+func stepsDone(steps []stepView) bool {
+	for _, st := range steps {
+		if st.State != "done" && st.State != "skip" {
+			return false
+		}
+	}
+	return len(steps) > 0
 }
 
 // eventView is one line of a job's log.
@@ -479,12 +591,19 @@ func (s *Server) jobPage(w http.ResponseWriter, r *http.Request) {
 	}
 	v.Events = events
 	v.EventsHref = fmt.Sprintf("/events/jobs/%d?after=%d", id, last)
+	for _, ev := range events {
+		v.LogOpen = v.LogOpen || ev.Err
+	}
 	view := s.newView(w, r, fmt.Sprintf("Log #%d", id), "logs", v)
 	if v.Live {
-		view.Live = "live"
+		view.Live, view.Reload = "live", followEvery
 	}
 	s.render(w, r, http.StatusOK, "job", view)
 }
+
+// followEvery is how often, in seconds, an active job's page reloads itself
+// without the script, which follows the job's event stream instead.
+const followEvery = 5
 
 // jobID reads the job ID from the path, answering 404 itself if invalid.
 func (s *Server) jobID(w http.ResponseWriter, r *http.Request) (int64, bool) {
@@ -583,8 +702,20 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 			v.RanAt += ", finished " + clockTime(now, *j.FinishedAt)
 		}
 	}
+	v.Now = now.UnixMilli()
+	switch {
+	case j.StartedAt == nil:
+	case j.FinishedAt != nil:
+		v.Elapsed = clockText(j.FinishedAt.Sub(*j.StartedAt))
+	case j.Status == store.StatusRunning:
+		v.Elapsed, v.Since = clockText(now.Sub(*j.StartedAt)), j.StartedAt.UnixMilli()
+	}
+	v.LogOpen = j.Status == store.StatusFailed || j.Status == store.StatusCompletedWithFailures
+	if j.Status == store.StatusSucceeded || j.Status == store.StatusCompletedWithFailures {
+		v.Open = resultOf(pods.Kind(j.Kind), in)
+	}
 	v.Summary = readSummary(j.Summary)
-	v.Items = jobItemsOf(j, items)
+	v.Items = jobItemsOf(j, items, now)
 	v.Headline = fleetHeadline(j.Kind, j.Status, items, v.Summary)
 
 	u, _ := auth.UserFrom(ctx)
@@ -635,33 +766,78 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	return v
 }
 
+// resultOf is the page a finished job's work shows on: its environment or
+// image family; nil for other kinds, and for a teardown, whose work is gone.
+func resultOf(kind pods.Kind, in jobs.Inputs) *link {
+	switch kind {
+	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS:
+		if pods.CheckDomain(in.Domain) == nil {
+			return &link{envHref(in.Domain), "Open " + in.Domain}
+		}
+	case pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete:
+		family := in.Family
+		if f, _, ok := pods.ParseImageName(in.Image); ok && family == "" {
+			family = f
+		}
+		if pods.CheckFamily(family) == nil {
+			return &link{"/images/" + family, "Open " + family}
+		}
+	}
+	return nil
+}
+
 // foldAbove is the VM count above which the panel folds done rows into one
 // line, and the pips and tally sum the table up.
 const foldAbove = 12
 
-// jobItemsOf is job j's VM table: rows (needing attention first), pips and
-// the tally by status. It is the same for every viewer.
-func jobItemsOf(j store.Job, items []store.Item) jobItems {
+// jobItemsOf is job j's VM table at now: rows (needing attention first),
+// pips and the tally by status. It is the same for every viewer.
+func jobItemsOf(j store.Job, items []store.Item, now time.Time) jobItems {
 	t := jobItems{JobID: j.ID}
 	var plan pods.Plan
 	_ = json.Unmarshal(j.Plan, &plan) // unreadable: the rows show no steps
-	planned := map[string][]pods.Step{}
+	planned := map[string]pods.Item{}
 	for _, it := range plan.Items {
-		planned[it.Name] = it.Steps
+		planned[it.Name] = it
 	}
+	done := doneWord(pods.Kind(j.Kind))
 	n := map[string]int{}
 	var order []string
 	for _, it := range items {
+		p := planned[it.Name]
+		steps := itemSteps(p.Steps, it)
 		st := it.Status
+		switch {
+		case st != store.ItemRunning:
+		case stepsDone(steps):
+			st = store.ItemDone // the job ends it later
+		case slices.ContainsFunc(steps, func(v stepView) bool { return v.State == "fail" }):
+			st = store.ItemFailed // until a retry round starts it again
+		}
 		if n[st] == 0 {
 			order = append(order, st)
 		}
 		n[st]++
 		look := lookOf(itemLooks, st)
 		t.Pips = append(t.Pips, look.Pip)
-		t.Rows = append(t.Rows, jobItemView{
-			Name: it.Name, VMID: orDash(it.VMID), Step: it.Step, Steps: itemSteps(planned[it.Name], it), Look: look, Error: it.Error, status: st,
-		})
+		row := jobItemView{Name: it.Name, VMID: orDash(it.VMID), Steps: steps, Error: it.Error, status: st}
+		look.Label = capital(look.Label) // beside steps in words, e.g. "Starting"
+		if st == store.ItemDone {
+			look.Label = done
+			if a := addressOf(p); a != "" {
+				look.Label += " · " + a
+			}
+		}
+		row.Look = look
+		for i, sv := range steps {
+			if sv.State == "run" {
+				row.Doing, row.Note = doingOf(p.Steps[i], p), it.Note
+			}
+		}
+		if st == store.ItemRunning && j.Status == store.StatusRunning && !it.StepAt.IsZero() {
+			row.For, row.Since = clockText(now.Sub(it.StepAt)), it.StepAt.UnixMilli()
+		}
+		t.Rows = append(t.Rows, row)
 	}
 	sort.SliceStable(t.Rows, func(a, b int) bool { return itemRank(t.Rows[a].status) < itemRank(t.Rows[b].status) })
 	sort.SliceStable(order, func(a, b int) bool { return itemRank(order[a]) < itemRank(order[b]) })
@@ -995,10 +1171,10 @@ func (s *Server) sharedJobSnap(ctx context.Context, id int64, need uint64) (jobS
 		if err != nil {
 			return jobSnap{}, err
 		}
-		// Every viewer's VM table is the same and has no time words that go stale:
-		// render it once.
+		// Every viewer's VM table is the same: render it once. Its times go
+		// stale, but each carries when it began, from which the script ticks.
 		var v jobView
-		v.Items = jobItemsOf(snap.job, snap.items)
+		v.Items = jobItemsOf(snap.job, snap.items, s.now())
 		snap.itemsHTML, err = fragment("job", "job-items", v)
 		return snap, err
 	})

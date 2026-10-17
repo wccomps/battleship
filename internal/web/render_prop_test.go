@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -160,6 +161,10 @@ func TestPropPagesEscapeHostileText(t *testing.T) {
 		if err := refreshesOnSite(tags); err != nil {
 			t.Fatalf("%s as %s: %v", page, root, err)
 		}
+		reloads := slices.ContainsFunc(tags, func(tag markupTag) bool { return tag.Name == "meta" && tag.Attrs["content"] == strconv.Itoa(v.Reload) })
+		if want := root == "layout" && v.Reload > 0; reloads != want {
+			t.Fatalf("%s as %s with Reload %d: reloads %v, want %v", page, root, v.Reload, reloads, want)
+		}
 	})
 }
 
@@ -191,13 +196,16 @@ func staysOnSite(u string) bool {
 }
 
 // refreshesOnSite checks that every meta refresh in tags goes to a path
-// on this site.
+// on this site, or reloads the page after some seconds.
 func refreshesOnSite(tags []markupTag) error {
 	for _, tag := range tags {
 		if tag.Name != "meta" || !strings.EqualFold(tag.Attrs["http-equiv"], "refresh") {
 			continue
 		}
 		content := html.UnescapeString(tag.Attrs["content"])
+		if n, err := strconv.Atoi(content); err == nil && n > 0 && strconv.Itoa(n) == content {
+			continue
+		}
 		to, ok := strings.CutPrefix(content, "0;url=")
 		if !ok || !staysOnSite(to) {
 			return fmt.Errorf("meta refresh %q leaves the site", content)

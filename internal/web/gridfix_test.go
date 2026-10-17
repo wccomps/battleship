@@ -182,7 +182,7 @@ func TestHelpKnowledgeInPlace(t *testing.T) {
 	contains(t, "reset preview", body, "Work since then is lost.")
 
 	h.finish(running, store.Outcome{Status: store.StatusInterrupted})
-	contains(t, "interrupted job", h.get(&op, "/logs/"+itoa(running)).Body.String(), `<span class="st b s-int">`, "interrupted</span>")
+	contains(t, "interrupted job", h.get(&op, "/logs/"+itoa(running)).Body.String(), `<span class="st b s-int">`, "interrupted · ")
 
 	h.start(power)
 	h.finish(power, store.Outcome{Status: store.StatusSucceeded})

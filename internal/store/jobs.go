@@ -92,8 +92,13 @@ type Item struct {
 	Status string
 	Error  string
 	// Steps maps step name to its last outcome (done, skipped, failed,
-	// interrupted).
+	// interrupted) in its latest run: a retry round starts it afresh.
 	Steps map[string]string
+	// StepAt is when its last step began or ended: the time of its last
+	// event other than an info line, which leaves it.
+	StepAt time.Time
+	// Note is its last info line since then, e.g. what a step waits for.
+	Note string
 }
 
 type Event struct {
@@ -206,7 +211,7 @@ func (s *Store) JobsBefore(ctx context.Context, before int64, limit int) ([]Job,
 
 // Items returns the job's items in plan order.
 func (s *Store) Items(ctx context.Context, jobID int64) ([]Item, error) {
-	rows, err := s.pool.Query(ctx, `SELECT i.job_id, i.idx, i.name, i.team, i.vmid, i.step, `+itemStatusSQL+`, i.error, i.steps
+	rows, err := s.pool.Query(ctx, `SELECT i.job_id, i.idx, i.name, i.team, i.vmid, i.step, `+itemStatusSQL+`, i.error, i.steps, i.updated_at, i.note
 		FROM job_items i JOIN jobs j ON j.id = i.job_id WHERE i.job_id = $1 ORDER BY i.idx`, jobID)
 	if err != nil {
 		return nil, err
@@ -215,7 +220,7 @@ func (s *Store) Items(ctx context.Context, jobID int64) ([]Item, error) {
 	var items []Item
 	for rows.Next() {
 		var it Item
-		if err := rows.Scan(&it.JobID, &it.Idx, &it.Name, &it.Team, &it.VMID, &it.Step, &it.Status, &it.Error, &it.Steps); err != nil {
+		if err := rows.Scan(&it.JobID, &it.Idx, &it.Name, &it.Team, &it.VMID, &it.Step, &it.Status, &it.Error, &it.Steps, &it.StepAt, &it.Note); err != nil {
 			return nil, err
 		}
 		items = append(items, it)
@@ -274,12 +279,14 @@ func (s *Store) AddEvent(ctx context.Context, jobID int64, ev Event) error {
 	if ev.Item != "" {
 		if _, err := tx.Exec(ctx, `UPDATE job_items SET
 				step = CASE WHEN $3 <> '' THEN $3 ELSE step END,
-				steps = CASE WHEN $3 <> '' AND $4 IN ('done', 'skipped', 'failed', 'interrupted')
+				steps = CASE WHEN $4 = 'started' THEN '{}'
+					WHEN $3 <> '' AND $4 IN ('done', 'skipped', 'failed', 'interrupted')
 					THEN steps || jsonb_build_object($3::text, $4::text) ELSE steps END,
 				status = CASE WHEN status IN `+keptOnEventSQL+` THEN status ELSE 'running' END,
 				error = CASE WHEN $4 = 'failed' THEN $5 ELSE error END,
-				updated_at = now()
-			WHERE job_id = $1 AND name = $2`, jobID, ev.Item, ev.Step, ev.Status, ev.Message); err != nil {
+				note = CASE WHEN $4 = 'info' THEN $5 ELSE '' END,
+				updated_at = CASE WHEN $4 = 'info' THEN updated_at ELSE $6 END
+			WHERE job_id = $1 AND name = $2`, jobID, ev.Item, ev.Step, ev.Status, ev.Message, ev.At); err != nil {
 			return err
 		}
 	}

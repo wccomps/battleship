@@ -168,11 +168,11 @@ func TestJobPage(t *testing.T) {
 	contains(t, "pending job page", body,
 		"<title>Log #"+itoa(id)+" · battleship</title>",
 		`Reset to snapshot <span class="vm">initial</span> <span class="muted vm">#`+itoa(id)+`</span></h1>`,
-		`<div class="page wide" id="job-live" data-events="/events/jobs/`+itoa(id)+`?after=0">`,
-		`<span class="st b s-wait">`, "pending</span>",
+		`<div class="page wide" id="job-live" `+h.dataNow()+` data-events="/events/jobs/`+itoa(id)+`?after=0">`,
+		`<span class="st b s-wait">`, "queued</span>",
 		`<span title="olive@example.org">olive</span> · olive@auth.example.org`,
 		`teams <span class="vm">01</span>`,
-		`<tr><td><span class="vm">team01-dc</span></td><td class="muted c-vmid">10101</td><td class="c-steps"><span class="steps" role="img" aria-label="stop: waiting, rollback: waiting, start: waiting"><span class="pip wait" title="stop: waiting"></span><span class="pip wait" title="rollback: waiting"></span><span class="pip wait" title="start: waiting"></span></span></td><td><span class="st s-wait">`,
+		`<tr><td><span class="vm">team01-dc</span></td><td class="muted c-vmid">10101</td><td class="wide"><span class="steps" role="img" aria-label="stop: waiting, rollback: waiting, start: waiting"><span class="pip wait" title="stop: waiting"></span><span class="pip wait" title="rollback: waiting"></span><span class="pip wait" title="start: waiting"></span></span><span class="st s-wait">`,
 		`<ol class="log" id="job-log" aria-live="polite">`,
 	)
 	// Whoever may reset VMs may cancel; others see why not.
@@ -228,7 +228,7 @@ func TestJobPageShowsItemsThatNeverRan(t *testing.T) {
 	contains(t, "stale job", body,
 		`<span class="st b s-stale">`,
 		"the cluster changed since the preview",
-		`<span class="st s-skip">`, "not run</span>",
+		`<span class="st s-skip">`, "Not run</span>",
 		"Preview again</a>")
 	lacks(t, "stale job", body, `<span class="st s-wait">`, "data-events", "Retry")
 
@@ -298,9 +298,9 @@ func TestJobPageOfAFinishedJob(t *testing.T) {
 	op := h.login(asOperator)
 	body := h.get(&op, "/logs/"+itoa(id)).Body.String()
 	contains(t, "finished job", body,
-		`<span class="st b s-part">`, "completed with failures</span>",
+		`<span class="st b s-part">`, "completed with failures · <time>",
 		`title="started `, `, finished `,
-		`<td class="err">start: VM is locked (backup)</td>`,
+		`Failed</span><span class="err">start: VM is locked (backup)</span></td>`,
 		"<span class=\"name\">team01-ftp</span> (VMID 10103) is <span class=\"name\">half-built</span>; delete it by hand",
 		`Removed again after failing half-built: <span class="vm">team01-ftp</span>`,
 		`<time title="09:00:05 UTC">09:00:05</time><span class="vm">team01-dc</span><span>power done</span></li>`,
@@ -340,7 +340,7 @@ func TestCancelJob(t *testing.T) {
 	}
 	body := h.get(&op, "/logs/"+itoa(running)).Body.String()
 	contains(t, "running job with a cancel requested", body,
-		"cancel requested by test-lead@example.org", `<span class="st b ">`, "running</span>")
+		"cancel requested by test-lead@example.org", `<span class="st b ">`, "running · <time data-tick=")
 	// Asking twice does nothing more, so the button goes.
 	lacks(t, "lead's page of a job being cancelled", h.get(&lead, "/logs/"+itoa(running)).Body.String(), "Cancel job")
 
@@ -573,7 +573,7 @@ func TestJobEvents(t *testing.T) {
 	if ev.Event != "patch" {
 		t.Fatalf("second event = %+v, want patch", ev)
 	}
-	contains(t, "first patch", ev.Data, `<div class="sec" id="job-head">`, "running</span>", `<div class="pf-acts" id="job-actions">`, `<div class="sec" id="job-items">`)
+	contains(t, "first patch", ev.Data, `<div class="sec" id="job-head">`, "running · <time data-tick=", `<div class="pf-acts" id="job-actions">`, `<div class="sec" id="job-items">`)
 
 	// A new line reaches the stream, held back by the stream's gap.
 	h.clock.BlockUntil(t, 2) // heartbeat and stream end
@@ -996,8 +996,7 @@ func TestJobPageGoesBackToItsList(t *testing.T) {
 	}
 }
 
-// A running VM spins once, at its current step; the job's status spins
-// once; its tally pip and status cell don't spin as well.
+// Only the job's status spins; a running VM's current step is marked, still.
 func TestRunningJobSpinsOncePerLevel(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -1018,8 +1017,9 @@ func TestRunningJobSpinsOncePerLevel(t *testing.T) {
 	}
 }
 
-// In the browser, the running step's pip spins and the tally's doesn't.
-func TestBrowserRunningJobSpinsAtTheStep(t *testing.T) {
+// In the browser, the running step's pip is still: only the job's status
+// spins.
+func TestBrowserRunningJobSpinsOnce(t *testing.T) {
 	h := browserHarness(t)
 	h.poll()
 	id := h.submitJob(jobs.Inputs{Kind: pods.KindReset, Teams: "1", Hosts: []string{"dc"}, Snapshot: "initial"}, byOperator)
@@ -1032,8 +1032,17 @@ func TestBrowserRunningJobSpinsAtTheStep(t *testing.T) {
 	op := h.login(asOperator)
 	b := newBrowser(t, h, &op, 1280, 800, false)
 	b.open("/logs/" + itoa(id))
-	b.waitFor("the step pip spinning, and no summary for one VM",
-		`getComputedStyle(document.querySelector(".steps .pip.run")).animationName === "spin" && !document.querySelector(".pips")`)
+	b.waitFor("the step pip still, and no summary for one VM",
+		`getComputedStyle(document.querySelector(".steps .pip.run")).animationName === "none" && !document.querySelector(".pips")`)
+	if !b.is(stillButOne) {
+		t.Errorf("more than the job's status moves: %s", b.where())
+	}
+	// With the script, the page follows the job without reloading.
+	b.eval(`window.stayed = true`, nil)
+	time.Sleep((followEvery + 1) * time.Second)
+	if !b.is(`window.stayed === true`) {
+		t.Error("the page reloaded itself while the script follows the job")
+	}
 }
 
 // A job of up to foldAbove VMs is read from its table; above, pips and a

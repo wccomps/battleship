@@ -351,3 +351,57 @@ func TestAddEventRecordsStepOutcomes(t *testing.T) {
 		t.Errorf("items = %+v, want steps %v", items, want)
 	}
 }
+
+// An item's StepAt is its last step event's time; an info line sets its
+// Note and leaves StepAt, and the next step event clears the note. A start
+// clears the outcomes of an earlier run.
+func TestItemStepAtAndNote(t *testing.T) {
+	s := storetest.New(t)
+	id := create(t, s, "team:01")
+	mustClaim(t, s, "w")
+	at := time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
+	item := func() store.Item {
+		t.Helper()
+		items, err := s.Items(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, it := range items {
+			if it.Name == "team01-teak" {
+				return it
+			}
+		}
+		t.Fatalf("no team01-teak in %v", items)
+		return store.Item{}
+	}
+	for _, c := range []struct {
+		ev       store.Event
+		stepAt   time.Time
+		wantNote string
+	}{
+		{store.Event{At: at, Step: "stop", Status: "started"}, at, ""},
+		{store.Event{At: at.Add(time.Minute), Step: "stop", Status: "info", Message: "waiting: VM is locked"}, at, "waiting: VM is locked"},
+		{store.Event{At: at.Add(2 * time.Minute), Step: "stop", Status: "info", Message: "still locked"}, at, "still locked"},
+		{store.Event{At: at.Add(3 * time.Minute), Step: "stop", Status: "done"}, at.Add(3 * time.Minute), ""},
+		{store.Event{At: at.Add(4 * time.Minute), Step: "delete", Status: "failed", Message: "locked"}, at.Add(4 * time.Minute), ""},
+	} {
+		c.ev.Item = "team01-teak"
+		if err := s.AddEvent(ctx, id, c.ev); err != nil {
+			t.Fatal(err)
+		}
+		if it := item(); !it.StepAt.Equal(c.stepAt) || it.Note != c.wantNote {
+			t.Errorf("after %s %q: StepAt %v, note %q; want %v, %q", c.ev.Status, c.ev.Message, it.StepAt, it.Note, c.stepAt, c.wantNote)
+		}
+	}
+
+	// A retry round starts it afresh: its earlier run's outcomes go.
+	if it := item(); len(it.Steps) != 2 {
+		t.Fatalf("steps before the retry round: %v", it.Steps)
+	}
+	if err := s.AddEvent(ctx, id, store.Event{At: at.Add(5 * time.Minute), Item: "team01-teak", Step: "stop", Status: "started"}); err != nil {
+		t.Fatal(err)
+	}
+	if it := item(); len(it.Steps) != 0 || !it.StepAt.Equal(at.Add(5*time.Minute)) {
+		t.Errorf("after a restart: steps %v, StepAt %v", it.Steps, it.StepAt)
+	}
+}

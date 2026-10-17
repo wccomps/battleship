@@ -7,6 +7,9 @@
 {{- with .Refresh}}
 <meta http-equiv="refresh" content="0;url={{.}}">
 {{- end}}
+{{- if gt .Reload 0}}
+<noscript><meta http-equiv="refresh" content="{{.Reload}}"></noscript>
+{{- end}}
 <title>{{.Title}} · battleship</title>
 <link rel="icon" type="image/svg+xml" href="{{asset "favicon.svg"}}">
 <link rel="stylesheet" href="{{asset "app.css"}}">

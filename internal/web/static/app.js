@@ -63,6 +63,21 @@
   setInterval(ages, 1000);
   ages();
 
+  // A job's running times: data-tick is when each began (Unix ms), reckoned
+  // on the server's clock, which data-now gave when the job was drawn.
+  function pad(n) { return n < 10 ? "0" + n : String(n); }
+  function ticks() {
+    each(document.querySelectorAll("[data-now]"), function (box) {
+      if (box.skew === undefined) box.skew = Number(box.getAttribute("data-now")) - Date.now();
+      each(box.querySelectorAll("[data-tick]"), function (el) {
+        var s = Math.max(0, Math.floor((Date.now() + box.skew - Number(el.getAttribute("data-tick"))) / 1000));
+        var text = (s >= 3600 ? Math.floor(s / 3600) + ":" + pad(Math.floor(s / 60) % 60) : Math.floor(s / 60)) + ":" + pad(s % 60);
+        if (el.textContent !== text) el.textContent = text;
+      });
+    });
+  }
+  setInterval(ticks, 1000);
+
   // -- Live updates
 
   // follow applies live's data-events stream; onChange runs after it
@@ -131,17 +146,23 @@
       changed();
     }
 
+    // New lines count in the log's fold, and a failure unfolds it.
     function log(html) {
-      var list = live.querySelector("#job-log");
+      var list = live.querySelector("#job-log"), sum = live.querySelector("#job-log-n");
       if (!list) return;
       Array.prototype.slice.call(parse(html).children).forEach(function (li) {
-        if (!li.id || !$(li.id)) list.appendChild(li);
+        if (li.id && $(li.id)) return;
+        list.appendChild(li);
+        if (li.querySelector(".err") && list.parentNode.matches("details")) list.parentNode.open = true;
       });
+      var n = list.children.length;
+      if (sum) sum.textContent = "Log · " + n + (n === 1 ? " line" : " lines");
     }
 
     function changed() {
       showLive();
       ages();
+      ticks();
       if (onChange) onChange();
     }
 
@@ -366,6 +387,7 @@
     if (!panel.open) panel.showModal();
     var live = sheet.matches("[data-events]") ? sheet : sheet.querySelector("[data-events]");
     if (live) stopPanel = follow(live);
+    ticks();
     typedConfirm(sheet);
     machineRows(sheet);
     var typed = sheet.querySelector("input[data-typed], input[type=text]");
@@ -529,5 +551,6 @@
   var live = document.querySelector("main [data-events]");
   if (live) follow(live, form ? function () { updateBar(); } : null);
   showLive();
+  ticks();
   if (form) updateBar();
 })();

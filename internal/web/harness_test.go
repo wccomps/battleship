@@ -782,3 +782,8 @@ func (h *harness) gridOf(p persona) status.Grid {
 	defer release()
 	return v.Grid()
 }
+
+// dataNow is the data-now attribute a job drawn now carries.
+func (h *harness) dataNow() string {
+	return `data-now="` + strconv.FormatInt(h.clock.Now().UnixMilli(), 10) + `"`
+}

@@ -311,21 +311,23 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .rvw .st,.dnsr .st{white-space:normal}
 .more td{color:var(--tx3);text-align:center}
 /* the job panel folds done rows into one; the job page shows them all */
-.panel tr.fold,main .more.fold-n,.panel .c-vmid{display:none}
+.panel tr.fold,.page#job-live .fold-n,.panel .c-vmid{display:none}
 
 /* job progress: one pip per VM */
 .pips{display:flex;flex-wrap:wrap;gap:3px}
 .pip{width:10px;height:10px;border-radius:50%;background:var(--ln)}
 .pip.done{background:var(--run)}
 .pip.fail{border-radius:0;background:var(--bad);clip-path:polygon(20% 0,50% 30%,80% 0,100% 20%,70% 50%,100% 80%,80% 100%,50% 70%,20% 100%,0 80%,30% 50%,0 20%)}
-.pip.run{background:none;border:2px solid var(--busy);border-right-color:transparent;animation:spin 1s linear infinite}
-.pips .pip.run{animation:none;border:none;background:var(--busy)} /* the tally stays still: the step pip and the job status already spin */
+.pip.run{background:var(--busy)} /* still: only the job's status spins */
 .pip.wait{background:none;border:1.5px solid var(--ln2)}
 .pip.skip{height:3px;margin-block:3.5px;border-radius:1px;background:var(--ln2)}
 .pip.int{background:var(--stale)}
-/* An item's steps in its row: one pip per planned step. */
-.c-steps{white-space:nowrap}
+/* A VM's row: a pip per planned step, the step in words, time on it. */
 .steps{display:inline-flex;gap:3px;margin-right:8px;vertical-align:middle}
+.jobt .step{font-weight:500}
+.jobt .err{display:block;margin-top:2px}
+.jobt time{font-variant-numeric:tabular-nums}
+.logbox[open]>.disc{margin-bottom:var(--s2)}
 .tally{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:var(--t2);color:var(--tx2)}
 .tally b{color:var(--tx);font-weight:600}
 .tally .bad,.tally .bad b{color:var(--bad)}
@@ -537,13 +539,14 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
   .tbl.fams td.chev{display:none}
   .envh .acts{width:100%;margin-left:0}
   .envh .acts .btn{flex:1}
-  .envt thead,.rvw thead{display:none}
-  .envt,.envt tbody,.rvw,.rvw tbody{display:block}
-  .envt tr,.rvw tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:9px 12px;border-top:1px solid var(--ln)}
-  .envt tr:first-child,.rvw tr:first-child{border-top:0}
-  .envt td,.rvw td{display:block;min-width:0;padding:0;border:0}
-  .envt td.ad,.rvw td.c2{grid-column:2;grid-row:1;text-align:right}
-  .rvw td.wide{grid-column:1/-1;text-align:left}
+  .envt thead,.rvw thead,.jobt thead,.jobt .c-vmid{display:none}
+  .envt,.envt tbody,.rvw,.rvw tbody,.jobt,.jobt tbody{display:block}
+  .envt tr,.rvw tr,.jobt tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:9px 12px;border-top:1px solid var(--ln)}
+  .envt tr:first-child,.rvw tr:first-child,.jobt tr:first-child{border-top:0}
+  .envt td,.rvw td,.jobt td{display:block;min-width:0;padding:0;border:0}
+  .envt td.ad,.rvw td.c2,.jobt td.c2{grid-column:2;grid-row:1;text-align:right}
+  .rvw td.wide,.jobt td.wide{grid-column:1/-1;text-align:left}
+  .tbl.jobt tr.bad{background:var(--bad-bg)}
   .rvw tr.blk{background:repeating-linear-gradient(135deg,transparent 0 6px,var(--sf2) 6px 9px)}
   .rvw tr.blk td{background:none}
   .envt td.si,.envt td.nt{grid-column:1/-1}

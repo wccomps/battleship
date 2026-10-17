@@ -127,6 +127,9 @@ type view struct {
 	Initial string
 	// refresh, if set, is the URL the page goes on to at once; see Refresh.
 	refresh string
+	// Reload, if above 0, reloads the page every Reload seconds when the
+	// script doesn't run; the script follows the page's event stream instead.
+	Reload int
 }
 
 // Refresh is the URL the layout's page goes on to at once, if it is local.

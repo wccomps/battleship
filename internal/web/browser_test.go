@@ -492,7 +492,7 @@ func TestBrowserPreviewAndJob(t *testing.T) {
 			h.start(n)
 			h.event(n, "team07-web", "stop", string(apply.EventDone), "")
 			publishJob(h, n)
-			b.waitFor("the job to run", `document.querySelector("#job-head .st").textContent.trim() === "running"`)
+			b.waitFor("the job to run", `document.querySelector("#job-head .st").textContent.trim().startsWith("running · ")`)
 			b.waitFor("the log line", `document.querySelectorAll("#job-log li").length > 0`)
 			b.shot("job-running-" + size.name)
 			h.finish(n, store.Outcome{Status: store.StatusCompletedWithFailures, Items: map[string]store.ItemOutcome{
@@ -501,7 +501,7 @@ func TestBrowserPreviewAndJob(t *testing.T) {
 				"team05-wks1": {Status: store.ItemDone},
 			}})
 			publishJob(h, n)
-			b.waitFor("the job to finish", `document.querySelector("#job-head .st").textContent.trim() === "completed with failures"`)
+			b.waitFor("the job to finish", `document.querySelector("#job-head .st").textContent.trim().startsWith("completed with failures · ")`)
 			if got := b.text("#job-actions"); got != "Retry 1 failed VM" {
 				t.Errorf("job actions = %q", got)
 			}
