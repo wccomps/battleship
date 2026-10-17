@@ -215,7 +215,7 @@ func (e *Executor) copyMaster(ctx context.Context, spec *pods.TemplateSpec) erro
 	cloneUPID, cloneErr = e.taskUPID(ctx, spec.VMID, func() (string, error) {
 		return e.startClone(ctx, true, proxmox.CloneRequest{
 			SourceNode: spec.MasterNode, SourceVMID: spec.MasterVMID, NewVMID: spec.VMID, Name: name,
-			TargetNode: spec.MasterNode, Full: true, Storage: e.Cfg.Deploy.Storage,
+			TargetNode: spec.MasterNode, Full: true, Storage: e.Cfg.Deploy.Storage, Pool: e.Cfg.Images.Pool,
 		})
 	}, nil) // a failed copy task is never re-started: cleanup removes the leftover
 	if cloneUPID != "" || cloneErr != nil {

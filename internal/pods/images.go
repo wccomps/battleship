@@ -256,17 +256,18 @@ func KindForOSType(ostype string) string {
 }
 
 // RegisterCandidates lists the VMs in the images pool that aren't templates,
-// busy (a lock, such as a register's clone in progress) or registered
-// already (an image's Source: its family page's New version copies it in
-// again; images must carry their Source, see ReadNotes), by VMID, reading
-// each one's config as the user. Each gets a family: the one its notes say an
+// named as one (a deploy's template build not yet converted), busy (a lock,
+// such as a register's clone in progress) or registered already (an image's
+// Source: its family page's New version copies it in again; images must
+// carry their Source, see ReadNotes), by VMID, reading each one's config as
+// the user. Each gets a family: the one its notes say an
 // edit copy came from, else SuggestFamily; a kind; and why ImageRegister
 // would refuse it, if it would.
 func (p Planner) RegisterCandidates(ctx context.Context, vms []proxmox.VM, images []BaseImage) []RegisterCandidate {
 	var out []RegisterCandidate
 	var srcs []proxmox.VM
 	for _, vm := range vms {
-		if vm.Pool != p.Cfg.Images.Pool || vm.Template || vm.Lock != "" {
+		if vm.Pool != p.Cfg.Images.Pool || vm.Template || p.Naming.IsTemplateName(vm.Name) || vm.Lock != "" {
 			continue
 		}
 		if slices.ContainsFunc(images, func(im BaseImage) bool { return im.Source == vm.VMID }) {
