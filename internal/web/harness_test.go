@@ -42,6 +42,17 @@ type fakeAPI struct {
 	inFlight    int // VMConfig calls under way
 	maxInFlight int
 	configReads int
+	// agentHangs are VMIDs whose agent reads hang until cancelled;
+	// agentReads counts the reads of interfaces asked for.
+	agentHangs map[int]bool
+	agentReads int
+}
+
+// agentReadCount is agentReads, under Mu.
+func (f *fakeAPI) agentReadCount() int {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	return f.agentReads
 }
 
 func (f *fakeAPI) readCounts() (reads, inFlight, maxInFlight int) {
@@ -114,6 +125,17 @@ func (f *fakeAPI) hold(ctx context.Context, key string) (func(), error) {
 		f.Mu.Lock()
 		defer f.Mu.Unlock()
 		return nil, f.listErr
+	}
+	if id, ok := strings.CutPrefix(key, "agent-nics:"); ok {
+		vmid, _ := strconv.Atoi(id)
+		f.Mu.Lock()
+		hang := f.agentHangs[vmid]
+		f.Mu.Unlock()
+		if hang {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		return nil, nil
 	}
 	id, ok := strings.CutPrefix(key, "config:")
 	if !ok {
@@ -375,6 +397,18 @@ func (p permAPI) ClusterVMs(ctx context.Context) ([]proxmox.VM, error) {
 	return slices.DeleteFunc(vms, func(vm proxmox.VM) bool {
 		return !p.pve.Allowed(user, "/vms/"+strconv.Itoa(vm.VMID), "VM.Audit")
 	}), nil
+}
+
+// AgentInterfaces needs VM.GuestAgent.Audit on the VM, as Proxmox's does.
+func (p permAPI) AgentInterfaces(ctx context.Context, node string, vmid int) ([]proxmox.GuestNIC, error) {
+	p.Mu.Lock()
+	p.agentReads++
+	p.Mu.Unlock()
+	path := "/vms/" + strconv.Itoa(vmid)
+	if !p.pve.Allowed(p.cred().User, path, "VM.GuestAgent.Audit") {
+		return nil, &proxmox.APIError{Status: 403, Message: "Permission check failed (" + path + ", VM.GuestAgent.Audit)"}
+	}
+	return p.fakeAPI.AgentInterfaces(ctx, node, vmid)
 }
 
 func (p permAPI) Permissions(ctx context.Context) (proxmox.Permissions, error) {
