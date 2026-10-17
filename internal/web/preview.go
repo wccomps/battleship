@@ -51,7 +51,10 @@ type previewPage struct {
 	Nothing  string  // why nothing can run; the page then has no confirm form
 	Confirm  *confirmForm
 	EditHref string // the form, filled in with these inputs; the grid for a grid selection
-	FromGrid bool   // the VMs were ticked on the grid: Back closes the panel
+	// CloseHref is where closing it goes: the form for a grid operation,
+	// else the page the operation belongs to.
+	CloseHref string
+	FromGrid  bool // the VMs were ticked on the grid: Back closes the panel
 	// Fields are the inputs as hidden fields: submitted by the confirm, and posted
 	// back by Reselect.
 	Fields []field
@@ -245,18 +248,22 @@ func previewTitle(op operation, in jobs.Inputs) opLabel {
 // newPreviewPage describes plan for people.
 func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Inputs, plan *pods.Plan, allTeams bool, opts previewOptions) previewPage {
 	p := previewPage{
-		Op:       op,
-		Title:    previewTitle(op, in),
-		Asked:    previewFacts(in, opts.fromGrid, opts.retryOf),
-		Runnable: len(plan.Runnable()),
-		Problem:  opts.problem,
-		EditHref: formQuery(op, in),
-		FromGrid: opts.fromGrid,
-		Fields:   inputFields(in),
+		Op:        op,
+		Title:     previewTitle(op, in),
+		Asked:     previewFacts(in, opts.fromGrid, opts.retryOf),
+		Runnable:  len(plan.Runnable()),
+		Problem:   opts.problem,
+		EditHref:  formQuery(op, in),
+		FromGrid:  opts.fromGrid,
+		CloseHref: formQuery(op, in),
+		Fields:    inputFields(in),
 	}
 	p.Heading = p.Title.Label
+	if op.Kind.Teamless() {
+		p.CloseHref = listPage(op.Kind)
+	}
 	if opts.fromGrid {
-		p.EditHref = "/"
+		p.EditHref, p.CloseHref = "/", "/"
 		switch op.Kind {
 		case pods.KindReset:
 			p.Reselect = "Change snapshot"

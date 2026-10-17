@@ -16,7 +16,7 @@
 <div class="ph">
 <h1 id="pv-title">{{opIcon .Title.Icon}}{{.Title.Label}}{{with .Title.Detail}} <span class="vm">{{.}}</span>{{end}}</h1>
 <span class="sp"></span>
-{{template "close" .EditHref}}
+{{template "close" .CloseHref}}
 </div>
 <div class="pb">
 {{- with .Problem}}{{template "problem" .}}{{end}}

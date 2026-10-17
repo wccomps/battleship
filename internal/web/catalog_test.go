@@ -261,24 +261,30 @@ func TestImagesPageOffersReadyVMs(t *testing.T) {
 	h.api.Add(proxmox.VM{VMID: 150, Name: "teak-build", Node: "n1", Pool: pool, Status: "stopped"},
 		map[string]string{"ostype": "win11", "agent": "1", "description": "Login: admin"})
 	h.api.Add(proxmox.VM{VMID: 151, Name: "oak-build", Node: "n1", Pool: pool, Status: "running"}, map[string]string{"ostype": "l26"})
+	h.api.Add(proxmox.VM{VMID: 152, Name: "elm-build", Node: "n1", Pool: pool, Status: "stopped"}, map[string]string{"ostype": "other"})
 	sess := h.login(asLead)
 	body := h.get(&sess, "/images").Body.String()
-	link := `href="/images/register?vmid=150&amp;family=teak&amp;image_kind=windows"`
-	if !strings.Contains(body, "VMs in the images pool") || strings.Count(body, link) != 1 || !strings.Contains(body, "Login: admin") {
-		t.Errorf("images page lacks teak-build ready to register:\n%s", body)
+	// A VM with a family and kind goes straight to the preview.
+	post := `<form method="post" action="/images/register/preview"><input type="hidden" name="csrf" value="` + sess.CSRF +
+		`"><input type="hidden" name="vmid" value="150"><input type="hidden" name="family" value="teak"><input type="hidden" name="image_kind" value="windows"><button class="btn sm" type="submit">Register</button></form>`
+	if !strings.Contains(body, "VMs in the images pool") || strings.Count(body, post) != 1 || !strings.Contains(body, "Login: admin") {
+		t.Errorf("images page lacks teak-build's Register straight to the preview:\n%s", body)
+	}
+	// One whose kind nothing says opens the form, to pick it.
+	if !strings.Contains(body, `href="/images/register?vmid=152&amp;family=elm"`) {
+		t.Errorf("images page lacks elm-build's link to the form:\n%s", body)
 	}
 	if !strings.Contains(body, "oak-build is running; shut it down first") {
 		t.Errorf("images page doesn't say why oak-build can't be registered:\n%s", body)
 	}
-	for _, not := range []string{"vmid=151", "vmid=8000", "vmid=8001"} {
+	for _, not := range []string{`value="151"`, "vmid=151", "vmid=8000", "vmid=8001"} {
 		if strings.Contains(body, not) {
 			t.Errorf("images page offers %s", not)
 		}
 	}
-	form := h.get(&sess, "/images/register?vmid=150&family=teak&image_kind=windows").Body.String()
-	if !strings.Contains(form, `value="150"`) || !strings.Contains(form, `value="teak" required`) ||
-		!strings.Contains(form, `value="windows" checked`) {
-		t.Errorf("register form isn't filled in:\n%s", form)
+	preview := h.post(&sess, "/images/register/preview", url.Values{"vmid": {"150"}, "family": {"teak"}, "image_kind": {"windows"}}).Body.String()
+	if !strings.Contains(preview, "teak-v1") || !strings.Contains(preview, `href="/images" data-close`) {
+		t.Errorf("the preview isn't teak-v1 closing to the images page:\n%s", preview)
 	}
 }
 

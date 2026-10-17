@@ -293,6 +293,10 @@ type jobView struct {
 	// Teamless is an image or environment job, whose facts (Asked) say what
 	// it acts on.
 	Teamless bool
+	Home     string // where closing it goes (see listPage)
+	// BackHref and BackLabel are the page's back link: the page its kind
+	// belongs to for an image or environment job, else the job list.
+	BackHref, BackLabel string
 	// Ran is when it ran ("13:12–13:34"), or when it was made if not started;
 	// RanAt is the full time, for a title.
 	Ran, RanAt string
@@ -541,6 +545,9 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 		Who:        whoShort(j.CreatedBy),
 		By:         j.CreatedBy,
 		Role:       actsAs(j),
+		Home:       listPage(pods.Kind(j.Kind)),
+		BackHref:   "/logs",
+		BackLabel:  "Logs",
 		Teams:      jobTeams(in),
 		Hosts:      hostsText(in.Hosts),
 		Error:      j.Error,
@@ -605,6 +612,12 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	}
 	if v.CanRetry {
 		v.StartAgain = ""
+	}
+	switch v.Home {
+	case "/images":
+		v.BackHref, v.BackLabel = v.Home, "Images"
+	case "/environments":
+		v.BackHref, v.BackLabel = v.Home, "Environments"
 	}
 	return v
 }
@@ -743,7 +756,7 @@ func (s *Server) jobEventsAfter(ctx context.Context, id, after int64) ([]eventVi
 		}
 		for _, ev := range evs {
 			after = ev.ID
-			if ev.Status == string(apply.EventSkipped) && ev.Message == "" {
+			if ev.Status == string(apply.EventSkipped) && ev.Message == "" || ev.Status == string(apply.EventStarted) {
 				continue
 			}
 			out = append(out, eventView{

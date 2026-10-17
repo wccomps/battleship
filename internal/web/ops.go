@@ -256,3 +256,15 @@ func actor(u auth.User) string {
 	}
 	return u.Subject
 }
+
+// listPage is the page a job of kind belongs to, where closing its preview
+// or job page goes: Images or Environments for those, else the grid.
+func listPage(kind pods.Kind) string {
+	switch kind {
+	case pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete:
+		return "/images"
+	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS:
+		return "/environments"
+	}
+	return "/"
+}

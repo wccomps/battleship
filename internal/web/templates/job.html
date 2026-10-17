@@ -8,7 +8,7 @@
 <h1 id="job-title">{{template "job-op" .Op}}</h1>
 <span class="muted vm">#{{.ID}}</span>
 <span class="sp"></span>
-{{template "close" "/"}}
+{{template "close" .Home}}
 </div>
 <div class="pb">
 {{template "job-head" .}}
@@ -22,7 +22,7 @@
 </div>
 {{- else}}
 <div class="page wide" id="job-live"{{if .Live}} data-events="{{.EventsHref}}"{{end}}>
-<a class="btn ghost back" href="/logs">{{icon "back"}}Logs</a>
+<a class="btn ghost back" href="{{.BackHref}}">{{icon "back"}}{{.BackLabel}}</a>
 <div class="jhead">
 <h1 class="ptitle">{{template "job-op" .Op}} <span class="muted vm">#{{.ID}}</span></h1>
 <span class="sp"></span>

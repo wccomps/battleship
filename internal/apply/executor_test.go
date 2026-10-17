@@ -1890,3 +1890,23 @@ func TestRebuildRetryRoundResumesTheNewCopy(t *testing.T) {
 		t.Errorf("master copied %d times, want 1", n)
 	}
 }
+
+// Each item reports started before its first step's outcome, once, so a job
+// page shows it running while a long first step (a clone) waits.
+func TestItemsReportStartedFirst(t *testing.T) {
+	f := newCluster()
+	rec := &recorder{}
+	testExecutor(f, rec).Run(context.Background(), deployTeak(t, f, "01"))
+	var mine []Event
+	for _, e := range rec.events {
+		if e.Item == "team01-teak" {
+			mine = append(mine, e)
+		}
+	}
+	if len(mine) < 2 || mine[0].Status != EventStarted || mine[0].Step != pods.StepClone {
+		t.Fatalf("events = %+v, want started at clone first", mine)
+	}
+	if n := len(rec.find("team01-teak", EventStarted)); n != 1 {
+		t.Errorf("started %d times, want once", n)
+	}
+}
