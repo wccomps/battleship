@@ -98,11 +98,11 @@ func catalogue(images []pods.BaseImage) (groups []kindGroup, retired []familyRow
 }
 
 // what says what im is: the OS its details give, else the first line of
-// its notes with text; nothing when its details are unreadable, since that
-// line is the block's.
+// its notes with text; when its details are unreadable, that they are (the
+// first line would be the block's).
 func what(im pods.BaseImage) string {
 	if im.Unreadable {
-		return ""
+		return "Details unreadable: open the family to see its notes."
 	}
 	if im.Details.OS != "" {
 		return im.Details.OS

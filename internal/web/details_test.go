@@ -433,3 +433,16 @@ func TestBrowserPassword(t *testing.T) {
 		b.clean()
 	})
 }
+
+// The catalogue row of an image whose details block is unreadable says so,
+// rather than showing a line of the broken block or nothing.
+func TestCatalogueSaysDetailsUnreadable(t *testing.T) {
+	h := newHarness(t)
+	h.api.Add(proxmox.VM{VMID: 8003, Name: "odd-v1", Node: "n1", Template: true, Tags: "base;linux"},
+		map[string]string{"agent": "1", "description": "**Details**\n- Login: root\nrun on"})
+	sess := h.login(asLead)
+	body := h.get(&sess, "/images").Body.String()
+	if !strings.Contains(body, "Details unreadable: open the family to see its notes.") || strings.Contains(body, "Login: root") {
+		t.Errorf("the catalogue row doesn't say the details are unreadable:\n%s", body)
+	}
+}
