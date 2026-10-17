@@ -30,7 +30,8 @@ var hashedFor = map[string]map[string][]Kind{
 		"GPUVGA":    nil,
 	},
 	"Images": {
-		"Pool": imageKinds, "VMIDRange": imageKinds, "EditBridge": imageKinds, "EditZone": imageKinds,
+		"Pool":      append(slices.Clone(imageKinds), KindDeploy), // built templates join it
+		"VMIDRange": imageKinds, "EditBridge": imageKinds, "EditZone": imageKinds,
 	},
 	"Environments": {
 		"Slots": envKinds, "Pool": envKinds, "IntBridge": envKinds, "ExtBridge": envKinds, "SDNZone": envKinds,

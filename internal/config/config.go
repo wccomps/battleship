@@ -107,7 +107,7 @@ type Concurrency struct {
 
 // Images configures base images: templates environments are cloned from.
 type Images struct {
-	Pool      string `toml:"pool"`       // where base images live; an admin creates it
+	Pool      string `toml:"pool"`       // where base images, and the templates deploys build, live; an admin creates it
 	VMIDRange string `toml:"vmid_range"` // e.g. "8000-8999"
 	// EditBridge is the net0 bridge of a working copy opened for editing,
 	// which needs a network with internet access to patch. EditZone is its SDN

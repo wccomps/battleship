@@ -90,3 +90,30 @@ func TestRegisterCandidates(t *testing.T) {
 		t.Errorf("304 = %+v, want family alder from its notes", c)
 	}
 }
+
+// A deploy builds its templates into the images pool. Whatever a template
+// is named and tagged, converted or not, it is neither a base image nor a
+// register candidate.
+func TestPropBuiltTemplatesAreNotImages(t *testing.T) {
+	cfg := envConfig()
+	rapid.Check(t, func(t *rapid.T) {
+		name := rapid.String().Draw(t, "master") + cfg.Naming.TemplateSuffix
+		var tags []string
+		for _, tag := range append([]string{BaseTag, DeprecatedTag}, ImageKinds...) {
+			if rapid.Bool().Draw(t, "tag "+tag) {
+				tags = append(tags, tag)
+			}
+		}
+		f := podstest.New("alder")
+		f.Add(proxmox.VM{VMID: 9021, Name: name, Node: "alder", Pool: cfg.Images.Pool, Status: "stopped",
+			Template: rapid.Bool().Draw(t, "converted"), Tags: strings.Join(tags, ";")}, map[string]string{"agent": "1", "ostype": "l26"})
+		vms, _ := f.ClusterVMs(context.Background())
+		images := BaseImages(vms)
+		if len(images) != 0 {
+			t.Fatalf("BaseImages = %+v", images)
+		}
+		if got := NewPlanner(f, cfg).RegisterCandidates(context.Background(), vms, images); len(got) != 0 {
+			t.Fatalf("RegisterCandidates = %+v", got)
+		}
+	})
+}
