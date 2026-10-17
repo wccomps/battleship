@@ -383,6 +383,13 @@ textarea.inp{height:auto;padding:8px 10px;resize:vertical}
 .jhead form{display:contents}
 .back{align-self:flex-start;margin-left:-10px}
 .field{display:grid;gap:8px;min-width:0;margin:0;padding:0;border:0}
+/* environment forms: the router, and a row per host */
+.hrows{display:grid;gap:8px}
+.hrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) 6.5rem 36px;gap:8px;align-items:end}
+.hrow:not([data-row]){grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)}
+.sub{display:grid;gap:4px;font-size:var(--t1);color:var(--tx2)}
+.hadd{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:8px}
+@media (max-width:560px){.hrow[data-row]{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
 .field>legend,.lbl{padding:0;margin-bottom:8px;font-size:var(--t2);font-weight:500}
 .field>.lbl{margin-bottom:0}
 .field>legend .muted{font-weight:400}

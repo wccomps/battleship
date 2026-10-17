@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
@@ -30,7 +31,10 @@ type catalogPage struct {
 	// that the form must first ask which.
 	Env     *pods.Environment
 	Picking bool
-	vms     []proxmox.VM
+	// ExtraRows is how many empty host rows to add: one after Add host
+	// without JavaScript.
+	ExtraRows int
+	vms       []proxmox.VM
 }
 
 // newCatalogPage reads environments and images as the user, without the
@@ -137,6 +141,9 @@ func (s *Server) withNotes(ctx context.Context, p catalogPage) catalogPage {
 func (s *Server) teamlessForm(w http.ResponseWriter, r *http.Request, status int, op operation, in jobs.Inputs, problem string) {
 	p := s.newCatalogPage(r.Context())
 	p.Op, p.In, p.Error = op, in, problem
+	if r.FormValue(fieldMore) == yes {
+		p.ExtraRows = 1
+	}
 	if op.Kind.OnEnvironment() {
 		if e, ok := pods.EnvByDomain(p.Envs, in.Domain); ok {
 			p.Env = &e
@@ -151,4 +158,39 @@ func (s *Server) teamlessForm(w http.ResponseWriter, r *http.Request, status int
 		p = s.withNotes(r.Context(), p)
 	}
 	s.render(w, r, status, "teamless", s.newView(w, r, op.Title, string(op.Kind), p))
+}
+
+// hostRow is one row of the environment forms: a host's name, base image
+// family and optional last address octet.
+type hostRow struct{ Name, Image, Octet string }
+
+// rowOf splits a stored name=image[:octet] line into a row.
+func rowOf(spec string) hostRow {
+	name, rest, _ := strings.Cut(spec, "=")
+	image, octet, _ := strings.Cut(rest, ":")
+	return hostRow{strings.TrimSpace(name), strings.TrimSpace(image), strings.TrimSpace(octet)}
+}
+
+// HostRows are the form's host rows: the hosts given, then ExtraRows empty
+// ones, and at least one.
+func (p catalogPage) HostRows() []hostRow {
+	var rows []hostRow
+	for _, spec := range p.In.EnvHosts {
+		rows = append(rows, rowOf(spec))
+	}
+	for range p.ExtraRows {
+		rows = append(rows, hostRow{})
+	}
+	if len(rows) == 0 {
+		rows = append(rows, hostRow{})
+	}
+	return rows
+}
+
+// RouterRow is the router given, or the usual name, gw, with no image yet.
+func (p catalogPage) RouterRow() hostRow {
+	if p.In.Router == "" {
+		return hostRow{Name: "gw"}
+	}
+	return rowOf(p.In.Router)
 }

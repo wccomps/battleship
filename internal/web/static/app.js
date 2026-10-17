@@ -484,6 +484,33 @@
     }
   });
 
+  // -- Environment host rows
+
+  // Add host copies the last row, emptied (without this script it asks the
+  // server for the form with one more row); a row's remove button shows
+  // while it has company.
+  function showRemovers(box) {
+    var rows = box.querySelectorAll("[data-row]");
+    each(rows, function (r) { r.querySelector("[data-remove-row]").hidden = rows.length < 2; });
+  }
+  each(document.querySelectorAll("[data-rows]"), showRemovers);
+  document.addEventListener("click", function (e) {
+    var add = e.target.closest("[data-add-row]"), remove = e.target.closest("[data-remove-row]");
+    var box = add ? add.form && add.form.querySelector("[data-rows]") : remove && remove.closest("[data-rows]");
+    if (!box) return;
+    e.preventDefault();
+    if (remove) {
+      remove.closest("[data-row]").remove();
+    } else {
+      var row = box.lastElementChild.cloneNode(true);
+      each(row.querySelectorAll("input"), function (i) { i.value = ""; });
+      each(row.querySelectorAll("select"), function (s) { s.selectedIndex = 0; });
+      box.appendChild(row);
+      row.querySelector("input").focus();
+    }
+    showRemovers(box);
+  });
+
   // -- Start
 
   var live = document.querySelector("main [data-events]");

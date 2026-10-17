@@ -85,6 +85,14 @@ const (
 	fieldFamily      = "family"
 	fieldImageKind   = "image_kind"
 	fieldImage       = "image"
+	// The environment forms' router and host rows (see envRows), read into
+	// Router and EnvHosts when present.
+	fieldRouterName  = "router_name"
+	fieldRouterImage = "router_image"
+	fieldHostName    = "host_name"
+	fieldHostImage   = "host_image"
+	fieldHostOctet   = "host_octet"
+	fieldMore        = "more" // asks the form again with one more host row
 	fromGridValue    = "grid"
 	yes              = "yes"
 )
@@ -101,6 +109,21 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 		for _, line := range strings.Split(form.Get(fieldEnvHosts), "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				in.EnvHosts = append(in.EnvHosts, line)
+			}
+		}
+		if form.Has(fieldRouterImage) {
+			in.Router = ""
+			if image := strings.TrimSpace(form.Get(fieldRouterImage)); image != "" {
+				in.Router = hostSpec(form.Get(fieldRouterName), image, "")
+			}
+		}
+		if form.Has(fieldHostName) {
+			in.EnvHosts = nil
+			names, images, octets := form[fieldHostName], form[fieldHostImage], form[fieldHostOctet]
+			for i, name := range names {
+				if spec := hostSpec(name, at(images, i), at(octets, i)); spec != "" {
+					in.EnvHosts = append(in.EnvHosts, spec)
+				}
 			}
 		}
 		in.VMID, _ = strconv.Atoi(strings.TrimSpace(form.Get(fieldVMID)))
@@ -267,4 +290,27 @@ func listPage(kind pods.Kind) string {
 		return "/environments"
 	}
 	return "/"
+}
+
+// hostSpec is a host row as the name=image[:octet] line jobs store, or ""
+// for a row left empty. A half-filled row still makes a line, which the
+// preview refuses with the reason.
+func hostSpec(name, image, octet string) string {
+	name, image, octet = strings.TrimSpace(name), strings.TrimSpace(image), strings.TrimPrefix(strings.TrimSpace(octet), ".")
+	if name == "" && image == "" {
+		return ""
+	}
+	spec := name + "=" + image
+	if octet != "" {
+		spec += ":" + octet
+	}
+	return spec
+}
+
+// at is vs[i], or "" past its end.
+func at(vs []string, i int) string {
+	if i < len(vs) {
+		return vs[i]
+	}
+	return ""
 }

@@ -8,6 +8,7 @@
 {{- else}}
 <form class="sheet" method="post" action="{{.Op.Path}}/preview" aria-labelledby="form-title">
 {{template "csrf" $csrf}}
+{{- if or (eq .Op.Kind "env-create") (eq .Op.Kind "env-add")}}<button type="submit" class="sr" tabindex="-1" aria-hidden="true">Preview</button>{{end}}
 {{- end}}
 <div class="ph"><h1 id="form-title">{{opIcon (print .Op.Kind)}}{{.Op.Title}}</h1><span class="sp"></span>{{template "close" $back}}</div>
 <div class="pb form">
@@ -40,19 +41,39 @@
 </dl>
 {{- end}}
 {{- if .AsksRouter}}
-<div class="field">
-<label class="lbl" for="router">Router <span class="muted">· name=image{{if eq .Op.Kind "env-add"}}{{if and .Env .Env.HasRouter}} · only to resume this one{{else}} · this environment has none; leave empty to add hosts only{{end}}{{end}}</span></label>
-<input class="inp" type="text" id="router" name="router" value="{{.In.Router}}"{{if eq .Op.Kind "env-create"}} required{{end}} autocomplete="off" spellcheck="false" aria-describedby="router-hint">
-<span class="hint" id="router-hint">router images: {{range $i, $r := .Routers}}{{if $i}}, {{end}}{{$r.Family}}{{else}}none registered{{end}} · its LAN is .2</span>
+{{- $r := .RouterRow}}
+<fieldset class="field">
+<legend>Router{{if eq .Op.Kind "env-add"}} <span class="muted">· {{if and .Env .Env.HasRouter}}only to resume this one{{else}}this environment has none{{end}}</span>{{end}}</legend>
+<div class="hrow">
+<label class="sub"><span>Image</span><select class="inp" name="router_image"{{if eq .Op.Kind "env-create"}} required{{end}}>
+<option value="">{{if eq .Op.Kind "env-create"}}choose…{{else}}none{{end}}</option>
+{{- $found := false}}{{range .Routers}}<option value="{{.Family}}"{{if eq .Family $r.Image}} selected{{$found = true}}{{end}}>{{.Family}}</option>{{end}}
+{{- if and $r.Image (not $found)}}<option value="{{$r.Image}}" selected>{{$r.Image}} (not a current router image)</option>{{end}}
+</select></label>
+<label class="sub"><span>Name</span><input class="inp" type="text" name="router_name" value="{{$r.Name}}" autocomplete="off" spellcheck="false"></label>
 </div>
+<span class="hint">its LAN address is {{.Subnet}}.2</span>
+</fieldset>
 {{- end}}
 {{- if or (eq .Op.Kind "env-create") (eq .Op.Kind "env-add")}}
-<div class="field">
-<label class="lbl" for="env-hosts">Hosts <span class="muted">· one per line, name=image or name=image:octet</span></label>
-<textarea class="inp" id="env-hosts" name="env_hosts" rows="6" spellcheck="false" aria-describedby="hosts-hint">{{range .In.EnvHosts}}{{.}}
-{{end}}</textarea>
-<span class="hint" id="hosts-hint">images: {{range $i, $o := .Others}}{{if $i}}, {{end}}{{$o.Family}} ({{$o.Kind}}){{else}}none registered{{end}} · addresses {{.Subnet}}.4–254, picked if left out</span>
+<fieldset class="field">
+<legend>Hosts</legend>
+<div class="hrows" data-rows>
+{{- range $i, $h := .HostRows}}
+<div class="hrow" data-row>
+<label class="sub"><span>Name</span><input class="inp" type="text" name="host_name" value="{{.Name}}" placeholder="e.g. dc" autocomplete="off" spellcheck="false"></label>
+<label class="sub"><span>Image</span><select class="inp" name="host_image"><option value="">choose…</option>
+{{- $found := false}}{{range $.Data.Others}}<option value="{{.Family}}"{{if eq .Family $h.Image}} selected{{$found = true}}{{end}}>{{.Family}} · {{.Kind}}</option>{{end}}
+{{- if and $h.Image (not $found)}}<option value="{{$h.Image}}" selected>{{$h.Image}} (not a current image)</option>{{end}}
+</select></label>
+<label class="sub oct"><span>Address .</span><input class="inp" type="number" name="host_octet" value="{{.Octet}}" min="4" max="254" placeholder="auto"></label>
+<button type="button" class="btn ghost sq" data-remove-row aria-label="Remove this host" hidden>{{icon "close"}}</button>
 </div>
+{{- end}}
+</div>
+<div class="hadd"><button type="submit" class="btn sm" name="more" value="yes" formnovalidate data-add-row>Add host</button>
+<span class="hint">addresses {{.Subnet}}.4–254; one is picked when Address is empty</span></div>
+</fieldset>
 {{- if or .Routers .Others}}
 <div class="field">
 <span class="lbl">Base images <span class="muted">· the newest version of each</span></span>

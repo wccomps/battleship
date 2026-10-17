@@ -130,6 +130,10 @@ func (s *Server) opPreview(op operation) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		form := postedForm(r)
 		in := formInputs(op.Kind, form)
+		if op.Kind.Teamless() && form.Get(fieldMore) == yes {
+			s.teamlessForm(w, r, http.StatusOK, op, in, "")
+			return
+		}
 		if fromGrid(form) {
 			if len(in.VMs) == 0 {
 				s.nothingTicked(w, r)
