@@ -57,7 +57,7 @@
 <div class="stline">{{with .Look}}<span class="st b {{.Class}}">{{if eq .Glyph "spin"}}<span class="spin" aria-hidden="true"></span>{{else}}{{icon .Glyph}}{{end}}{{.Label}}</span>{{end}}
 <span class="meta"><span title="{{.By}}">{{.Who}}</span> · {{or .Role "command line"}} · <span title="{{.RanAt}}">{{.Ran}}</span>{{if not .Teamless}} · teams <span class="vm">{{.Teams}}</span>{{if ne .Hosts "all"}} · <span class="vm">{{.Hosts}}</span>{{end}}{{end}}
 {{- range .Asked}} · {{.Label}} <span class="vm">{{.Value}}</span>{{end}}
-{{- with .Waiting}} · after {{range $i, $id := .}}{{if $i}}, {{end}}<a href="/logs/{{$id}}">#{{$id}}</a>{{end}}{{end}}
+{{- with .Waiting}} · after {{range $i, $id := .}}{{if $i}}, {{end}}<a href="/logs/{{$id}}">#{{$id}}</a>{{end}}{{else}}{{with .Queued}} · {{.}}{{end}}{{end}}
 {{- with .CancelNote}} · {{.}}{{end}}</span></div>
 {{- with .Headline}}
 <p class="headline">{{.}}</p>
@@ -112,8 +112,10 @@
 <div class="sec" id="job-items">
 {{- with .Items}}
 {{- if .Rows}}
+{{- if .Summary}}
 <div class="pips" role="img" aria-label="{{.TallyText}}">{{range .Pips}}<span class="pip {{.}}"></span>{{end}}</div>
 <div class="tally">{{range .Tally}}<span{{if .Bad}} class="bad"{{end}}><b>{{.N}}</b> {{.Label}}</span>{{end}}</div>
+{{- end}}
 <div class="tscroll long">
 <table class="tbl">
 <thead><tr><th scope="col">VM</th><th scope="col" class="c-vmid">VMID</th><th scope="col">Steps</th><th scope="col">Status</th><th scope="col">Error</th></tr></thead>

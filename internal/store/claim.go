@@ -239,3 +239,24 @@ func (s *Store) BlockersOf(ctx context.Context, jobIDs []int64) (map[int64][]int
 	}
 	return out, rows.Err()
 }
+
+// ReservedKeys are the lock keys pending and running jobs other than except
+// write (lock_writes): what they will create or change. Planning reads them
+// so it doesn't hand out a VMID or slot a queued job will create (see
+// pods.Planner.Reserved).
+func (s *Store) ReservedKeys(ctx context.Context, except int64) (map[string]bool, error) {
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT k FROM jobs, unnest(lock_writes) AS k
+		WHERE status IN ('pending', 'running') AND id <> $1`, except)
+	if err != nil {
+		return nil, fmt.Errorf("reading queued jobs' lock keys: %w", err)
+	}
+	keys, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("reading queued jobs' lock keys: %w", err)
+	}
+	out := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		out[k] = true
+	}
+	return out, nil
+}

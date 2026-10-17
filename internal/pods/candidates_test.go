@@ -52,9 +52,9 @@ func TestKindForOSType(t *testing.T) {
 	}
 }
 
-// The pool's VMs that aren't templates or busy are listed, by VMID, each
-// with the family its registrations or notes give before its name does,
-// and the reason a register would refuse it.
+// The pool's VMs that aren't templates, busy or registered already are
+// listed, by VMID, each with the family an edit copy's notes give before
+// its name does, and the reason a register would refuse it.
 func TestRegisterCandidates(t *testing.T) {
 	cfg := envConfig()
 	pool := cfg.Images.Pool
@@ -74,19 +74,16 @@ func TestRegisterCandidates(t *testing.T) {
 		{Name: "alder-v1", Family: "alder", Version: 1, Kind: ImageLinux},
 	}
 	got := NewPlanner(f, cfg).RegisterCandidates(context.Background(), vms, images)
-	if len(got) != 4 || got[0].VMID != 301 || got[1].VMID != 302 || got[2].VMID != 303 || got[3].VMID != 304 {
-		t.Fatalf("RegisterCandidates = %+v, want 301-304", got)
+	if len(got) != 3 || got[0].VMID != 302 || got[1].VMID != 303 || got[2].VMID != 304 {
+		t.Fatalf("RegisterCandidates = %+v, want 302-304 (301 is registered)", got)
 	}
-	if c := got[0]; c.Family != "server" || c.Kind != ImageWindows || c.From.Name != "server-v2" || c.Blocked != "" || c.Notes != "Login: admin" {
-		t.Errorf("301 = %+v, want family server from its registrations, ready", c)
-	}
-	if c := got[1]; c.Family != "oak" || c.Kind != ImageWindows || !strings.Contains(c.Blocked, "running") {
+	if c := got[0]; c.Family != "oak" || c.Kind != ImageWindows || !strings.Contains(c.Blocked, "running") || c.Notes != "Login: admin" {
 		t.Errorf("302 = %+v, want family oak, blocked as running", c)
 	}
-	if c := got[2]; c.Kind != ImageLinux || !strings.Contains(c.Blocked, "guest agent") {
+	if c := got[1]; c.Kind != ImageLinux || !strings.Contains(c.Blocked, "guest agent") {
 		t.Errorf("303 = %+v, want linux, blocked for no guest agent", c)
 	}
-	if c := got[3]; c.Family != "alder" || c.Kind != ImageLinux || c.Blocked != "" {
+	if c := got[2]; c.Family != "alder" || c.Kind != ImageLinux || c.Blocked != "" {
 		t.Errorf("304 = %+v, want family alder from its notes", c)
 	}
 }

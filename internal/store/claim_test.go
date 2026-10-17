@@ -441,3 +441,26 @@ func TestReapStaleHonoursTheClaimersStaleAfter(t *testing.T) {
 		t.Errorf("reaped %v, want only job %d (job %d's claimer gave it an hour)", ids, none, long)
 	}
 }
+
+// Reserved keys are what pending and running jobs, but the one asking,
+// write; reads and finished jobs don't reserve.
+func TestReservedKeys(t *testing.T) {
+	s := storetest.New(t)
+	running := create(t, s, "vmid:8000", "read:vmid:150")
+	if got := mustClaim(t, s, "w1"); got == nil || got.ID != running {
+		t.Fatalf("claim = %+v, want job %d", got, running)
+	}
+	pending := create(t, s, "vmid:8001", "slot:05")
+	done := create(t, s, "vmid:8002")
+	if err := s.RequestCancel(ctx, done, "lena@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ReservedKeys(ctx, 0)
+	if want := map[string]bool{"vmid:8000": true, "vmid:8001": true, "slot:05": true}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("ReservedKeys = %v, %v; want %v", got, err, want)
+	}
+	got, err = s.ReservedKeys(ctx, pending)
+	if want := map[string]bool{"vmid:8000": true}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("ReservedKeys but %d = %v, %v; want %v", pending, got, err, want)
+	}
+}

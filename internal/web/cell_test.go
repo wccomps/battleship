@@ -361,7 +361,7 @@ func TestCellPageShowsLastJob(t *testing.T) {
 
 	// A job under way shows as such.
 	power := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Hosts: []string{"dc"}, Action: "reboot"}, byOperator)
-	contains(t, "VM with a pending job", h.get(&op, "/vm/01/dc").Body.String(), `href="/logs/`+itoa(power)+`"`, `<span class="st s-wait">`, "Reboot<span class=\"sr\"> pending</span>")
+	contains(t, "VM with a queued job", h.get(&op, "/vm/01/dc").Body.String(), `href="/logs/`+itoa(power)+`"`, `<span class="st s-wait">`, "Reboot<span class=\"sr\"> queued</span>")
 }
 
 // The snapshot picker narrows the snapshot list without mutating the shared

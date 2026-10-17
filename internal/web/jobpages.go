@@ -25,6 +25,10 @@ import (
 // jobsPerPage is how many jobs a page of the job list shows.
 const jobsPerPage = 50
 
+// freeWorker notes a queued job waiting for no other job: every worker is
+// busy, or one is about to claim it.
+const freeWorker = "waiting for a free worker"
+
 // statusLook is how a job, item or log status is shown: a glyph (icon name,
 // or "spin"), a word, a colour class (s-ok …) and, for items, a pip.
 type statusLook struct {
@@ -32,7 +36,7 @@ type statusLook struct {
 }
 
 var jobLooks = map[string]statusLook{
-	store.StatusPending:               {"wait", "pending", "s-wait", ""},
+	store.StatusPending:               {"wait", "queued", "s-wait", ""},
 	store.StatusRunning:               {"spin", "running", "", ""},
 	store.StatusSucceeded:             {"done", "succeeded", "s-ok", ""},
 	store.StatusCompletedWithFailures: {"warn", "completed with failures", "s-part", ""},
@@ -234,6 +238,8 @@ func (s *Server) jobsList(ctx context.Context, before int64) (jobsList, error) {
 			row.Note = "cancel requested"
 		case j.Status == store.StatusPending && len(waiting[j.ID]) > 0:
 			row.Note = "after #" + strconv.FormatInt(waiting[j.ID][0], 10)
+		case queuedNote(j, waiting[j.ID]) != "":
+			row.Note = freeWorker
 		case j.Status == store.StatusStale:
 			row.Note = "nothing ran"
 		}
@@ -306,6 +312,7 @@ type jobView struct {
 	Summary    *summaryView
 	CancelNote string  // who asked to cancel it, and whether it took effect
 	Waiting    []int64 // pending: the jobs it waits for
+	Queued     string  // pending and waiting for no job: freeWorker
 	Items      jobItems
 	Live       bool // the job is active: the page follows it
 	CanCancel  bool
@@ -339,6 +346,9 @@ type jobItems struct {
 	// Fold is how many done rows the panel folds into one line; the job page
 	// shows them all.
 	Fold int
+	// Summary is whether the pips and tally show: only above foldAbove VMs,
+	// where the table is too long to read each status at a glance.
+	Summary bool
 }
 
 // tallyPart is one count of the tally, e.g. 3 failed.
@@ -554,6 +564,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 		Live:       j.Active(),
 		CancelNote: cancelNote(j),
 		Waiting:    snap.waiting,
+		Queued:     queuedNote(j, snap.waiting),
 	}
 	if len(in.VMs) > 0 {
 		v.Hosts = "all" // the table names the VMs
@@ -622,7 +633,8 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	return v
 }
 
-// foldAbove is the VM count above which the panel folds done rows into one line.
+// foldAbove is the VM count above which the panel folds done rows into one
+// line, and the pips and tally sum the table up.
 const foldAbove = 12
 
 // jobItemsOf is job j's VM table: rows (needing attention first), pips and
@@ -655,6 +667,7 @@ func jobItemsOf(j store.Job, items []store.Item) jobItems {
 		t.Tally = append(t.Tally, tallyPart{N: n[st], Label: lookOf(itemLooks, st).Label,
 			Bad: st == store.ItemFailed || st == store.ItemRemoved})
 	}
+	t.Summary = len(items) > foldAbove
 	if done := n[store.ItemDone]; len(items) > foldAbove && done > 0 {
 		t.Fold = done
 		for i := range t.Rows {
@@ -980,4 +993,13 @@ func (s *Server) sharedJobSnap(ctx context.Context, id int64, need uint64) (jobS
 		snap.itemsHTML, err = fragment("job", "job-items", v)
 		return snap, err
 	})
+}
+
+// queuedNote is freeWorker for a queued job that waits for no other job and
+// isn't being cancelled, else "".
+func queuedNote(j store.Job, waiting []int64) string {
+	if j.Status != store.StatusPending || len(waiting) > 0 || j.CancelRequested {
+		return ""
+	}
+	return freeWorker
 }

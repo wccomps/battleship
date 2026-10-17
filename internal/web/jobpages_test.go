@@ -172,8 +172,6 @@ func TestJobPage(t *testing.T) {
 		`<span class="st b s-wait">`, "pending</span>",
 		`<span title="olive@example.org">olive</span> · olive@auth.example.org`,
 		`teams <span class="vm">01</span>`,
-		`<div class="tally"><span><b>2</b> pending</span></div>`,
-		`<div class="pips" role="img" aria-label="2 pending"><span class="pip wait"></span><span class="pip wait"></span></div>`,
 		`<tr><td><span class="vm">team01-dc</span></td><td class="muted c-vmid">10101</td><td class="c-steps"><span class="steps" role="img" aria-label="stop: waiting, rollback: waiting, start: waiting"><span class="pip wait" title="stop: waiting"></span><span class="pip wait" title="rollback: waiting"></span><span class="pip wait" title="start: waiting"></span></span></td><td><span class="st s-wait">`,
 		`<ol class="log" id="job-log" aria-live="polite">`,
 	)
@@ -230,7 +228,6 @@ func TestJobPageShowsItemsThatNeverRan(t *testing.T) {
 	contains(t, "stale job", body,
 		`<span class="st b s-stale">`,
 		"the cluster changed since the preview",
-		"<b>2</b> not run</span>",
 		`<span class="st s-skip">`, "not run</span>",
 		"Preview again</a>")
 	lacks(t, "stale job", body, `<span class="st s-wait">`, "data-events", "Retry")
@@ -241,7 +238,7 @@ func TestJobPageShowsItemsThatNeverRan(t *testing.T) {
 	}
 	body = h.get(&op, "/logs/"+itoa(cancelled)).Body.String()
 	contains(t, "job cancelled before it started", body,
-		`<span class="st b s-cancel">`, "<b>2</b> not run</span>",
+		`<span class="st b s-cancel">`, `<span class="st s-skip">`,
 		"cancelled by lena@example.org")
 }
 
@@ -303,7 +300,6 @@ func TestJobPageOfAFinishedJob(t *testing.T) {
 	contains(t, "finished job", body,
 		`<span class="st b s-part">`, "completed with failures</span>",
 		`title="started `, `, finished `,
-		`<div class="tally"><span class="bad"><b>1</b> failed</span><span><b>1</b> done</span></div>`,
 		`<td class="err">start: VM is locked (backup)</td>`,
 		"<span class=\"name\">team01-ftp</span> (VMID 10103) is <span class=\"name\">half-built</span>; delete it by hand",
 		`Removed again after failing half-built: <span class="vm">team01-ftp</span>`,
@@ -797,7 +793,7 @@ func TestJobStreamsShareReads(t *testing.T) {
 		if ev := c.next(); ev.Event != "log" || !strings.Contains(ev.Data, "team01-dc") {
 			t.Fatalf("stream %d: %+v, want the new log line", i, ev)
 		}
-		if ev := c.next(); ev.Event != "patch" || !strings.Contains(ev.Data, "1 running") {
+		if ev := c.next(); ev.Event != "patch" || !strings.Contains(ev.Data, `title="power: done"`) {
 			t.Fatalf("stream %d: %+v, want the VMs patched", i, ev)
 		}
 	}
@@ -1034,7 +1030,43 @@ func TestBrowserRunningJobSpinsAtTheStep(t *testing.T) {
 	op := h.login(asOperator)
 	b := newBrowser(t, h, &op, 1280, 800, false)
 	b.open("/logs/" + itoa(id))
-	b.waitFor("the step pip spinning and the tally still",
-		`getComputedStyle(document.querySelector(".steps .pip.run")).animationName === "spin" && `+
-			`getComputedStyle(document.querySelector(".pips .pip.run")).animationName === "none"`)
+	b.waitFor("the step pip spinning, and no summary for one VM",
+		`getComputedStyle(document.querySelector(".steps .pip.run")).animationName === "spin" && !document.querySelector(".pips")`)
+}
+
+// A job of up to foldAbove VMs is read from its table; above, pips and a
+// tally sum it up, and the running tally pip stays still.
+func TestJobSummaryOnlyForLongTables(t *testing.T) {
+	h := newHarness(t)
+	h.poll()
+	op := h.login(asOperator)
+	small := h.submitJob(jobs.Inputs{Kind: pods.KindReset, Teams: "1", Snapshot: "initial"}, byOperator)
+	if body := h.get(&op, "/logs/"+itoa(small)).Body.String(); strings.Contains(body, `class="tally"`) || strings.Contains(body, `class="pips"`) {
+		t.Errorf("a %s-VM job has a summary:\n%s", "small", body)
+	}
+	for team := 10; team <= 24; team++ {
+		h.api.add(teamVM(itoa(int64(team)), "dc", 10000+team*100+1), cleanConfig(itoa(int64(team))), "initial")
+	}
+	big := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "10-24", Action: "stop"}, byOperator)
+	items, err := h.st.Items(context.Background(), big)
+	if err != nil || len(items) <= foldAbove {
+		t.Fatalf("%d items, %v; want more than %d", len(items), err, foldAbove)
+	}
+	body := h.get(&op, "/logs/"+itoa(big)).Body.String()
+	contains(t, "big job", body, `<div class="pips" role="img" aria-label="`+itoa(int64(len(items)))+` pending">`,
+		`<div class="tally"><span><b>`+itoa(int64(len(items)))+`</b> pending</span></div>`)
+}
+
+// A queued job says what it waits for: another job, or a free worker.
+func TestQueuedJobSaysWhatItWaitsFor(t *testing.T) {
+	h := newHarness(t)
+	h.poll()
+	op := h.login(asOperator)
+	first := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Action: "stop"}, byOperator)
+	next := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Action: "start"}, byOperator)
+	contains(t, "first job", h.get(&op, "/logs/"+itoa(first)).Body.String(), `<span class="st b s-wait">`, "queued</span>", " · waiting for a free worker")
+	page := h.get(&op, "/logs/"+itoa(next)).Body.String()
+	contains(t, "next job", page, "queued</span>", ` · after <a href="/logs/`+itoa(first)+`">#`+itoa(first)+`</a>`)
+	lacks(t, "next job", page, "waiting for a free worker")
+	contains(t, "job list", h.get(&op, "/logs").Body.String(), "waiting for a free worker", "after #"+itoa(first))
 }

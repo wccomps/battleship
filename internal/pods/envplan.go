@@ -56,8 +56,17 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 	}
 	var slot *Environment
 	var hidden []string // slots that look free but hold VMs this user can't see
+	var queued []string // slots that look free but a queued job will fill
+	reserved, err := p.reserved(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for i := range envs {
 		if !envs[i].Free() {
+			continue
+		}
+		if reserved["slot:"+envs[i].Slot.Name] {
+			queued = append(queued, envs[i].Slot.Name)
 			continue
 		}
 		held, err := p.slotHeld(ctx, envs[i].Slot, vms)
@@ -75,6 +84,9 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 		if len(hidden) > 0 {
 			msg += fmt.Sprintf(" (dev slot %s holds VMs you can't see)", strings.Join(hidden, ", "))
 		}
+		if len(queued) > 0 {
+			msg += fmt.Sprintf(" (a queued job will fill dev slot %s)", strings.Join(queued, ", "))
+		}
 		return nil, errors.New(msg)
 	}
 	env := *slot
@@ -86,7 +98,10 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 // what a user may see depends on their rights, but Proxmox reports any.
 // VMs on the slot's bridges count through Environments' Users instead.
 func (p Planner) slotHeld(ctx context.Context, slot Slot, vms []proxmox.VM) (bool, error) {
-	use := newVMIDUse(p.API, vms)
+	use, err := p.vmidUse(ctx, vms)
+	if err != nil {
+		return false, err
+	}
 	// errSlotHeld cancels gctx, which stops the rest.
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(envReads)

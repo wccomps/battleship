@@ -289,6 +289,10 @@ type Planner struct {
 	// Access, if set, is the planning user's privileges: jobs.BuildPlan
 	// blocks what they lack (BlockUnpermitted).
 	Access Access
+	// Reserved, if set, returns the lock keys other pending or running jobs
+	// write ("vmid:8012", "slot:05"): VMIDs and slots they will create but may
+	// not have yet, which a free VMID or slot must not be.
+	Reserved func(ctx context.Context) (map[string]bool, error)
 }
 
 // NewPlanner plans with api. If api can read the caller's privileges (a
@@ -613,7 +617,10 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	if err != nil {
 		return err
 	}
-	use := newVMIDUse(p.API, vms)
+	use, err := p.vmidUse(ctx, vms)
+	if err != nil {
+		return err
+	}
 	held := maps.Clone(use.listed) // and, as items are added, VMIDs already itemized
 	want := map[string]bool{}
 	for _, t := range plan.Teams {

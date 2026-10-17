@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
@@ -422,5 +423,37 @@ func TestSetDNSFormSaysAGoneChoice(t *testing.T) {
 	sess := h.login(asLead)
 	if body := h.get(&sess, "/environments/dns?domain=kilo.alpha").Body.String(); !strings.Contains(body, "it was dc, which is no longer one") {
 		t.Errorf("the gone choice isn't said:\n%s", body)
+	}
+}
+
+// Two registers previewed while the first still waits in the queue get
+// different VMIDs: the first's isn't made yet, but it's taken.
+func TestQueuedRegisterReservesItsVMID(t *testing.T) {
+	h := newHarness(t)
+	addImages(h)
+	pool := h.cfg.Images.Pool
+	for _, vm := range []proxmox.VM{
+		{VMID: 150, Name: "teak-build", Node: "n1", Pool: pool, Status: "stopped"},
+		{VMID: 151, Name: "oak-build", Node: "n1", Pool: pool, Status: "stopped"},
+	} {
+		h.api.Add(vm, map[string]string{"agent": "1", "ostype": "l26"})
+	}
+	sess := h.login(asLead)
+	var vmids []int
+	for _, vm := range []string{"150", "151"} {
+		family := map[string]string{"150": "teak", "151": "oak"}[vm]
+		action, fields, _ := h.preview(&sess, "/images/register", url.Values{"vmid": {vm}, "family": {family}, "image_kind": {"linux"}})
+		if rec := h.post(&sess, action, fields); rec.Code != http.StatusSeeOther {
+			t.Fatalf("confirm %s = %d\n%s", vm, rec.Code, rec.Body)
+		}
+		js := h.jobsInStore()
+		items, err := h.st.Items(context.Background(), js[0].ID)
+		if err != nil || len(items) != 1 {
+			t.Fatalf("items = %v, %v", items, err)
+		}
+		vmids = append(vmids, items[0].VMID)
+	}
+	if vmids[0] == vmids[1] {
+		t.Errorf("both registers planned VMID %d", vmids[0])
 	}
 }

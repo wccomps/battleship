@@ -217,9 +217,8 @@ func FamilyNames(images []BaseImage) []string {
 type RegisterCandidate struct {
 	VMID       int
 	Name, Node string
-	Family     string    // suggested (see RegisterCandidates); "" if nothing says
-	Kind       string    // its family's kind, or by its OS type; "" if neither says
-	From       BaseImage // the highest version registered from it, if any
+	Family     string // suggested (see RegisterCandidates); "" if nothing says
+	Kind       string // its family's kind, or by its OS type; "" if neither says
 	Notes      string
 	Blocked    string // why it can't be registered as it is (see ImageRegister)
 }
@@ -254,12 +253,13 @@ func KindForOSType(ostype string) string {
 	return ""
 }
 
-// RegisterCandidates lists the VMs in the images pool that aren't templates
-// or busy (a lock, such as a register's clone in progress), by VMID, reading
-// each one's config as the user. Each gets a family: the one it was
-// registered as (images must carry their Source; see ReadNotes), else the
-// one its notes say an edit copy came from, else SuggestFamily; a kind; and
-// why ImageRegister would refuse it, if it would.
+// RegisterCandidates lists the VMs in the images pool that aren't templates,
+// busy (a lock, such as a register's clone in progress) or registered
+// already (an image's Source: its row's New version copies it in again;
+// images must carry their Source, see ReadNotes), by VMID, reading each
+// one's config as the user. Each gets a family: the one its notes say an
+// edit copy came from, else SuggestFamily; a kind; and why ImageRegister
+// would refuse it, if it would.
 func (p Planner) RegisterCandidates(ctx context.Context, vms []proxmox.VM, images []BaseImage) []RegisterCandidate {
 	var out []RegisterCandidate
 	var srcs []proxmox.VM
@@ -267,21 +267,18 @@ func (p Planner) RegisterCandidates(ctx context.Context, vms []proxmox.VM, image
 		if vm.Pool != p.Cfg.Images.Pool || vm.Template || vm.Lock != "" {
 			continue
 		}
-		c := RegisterCandidate{VMID: vm.VMID, Name: vm.Name, Node: vm.Node, Blocked: p.sourceBlock(vm)}
-		for _, im := range images {
-			if im.Source == vm.VMID && im.Version > c.From.Version {
-				c.From = im
-			}
+		if slices.ContainsFunc(images, func(im BaseImage) bool { return im.Source == vm.VMID }) {
+			continue
 		}
-		out, srcs = append(out, c), append(srcs, vm)
+		out = append(out, RegisterCandidate{VMID: vm.VMID, Name: vm.Name, Node: vm.Node, Blocked: p.sourceBlock(vm)})
+		srcs = append(srcs, vm)
 	}
 	p.eachConfig(ctx, srcs, func(i int, cfg map[string]string, err error) {
 		c := &out[i]
 		if err == nil {
 			c.Notes = UserNotes(cfg["description"])
 		}
-		c.Family = c.From.Family
-		if f, _, ok := ParseImageName(baseNote(cfg)); c.Family == "" && ok {
+		if f, _, ok := ParseImageName(baseNote(cfg)); ok {
 			c.Family = f
 		}
 		if c.Family == "" {

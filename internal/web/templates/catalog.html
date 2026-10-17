@@ -58,7 +58,7 @@
 {{- range .}}
 <tr>
 <td class="img"><div class="iname">{{names .Name}}</div>
-<div class="meta">VMID {{.VMID}} · {{.Node}}{{with .From.Name}} · registered as {{names .}}{{end}}</div>
+<div class="meta">VMID {{.VMID}} · {{.Node}}</div>
 {{- with .Blocked}}<div class="meta">{{icon "warn"}} {{.}}</div>{{end}}</td>
 <td>{{with .Notes}}<div class="notes">{{.}}</div>{{else}}<span class="meta">none</span>{{end}}</td>
 <td class="act"><div class="acts">
