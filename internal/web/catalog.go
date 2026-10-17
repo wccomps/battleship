@@ -21,7 +21,6 @@ type catalogPage struct {
 	Routers  []pods.BaseImage // newest usable version of each router family
 	Others   []pods.BaseImage // newest usable version of each other family
 	Families []string         // every family, once
-	Kinds    []string
 	Subnet   string
 	ReadErr  string // why the cluster couldn't be read
 	// Env is the environment an env-add or env-dns form works on.
@@ -30,19 +29,18 @@ type catalogPage struct {
 	DNSCards []dnsCard
 	DNSHint  string
 	envForm
-	vms []proxmox.VM
 }
 
 // newCatalogPage reads environments and images as the user, without the
 // images' notes: only the pages that show them read them (withNotes).
 func (s *Server) newCatalogPage(ctx context.Context) catalogPage {
-	p := catalogPage{Kinds: pods.ImageKinds, Subnet: s.cfg.Environments.Subnet}
+	p := catalogPage{Subnet: s.cfg.Environments.Subnet}
 	envs, vms, err := s.planner(ctx).Environments(ctx)
 	if err != nil {
 		p.ReadErr = "Couldn't read the cluster: " + sentence(proxmox.Describe(err))
 		return p
 	}
-	p.Envs, p.vms = envs, vms
+	p.Envs = envs
 	p.Images = pods.BaseImages(vms)
 	p.Families = pods.FamilyNames(p.Images)
 	p.Routers = pods.Families(p.Images, pods.ImageRouter)

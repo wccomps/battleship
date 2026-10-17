@@ -136,8 +136,10 @@ func TestPropJobRowsEscapeAndTime(t *testing.T) {
 			if j.Status != store.StatusRunning || r.status != store.ItemRunning {
 				t.Fatalf("a %s VM of a %s job has a time %q", r.status, j.Status, r.For)
 			}
+			// Since is the step's start cut to the millisecond, so the time
+			// on it may read up to a millisecond less.
 			began := time.UnixMilli(r.Since)
-			if want := clockText(now.Sub(began)); r.For != want && clockText(now.Sub(began)+time.Millisecond) != r.For {
+			if want := clockText(now.Sub(began)); r.For != want && clockText(now.Sub(began)-time.Millisecond) != r.For {
 				t.Fatalf("time %q, want %q for a step begun %v at %v", r.For, want, began, now)
 			}
 		}
@@ -177,7 +179,7 @@ func TestPropOpenStaysOnSite(t *testing.T) {
 			if pods.CheckDomain(name) != nil || name != in.Domain {
 				t.Fatalf("%+v opens domain %q", in, name)
 			}
-		case l.Href == "/images/"+name:
+		case l.Href == "/images/family/"+name:
 			if pods.CheckFamily(name) != nil {
 				t.Fatalf("%+v opens family %q", in, name)
 			}

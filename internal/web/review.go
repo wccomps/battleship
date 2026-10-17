@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,8 +27,9 @@ type reviewView struct {
 	DNS  []dnsRow
 	Note string // a line after the rows
 	// Kept are VMs a teardown leaves alone, each with why.
-	Kept  []string
-	Retry int64 // the job this retries
+	Kept []string
+	// Retry says which job this retries, and what of it.
+	Retry string
 }
 
 // reviewFact is a labelled fact of a review: a name, text and a muted note,
@@ -363,21 +363,20 @@ func imageReview(op operation, in jobs.Inputs, plan *pods.Plan) *reviewView {
 	return r
 }
 
-// reviewBack is where a review's Back goes: the form, filled in; Images
-// for a register, whose row was the form; and the family page for the
-// operations its versions offer.
+// reviewBack is where a review's Back goes: the form, filled in; the page
+// it was opened from for a register (Images, whose row was the form) and a
+// teardown (Environments); and the family page for an edit, deprecate or
+// delete, which start there.
 func reviewBack(op operation, in jobs.Inputs) string {
 	switch op.Kind {
-	case pods.KindImageRegister:
+	case pods.KindImageRegister, pods.KindEnvTeardown:
 		return listPage(in)
 	case pods.KindImageEdit:
-		return "/images/" + url.PathEscape(in.Family)
+		return familyHref(in.Family)
 	case pods.KindImageDeprecate, pods.KindImageDelete:
 		if f, _, ok := pods.ParseImageName(in.Image); ok {
-			return "/images/" + url.PathEscape(f)
+			return familyHref(f)
 		}
-		return listPage(in)
-	case pods.KindEnvTeardown:
 		return listPage(in)
 	}
 	return formQuery(op, in)

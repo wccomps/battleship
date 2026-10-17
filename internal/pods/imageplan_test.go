@@ -62,13 +62,6 @@ func TestImageRegisterBlocks(t *testing.T) {
 	if _, err := p.ImageRegister(ctx, ImageRequest{VMID: 150, Family: "new", Kind: "toaster"}); err == nil {
 		t.Error("unknown kind accepted")
 	}
-	// A new family may not be named like an image operation, whose form
-	// would hide its page.
-	for _, f := range ReservedFamilies {
-		if _, err := p.ImageRegister(ctx, ImageRequest{VMID: 150, Family: f, Kind: ImageLinux}); err == nil || !strings.Contains(err.Error(), "operation") {
-			t.Errorf("new family %s: %v, want refused", f, err)
-		}
-	}
 	// Team-named sources are refused, each saying what it is.
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "alder", Status: "stopped"}, nil)
 	f.Add(proxmox.VM{VMID: 152, Name: "team01-oak", Node: "alder", Status: "stopped"}, nil)

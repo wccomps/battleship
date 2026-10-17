@@ -96,10 +96,7 @@ func (s *Server) opConfirm(op operation) http.Handler {
 			return
 		}
 		if op.Kind.TypedConfirm() {
-			typed, want, what := strings.TrimSpace(form.Get(fieldTyped)), in.Typed(), "the team range"
-			if op.Kind == pods.KindEnvTeardown {
-				what = "the domain"
-			}
+			typed, want, what := strings.TrimSpace(form.Get(fieldTyped)), in.Typed(), in.TypedWhat()
 			if typed != want {
 				msg := fmt.Sprintf("To confirm, type %s exactly as shown: %s.", what, want)
 				if typed != "" {

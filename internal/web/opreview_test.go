@@ -309,20 +309,20 @@ func TestImageReviews(t *testing.T) {
 			`<span><span class="name">debian-12-v2</span> will no longer be offered for new hosts. Hosts made from it keep working.</span>`,
 			`<thead><tr><th scope="col">VM</th><th scope="col" class="r">VMID · node</th></tr></thead>`,
 			`<tr><td><span class="vm">debian-12-v2</span></td><td class="r wide meta">8002 · n1</td></tr>`,
-			`<a class="btn first" href="/images/debian-12" data-panel-link>Back</a>`,
+			`<a class="btn first" href="/images/family/debian-12" data-panel-link>Back</a>`,
 			`<button type="submit" class="btn pri">`, "Deprecate debian-12-v2</button>"}},
 		{"/images/delete", url.Values{"image": {"debian-12-v1"}}, []string{
 			`<span class="eyebrow">Review ·</span> Delete <span class="vm">debian-12-v1</span></h1>`,
 			"will be deleted. Hosts made from it keep working: they are full copies. This can&#39;t be undone.",
 			`<tr><td><span class="vm">debian-12-v1</span></td><td class="r wide meta">8001 · n1</td></tr>`,
-			`<a class="btn first" href="/images/debian-12" data-panel-link>Back</a>`,
+			`<a class="btn first" href="/images/family/debian-12" data-panel-link>Back</a>`,
 			`<button type="submit" class="btn pri bad">`, "Delete debian-12-v1</button>"}},
 		{"/images/edit", url.Values{"family": {"gw"}}, []string{
 			`<span class="eyebrow">Review ·</span> Edit <span class="vm">gw</span></h1>`,
 			`<span>Copies <span class="name">gw-v1</span> as <span class="name">gw-edit</span> on the edit network, for you to patch and register as the next version.</span>`,
 			`<thead><tr><th scope="col">VM</th><th scope="col">Image</th><th scope="col" class="r">VMID · node</th></tr></thead>`,
 			`<tr><td><span class="vm">gw-edit</span></td><td class="wide"><code>gw-v1</code></td><td class="r wide meta">`,
-			`<a class="btn first" href="/images/gw" data-panel-link>Back</a>`,
+			`<a class="btn first" href="/images/family/gw" data-panel-link>Back</a>`,
 			"Copy as gw-edit</button>"}},
 	} {
 		_, _, body := h.preview(&sess, c.path, c.form)
@@ -410,7 +410,7 @@ func TestBrowserReviews(t *testing.T) {
 			b.noSideways("create review")
 			b.shot("create-review-" + size.name)
 
-			b.open("/images/debian-12")
+			b.open("/images/family/debian-12")
 			b.click(`form[action="/images/deprecate/preview"] button`)
 			b.waitFor("the deprecate review", `location.pathname === "/images/deprecate/preview"`)
 			b.noSideways("deprecate review")

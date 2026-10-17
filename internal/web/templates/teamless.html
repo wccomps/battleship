@@ -108,7 +108,7 @@
 </div>
 <fieldset class="field">
 <legend>Kind <span class="muted">· for a new family</span></legend>
-<div class="opts">{{range .Kinds}}<label class="opt"><input type="radio" name="image_kind" value="{{.}}"{{if eq . $.Data.In.ImageKind}} checked{{end}}><span>{{.}}</span></label>{{end}}</div>
+<div class="opts">{{range imageKinds}}<label class="opt"><input type="radio" name="image_kind" value="{{.}}"{{if eq . $.Data.In.ImageKind}} checked{{end}}><span>{{.}}</span></label>{{end}}</div>
 </fieldset>
 {{- end}}
 {{- if eq .Op.Kind "image-edit"}}

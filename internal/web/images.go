@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -143,8 +144,8 @@ type familyView struct {
 	Next         int             // the next version's number
 	// Edit is an open edit copy (see pods.ImageEdit), registered as Next.
 	Edit *pods.RegisterCandidate
-	// Source is the VM the newest version with one was registered from, if it
-	// still exists, to copy in again as Next.
+	// Source is the VM the newest version whose source VM still exists was
+	// registered from, to copy in again as Next.
 	Source   *proxmox.VM
 	Versions []versionRow // newest first
 	// MayClone is whether the user may make the next version, either way
@@ -162,7 +163,25 @@ type versionRow struct {
 	May     bool
 }
 
-// familyPage serves /images/{family}: a page, or the panel over Images.
+// familiesPath is where each family's page is, under its name (familyHref),
+// apart from the image operations' paths.
+const familiesPath = "/images/family/"
+
+func familyHref(family string) string { return familiesPath + url.PathEscape(family) }
+
+// oldFamilyPage sends a family page's old address, /images/{family}, to
+// its page.
+func (s *Server) oldFamilyPage(w http.ResponseWriter, r *http.Request) {
+	family := r.PathValue("family")
+	if pods.CheckFamily(family) != nil {
+		s.notFound(w, r)
+		return
+	}
+	http.Redirect(w, r, familyHref(family), http.StatusMovedPermanently)
+}
+
+// familyPage serves a family's page (familyHref): a page, or the panel
+// over Images.
 func (s *Server) familyPage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	family := r.PathValue("family")
@@ -225,8 +244,8 @@ func newFamilyView(family string, rd imagesRead) (familyView, bool) {
 		}
 		p.Versions = append(p.Versions, versionRow{BaseImage: im, Current: p.Current != nil && im.VMID == p.Current.VMID})
 		if im.Source != 0 && im.Version > sourced {
-			if vm, ok := vmWithID(rd.vms, im.Source); ok {
-				p.Source, sourced = &vm, im.Version
+			if i := slices.IndexFunc(rd.vms, func(v proxmox.VM) bool { return v.VMID == im.Source && !v.Template }); i >= 0 {
+				p.Source, sourced = &rd.vms[i], im.Version
 			}
 		}
 	}
@@ -238,12 +257,4 @@ func newFamilyView(family string, rd imagesRead) (familyView, bool) {
 		}
 	}
 	return p, true
-}
-
-func vmWithID(vms []proxmox.VM, vmid int) (proxmox.VM, bool) {
-	i := slices.IndexFunc(vms, func(v proxmox.VM) bool { return v.VMID == vmid && !v.Template })
-	if i < 0 {
-		return proxmox.VM{}, false
-	}
-	return vms[i], true
 }

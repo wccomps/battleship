@@ -127,8 +127,8 @@ func TestBrowserCatalogPages(t *testing.T) {
 			for _, page := range []struct{ path, name string }{
 				{"/environments", "environments"},
 				{"/images", "images"},
-				{"/images/debian-12", "family"},
-				{"/images/gw", "family-source"},
+				{"/images/family/debian-12", "family"},
+				{"/images/family/gw", "family-source"},
 				{"/environments/new", "env-new"},
 				{"/images/register", "image-register"},
 				{"/environments/kilo.alpha/add", "env-add"},
@@ -166,7 +166,7 @@ func TestBrowserCatalogPages(t *testing.T) {
 				t.Errorf("elm-build's Register stays dimmed after picking a kind")
 			}
 			// A family opens in the panel over Images.
-			b.click(`a.fam[href="/images/debian-12"]`)
+			b.click(`a.fam[href="/images/family/debian-12"]`)
 			b.waitFor("the family sheet", `document.querySelector("#panel[open] .sheet.family") !== null`)
 			b.noSideways("family sheet")
 			b.shot("family-panel-" + size.name)
@@ -208,7 +208,7 @@ func TestNotesShowAsText(t *testing.T) {
 		map[string]string{"description": xssNotes, "agent": "1", "net0": "virtio=BC:24:11:00:80:03,bridge=vmbr0"})
 	sess := h.login(asLead)
 	pages := map[string]string{}
-	for _, path := range []string{"/images", "/images/debian-12", "/environments", "/environments/new", "/environments/kilo.alpha/add"} {
+	for _, path := range []string{"/images", "/images/family/debian-12", "/environments", "/environments/new", "/environments/kilo.alpha/add"} {
 		pages[path] = h.get(&sess, path).Body.String()
 		pages["panel "+path] = h.panelGet(&sess, path, nil).Body.String()
 	}

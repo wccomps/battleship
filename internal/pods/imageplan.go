@@ -70,10 +70,6 @@ func sourceBridges(cfg map[string]string) []string {
 	return slices.Compact(slices.Sorted(slices.Values(nicBridgesAll(cfg))))
 }
 
-// ReservedFamilies can't start a new family: the web app's family page,
-// /images/<family>, would be the operation's form.
-var ReservedFamilies = []string{"register", "edit", "deprecate", "delete"}
-
 // ImageRegister plans copying a VM in as its family's next version.
 func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, error) {
 	if err := CheckFamily(req.Family); err != nil {
@@ -98,9 +94,6 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 	}
 	if !slices.Contains(ImageKinds, kind) {
 		return nil, fmt.Errorf("the image kind must be one of %s, not %q", strings.Join(ImageKinds, ", "), kind)
-	}
-	if !exists && slices.Contains(ReservedFamilies, req.Family) {
-		return nil, fmt.Errorf("image family %q is the name of an image operation; pick another", req.Family)
 	}
 	version := 1
 	if exists {

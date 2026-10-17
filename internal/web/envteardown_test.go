@@ -208,6 +208,12 @@ func TestEnvTeardownRetry(t *testing.T) {
 		"gw.kilo.alpha": {Status: store.ItemDone}, "yew.kilo.alpha": {Status: store.ItemDone},
 		"teak.kilo.alpha": {Status: store.ItemFailed, Error: "delete: refused"},
 	}})
+	// Its page offers the teardown again, not its failed VMs: a retry
+	// plans what is left whole.
+	page := h.get(&sess, "/logs/"+itoa(id)).Body.String()
+	contains(t, "the job page", page, `title="Battleship already tried its failed VMs again by itself (1 automatic round), so fix the cause first. Plans the teardown again, of what is left, after a preview.">`,
+		"Retry the teardown</button>")
+	lacks(t, "the job page", page, "Retry 0", "for 0 VMs")
 	rec := h.post(&sess, "/logs/"+itoa(id)+"/retry", url.Values{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("retry = %d\n%s", rec.Code, rec.Body)
@@ -215,7 +221,8 @@ func TestEnvTeardownRetry(t *testing.T) {
 	body := rec.Body.String()
 	contains(t, "the retry", body, `<span>Deletes 2 VMs in <span class="name">dev-01</span>. Frees the disks deleted VMs left at VMID 2100. The slot is free again afterwards.</span>`,
 		`<span class="vm">disks-2100</span>`,
-		"Retry of #"+itoa(id), `<input type="hidden" name="slot" value="01">`)
+		`<p class="meta">Retry of #`+itoa(id)+": the teardown of what is left.</p>", `<input type="hidden" name="slot" value="01">`)
+	lacks(t, "the retry", body, "didn&#39;t finish")
 	action, _ := confirmOf(t, body)
 	if action != "/environments/kilo.alpha/teardown/confirm" {
 		t.Errorf("retry confirms at %s", action)

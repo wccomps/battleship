@@ -124,15 +124,15 @@ func TestImagesPageCatalogue(t *testing.T) {
 		t.Errorf("groups wrong (router %d, linux %d):\n%s", router, linux, table)
 	}
 	contains(t, "the catalogue", table,
-		`<a class="fam" href="/images/gw" data-panel-link>gw</a></td><td class="cur"><code>v1</code> <span class="meta">· 8000</span></td><td class="nl">admin / gwpass</td>`,
-		`<a class="fam" href="/images/debian-12" data-panel-link>debian-12</a></td><td class="cur"><code>v2</code> <span class="meta">· 8002</span></td><td class="nl">debian / Changeme1!</td>`)
+		`<a class="fam" href="/images/family/gw" data-panel-link>gw</a></td><td class="cur"><code>v1</code> <span class="meta">· 8000</span></td><td class="nl">admin / gwpass</td>`,
+		`<a class="fam" href="/images/family/debian-12" data-panel-link>debian-12</a></td><td class="cur"><code>v2</code> <span class="meta">· 8002</span></td><td class="nl">debian / Changeme1!</td>`)
 	lacks(t, "the catalogue", table, "win10", "WAN dhcp", "old login", "debian-12-v1")
 	if strings.Count(table, `class="fam"`) != 2 {
 		t.Errorf("want 2 families in the catalogue:\n%s", table)
 	}
 	fold, _, _ := strings.Cut(rest, "</details>")
 	contains(t, "the retired fold", fold, `<summary class="disc">Retired families (1)</summary>`, "<code>win10</code>",
-		"windows · every version deprecated · v1 is the newest", `<a class="btn sm" href="/images/win10" data-panel-link>Open</a>`)
+		"windows · every version deprecated · v1 is the newest", `<a class="btn sm" href="/images/family/win10" data-panel-link>Open</a>`)
 	contains(t, "the page", body, `<dialog class="panel" id="panel"`)
 }
 
@@ -145,7 +145,7 @@ func TestFamilyPageStates(t *testing.T) {
 	addCatalog(h)
 	sess := h.login(asLead)
 
-	deb := h.get(&sess, "/images/debian-12").Body.String()
+	deb := h.get(&sess, "/images/family/debian-12").Body.String()
 	contains(t, "debian-12", deb, `<dt>Current</dt><dd><code>debian-12-v2</code> · VMID 8002 · n1</dd>`,
 		`<div class="notes box">debian / Changeme1!`+"\n"+`sudo, cloud-init</div>`, "Next version · v3",
 		`<code>debian-12-edit</code> is open for editing`,
@@ -164,7 +164,7 @@ func TestFamilyPageStates(t *testing.T) {
 	contains(t, "debian-12's versions", versions, `action="/images/deprecate/preview"`, `name="image" value="debian-12-v2"`,
 		`action="/images/delete/preview"`, `name="image" value="debian-12-v1"`)
 
-	gw := h.get(&sess, "/images/gw").Body.String()
+	gw := h.get(&sess, "/images/family/gw").Body.String()
 	contains(t, "gw", gw, `<dt>Built from</dt><dd><code>gw-build</code> · VMID 140 · stopped</dd>`, "Copy <code>gw-build</code> in again",
 		`<input type="hidden" name="vmid" value="140"><input type="hidden" name="family" value="gw">`+"\n"+`<button class="btn pri" type="submit">New version from gw-build</button>`,
 		`action="/images/edit/preview"`, `<button class="btn" type="submit">Open for editing</button>`, "Next version · v2")
@@ -173,12 +173,12 @@ func TestFamilyPageStates(t *testing.T) {
 	// An older version that isn't deprecated has neither action.
 	h.api.Add(proxmox.VM{VMID: 8006, Name: "alder-v1", Node: "n1", Template: true, Tags: "base;linux"}, nil)
 	h.api.Add(proxmox.VM{VMID: 8007, Name: "alder-v2", Node: "n1", Template: true, Tags: "base;linux"}, nil)
-	alder := h.get(&sess, "/images/alder").Body.String()
+	alder := h.get(&sess, "/images/family/alder").Body.String()
 	if strings.Count(alder, "Deprecate</button>") != 1 || strings.Contains(alder, "Delete</button>") {
 		t.Errorf("alder-v1, neither current nor deprecated, has an action:\n%s", alder)
 	}
 
-	win := h.get(&sess, "/images/win10").Body.String()
+	win := h.get(&sess, "/images/family/win10").Body.String()
 	contains(t, "win10", win, "none <span class=\"meta\">· every version is deprecated</span>", "Delete</button>", "register a new build VM")
 	lacks(t, "win10", win, "Deprecate</button>", "Open for editing", "New version from")
 }
@@ -189,7 +189,7 @@ func TestFamilyPageLacksPrivileges(t *testing.T) {
 	h := newHarness(t)
 	addCatalog(h)
 	sess := h.login(asOperator)
-	deb := h.get(&sess, "/images/debian-12").Body.String()
+	deb := h.get(&sess, "/images/family/debian-12").Body.String()
 	contains(t, "debian-12 as an operator", deb,
 		`<button class="btn pri" type="submit" disabled>Register debian-12-edit as v3</button>`,
 		`<button class="btn sm" type="submit" disabled>Deprecate</button>`, `<button class="btn sm bad" type="submit" disabled>Delete</button>`,
@@ -210,8 +210,8 @@ func TestFamilyPagePaths(t *testing.T) {
 	h := newHarness(t)
 	addCatalog(h)
 	sess := h.login(asLead)
-	page := h.get(&sess, "/images/gw")
-	panel := h.panelGet(&sess, "/images/gw", nil)
+	page := h.get(&sess, "/images/family/gw")
+	panel := h.panelGet(&sess, "/images/family/gw", nil)
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "<html") {
 		t.Errorf("page = %d", page.Code)
 	}
@@ -219,7 +219,8 @@ func TestFamilyPagePaths(t *testing.T) {
 		panel.Header().Get(panelHeader) != "1" {
 		t.Errorf("panel = %d %s", panel.Code, panel.Body)
 	}
-	for _, path := range []string{"/images/nope", "/images/GW", "/images/gw-v1", "/images/-x", "/images/%3Cscript%3E"} {
+	for _, path := range []string{"/images/family/nope", "/images/family/GW", "/images/family/gw-v1", "/images/family/-x", "/images/family/%3Cscript%3E",
+		"/images/GW", "/images/-x", "/images/%3Cscript%3E"} {
 		if rec := h.get(&sess, path); rec.Code != http.StatusNotFound {
 			t.Errorf("GET %s = %d, want 404", path, rec.Code)
 		}
@@ -227,6 +228,19 @@ func TestFamilyPagePaths(t *testing.T) {
 	// The operations' forms keep their paths.
 	if body := h.get(&sess, "/images/register?vmid=152&family=elm").Body.String(); !strings.Contains(body, `name="vmid" value="152"`) {
 		t.Errorf("the register form is gone:\n%s", body)
+	}
+	// A family's old address goes to its page.
+	if rec := h.get(&sess, "/images/gw"); rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != "/images/family/gw" {
+		t.Errorf("GET /images/gw = %d to %q, want 301 to /images/family/gw", rec.Code, rec.Header().Get("Location"))
+	}
+	// A family may be named like an operation, or like the families' path:
+	// its page is apart from them.
+	for i, f := range []string{"register", "delete", "family"} {
+		h.api.Add(proxmox.VM{VMID: 8100 + i, Name: f + "-v1", Node: "n1", Template: true, Tags: "base;linux"},
+			map[string]string{"description": "login " + f, "agent": "1"})
+		if body := h.get(&sess, "/images/family/"+f).Body.String(); !strings.Contains(body, `<span class="vm">`+f+`</span>`) || !strings.Contains(body, "login "+f) {
+			t.Errorf("family %s's page:\n%s", f, body)
+		}
 	}
 }
 
@@ -244,8 +258,8 @@ func TestPropFamilyPath(t *testing.T) {
 			return // the path would be /images or above it
 		}
 		before, _, _ := h.api.readCounts()
-		rec := h.get(&sess, "/images/"+url.PathEscape(seg))
-		if after, _, _ := h.api.readCounts(); pods.CheckFamily(seg) != nil && after != before && !isOpPath(seg) {
+		rec := h.get(&sess, "/images/family/"+url.PathEscape(seg))
+		if after, _, _ := h.api.readCounts(); pods.CheckFamily(seg) != nil && after != before {
 			t.Fatalf("%q isn't a family name, but the cluster was read for it", seg)
 		}
 		known := false
@@ -257,23 +271,13 @@ func TestPropFamilyPath(t *testing.T) {
 			t.Fatalf("family %q = %d", seg, rec.Code)
 		case known && !strings.Contains(rec.Body.String(), `<span class="vm">`+seg+`</span>`):
 			t.Fatalf("family %q shows another family", seg)
-		case !known && rec.Code != http.StatusNotFound && !isOpPath(seg):
+		case !known && rec.Code != http.StatusNotFound:
 			t.Fatalf("%q = %d, want 404", seg, rec.Code)
 		}
 		if _, err := checkMarkup(rec.Body.String()); err != nil {
 			t.Fatalf("%q: %v", seg, err)
 		}
 	})
-}
-
-// isOpPath reports whether /images/seg is an image operation's form.
-func isOpPath(seg string) bool {
-	for _, op := range operations {
-		if op.Path == "/images/"+seg {
-			return true
-		}
-	}
-	return false
 }
 
 // The register review says in one sentence what happens, lists where the

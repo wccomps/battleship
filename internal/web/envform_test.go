@@ -506,7 +506,7 @@ func TestRetryAFailedCreate(t *testing.T) {
 		t.Fatalf("retry = %d\n%s", rec.Code, rec.Body)
 	}
 	body := rec.Body.String()
-	contains(t, "the retry preview", body, `<p class="meta">Retry of #`+itoa(id)+": only the VMs that didn't finish.</p>",
+	contains(t, "the retry preview", body, `<p class="meta">Retry of #`+itoa(id)+": only the VMs that didn&#39;t finish.</p>",
 		"<span>Clones oak into <span class=\"name\">dev-02</span> and starts it. Picks up teak where it stopped. Then teak and oak get their name,",
 		`<tr><td><span class="vm">teak.kilo.bravo</span></td><td class="wide"><code>debian-12-v1</code></td><td class="c2"><code>.10</code></td><td class="r wide meta">2201 · n1</td></tr>`,
 		`<tr><td><span class="vm">oak.kilo.bravo</span></td>`, "Create 2 VMs</button>")

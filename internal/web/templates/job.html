@@ -99,7 +99,7 @@
 {{- if .CanRetry}}
 <form method="post" action="/logs/{{.ID}}/retry">
 {{template "csrf" .CSRF}}
-<button type="submit" class="btn pri" title="{{.RetryTip}}">{{icon "reboot"}}Retry {{.RetryN}} failed {{if eq .RetryN 1}}VM{{else}}VMs{{end}}</button>
+<button type="submit" class="btn pri" title="{{.RetryTip}}">{{icon "reboot"}}{{.RetryLabel}}</button>
 </form>
 {{- else if .StartAgain}}
 <a class="btn pri" href="{{.StartAgain}}"{{if not .AgainPage}} data-panel-link{{end}}>{{icon "reboot"}}Preview again</a>

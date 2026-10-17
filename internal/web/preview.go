@@ -404,7 +404,13 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 	p.Warnings = append(p.Warnings, plan.Notices...) // what was left alone, even when nothing runs
 	if p.Review = s.review(ctx, op, in, plan, p.Nothing); p.Review != nil {
 		p.Heading = p.Review.Verb + " " + p.Review.Subject
-		p.EditHref, p.Review.Retry = reviewBack(op, in), opts.retryOf
+		p.EditHref = reviewBack(op, in)
+		if opts.retryOf > 0 {
+			p.Review.Retry = "Retry of #" + strconv.FormatInt(opts.retryOf, 10) + ": only the VMs that didn't finish."
+			if op.Kind.RetriedWhole() {
+				p.Review.Retry = "Retry of #" + strconv.FormatInt(opts.retryOf, 10) + ": the " + op.Noun + " of what is left."
+			}
+		}
 	}
 
 	return p

@@ -54,7 +54,7 @@
 {{- range .}}
 <tr class="kg"><th scope="rowgroup" colspan="4">{{.Label}}</th></tr>
 {{- range .Families}}
-<tr class="link"><td><a class="fam" href="/images/{{.Image.Family}}" data-panel-link>{{.Image.Family}}</a></td><td class="cur"><code>v{{.Image.Version}}</code> <span class="meta">· {{.Image.VMID}}</span></td><td class="nl">{{.FirstLine}}</td><td class="chev">{{icon "chev"}}</td></tr>
+<tr class="link"><td><a class="fam" href="{{familyHref .Image.Family}}" data-panel-link>{{.Image.Family}}</a></td><td class="cur"><code>v{{.Image.Version}}</code> <span class="meta">· {{.Image.VMID}}</span></td><td class="nl">{{.FirstLine}}</td><td class="chev">{{icon "chev"}}</td></tr>
 {{- end}}
 {{- end}}
 </tbody>
@@ -68,7 +68,7 @@
 <summary class="disc">Retired families ({{len .}})</summary>
 <ul>
 {{- range .}}
-<li><code>{{.Image.Family}}</code><span class="meta">{{.Image.Kind}} · every version deprecated · v{{.Image.Version}} is the newest</span><span class="sp"></span><a class="btn sm" href="/images/{{.Image.Family}}" data-panel-link>Open</a></li>
+<li><code>{{.Image.Family}}</code><span class="meta">{{.Image.Kind}} · every version deprecated · v{{.Image.Version}} is the newest</span><span class="sp"></span><a class="btn sm" href="{{familyHref .Image.Family}}" data-panel-link>Open</a></li>
 {{- end}}
 </ul>
 </details>

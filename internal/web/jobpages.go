@@ -334,7 +334,7 @@ type jobView struct {
 	CanCancel  bool
 	AskCancel  bool // the job could be cancelled, but not by this viewer
 	CanRetry   bool
-	RetryN     int    // how many VMs a retry runs again
+	RetryLabel string // the button: "Retry 2 failed VMs", or "Retry the teardown" (pods.Kind.RetriedWhole)
 	RetryTip   string // what to know before retrying
 	RetryLock  string // why this viewer can't retry it: they lack its privilege
 	RetryFault string // why the job can't be retried at all, when its stored job can't be read
@@ -527,16 +527,6 @@ func itemSteps(planned []pods.Step, it store.Item) []stepView {
 		out = append(out, v)
 	}
 	return out
-}
-
-// stepsDone reports whether every one of steps is done or skipped.
-func stepsDone(steps []stepView) bool {
-	for _, st := range steps {
-		if st.State != "done" && st.State != "skip" {
-			return false
-		}
-	}
-	return len(steps) > 0
 }
 
 // eventView is one line of a job's log.
@@ -743,14 +733,20 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 			v.RetryFault = sentence(err.Error())
 		default:
 			v.CanRetry = true
-			v.RetryN = len(retry.VMs)
-			v.RetryTip = fmt.Sprintf("Runs the job again for %s, after a preview.", countVMs(len(retry.VMs)))
+			n, them := len(retry.VMs), "them"
+			v.RetryLabel = "Retry " + strconv.Itoa(n) + byCount(n, " failed VM", " failed VMs")
+			v.RetryTip = fmt.Sprintf("Runs the job again for %s, after a preview.", countVMs(n))
+			if op, _ := operationFor(retry.Kind); retry.Kind.RetriedWhole() {
+				them = "its failed VMs"
+				v.RetryLabel = "Retry the " + op.Noun
+				v.RetryTip = "Plans the " + op.Noun + " again, of what is left, after a preview."
+			}
 			if n := s.cfg.Retry.Rounds; n > 0 && j.Status == store.StatusCompletedWithFailures {
 				rounds := "1 automatic round"
 				if n != 1 {
 					rounds = fmt.Sprintf("%d automatic rounds", n)
 				}
-				v.RetryTip = "Battleship already tried them again by itself (" + rounds + "), so fix the cause first. " + v.RetryTip
+				v.RetryTip = "Battleship already tried " + them + " again by itself (" + rounds + "), so fix the cause first. " + v.RetryTip
 			}
 		}
 	}
@@ -780,7 +776,7 @@ func resultOf(kind pods.Kind, in jobs.Inputs) *link {
 			family = f
 		}
 		if pods.CheckFamily(family) == nil {
-			return &link{"/images/" + family, "Open " + family}
+			return &link{familyHref(family), "Open " + family}
 		}
 	}
 	return nil
@@ -807,13 +803,6 @@ func jobItemsOf(j store.Job, items []store.Item, now time.Time) jobItems {
 		p := planned[it.Name]
 		steps := itemSteps(p.Steps, it)
 		st := it.Status
-		switch {
-		case st != store.ItemRunning:
-		case stepsDone(steps):
-			st = store.ItemDone // the job ends it later
-		case slices.ContainsFunc(steps, func(v stepView) bool { return v.State == "fail" }):
-			st = store.ItemFailed // until a retry round starts it again
-		}
 		if n[st] == 0 {
 			order = append(order, st)
 		}

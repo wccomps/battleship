@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
@@ -169,6 +170,7 @@ func TestJobRowsSayStepAndTime(t *testing.T) {
 	for _, st := range steps["ash.kilo.alpha"] {
 		h.eventAt(id, now.Add(-time.Minute), "ash.kilo.alpha", string(st), "done", "")
 	}
+	h.eventAt(id, now.Add(-time.Minute), "ash.kilo.alpha", "", string(apply.EventSucceeded), "")
 	h.eventAt(id, now.Add(-12*time.Second), "elm.kilo.alpha", string(steps["elm.kilo.alpha"][0]), "started", "")
 	if it := h.itemNamed(id, "oak.kilo.alpha"); !it.StepAt.Equal(now.Add(-151 * time.Second)) {
 		t.Fatalf("oak's step began %v, want %v (the info line must leave it)", it.StepAt, now.Add(-151*time.Second))
@@ -205,6 +207,16 @@ func TestJobRowsSayStepAndTime(t *testing.T) {
 	h.eventAt(id, now, "elm.kilo.alpha", string(steps["elm.kilo.alpha"][0]), "started", "")
 	row = vmRowOf(t, h.get(&sess, "/logs/"+itoa(id)).Body.String(), "elm.kilo.alpha")
 	contains(t, "elm's row in a retry round", row, `<span class="pip run" title="clone: running">`, `<span class="step">Cloning</span>`)
+
+	// A worker from before items had a succeeded event (a rolling update)
+	// leaves a VM whose steps are all done running until the job ends: it
+	// reads running, with no step under way.
+	for _, st := range oak[wait:] {
+		h.eventAt(id, now, "oak.kilo.alpha", string(st), "done", "")
+	}
+	row = vmRowOf(t, h.get(&sess, "/logs/"+itoa(id)).Body.String(), "oak.kilo.alpha")
+	contains(t, "oak's row with every step done", row, `Running</span>`)
+	lacks(t, "oak's row with every step done", row, "pip run", `class="step"`, "Ready")
 
 	// Finished: no times tick; done rows read as their outcome.
 	h.finish(id, store.Outcome{Status: store.StatusSucceeded, Items: map[string]store.ItemOutcome{
@@ -271,10 +283,10 @@ func TestFinishedJobOpensItsResult(t *testing.T) {
 		{jobs.Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.bravo"}, `<a class="btn pri" href="/environments#kilo.bravo">Open kilo.bravo</a>`},
 		{jobs.Inputs{Kind: pods.KindEnvAdd, Domain: "kilo.alpha"}, `<a class="btn pri" href="/environments#kilo.alpha">Open kilo.alpha</a>`},
 		{jobs.Inputs{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"}, `<a class="btn pri" href="/environments#kilo.alpha">Open kilo.alpha</a>`},
-		{jobs.Inputs{Kind: pods.KindImageRegister, Family: "debian-12", VMID: 150}, `<a class="btn pri" href="/images/debian-12">Open debian-12</a>`},
-		{jobs.Inputs{Kind: pods.KindImageEdit, Family: "win2022"}, `<a class="btn pri" href="/images/win2022">Open win2022</a>`},
-		{jobs.Inputs{Kind: pods.KindImageDeprecate, Image: "debian-12-v1"}, `<a class="btn pri" href="/images/debian-12">Open debian-12</a>`},
-		{jobs.Inputs{Kind: pods.KindImageDelete, Image: "debian-12-v1"}, `<a class="btn pri" href="/images/debian-12">Open debian-12</a>`},
+		{jobs.Inputs{Kind: pods.KindImageRegister, Family: "debian-12", VMID: 150}, `<a class="btn pri" href="/images/family/debian-12">Open debian-12</a>`},
+		{jobs.Inputs{Kind: pods.KindImageEdit, Family: "win2022"}, `<a class="btn pri" href="/images/family/win2022">Open win2022</a>`},
+		{jobs.Inputs{Kind: pods.KindImageDeprecate, Image: "debian-12-v1"}, `<a class="btn pri" href="/images/family/debian-12">Open debian-12</a>`},
+		{jobs.Inputs{Kind: pods.KindImageDelete, Image: "debian-12-v1"}, `<a class="btn pri" href="/images/family/debian-12">Open debian-12</a>`},
 		{jobs.Inputs{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"}, ""},
 		{jobs.Inputs{Kind: pods.KindTeardown, Teams: "1"}, ""},
 		{jobs.Inputs{Kind: pods.KindPower, Teams: "1", Action: "start"}, ""},
@@ -408,6 +420,7 @@ func runEnvAdd(h *harness) int64 {
 			for _, st := range it.Steps {
 				h.eventAt(id, now.Add(-time.Minute), it.Name, string(st), "done", "")
 			}
+			h.eventAt(id, now.Add(-time.Minute), it.Name, "", string(apply.EventSucceeded), "")
 		case "elm.kilo.alpha":
 			h.eventAt(id, now.Add(-12*time.Second), it.Name, string(it.Steps[0]), "started", "")
 		}
@@ -526,6 +539,7 @@ func TestBrowserBigDeployJob(t *testing.T) {
 			for _, st := range it.Steps {
 				h.eventAt(id, now.Add(-time.Minute), it.Name, string(st), "done", "")
 			}
+			h.eventAt(id, now.Add(-time.Minute), it.Name, "", string(apply.EventSucceeded), "")
 		case team < 14: // running, at different steps
 			k := i % len(it.Steps)
 			h.eventAt(id, now.Add(-3*time.Minute), it.Name, string(it.Steps[0]), "started", "")
