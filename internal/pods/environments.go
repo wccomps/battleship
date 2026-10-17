@@ -212,11 +212,11 @@ func (e Environment) DNS() string {
 // envReads is how many Proxmox reads environment planning makes at once.
 const envReads = 8
 
-// Environments reads every slot: the VMs in its pool with their notes, and
-// the other VMs on its bridges. Templates never run, so they hold no slot;
-// team VMs (see Classify) are on team bridges, so they aren't read, but a
-// VM only named like one may be anywhere. It also returns the VM listing it
-// read.
+// Environments reads every slot: the VMs in its pool with their notes, the
+// other VMs on its bridges, and its half-deleted VMs. Templates never run,
+// so they hold no slot; team VMs (see Classify) are on team bridges, so
+// they aren't read, but a VM only named like one may be anywhere. It also
+// returns the VM listing it read.
 func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM, error) {
 	vms, err := p.API.ClusterVMs(ctx)
 	if err != nil {

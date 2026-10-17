@@ -24,8 +24,8 @@ const (
 	EventInfo    EventStatus = "info"
 	// EventStarted: an attempt at the item began (its first step, or a gone
 	// VM's check), so it shows as running while a long step (a clone) waits
-	// on Proxmox. Every attempt, in every round, starts with one. Logs leave
-	// it out.
+	// on Proxmox. Every attempt, in every round, starts with one. The web
+	// log leaves it out.
 	EventStarted EventStatus = "started"
 	// EventSucceeded: the item ran its last step; the web log leaves it out.
 	// An item's EventFailed (with its step) or EventInterrupted ends it too.

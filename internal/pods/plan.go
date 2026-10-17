@@ -722,8 +722,7 @@ const orphanListings = 8
 
 // orphanCandidates are the VMIDs teams' VMs get when cloned from current
 // templates (CloneVMID), where a gone VM's disks would be. Disks of VMs
-// whose template is gone are only found by a whole-storage listing (more
-// than maxOrphanCandidates).
+// whose template is gone aren't looked for.
 func (p Planner) orphanCandidates(teams []string, vms []proxmox.VM) []int {
 	var out []int
 	for _, t := range teams {
