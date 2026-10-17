@@ -41,7 +41,7 @@
 {{- end}}
 {{- if .AsksRouter}}
 <div class="field">
-<label class="lbl" for="router">Router <span class="muted">· name=image{{if eq .Op.Kind "env-add"}}{{if .Env.HasRouter}} · only to resume this one{{else}} · this environment has none; leave empty to add hosts only{{end}}{{end}}</span></label>
+<label class="lbl" for="router">Router <span class="muted">· name=image{{if eq .Op.Kind "env-add"}}{{if and .Env .Env.HasRouter}} · only to resume this one{{else}} · this environment has none; leave empty to add hosts only{{end}}{{end}}</span></label>
 <input class="inp" type="text" id="router" name="router" value="{{.In.Router}}"{{if eq .Op.Kind "env-create"}} required{{end}} autocomplete="off" spellcheck="false" aria-describedby="router-hint">
 <span class="hint" id="router-hint">router images: {{range $i, $r := .Routers}}{{if $i}}, {{end}}{{$r.Family}}{{else}}none registered{{end}} · its LAN is .2</span>
 </div>
@@ -63,14 +63,14 @@
 </div>
 {{- end}}
 {{- end}}
-{{- if eq .Op.Kind "env-dns"}}
+{{- if eq .Op.Kind "env-dns"}}{{with .Env}}
 <div class="field">
 <label class="lbl" for="dns">DNS server</label>
-{{- $cur := or .In.DNS .Env.DNS}}
-<select class="inp" id="dns" name="dns" required aria-describedby="dns-hint">{{range .Env.DNSChoices}}<option value="{{.}}"{{if eq . $cur}} selected{{end}}>{{.}}</option>{{end}}</select>
-<span class="hint" id="dns-hint">the router, or a Windows or Linux host of this environment{{with .StaleDNS}} · it was {{.}}, which is no longer one{{end}}</span>
+{{- $cur := or $.Data.In.DNS .DNS}}
+<select class="inp" id="dns" name="dns" required aria-describedby="dns-hint">{{range .DNSChoices}}<option value="{{.}}"{{if eq . $cur}} selected{{end}}>{{.}}</option>{{end}}</select>
+<span class="hint" id="dns-hint">the router, or a Windows or Linux host of this environment{{with $.Data.StaleDNS}} · it was {{.}}, which is no longer one{{end}}</span>
 </div>
-{{- end}}
+{{- end}}{{end}}
 {{- if eq .Op.Kind "image-register"}}
 <div class="field">
 <label class="lbl" for="vmid">VM to copy in <span class="muted">· VMID</span></label>
