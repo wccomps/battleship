@@ -94,8 +94,8 @@ else the name less `-build`) and, where it can tell, the kind, or says why it ca
 (`battleship image register -vm 101 -family win2022 -kind windows`). A new version deprecates the previous one;
 **Open for editing** (`image edit -family`) makes a working copy to patch and register as the next version.
 
-**Environments → Create** takes the first free dev slot and clones a router and hosts into it
-(`battleship env create -domain kilo.alpha -router gw=opnsense -host dc=win2022:10 -host web=debian-12`).
+**Environments → Create** clones a router and hosts into a free dev slot, the first unless you choose one
+(`battleship env create -domain kilo.alpha -router gw=opnsense -host dc=win2022:10 -host web=debian-12`, `-slot 02`).
 Windows and Linux hosts get their name, a static address on the slot's LAN (`.2` is the gateway) and DNS through
 the QEMU guest agent. **Set DNS** (`env dns -domain kilo.alpha -server dc`) points them at a domain controller once it is promoted.
 **Tear down** (`env teardown -domain kilo.alpha`, confirmed by typing the domain) deletes the VMs in its slot's pool,

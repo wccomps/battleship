@@ -9,8 +9,8 @@ import (
 	"github.com/wccomps/battleship/internal/pods"
 )
 
-// reviewView is the review of an image or environment operation: one
-// sentence saying what will happen, then the facts of what will exist (a
+// reviewView is the review of an image or environment operation: what
+// will happen, then the facts of what will exist (a
 // register) or a row per VM it acts on.
 type reviewView struct {
 	Verb, Subject string // the title: "Register teak-build"
@@ -366,7 +366,6 @@ func andList(names []string) string {
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
-// byCount is one if n is 1, else many.
 func byCount(n int, one, many string) string {
 	if n == 1 {
 		return one

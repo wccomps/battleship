@@ -187,8 +187,21 @@ func TestEnvTeardownFreesTheSlot(t *testing.T) {
 	body := h.get(&sess, "/environments").Body.String()
 	lacks(t, "Environments", body, `id="kilo.alpha"`, "dev-01</span><span>router")
 	contains(t, "Environments", body, `<span class="vm">dev-01 – dev-03, dev-05 – dev-10</span><span class="meta">· Create uses dev-01</span></p>`)
-	contains(t, "the job page", h.get(&sess, "/logs/"+itoa(j.ID)).Body.String(), `href="/environments#kilo.alpha">`, "Environments</a>",
+	contains(t, "the job page", h.get(&sess, "/logs/"+itoa(j.ID)).Body.String(), `<a class="btn ghost back" href="/environments#kilo.alpha">`, `</svg>Environments</a>`,
 		`<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>Tear down <span class="vm">kilo.alpha</span>`)
+}
+
+// A teardown that can't be planned has no form to show again: its page
+// says why, and leads back to Environments.
+func TestEnvTeardownRefused(t *testing.T) {
+	h := newHarness(t)
+	addEnvs(h)
+	sess := h.login(asLead)
+	rec := h.get(&sess, "/environments/kilo.bravo/teardown")
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("teardown of an environment that isn't there = %d\n%s", rec.Code, rec.Body)
+	}
+	contains(t, "the page", rec.Body.String(), "Can&#39;t tear down kilo.bravo", `href="/environments#kilo.bravo"`, "Back to Environments")
 }
 
 // A teardown that failed partway is retried in its slot: the review plans

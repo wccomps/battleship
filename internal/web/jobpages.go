@@ -464,7 +464,6 @@ func addressOf(it pods.Item) string {
 	return ""
 }
 
-// capital is s with its first letter upper case.
 func capital(s string) string {
 	if s == "" {
 		return ""
@@ -770,7 +769,7 @@ func jobItemsOf(j store.Job, items []store.Item, now time.Time) jobItems {
 		look := lookOf(itemLooks, st)
 		t.Pips = append(t.Pips, look.Pip)
 		row := jobItemView{Name: it.Name, VMID: orDash(it.VMID), Steps: steps, Error: it.Error, status: st}
-		look.Label = capital(look.Label) // beside steps in words, e.g. "Starting"
+		look.Label = capital(look.Label) // as the running rows' steps in words read, e.g. "Starting"
 		if st == store.ItemDone {
 			look.Label = done
 			if a := addressOf(p); a != "" {
@@ -1066,7 +1065,8 @@ func actsAs(j store.Job) string {
 	return j.CreatedRole
 }
 
-// retryJob previews re-running a job for the VMs it didn't finish. Confirming
+// retryJob previews re-running a job for the VMs it didn't finish, or all of
+// it for a kind retried whole (pods.Kind.RetriedWhole). Confirming
 // goes through the operation's usual confirm and checks.
 func (s *Server) retryJob(w http.ResponseWriter, r *http.Request) {
 	snap, ok := s.jobOf(w, r)

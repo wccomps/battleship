@@ -178,10 +178,10 @@ type Item struct {
 	// of a template, into Pool. Tags is the whole tag list the label step sets
 	// ("" clears them); Notes, if set, is the notes line it writes. An
 	// environment teardown's items carry the VM's tags and notes as they are,
-	// for its review. NICs maps
-	// NIC keys to the bridge the network step puts them on. Guest is what
-	// configure-guest sets inside the VM. Supersedes is the version a
-	// registered image replaces, tagged deprecated once it is a template.
+	// for its review. NICs maps NIC keys to the bridge the network step puts
+	// them on. Guest is what configure-guest sets inside the VM. Supersedes
+	// is the version a registered image replaces, tagged deprecated once it
+	// is a template.
 	Source     *Source           `json:"source,omitempty"`
 	Pool       string            `json:"pool,omitempty"`
 	Tags       string            `json:"tags,omitempty"`

@@ -92,7 +92,7 @@ func (p *catalogPage) dnsForm() {
 		p.DNSCards = append(p.DNSCards, card)
 	}
 	set := choices[1:]
-	var keep []string // the hosts that keep their own settings
+	var keep []string
 	for _, h := range e.Hosts {
 		switch {
 		case h.Router:

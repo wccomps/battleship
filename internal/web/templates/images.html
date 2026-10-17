@@ -8,7 +8,7 @@
 {{- with .Ready}}
 <section class="sec" aria-labelledby="ready">
 <div class="sech"><h2 class="sub" id="ready">Ready to register</h2><span class="meta">Build VMs in the images pool, shut down and generalized</span></div>
-{{- /* Each row is its own form; data-panel shows its review in the panel. */}}
+{{- /* A row ready to register is its own form; data-panel shows its review in the panel. */}}
 <div class="rlist" data-panel>
 <div class="rhead" aria-hidden="true"><span>VM</span><span>Becomes</span><span>Kind</span><span></span></div>
 {{- range .}}

@@ -28,14 +28,14 @@ type envsView struct {
 	Lacks                                  []string
 }
 
-// envBlock is a slot in use. Domain is set when its VMs share one: Add hosts
-// and Set DNS then act on it, unless Twin names an earlier slot with the
-// same domain, which they act on instead (pods.EnvByDomain).
+// envBlock is a slot in use. Domain is set when its VMs share one: Add
+// hosts, Set DNS and Tear down then act on it (Acts), unless Twin names the
+// slot with the same domain that they act on instead (pods.EnvByDomain).
 type envBlock struct {
 	ID     string // its anchor: the domain, or slot-NN
 	Domain string
 	Slot   string // its pool, e.g. dev-01
-	Router string // the router's host name, "" without one
+	Router string
 	DNS    string
 	Hosts  []envHostRow
 	// Users are VMs outside its pool with a NIC on its networks.
