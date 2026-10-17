@@ -1,75 +1,98 @@
 {{define "content" -}}
 {{- $csrf := .CSRF}}
 {{- with .Data}}
-{{- $back := "/environments"}}{{if hasPrefix .Op.Path "/images"}}{{$back = "/images"}}{{end}}
-{{- if .Picking}}
-<form class="sheet" method="get" action="{{.Op.Path}}" aria-labelledby="form-title">
-{{- range .Carry}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
-{{- else}}
+{{- $back := .Back}}
 <form class="sheet" method="post" action="{{.Op.Path}}/preview" aria-labelledby="form-title">
 {{template "csrf" $csrf}}
-{{- end}}
-<div class="ph"><h1 id="form-title">{{opIcon (print .Op.Kind)}}{{.Op.Title}}</h1><span class="sp"></span>{{template "close" $back}}</div>
+{{- $machines := .Op.Machines}}
+{{- if $machines}}<button type="submit" class="sr" tabindex="-1" aria-hidden="true">Review</button>{{end}}
+<div class="ph"><h1 id="form-title">{{opIcon (print .Op.Kind)}}{{.Op.Title}}{{with .Env}}{{if eq $.Data.Op.Kind "env-add"}} to{{else}} for{{end}} <span class="vm">{{.Domain}}</span>{{end}}</h1><span class="sp"></span>{{template "close" $back}}</div>
 <div class="pb form">
 {{- with .Error}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
 {{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
-{{- if .Picking}}
-{{- with .EnvDomains}}
-<div class="field">
-<label class="lbl" for="domain">Environment</label>
-<select class="inp" id="domain" name="domain" required>{{range .}}<option value="{{.}}">{{.}}</option>{{end}}</select>
-</div>
-{{- else}}{{if not .ReadErr}}
-<p class="say">No environment has hosts on one domain to pick. <a class="btn sm" href="/environments/new">Create environment</a></p>
-{{- end}}{{end}}
-{{- else}}
 {{- if eq .Op.Kind "env-create"}}
+<p class="facts"><span>LAN <b>{{.Subnet}}.0/24</b></span><span>router <b>.{{.Gateway}}</b> · hosts <b>.{{.FirstOctet}}–.{{.LastOctet}}</b></span></p>
+<div class="frow">
 <div class="field">
 <label class="lbl" for="domain">Domain</label>
-<input class="inp" type="text" id="domain" name="domain" value="{{.In.Domain}}" required autocomplete="off" spellcheck="false" aria-describedby="domain-hint">
-<span class="hint" id="domain-hint">e.g. kilo.alpha · takes the first free dev slot</span>
+<input class="inp" type="text" id="domain" name="domain" value="{{.In.Domain}}" required autocomplete="off" spellcheck="false" aria-describedby="domain-hint{{if .DomainErr}} domain-err{{end}}"{{if .DomainErr}} aria-invalid="true"{{end}}>
+<span class="hint" id="domain-hint">e.g. kilo.alpha · each machine is named &lt;name&gt;.&lt;domain&gt;</span>
+{{- with .DomainErr}}<span class="ferr" id="domain-err">{{.}}</span>{{end}}
+</div>
+<div class="field">
+<label class="lbl" for="slot">Slot</label>
+{{- if or .Slots .In.Slot}}
+<select class="inp" id="slot" name="slot"{{if .SlotErr}} aria-invalid="true" aria-describedby="slot-err"{{end}}>
+{{- $chosen := .ChosenSlot}}{{range $i, $s := .Slots}}<option value="{{.Name}}"{{if eq .Name $chosen}} selected{{end}}>{{.Pool}}{{if eq $i 0}} · first free{{end}}</option>{{end}}
+{{- if .StaleSlot}}<option value="{{.In.Slot}}" selected>{{.In.Slot}} · not free</option>{{end}}
+</select>
+{{- else if not .ReadErr}}
+<span class="hint">{{if .Queued}}Queued jobs will fill every free dev slot ({{.QueuedRuns}}){{else}}Every dev slot is in use{{end}}{{with .SlotsErr}} ({{.}}){{end}}.</span>
+{{- end}}
+{{- with .SlotsErr}}{{if $.Data.Slots}}<span class="hint">{{.}}</span>{{end}}{{end}}
+{{- with .SlotErr}}<span class="ferr" id="slot-err">{{.}}</span>{{end}}
+</div>
 </div>
 {{- end}}
-{{- with .Env}}
-<input type="hidden" name="domain" value="{{.Domain}}">
-<dl class="kv">
-<dt>Environment</dt><dd>{{names .Domain}} <span class="muted">· {{.Slot.Pool}}</span></dd>
-{{- if eq $.Data.Op.Kind "env-add"}}{{with .RouterName}}
-<dt>Router</dt><dd>{{names .}}</dd>
+{{- if eq .Op.Kind "env-add"}}{{with .Env}}
+<div class="sec"><span class="hint">Already here · {{.Slot.Pool}}</span><div class="here">{{range $.Data.Here}}<span>{{.Name}}{{with .Addr}} {{.}}{{end}}</span>{{end}}</div></div>
 {{- end}}{{end}}
-</dl>
-{{- end}}
-{{- if .AsksRouter}}
-<div class="field">
-<label class="lbl" for="router">Router <span class="muted">· name=image{{if eq .Op.Kind "env-add"}}{{if and .Env .Env.HasRouter}} · only to resume this one{{else}} · this environment has none; leave empty to add hosts only{{end}}{{end}}</span></label>
-<input class="inp" type="text" id="router" name="router" value="{{.In.Router}}"{{if eq .Op.Kind "env-create"}} required{{end}} autocomplete="off" spellcheck="false" aria-describedby="router-hint">
-<span class="hint" id="router-hint">router images: {{range $i, $r := .Routers}}{{if $i}}, {{end}}{{$r.Family}}{{else}}none registered{{end}} · its LAN is .2</span>
+{{- if $machines}}
+<fieldset class="field">
+<legend class="lbl">{{if eq .Op.Kind "env-create"}}Machines{{else}}New hosts{{end}}</legend>
+<div class="mgrid" data-rows>
+<div class="mhead" aria-hidden="true"><span>Name</span><span>Image</span><span>Address</span><span></span></div>
+{{- with .Router}}
+<div class="mrow router">
+<input class="inp n" type="text" name="router_name" value="{{.Name}}" aria-label="Router name" autocomplete="off" spellcheck="false"{{if eq .Bad "name"}} aria-invalid="true" aria-describedby="r-err"{{end}}>
+<select class="inp im" name="router_image" aria-label="Router image"{{if eq .Bad "image"}} aria-invalid="true" aria-describedby="r-err"{{end}}>
+<option value="">{{if eq $.Data.Op.Kind "env-create"}}Choose image{{else}}No router{{end}}</option>
+{{- $r := .}}{{$found := false}}{{range $.Data.RouterImages}}<option value="{{.Family}}"{{if eq .Family $r.Image}} selected{{$found = true}}{{end}}>{{.Label}}</option>{{end}}
+{{- if and .Image (not $found)}}<option value="{{.Image}}" selected data-stale>{{.Image}} · not a current router image</option>{{end}}
+</select>
+<div class="addr fixed a"><span class="pre l">{{$.Data.Subnet}}.</span><span class="pre s">.</span><b>{{$.Data.Gateway}}</b></div>
+{{- if eq $.Data.Op.Kind "env-add"}}<button type="button" class="btn ghost sq x" data-remove-row aria-label="Remove the router" hidden>{{icon "close"}}</button>{{else}}<span class="x"></span>{{end}}
+{{- with .Err}}<span class="ferr" id="r-err">{{.}}</span>{{end}}
 </div>
 {{- end}}
-{{- if or (eq .Op.Kind "env-create") (eq .Op.Kind "env-add")}}
-<div class="field">
-<label class="lbl" for="env-hosts">Hosts <span class="muted">· one per line, name=image or name=image:octet</span></label>
-<textarea class="inp" id="env-hosts" name="env_hosts" rows="6" spellcheck="false" aria-describedby="hosts-hint">{{range .In.EnvHosts}}{{.}}
-{{end}}</textarea>
-<span class="hint" id="hosts-hint">images: {{range $i, $o := .Others}}{{if $i}}, {{end}}{{$o.Family}} ({{$o.Kind}}){{else}}none registered{{end}} · addresses {{.Subnet}}.4–254, picked if left out</span>
+{{- range .Rows}}
+{{- $h := .}}{{$err := print "h" .N "-err"}}
+<div class="mrow" data-row>
+<input class="inp n" type="text" name="host_name" value="{{.Name}}" placeholder="name" aria-label="Host {{.N}} name" autocomplete="off" spellcheck="false"{{if eq .Bad "name"}} aria-invalid="true" aria-describedby="{{$err}}"{{end}}>
+<select class="inp im" name="host_image" aria-label="Host {{.N}} image"{{if eq .Bad "image"}} aria-invalid="true" aria-describedby="{{$err}}"{{end}}>
+<option value="">Choose image</option>
+{{- $found := false}}{{range $.Data.HostImages}}<optgroup label="{{.Kind}}">{{range .Images}}<option value="{{.Family}}"{{if eq .Family $h.Image}} selected{{$found = true}}{{end}}>{{.Label}}</option>{{end}}</optgroup>{{end}}
+{{- if and .Image (not $found)}}<option value="{{.Image}}" selected data-stale>{{.Image}} · not a current image</option>{{end}}
+</select>
+<label class="addr a"><span class="pre l">{{$.Data.Subnet}}.</span><span class="pre s">.</span><input type="text" name="host_octet" value="{{.Octet}}" inputmode="numeric" placeholder="auto" aria-label="Host {{.N}} last octet" autocomplete="off"{{if eq .Bad "addr"}} aria-invalid="true" aria-describedby="{{$err}}"{{end}}></label>
+<button type="button" class="btn ghost sq x" data-remove-row aria-label="Remove host {{.N}}" hidden>{{icon "close"}}</button>
+{{- with .Err}}<span class="ferr" id="{{$err}}">{{.}}</span>{{end}}
 </div>
+{{- end}}
+</div>
+<div class="madd"><button type="submit" class="btn sm" name="more" value="yes" formnovalidate data-add-row>{{icon "plus"}}Add host</button><span class="hint">Blank address: one is picked · blank rows are ignored</span></div>
+</fieldset>
 {{- if or .Routers .Others}}
-<div class="field">
-<span class="lbl">Base images <span class="muted">· the newest version of each</span></span>
+<details>
+<summary class="disc">Notes on these images</summary>
 <ul class="imgnotes">
 {{- range .Routers}}{{template "imgnote" .}}{{end}}
 {{- range .Others}}{{template "imgnote" .}}{{end}}
 </ul>
-</div>
+</details>
 {{- end}}
 {{- end}}
-{{- if eq .Op.Kind "env-dns"}}{{with .Env}}
-<div class="field">
-<label class="lbl" for="dns">DNS server</label>
-{{- $cur := or $.Data.In.DNS .DNS}}
-<select class="inp" id="dns" name="dns" required aria-describedby="dns-hint">{{range .DNSChoices}}<option value="{{.}}"{{if eq . $cur}} selected{{end}}>{{.}}</option>{{end}}</select>
-<span class="hint" id="dns-hint">the router, or a Windows or Linux host of this environment{{with $.Data.StaleDNS}} · it was {{.}}, which is no longer one{{end}}</span>
+{{- if eq .Op.Kind "env-dns"}}{{with .DNSCards}}
+<fieldset class="field">
+<legend>DNS server for every host</legend>
+<div class="choices">
+{{- range .}}
+<label class="choice"><input type="radio" name="dns" value="{{.Value}}" required{{if .Checked}} checked{{end}}><span class="nm">{{if .Router}}Router{{with .Name}} · {{.}}{{end}}{{else}}{{.Name}}{{end}}</span>{{if .Current}}<span class="chip">current</span>{{end}}<span class="meta">{{.Addr}}{{with .Image}} · {{.}}{{end}}</span></label>
+{{- end}}
 </div>
+{{- with $.Data.StaleDNS}}<span class="hint">It was {{.}}, which is no longer one: choose another.</span>{{end}}
+</fieldset>
+<p class="hint">{{$.Data.DNSHint}}</p>
 {{- end}}{{end}}
 {{- if eq .Op.Kind "image-register"}}
 <div class="field">
@@ -85,7 +108,7 @@
 </div>
 <fieldset class="field">
 <legend>Kind <span class="muted">· for a new family</span></legend>
-<div class="opts">{{range .Kinds}}<label class="opt"><input type="radio" name="image_kind" value="{{.}}"{{if eq . $.Data.In.ImageKind}} checked{{end}}><span>{{.}}</span></label>{{end}}</div>
+<div class="opts">{{range imageKinds}}<label class="opt"><input type="radio" name="image_kind" value="{{.}}"{{if eq . $.Data.In.ImageKind}} checked{{end}}><span>{{.}}</span></label>{{end}}</div>
 </fieldset>
 {{- end}}
 {{- if eq .Op.Kind "image-edit"}}
@@ -102,15 +125,10 @@
 <datalist id="images">{{range .Images}}<option value="{{.Name}}"></option>{{end}}</datalist>
 </div>
 {{- end}}
-{{- end}}
 </div>
 <div class="pf">
 <a class="btn" href="{{$back}}">Cancel</a>
-{{- if not .Picking}}
-<button type="submit" class="btn pri">Preview</button>
-{{- else if .EnvDomains}}
-<button type="submit" class="btn pri">Next</button>
-{{- end}}
+<button type="submit" class="btn pri">Review</button>
 </div>
 </form>
 {{- end}}

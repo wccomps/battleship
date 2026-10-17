@@ -14,12 +14,22 @@
 {{- if .FromGrid}}<input type="hidden" name="from" value="grid">{{end}}
 {{- range .Fields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
 <div class="ph">
+{{- with .Review}}
+<h1 id="pv-title"><span class="eyebrow">Review ·</span> {{.Verb}} <span class="vm">{{.Subject}}</span></h1>
+{{- else}}
 <h1 id="pv-title">{{opIcon .Title.Icon}}{{.Title.Label}}{{with .Title.Detail}} <span class="vm">{{.}}</span>{{end}}</h1>
+{{- end}}
 <span class="sp"></span>
 {{template "close" .CloseHref}}
 </div>
 <div class="pb">
 {{- with .Problem}}{{template "problem" .}}{{end}}
+{{- with .Review}}
+{{template "review" .}}
+{{- with $.Data.Warnings}}
+<div class="say caution">{{icon "warn"}}<ul>{{range .}}<li>{{names .}}</li>{{end}}</ul></div>
+{{- end}}
+{{- else}}
 {{- with .Asked}}
 <dl class="kv">
 {{- range .}}<dt>{{.Label}}</dt><dd>{{if eq .Label "Teams"}}<span class="vm">{{.Value}}</span>{{else}}{{names .Value}}{{end}}</dd>{{end}}
@@ -84,15 +94,18 @@
 </table>
 </div>
 {{- end}}
-{{- with .Confirm}}{{with .TypeTeams}}
+{{- end}}
+{{- with .Confirm}}{{if .Typed}}
 <div class="confirm">
-<label for="typed">Type <code>{{.}}</code> to confirm</label>
-<input class="inp" type="text" id="typed" name="typed" required pattern="\s*{{.}}\s*" autocomplete="off" spellcheck="false" placeholder="{{.}}" data-typed="{{.}}">
+<label for="typed">Type <code>{{.Typed}}</code> to confirm</label>
+<input class="inp" type="text" id="typed" name="typed" required pattern="\s*{{.TypedRE}}\s*" autocomplete="off" spellcheck="false" placeholder="{{.Typed}}" data-typed="{{.Typed}}">
 </div>
 {{- end}}{{end}}
 </div>
 <div class="pf">
-{{- if .FromGrid}}
+{{- if .Review}}
+<a class="btn first" href="{{.EditHref}}"{{if eq .EditHref .CloseHref}} data-close{{else}} data-panel-link{{end}}>Back</a>
+{{- else if .FromGrid}}
 {{- with .Reselect}}
 <button type="submit" class="btn first" formaction="{{$.Data.Op.Path}}" formnovalidate>{{.}}</button>
 {{- end}}

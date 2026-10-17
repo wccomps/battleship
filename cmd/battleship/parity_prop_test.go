@@ -27,9 +27,11 @@ var cliFlags = map[string]map[string]string{
 	"edit":      {"family": "Family"},
 	"deprecate": {"image": "Image"},
 	"delete":    {"image": "Image"},
-	"create":    {"domain": "Domain", "router": "Router", "host": "EnvHosts"},
+	"create":    {"domain": "Domain", "slot": "Slot", "router": "Router", "host": "EnvHosts"},
 	"add":       {"domain": "Domain", "router": "Router", "host": "EnvHosts"},
 	"dns":       {"domain": "Domain", "server": "DNS"},
+	// battleship env teardown, apart from the team teardown.
+	"env-teardown": {"domain": "Domain"},
 }
 
 // cliBools are each command's boxes.
@@ -41,7 +43,7 @@ var cliBools = map[string]map[string]string{
 // bases on numbers, and lines.
 var cliValues = []string{"1", " 1-2 ", "1,2", "dc", " dc , web ", ",", "team01-dc", "*.kilo.alpha", " *.kilo.alpha ", "round2", " round2",
 	"stop", " stop ", "Stop", "a\nb", "kilo.alpha", " kilo.alpha ", "gw=opnsense", " gw = gw ", "dc=debian-12:20", "", " ", "router", " dc ",
-	"7000", " 7000 ", "010", "0x1f4", "+150", "-5", "abc", "1_000", "debian-12", " debian-12", "linux", "debian-12-v1", " debian-12-v1 "}
+	"7000", " 7000 ", "010", "0x1f4", "+150", "-5", "abc", "1_000", "debian-12", " debian-12", "linux", "debian-12-v1", " debian-12-v1 ", "02", " 2 ", "002", "dev-02", "0"}
 
 func parseCLI(sub string, args []string) (command, bool) {
 	var c command
@@ -51,6 +53,8 @@ func parseCLI(sub string, args []string) (command, bool) {
 		c, _, ok = parseImage(append([]string{sub}, args...), io.Discard)
 	case "create", "add", "dns":
 		c, _, ok = parseEnv(append([]string{sub}, args...), io.Discard)
+	case "env-teardown":
+		c, _, ok = parseEnv(append([]string{"teardown"}, args...), io.Discard)
 	default:
 		c, _, ok = parseOp(sub, args, io.Discard)
 	}
@@ -122,7 +126,7 @@ func checkParity(t interface{ Fatalf(string, ...any) }, sub string, values map[s
 // A command line asks for the same job as the web form given the same
 // values.
 func TestPropCLIAsksWhatTheFormDoes(t *testing.T) {
-	subs := []string{"deploy", "teardown", "reset", "power", "snapshot", "register", "edit", "deprecate", "delete", "create", "add", "dns"}
+	subs := []string{"deploy", "teardown", "reset", "power", "snapshot", "register", "edit", "deprecate", "delete", "create", "add", "dns", "env-teardown"}
 	valid := map[string]string{"teams": "1", "templates": "*.x", "action": "stop", "name": "round2", "vm": "7000", "family": "debian-12",
 		"image": "debian-12-v1", "domain": "kilo.alpha", "router": "gw=gw"}
 	for _, sub := range subs {

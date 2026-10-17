@@ -1,7 +1,8 @@
 // Command battleship deploys, resets, powers and tears down team pods on Proxmox.
 //
-// Every operation prints its plan, asks for confirmation (teardown wants the
-// team range typed), and applies exactly that plan. -yes skips the prompt;
+// Every operation prints its plan, asks for confirmation (a teardown wants
+// the team range typed, an environment's its domain), and applies exactly
+// that plan. -yes skips the prompt;
 // without -yes and without a terminal, nothing changes. Any character device
 // on stdin (even /dev/null) counts as a terminal, so automation should pass
 // -yes or redirect stdin from a file.
@@ -95,7 +96,7 @@ type deps struct {
 const usage = `usage: battleship <deploy|teardown|reset|power|snapshot> [flags]
        battleship jobs <list|show ID|cancel ID> [flags]
        battleship image <register|edit|deprecate|delete> [flags]
-       battleship env <create|add|dns> [flags]
+       battleship env <create|add|dns|teardown> [flags]
        battleship serve [flags]
        battleship nodes [flags]
 
@@ -117,6 +118,7 @@ proxmox.urls line.
   battleship snapshot -config battleship.toml -teams 7 -hosts dc -name before-scoring -yes
   battleship image register -config battleship.toml -vm 101 -family win11 -kind windows
   battleship env create -config battleship.toml -domain kilo.alpha -router gw=opnsense -host dc=win2022:10
+  battleship env teardown -config battleship.toml -domain kilo.alpha
   battleship jobs list -config battleship.toml
   battleship serve    -config battleship.toml -log-format json
   battleship nodes    -config battleship.toml

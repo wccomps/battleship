@@ -91,6 +91,8 @@ func TestStatusSQLLists(t *testing.T) {
 		{"touchedItemsSQL", touchedItemsSQL, items(func(r itemRule) bool { return r.touched })},
 		{"keptOnEventSQL", keptOnEventSQL, items(func(r itemRule) bool { return r.keptOnEvent })},
 		{"keptOnOutcomeSQL", keptOnOutcomeSQL, items(func(r itemRule) bool { return r.keptOnOutcome })},
+		{"endedItemsSQL", endedItemsSQL, items(func(r itemRule) bool { return r.ended })},
+		{"busyItemsSQL", busyItemsSQL, items(func(r itemRule) bool { return r.busy })},
 	} {
 		got := sqlStatuses(t, c.sql)
 		slices.Sort(c.want)

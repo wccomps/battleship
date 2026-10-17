@@ -63,6 +63,21 @@
   setInterval(ages, 1000);
   ages();
 
+  // A job's running times: data-tick is when each began (Unix ms), reckoned
+  // on the server's clock, which data-now gave when the job was drawn.
+  function pad(n) { return n < 10 ? "0" + n : String(n); }
+  function ticks() {
+    each(document.querySelectorAll("[data-now]"), function (box) {
+      if (box.skew === undefined) box.skew = Number(box.getAttribute("data-now")) - Date.now();
+      each(box.querySelectorAll("[data-tick]"), function (el) {
+        var s = Math.max(0, Math.floor((Date.now() + box.skew - Number(el.getAttribute("data-tick"))) / 1000));
+        var text = (s >= 3600 ? Math.floor(s / 3600) + ":" + pad(Math.floor(s / 60) % 60) : Math.floor(s / 60)) + ":" + pad(s % 60);
+        if (el.textContent !== text) el.textContent = text;
+      });
+    });
+  }
+  setInterval(ticks, 1000);
+
   // -- Live updates
 
   // follow applies live's data-events stream; onChange runs after it
@@ -131,17 +146,23 @@
       changed();
     }
 
+    // New lines count in the log's fold, and a failure unfolds it.
     function log(html) {
-      var list = live.querySelector("#job-log");
+      var list = live.querySelector("#job-log"), sum = live.querySelector("#job-log-n");
       if (!list) return;
       Array.prototype.slice.call(parse(html).children).forEach(function (li) {
-        if (!li.id || !$(li.id)) list.appendChild(li);
+        if (li.id && $(li.id)) return;
+        list.appendChild(li);
+        if (li.querySelector(".err") && list.parentNode.matches("details")) list.parentNode.open = true;
       });
+      var n = list.children.length;
+      if (sum) sum.textContent = "Log · " + n + (n === 1 ? " line" : " lines");
     }
 
     function changed() {
       showLive();
       ages();
+      ticks();
       if (onChange) onChange();
     }
 
@@ -366,7 +387,9 @@
     if (!panel.open) panel.showModal();
     var live = sheet.matches("[data-events]") ? sheet : sheet.querySelector("[data-events]");
     if (live) stopPanel = follow(live);
+    ticks();
     typedConfirm(sheet);
+    machineRows(sheet);
     var typed = sheet.querySelector("input[data-typed], input[type=text]");
     var pb = sheet.querySelector(".pb");
     if (pb) pb.scrollTop = 0;
@@ -484,10 +507,50 @@
     }
   });
 
+  // -- Environment machine rows
+
+  // Add host appends an empty copy of the last host row; without this script
+  // it is a submit that asks the server for more rows, and the remove buttons
+  // stay hidden (a cleared row is ignored). The last host row stays.
+  function machineRows(root) {
+    each(root.querySelectorAll("[data-rows]"), function (box) {
+      var rows = box.querySelectorAll("[data-row]");
+      each(rows, function (r, i) {
+        r.querySelector("[data-remove-row]").hidden = rows.length < 2;
+        each(r.querySelectorAll("[aria-label]"), function (el) {
+          el.setAttribute("aria-label", el.getAttribute("aria-label").replace(/\d+/, i + 1));
+        });
+      });
+      each(box.querySelectorAll(".router [data-remove-row]"), function (b) { b.hidden = false; });
+    });
+  }
+  machineRows(document);
+  document.addEventListener("click", function (e) {
+    var add = e.target.closest("[data-add-row]"), remove = e.target.closest("[data-remove-row]");
+    var box = add ? add.form && add.form.querySelector("[data-rows]") : remove && remove.closest("[data-rows]");
+    if (!box) return;
+    e.preventDefault();
+    if (remove) {
+      var gone = remove.closest(".mrow"), next = gone.nextElementSibling || gone.previousElementSibling;
+      gone.remove();
+      (next && next.matches(".mrow") ? next.querySelector("input") : box.closest("fieldset").querySelector("[data-add-row]")).focus();
+    } else {
+      var rows = box.querySelectorAll("[data-row]"), row = rows[rows.length - 1].cloneNode(true);
+      each(row.querySelectorAll("input"), function (i) { i.value = ""; });
+      each(row.querySelectorAll("[data-stale], .ferr"), function (x) { x.remove(); });
+      each(row.querySelectorAll("select"), function (s) { s.selectedIndex = 0; });
+      each(row.querySelectorAll("[aria-invalid]"), function (x) { x.removeAttribute("aria-invalid"); x.removeAttribute("aria-describedby"); });
+      box.appendChild(row);
+      row.querySelector("input").focus();
+    }
+    machineRows(box.parentNode);
+  });
+
   // -- Start
 
   var live = document.querySelector("main [data-events]");
   if (live) follow(live, form ? function () { updateBar(); } : null);
   showLive();
+  ticks();
   if (form) updateBar();
 })();

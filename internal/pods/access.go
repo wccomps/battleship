@@ -158,6 +158,7 @@ var offerPrivileges = map[Kind][]string{
 	KindEnvCreate:      {"VM.Clone"},
 	KindEnvAdd:         {"VM.Clone"},
 	KindEnvDNS:         {"VM.GuestAgent.Unrestricted"},
+	KindEnvTeardown:    {"VM.Allocate"},
 }
 
 // OfferPrivileges is offerPrivileges[k].

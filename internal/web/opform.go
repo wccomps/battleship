@@ -83,8 +83,12 @@ type snapshotPicker struct {
 func (s *Server) opForm(op operation) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
+		if op.Formless {
+			s.reviewPage(w, r, op, op.scope(formInputs(op.Kind, q)))
+			return
+		}
 		if op.Kind.Teamless() {
-			s.teamlessForm(w, r, http.StatusOK, op, formInputs(op.Kind, q), "")
+			s.teamlessForm(w, r, http.StatusOK, op, op.scope(formInputs(op.Kind, q)), "")
 			return
 		}
 		grid := false
@@ -105,8 +109,23 @@ func (s *Server) opForm(op operation) http.Handler {
 		}
 		p := s.newFormPage(r.Context(), op, in, q.Has(fieldTeams) || grid)
 		p.FromGrid = grid
-		s.render(w, r, http.StatusOK, "opform", s.newView(w, r, op.Title, string(op.Kind), p))
+		s.render(w, r, http.StatusOK, "opform", s.newView(w, r, op.Title, op.nav(), p))
 	})
+}
+
+// reviewPage is a formless operation's page, such as an environment's
+// teardown: it has nothing to fill in, so it opens on its review.
+func (s *Server) reviewPage(w http.ResponseWriter, r *http.Request, op operation, in jobs.Inputs) {
+	if err := in.Validate(); err != nil {
+		s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, sentence(err.Error()))
+		return
+	}
+	plan, err := jobs.BuildPlan(r.Context(), s.planner(r.Context()), in)
+	if err != nil {
+		s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, "Couldn't make a plan: "+sentence(proxmox.Describe(err)))
+		return
+	}
+	s.showPreview(w, r, http.StatusOK, op, in, plan, false, previewOptions{})
 }
 
 // newFormPage prepares an operation's form for in. picked means the reset
@@ -159,13 +178,17 @@ func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, 
 
 // renderForm shows the form again with a problem, keeping what was typed.
 func (s *Server) renderForm(w http.ResponseWriter, r *http.Request, status int, op operation, in jobs.Inputs, problem string) {
+	if op.Formless { // its review is its page
+		s.errorPage(w, r, status, "Can't "+strings.ToLower(op.Title)+" "+in.Domain, problem, listPage(in), "Back to "+op.sectionName())
+		return
+	}
 	if op.Kind.Teamless() {
 		s.teamlessForm(w, r, status, op, in, problem)
 		return
 	}
 	p := s.newFormPage(r.Context(), op, in, in.Teams != "")
 	p.Error = problem
-	s.render(w, r, status, "opform", s.newView(w, r, op.Title, string(op.Kind), p))
+	s.render(w, r, status, "opform", s.newView(w, r, op.Title, op.nav(), p))
 }
 
 // deploySets lists the template sets on the viewer's grid, matching the grid's

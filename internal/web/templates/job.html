@@ -3,7 +3,7 @@
 {{define "content" -}}
 {{- with .Data}}
 {{- if $.Panel}}
-<div class="sheet" id="job-live" aria-labelledby="job-title"{{if .Live}} data-events="{{.EventsHref}}"{{end}}>
+<div class="sheet" id="job-live" aria-labelledby="job-title" data-now="{{.Now}}"{{if .Live}} data-events="{{.EventsHref}}"{{end}}>
 <div class="ph">
 <h1 id="job-title">{{template "job-op" .Op}}</h1>
 <span class="muted vm">#{{.ID}}</span>
@@ -21,7 +21,7 @@
 </div>
 </div>
 {{- else}}
-<div class="page wide" id="job-live"{{if .Live}} data-events="{{.EventsHref}}"{{end}}>
+<div class="page wide" id="job-live" data-now="{{.Now}}"{{if .Live}} data-events="{{.EventsHref}}"{{end}}>
 <a class="btn ghost back" href="{{.BackHref}}">{{icon "back"}}{{.BackLabel}}</a>
 <div class="jhead">
 <h1 class="ptitle">{{template "job-op" .Op}} <span class="muted vm">#{{.ID}}</span></h1>
@@ -42,19 +42,21 @@
 {{opIcon .Icon}}{{.Label}}{{with .Detail}} <span class="vm">{{.}}</span>{{end}}
 {{- end}}
 
+{{/* job-log is folded unless something failed; the script counts the lines
+     it adds, and unfolds it for a failure. */}}
 {{define "job-log" -}}
-<div class="sec">
-<h2 class="sub">Log</h2>
+<details class="logbox" id="job-logbox"{{if .LogOpen}} open{{end}}>
+<summary class="disc" id="job-log-n">Log · {{len .Events}} {{if eq (len .Events) 1}}line{{else}}lines{{end}}</summary>
 <ol class="log" id="job-log" aria-live="polite">
 {{template "job-log-lines" .Events}}
 </ol>
-</div>
+</details>
 {{- end}}
 
 {{/* job-head is the job's status and facts. */}}
 {{define "job-head" -}}
 <div class="sec" id="job-head">
-<div class="stline">{{with .Look}}<span class="st b {{.Class}}">{{if eq .Glyph "spin"}}<span class="spin" aria-hidden="true"></span>{{else}}{{icon .Glyph}}{{end}}{{.Label}}</span>{{end}}
+<div class="stline">{{with .Look}}<span class="st b {{.Class}}">{{if eq .Glyph "spin"}}<span class="spin" aria-hidden="true"></span>{{else}}{{icon .Glyph}}{{end}}{{.Label}}{{with $.Elapsed}} · <time{{if $.Since}} data-tick="{{$.Since}}"{{end}}>{{.}}</time>{{end}}</span>{{end}}
 <span class="meta"><span title="{{.By}}">{{.Who}}</span> · {{or .Role "command line"}} · <span title="{{.RanAt}}">{{.Ran}}</span>{{if not .Teamless}} · teams <span class="vm">{{.Teams}}</span>{{if ne .Hosts "all"}} · <span class="vm">{{.Hosts}}</span>{{end}}{{end}}
 {{- range .Asked}} · {{.Label}} <span class="vm">{{.Value}}</span>{{end}}
 {{- with .Waiting}} · after {{range $i, $id := .}}{{if $i}}, {{end}}<a href="/logs/{{$id}}">#{{$id}}</a>{{end}}{{else}}{{with .Queued}} · {{.}}{{end}}{{end}}
@@ -79,9 +81,13 @@
 </div>
 {{- end}}
 
-{{/* job-actions is what can be done with the job now: one button. */}}
+{{/* job-actions is what can be done with the job now: one button, and
+     where a finished job's result is. */}}
 {{define "job-actions" -}}
 <div class="pf-acts" id="job-actions">
+{{- with .Open}}
+<a class="btn{{if not $.CanRetry}} pri{{end}}" href="{{.Href}}">{{.Label}}</a>
+{{- end}}
 {{- if .CanCancel}}
 <form method="post" action="/logs/{{.ID}}/cancel">
 {{template "csrf" .CSRF}}
@@ -93,7 +99,7 @@
 {{- if .CanRetry}}
 <form method="post" action="/logs/{{.ID}}/retry">
 {{template "csrf" .CSRF}}
-<button type="submit" class="btn pri" title="{{.RetryTip}}">{{icon "reboot"}}Retry {{.RetryN}} failed {{if eq .RetryN 1}}VM{{else}}VMs{{end}}</button>
+<button type="submit" class="btn pri" title="{{.RetryTip}}">{{icon "reboot"}}{{.RetryLabel}}</button>
 </form>
 {{- else if .StartAgain}}
 <a class="btn pri" href="{{.StartAgain}}"{{if not .AgainPage}} data-panel-link{{end}}>{{icon "reboot"}}Preview again</a>
@@ -117,14 +123,17 @@
 <div class="tally">{{range .Tally}}<span{{if .Bad}} class="bad"{{end}}><b>{{.N}}</b> {{.Label}}</span>{{end}}</div>
 {{- end}}
 <div class="tscroll long">
-<table class="tbl">
-<thead><tr><th scope="col">VM</th><th scope="col" class="c-vmid">VMID</th><th scope="col">Steps</th><th scope="col">Status</th><th scope="col">Error</th></tr></thead>
+<table class="tbl jobt">
+<thead><tr><th scope="col">VM</th><th scope="col" class="c-vmid">VMID</th><th scope="col">Now</th><th scope="col" class="r">For</th></tr></thead>
 <tbody>
-{{- range .Rows}}
-<tr{{if eq .Look.Class "s-fail"}} class="bad"{{else if .Fold}} class="fold"{{end}}><td><span class="vm">{{.Name}}</span></td><td class="muted c-vmid">{{.VMID}}</td><td class="c-steps">{{if .Steps}}<span class="steps" role="img" aria-label="{{.StepsText}}">{{range .Steps}}<span class="pip {{.State}}" title="{{.Title}}"></span>{{end}}</span>{{end}}{{with .Step}}<span class="muted">{{.}}</span>{{else}}{{if not .Steps}}—{{end}}{{end}}</td><td>{{template "st" .Look}}</td><td class="err">{{names .Error}}</td></tr>
+{{- range $r := .Rows}}
+<tr{{if eq .Look.Class "s-fail"}} class="bad"{{else if .Fold}} class="fold"{{end}}><td><span class="vm">{{.Name}}</span></td><td class="muted c-vmid">{{.VMID}}</td><td class="wide">
+{{- if .Steps}}<span class="steps" role="img" aria-label="{{.StepsText}}">{{range .Steps}}<span class="pip {{.State}}" title="{{.Title}}"></span>{{end}}</span>{{end}}
+{{- if .Doing}}<span class="step">{{.Doing}}</span>{{with .Note}} <span class="meta">· {{names .}}</span>{{end}}{{else}}{{template "st" .Look}}{{end}}
+{{- with .Error}}<span class="err">{{names .}}</span>{{end}}</td><td class="c2 r">{{with .For}}<time data-tick="{{$r.Since}}">{{.}}</time>{{end}}</td></tr>
 {{- end}}
 {{- with .Fold}}
-<tr class="more fold-n"><td colspan="5"><a href="/logs/{{$.Items.JobID}}">{{.}} done</a></td></tr>
+<tr class="more fold-n"><td colspan="4"><a href="/logs/{{$.Items.JobID}}">{{.}} done</a></td></tr>
 {{- end}}
 </tbody>
 </table>

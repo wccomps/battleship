@@ -2,6 +2,8 @@ package apply
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -343,5 +345,58 @@ func TestTeardownPlansHalfDeletedVMs(t *testing.T) {
 	plan, err = testPlanner(named).Teardown(context.Background(), []string{"01"}, nil)
 	if err != nil || len(plan.Items) != 1 || plan.Items[0].Name != "team01-teak" {
 		t.Fatalf("named half-deleted VM: items %+v, err %v; want it once, by name", plan, err)
+	}
+}
+
+// An environment's teardown runs as a team teardown does: each of its VMs
+// is shut down cleanly and deleted with its disks, and its slot is empty
+// afterwards. A VM on its networks from outside its pool is left running.
+func TestEnvTeardownEmptiesTheSlot(t *testing.T) {
+	f := podstest.New("cedar", "birch")
+	for _, vm := range []proxmox.VM{
+		{VMID: 2300, Name: "gw.kilo.alpha", Node: "cedar", Pool: "dev-03", Status: "running", Tags: "dev;kilo.alpha;router"},
+		{VMID: 2301, Name: "dc.kilo.alpha", Node: "birch", Pool: "dev-03", Status: "running"},
+		{VMID: 2302, Name: "web.kilo.alpha", Node: "cedar", Pool: "dev-03"},
+		{VMID: 150, Name: "stray", Node: "cedar", Status: "running"},
+	} {
+		f.Add(vm, map[string]string{"net0": "virtio=BC:24:11:00:00:01,bridge=devint03",
+			"scsi0": fmt.Sprintf("competitions:vm-%d-disk-0,size=8G", vm.VMID)})
+	}
+	p := testPlanner(f)
+	plan, err := p.EnvTeardown(context.Background(), pods.EnvRequest{Domain: "kilo.alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(f.VMs, 2302) // someone deleted it by hand after the preview
+	rec := &recorder{}
+	res := testExecutor(f, rec).Run(context.Background(), plan)
+	if len(res.Succeeded) != 3 || len(res.Failed)+len(res.Blocked)+len(res.Interrupted)+len(res.CleanupFailed) != 0 {
+		t.Fatalf("result = %+v", res)
+	}
+	if ev := rec.find("web.kilo.alpha", EventSkipped); len(ev) != 1 || ev[0].Message != "already deleted" {
+		t.Errorf("web's events = %+v", ev)
+	}
+	for _, id := range []int{2300, 2301} {
+		if f.Called(fmt.Sprintf("shutdown:%d:", id)) != 1 {
+			t.Errorf("VM %d wasn't shut down cleanly: calls %v", id, f.Calls)
+		}
+	}
+	envs, _, err := p.Environments(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := envs[2]; len(e.Hosts) != 0 || !slices.Equal(e.Users, []string{"stray"}) {
+		t.Errorf("dev-03 = %+v, want only stray on its networks", e)
+	}
+	if vols := f.VolumesOf(2301); len(vols) != 0 {
+		t.Errorf("dc's disks are left: %v", vols)
+	}
+	if vm := f.VMs[150]; vm == nil || vm.Status != "running" {
+		t.Errorf("stray = %+v, want it untouched", vm)
+	}
+	// Without the VM outside, the slot is free.
+	delete(f.VMs, 150)
+	if envs, _, err = p.Environments(context.Background()); err != nil || !envs[2].Free() {
+		t.Errorf("dev-03 = %+v, %v; want free", envs[2], err)
 	}
 }

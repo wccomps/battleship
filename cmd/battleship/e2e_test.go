@@ -245,7 +245,7 @@ func TestEndToEndPowerJob(t *testing.T) {
 	next(t, events, "end")
 
 	done := b.get("/logs/1")
-	for _, want := range []string{`<span class="st b s-ok">`, "succeeded</span>", `<span title="olive@example.org">olive</span> · olive@auth.example.org`} {
+	for _, want := range []string{`<span class="st b s-ok">`, "succeeded · <time>", `<span title="olive@example.org">olive</span> · olive@auth.example.org`} {
 		if !strings.Contains(done.body, want) {
 			t.Errorf("finished job page doesn't contain %q:\n%s", want, done.body)
 		}

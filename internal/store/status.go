@@ -16,10 +16,12 @@ const (
 )
 
 // Item statuses. An item is created pending, or blocked (never run); its
-// first event makes it running. When its job ends, Finish applies the
-// worker's outcome, then endItems marks items that never reached a step not
-// run and, for a stopped job, other unfinished ones interrupted. Events and
-// outcomes leave blocked and interrupted items be; not run is final.
+// first event makes it running. Its succeeded event makes it done and its
+// failed event failed, until a retry round's started event makes it running
+// again. When its job ends, Finish applies the worker's outcome, then
+// endItems marks items that never reached a step not run and, for a stopped
+// job, other unfinished ones interrupted. Events and outcomes leave blocked
+// and interrupted items be; not run is final.
 const (
 	ItemPending     = "pending"
 	ItemRunning     = "running"
@@ -91,14 +93,16 @@ type itemRule struct {
 	touched       bool // its job did something to its VM, so it is the VM's last result
 	keptOnEvent   bool // an event doesn't make it running again
 	keptOnOutcome bool // the worker's outcome doesn't overwrite it
+	ended         bool // the run ended it; only a started event makes it running again
+	busy          bool // in an active job, still to be worked on, or may be retried by a later round
 }
 
 // itemRules is every item status's rules; an unknown status has none.
 var itemRules = map[ItemStatus]itemRule{
-	ItemPending:     {unfinished: true, notRunNoStep: true},
-	ItemRunning:     {unfinished: true, notRunNoStep: true},
-	ItemDone:        {touched: true},
-	ItemFailed:      {retry: true, touched: true},
+	ItemPending:     {unfinished: true, notRunNoStep: true, busy: true},
+	ItemRunning:     {unfinished: true, notRunNoStep: true, busy: true},
+	ItemDone:        {touched: true, ended: true},
+	ItemFailed:      {retry: true, touched: true, ended: true, busy: true},
 	ItemBlocked:     {retry: true, keptOnEvent: true, keptOnOutcome: true},
 	ItemInterrupted: {notRunNoStep: true, retry: true, touched: true, keptOnEvent: true, keptOnOutcome: true},
 	ItemRemoved:     {retry: true, touched: true},
@@ -119,4 +123,6 @@ const (
 	touchedItemsSQL    = `('done', 'failed', 'interrupted', 'removed')`
 	keptOnEventSQL     = `('blocked', 'interrupted', 'not run')`
 	keptOnOutcomeSQL   = `('blocked', 'interrupted')`
+	endedItemsSQL      = `('done', 'failed')`
+	busyItemsSQL       = `('pending', 'running', 'failed')`
 )

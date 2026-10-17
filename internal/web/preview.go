@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -61,6 +63,9 @@ type previewPage struct {
 	// Reselect, for a reset or snapshot of grid-ticked VMs, labels a button that
 	// posts them back to the operation's form to choose again.
 	Reselect string
+	// Review, if set, replaces the facts, consequence and table: an image or
+	// environment operation's review.
+	Review *reviewView
 }
 
 // capacityView is the preview's resource summary: a row per node memory or
@@ -103,16 +108,19 @@ type itemRow struct {
 type confirmForm struct {
 	Nonce       string
 	Fingerprint string
-	TypeTeams   string // if set, the team range to type to confirm
-	RetryOf     int64  // the job this retries, so a preview shown again by the confirm still says so
-	Button      string
-	Danger      bool
+	// Typed, if set, is what to type to confirm (jobs.Inputs.Typed); TypedRE is
+	// it as the input's pattern.
+	Typed   string
+	TypedRE string
+	RetryOf int64 // the job this retries, so a preview shown again by the confirm still says so
+	Button  string
+	Danger  bool
 }
 
 // destructive reports whether in destroys or discards something, so the
 // confirm button says so.
 func destructive(in jobs.Inputs) bool {
-	return in.Kind == pods.KindTeardown || in.Kind == pods.KindReset || (in.Kind == pods.KindPower && in.Action == "stop") ||
+	return in.Kind.TearsDown() || in.Kind == pods.KindReset || (in.Kind == pods.KindPower && in.Action == "stop") ||
 		in.Kind == pods.KindImageDelete
 }
 
@@ -129,7 +137,23 @@ type previewOptions struct {
 func (s *Server) opPreview(op operation) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		form := postedForm(r)
-		in := formInputs(op.Kind, form)
+		in := op.scope(formInputs(op.Kind, form))
+		if machineInputs(op, form) {
+			// Add host without JavaScript, or Review: the form again, with
+			// more rows or what is wrong with the fields.
+			p, ok := s.catalogForm(r, op, in, "")
+			switch {
+			case !ok:
+				s.noEnv(w, r, in.Domain)
+				return
+			case form.Get(fieldMore) == yes:
+				s.renderCatalogForm(w, r, http.StatusOK, p)
+				return
+			case p.checkFields():
+				s.renderCatalogForm(w, r, http.StatusUnprocessableEntity, p)
+				return
+			}
+		}
 		if fromGrid(form) {
 			if len(in.VMs) == 0 {
 				s.nothingTicked(w, r)
@@ -143,12 +167,28 @@ func (s *Server) opPreview(op operation) http.Handler {
 		}
 		plan, err := jobs.BuildPlan(r.Context(), s.planner(r.Context()), in)
 		if err != nil {
-			s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, "Couldn't make a plan: "+sentence(proxmox.Describe(err)))
+			s.planRefused(w, r, op, in, err)
 			return
 		}
 		allTeams := !op.Kind.Teamless() && s.coversAllTeams(r.Context(), plan.Teams)
 		s.showPreview(w, r, http.StatusOK, op, in, plan, allTeams, previewOptions{fromGrid: fromGrid(form)})
 	})
+}
+
+// planRefused shows op's form again with why planning in failed: on the
+// field it names, for a pods.EnvProblem on a form with machine rows.
+func (s *Server) planRefused(w http.ResponseWriter, r *http.Request, op operation, in jobs.Inputs, err error) {
+	var pr pods.EnvProblem
+	if errors.As(err, &pr) && op.Machines {
+		if p, ok := s.catalogForm(r, op, in, ""); ok {
+			_, rows := p.request()
+			p.mark(pr, rows)
+			p.marked()
+			s.renderCatalogForm(w, r, http.StatusUnprocessableEntity, p)
+			return
+		}
+	}
+	s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, "Couldn't make a plan: "+sentence(proxmox.Describe(err)))
 }
 
 // showPreview renders plan's preview. If anything can run, it adds a confirm
@@ -181,14 +221,15 @@ func (s *Server) showPreview(w http.ResponseWriter, r *http.Request, code int, o
 			Nonce:       nonce,
 			Fingerprint: fp,
 			RetryOf:     opts.retryOf,
-			Button:      confirmLabel(op, in, len(plan.Runnable())),
+			Button:      confirmLabel(op, in, plan.Runnable()),
 			Danger:      destructive(in),
 		}
 		if op.Kind.TypedConfirm() {
-			p.Confirm.TypeTeams = in.Teams
+			p.Confirm.Typed = in.Typed()
+			p.Confirm.TypedRE = regexp.QuoteMeta(p.Confirm.Typed)
 		}
 	}
-	s.render(w, r, code, "preview", s.newView(w, r, p.Heading, string(op.Kind), p))
+	s.render(w, r, code, "preview", s.newView(w, r, p.Heading, op.nav(), p))
 }
 
 // storePreview records a preview for this session and returns its nonce.
@@ -222,17 +263,45 @@ func newNonce() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// confirmLabel is the confirm button's text, e.g. "Force stop 2 VMs".
-func confirmLabel(op operation, in jobs.Inputs, n int) string {
-	vms := "1 VM"
-	if n != 1 {
-		vms = strconv.Itoa(n) + " VMs"
+// confirmLabel is the confirm button's text, e.g. "Force stop 2 VMs", or
+// for an image operation the image it makes or acts on: "Register teak-v2".
+func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
+	n := len(runnable)
+	if n == 1 {
+		switch op.Kind {
+		case pods.KindImageRegister:
+			return "Register " + runnable[0].Name
+		case pods.KindImageEdit:
+			return "Copy as " + runnable[0].Name
+		case pods.KindImageDeprecate:
+			return "Deprecate " + runnable[0].Name
+		case pods.KindImageDelete:
+			return "Delete " + runnable[0].Name
+		}
 	}
+	vms := countVMs(n)
 	switch op.Kind {
+	case pods.KindEnvCreate:
+		return "Create " + vms
+	case pods.KindEnvAdd:
+		return "Add " + strconv.Itoa(n) + byCount(n, " host", " hosts")
+	case pods.KindEnvDNS:
+		set := 0 // the hosts whose DNS changes; the others only record the choice
+		for _, it := range runnable {
+			if it.Guest != nil {
+				set++
+			}
+		}
+		if set == 0 {
+			return "Record the choice"
+		}
+		return "Set DNS on " + strconv.Itoa(set) + byCount(set, " host", " hosts")
 	case pods.KindPower:
 		return powerLabel(in.Action) + " " + vms
 	case pods.KindTeardown:
 		return "Delete " + vms
+	case pods.KindEnvTeardown:
+		return "Tear down " + in.Domain
 	case pods.KindSnapshot:
 		return "Snapshot " + vms
 	default:
@@ -260,7 +329,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 	}
 	p.Heading = p.Title.Label
 	if op.Kind.Teamless() {
-		p.CloseHref = listPage(op.Kind)
+		p.CloseHref = listPage(in)
 	}
 	if opts.fromGrid {
 		p.EditHref, p.CloseHref = "/", "/"
@@ -350,6 +419,16 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		}
 	}
 	p.Warnings = append(p.Warnings, plan.Notices...) // what was left alone, even when nothing runs
+	if p.Review = review(op, in, plan, p.Nothing); p.Review != nil {
+		p.Heading = p.Review.Verb + " " + p.Review.Subject
+		p.EditHref = reviewBack(op, in)
+		if opts.retryOf > 0 {
+			p.Review.Retry = "Retry of #" + strconv.FormatInt(opts.retryOf, 10) + ": only the VMs that didn't finish."
+			if op.Kind.RetriedWhole() {
+				p.Review.Retry = "Retry of #" + strconv.FormatInt(opts.retryOf, 10) + ": the " + op.Noun + " of what is left."
+			}
+		}
+	}
 
 	return p
 }
@@ -359,7 +438,7 @@ func previewFacts(in jobs.Inputs, fromGrid bool, retryOf int64) []fact {
 	var fs []fact
 	switch {
 	case in.Kind.Teamless():
-		fs = teamlessFacts(in)
+		return nil // its review says it all
 	case !fromGrid:
 		fs = append(fs, fact{"Teams", teamsText(in.Teams)})
 		if len(in.Hosts) > 0 || in.Kind == pods.KindDeploy || in.Kind == pods.KindTeardown {
@@ -376,8 +455,9 @@ func previewFacts(in jobs.Inputs, fromGrid bool, retryOf int64) []fact {
 	return fs
 }
 
-// teamlessFacts are an image or environment operation's inputs.
-func teamlessFacts(in jobs.Inputs) []fact {
+// teamlessFacts are an image or environment operation's inputs; a slot is
+// named by its pool, from the pattern pool.
+func teamlessFacts(in jobs.Inputs, pool string) []fact {
 	var fs []fact
 	add := func(k, v string) {
 		if v != "" {
@@ -385,8 +465,12 @@ func teamlessFacts(in jobs.Inputs) []fact {
 		}
 	}
 	add("Domain", in.Domain)
+	if n, ok := pods.ParseSlotName(in.Slot); ok {
+		add("Slot", pods.ExpandSlot(pool, n))
+	}
 	add("Router", in.Router)
 	add("Hosts", strings.Join(in.EnvHosts, ", "))
+	add("Only these VMs", strings.Join(in.VMs, ", "))
 	add("DNS server", in.DNS)
 	if in.VMID != 0 {
 		add("VM", strconv.Itoa(in.VMID))
@@ -552,19 +636,6 @@ func consequence(kind pods.Kind, in jobs.Inputs, items []pods.Item) string {
 			msg += pick(" Their RAM is saved too if they are running, which takes longer.", " Its RAM is saved too if it is running, which takes longer.")
 		}
 		return msg
-	case pods.KindEnvCreate, pods.KindEnvAdd:
-		return vms + " will be cloned into " + poolOf(items) + ", wired to its networks, started, and given " +
-			pick("their names and addresses.", "its name and address.")
-	case pods.KindEnvDNS:
-		return vms + " will point at DNS server " + in.DNS + "."
-	case pods.KindImageRegister:
-		return "The VM will be copied in as " + itemNames(items) + " and made a template; the VM itself is left as it is."
-	case pods.KindImageEdit:
-		return itemNames(items) + " will be made from the newest version, for you to patch and register as the next one."
-	case pods.KindImageDeprecate:
-		return itemNames(items) + " will no longer be offered for new hosts. Hosts made from it keep working."
-	case pods.KindImageDelete:
-		return itemNames(items) + " will be deleted. Hosts made from it keep working: they are full copies. This can't be undone."
 	}
 	return ""
 }

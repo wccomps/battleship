@@ -27,6 +27,7 @@ var confirmPreviews = map[pods.Kind]url.Values{
 	pods.KindEnvCreate:      {"domain": {"new.env"}, "router": {"gw=gw"}, "env_hosts": {"teak=debian-12\noak=debian-12:20"}},
 	pods.KindEnvAdd:         {"domain": {"lab.env"}, "env_hosts": {"oak=debian-12"}},
 	pods.KindEnvDNS:         {"domain": {"lab.env"}, "dns": {"teak"}},
+	pods.KindEnvTeardown:    {"domain": {"lab.env"}},
 	pods.KindImageRegister:  {"vmid": {"7000"}, "family": {"debian-13"}, "image_kind": {"linux"}},
 	pods.KindImageEdit:      {"family": {"debian-12"}},
 	pods.KindImageDeprecate: {"image": {"debian-12-v1"}},
@@ -40,9 +41,11 @@ var confirmFields = []string{
 	fieldDNS, fieldVMID, fieldFamily, fieldImageKind, fieldImage,
 }
 
+// operationOf is kind's operation, opened for lab.env if it acts on an
+// environment.
 func operationOf(kind pods.Kind) operation {
 	i := slices.IndexFunc(operations, func(o operation) bool { return o.Kind == kind })
-	return operations[i]
+	return operations[i].at("lab.env")
 }
 
 func cloneForm(f url.Values) url.Values {
@@ -54,16 +57,18 @@ func cloneForm(f url.Values) url.Values {
 }
 
 // sameConfirm reports whether a confirm of b is the confirm a: the inputs
-// formInputs reads, the nonce and fingerprint, and a teardown's typed range.
+// formInputs reads (an environment's domain is its path's), the nonce and
+// fingerprint, and a teardown's typed range or domain.
 func sameConfirm(kind pods.Kind, a, b url.Values) bool {
-	in := formInputs(kind, a)
-	return reflect.DeepEqual(in, formInputs(kind, b)) && a.Get(fieldNonce) == b.Get(fieldNonce) &&
+	op := operationOf(kind)
+	in := op.scope(formInputs(kind, a))
+	return reflect.DeepEqual(in, op.scope(formInputs(kind, b))) && a.Get(fieldNonce) == b.Get(fieldNonce) &&
 		a.Get(fieldFingerprint) == b.Get(fieldFingerprint) &&
-		(!kind.TypedConfirm() || strings.TrimSpace(b.Get(fieldTyped)) == in.Teams)
+		(!kind.TypedConfirm() || strings.TrimSpace(b.Get(fieldTyped)) == in.Typed())
 }
 
 // confirmFieldsOf are the fields a confirm of kind reads: formInputs's, the
-// nonce and fingerprint, and a teardown's typed range.
+// nonce and fingerprint, and a teardown's typed range or domain.
 func confirmFieldsOf(kind pods.Kind) []string {
 	fs := []string{fieldNonce, fieldFingerprint}
 	if kind.TypedConfirm() {
@@ -112,11 +117,12 @@ func newConfirmTest(t *testing.T) *confirmTest {
 }
 
 // preview previews kind's form, returning its confirm's action and fields,
-// with a teardown's team range typed.
+// with a teardown's team range or domain typed.
 func (c *confirmTest) preview(kind pods.Kind) (string, url.Values) {
-	action, form, _ := c.h.preview(&c.lead, operationOf(kind).Path, confirmPreviews[kind])
+	op := operationOf(kind)
+	action, form, _ := c.h.preview(&c.lead, op.Path, confirmPreviews[kind])
 	if kind.TypedConfirm() {
-		form.Set(fieldTyped, formInputs(kind, form).Teams)
+		form.Set(fieldTyped, op.scope(formInputs(kind, form)).Typed())
 	}
 	return action, form
 }

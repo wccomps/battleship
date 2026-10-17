@@ -34,7 +34,10 @@ form ──> preview ──> confirm ──> stored job ──> worker claims it
    what it half-built (and reports what it couldn't, such as when the
    claim is unsure).
 6. **Finish.** The worker records the outcome (`store.Finish`). Retrying a
-   job's failed VMs previews and submits a new job for just those VMs.
+   team job, or an environment's create or add, previews and submits a new
+   job for just the VMs that didn't finish; an environment's teardown is
+   planned again whole in its slot. Image jobs and Set DNS can't be
+   retried: run them again from their form, and they resume what exists.
 
 Every Proxmox call is made with the submitter's credential; battleship holds
 none of its own. Postgres LISTEN/NOTIFY wakes idle workers, cancels jobs at
@@ -66,7 +69,7 @@ once, and pushes changes to open pages.
 | **plan, item, step** | What a job will do: one item per VM, each with ordered steps (clone, network, …, start) |
 | **blocked** | An item that can't run (missing privilege, missing snapshot); shown in the preview |
 | **fingerprint** | A hash of a plan, to tell whether the cluster changed since the preview |
-| **round** | One pass over a job's items; failed items get a retry round |
+| **round** | One pass over a job's items; failed items get a retry round, except failures for a missing privilege |
 | **baseline** | The `initial` snapshot taken at deploy; a reset rolls back to it |
 | **drift** | A VM whose config no longer matches the rules |
 | **leftover / orphaned disks** | Disks a deleted VM left on the storage |

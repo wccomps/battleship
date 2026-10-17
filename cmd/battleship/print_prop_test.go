@@ -31,7 +31,7 @@ var terminalTricks = []string{
 
 var allKinds = []pods.Kind{pods.KindDeploy, pods.KindTeardown, pods.KindReset, pods.KindPower, pods.KindSnapshot,
 	pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete,
-	pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS}
+	pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS, pods.KindEnvTeardown}
 
 // untrusted draws text a web user, an IdP, Proxmox or a guest could write.
 func untrusted(t *rapid.T, label string) string {
@@ -118,10 +118,11 @@ func TestPropPrintersEscapeUntrustedText(t *testing.T) {
 			}
 		case "event":
 			e := apply.Event{Time: time.Unix(0, 0), Item: untrusted(t, "item"), Step: pods.Step(untrusted(t, "step")),
-				Status:  rapid.SampledFrom([]apply.EventStatus{apply.EventSkipped, apply.EventStatus(untrusted(t, "status"))}).Draw(t, "status"),
+				Status: rapid.SampledFrom([]apply.EventStatus{apply.EventSkipped, apply.EventStarted, apply.EventSucceeded,
+					apply.EventStatus(untrusted(t, "status"))}).Draw(t, "status"),
 				Message: untrusted(t, "message")}
 			printEvent(&buf, e)
-			if e.Status != apply.EventSkipped || e.Message != "" {
+			if apply.Logged(e.Status, e.Message) {
 				// A message's own lines are indented under it.
 				lines = 1 + strings.Count(e.Message, "\n")
 				fields = append(fields, e.Item)

@@ -127,6 +127,9 @@ func printPlan(w io.Writer, naming pods.Naming, plan *pods.Plan) {
 	for _, n := range plan.Notices {
 		fmt.Fprintln(w, "Note: "+clean(n))
 	}
+	for _, k := range plan.Kept {
+		fmt.Fprintln(w, "Note: "+clean(k.String()))
+	}
 }
 
 // printCapacity prints what the plan needs against what the cluster has
@@ -181,8 +184,8 @@ func joinSteps(steps []pods.Step) string {
 }
 
 func printEvent(w io.Writer, e apply.Event) {
-	if e.Status == apply.EventSkipped && e.Message == "" {
-		return // already converged; not worth a line
+	if !apply.Logged(e.Status, e.Message) {
+		return
 	}
 	item := e.Item
 	if item == "" {

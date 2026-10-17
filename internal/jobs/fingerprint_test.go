@@ -17,6 +17,8 @@ var fingerprinted = map[string]map[string]bool{
 	"Plan": {
 		"Kind": true, "Teams": true, "Templates": true, "Items": true, "Config": true, "Locks": true,
 		"Notices": false, // what the plan leaves alone; a new one changes nothing it does
+		"Kept":    false, // the same, an environment teardown's
+		"Slot":    false, // in Locks
 	},
 	"TemplateSpec": {
 		"Name": true, "VMID": true, "Exists": true, "Rebuild": true, "Blocked": true,
@@ -35,11 +37,16 @@ var fingerprinted = map[string]map[string]bool{
 		"Team": false, "Host": false, "Node": false, "Baseline": false,
 		// Says why Blocked is set, which Blocked already covers.
 		"Unpermitted": false,
+		// What the review shows as before; Notes is what the job writes.
+		"DNSWas": false,
 	},
 	"Source": {
 		"VMID": true, "Node": true, "Name": true,
 		// Only decide the privileges needed, as TemplateSpec.Bridges.
 		"Bridges": false,
+		// What a register's review shows; the clone copies the notes as they
+		// are then.
+		"Base": false, "Notes": false,
 	},
 }
 

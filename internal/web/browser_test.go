@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -172,6 +173,14 @@ func (b *browser) fail(msg string) {
 	b.errs = append(b.errs, msg)
 }
 
+// expect drops the errors logged so far that contain s, such as a status
+// a step answers with on purpose.
+func (b *browser) expect(s string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.errs = slices.DeleteFunc(b.errs, func(e string) bool { return strings.Contains(e, s) })
+}
+
 // clean fails the test if the page logged script errors or CSP refusals.
 func (b *browser) clean() {
 	b.t.Helper()
@@ -247,17 +256,31 @@ func (b *browser) where() string {
 	return s + " errors: " + strings.Join(b.errs, "; ")
 }
 
-// waitFor waits until js is true.
+// waitFor waits until js is true. A check a navigation cuts off (such as a
+// form submit's just clicked) counts as false.
 func (b *browser) waitFor(what, js string) {
 	b.t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
-	for !b.is(js) {
-		if time.Now().After(deadline) {
+	for {
+		var ok bool
+		err := chromedp.Run(b.ctx, chromedp.Evaluate(js, &ok, func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithAwaitPromise(true) }))
+		switch {
+		case err == nil && ok:
+			b.settle()
+			return
+		case err != nil && !navigatedAway(err):
+			b.t.Fatalf("evaluating %s: %v", js, err)
+		case time.Now().After(deadline):
 			b.t.Fatalf("waiting for %s (%s); the tab shows %s", what, js, b.where())
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	b.settle()
+}
+
+// navigatedAway is whether err is an evaluation the page left before it
+// answered.
+func navigatedAway(err error) bool {
+	return strings.Contains(err.Error(), "Inspected target navigated or closed") || strings.Contains(err.Error(), "Execution context was destroyed")
 }
 
 // noSideways fails if the page scrolls sideways.
@@ -280,6 +303,22 @@ func (b *browser) shot(name string) {
 	b.settle()
 	var png []byte
 	b.run("screenshot", chromedp.CaptureScreenshot(&png))
+	if err := os.WriteFile(filepath.Join(dir, name+".png"), png, 0o644); err != nil {
+		b.t.Fatal(err)
+	}
+}
+
+// fullShot saves a screenshot of the whole page named name, if
+// BATTLESHIP_SHOTS is set.
+func (b *browser) fullShot(name string) {
+	b.t.Helper()
+	dir := os.Getenv("BATTLESHIP_SHOTS")
+	if dir == "" {
+		return
+	}
+	b.settle()
+	var png []byte
+	b.run("screenshot", chromedp.FullScreenshot(&png, 100))
 	if err := os.WriteFile(filepath.Join(dir, name+".png"), png, 0o644); err != nil {
 		b.t.Fatal(err)
 	}
@@ -467,7 +506,7 @@ func TestBrowserPreviewAndJob(t *testing.T) {
 			h.start(n)
 			h.event(n, "team07-web", "stop", string(apply.EventDone), "")
 			publishJob(h, n)
-			b.waitFor("the job to run", `document.querySelector("#job-head .st").textContent.trim() === "running"`)
+			b.waitFor("the job to run", `document.querySelector("#job-head .st").textContent.trim().startsWith("running · ")`)
 			b.waitFor("the log line", `document.querySelectorAll("#job-log li").length > 0`)
 			b.shot("job-running-" + size.name)
 			h.finish(n, store.Outcome{Status: store.StatusCompletedWithFailures, Items: map[string]store.ItemOutcome{
@@ -476,8 +515,8 @@ func TestBrowserPreviewAndJob(t *testing.T) {
 				"team05-wks1": {Status: store.ItemDone},
 			}})
 			publishJob(h, n)
-			b.waitFor("the job to finish", `document.querySelector("#job-head .st").textContent.trim() === "completed with failures"`)
-			if got := b.text("#job-actions"); got != "Retry 1 failed VM" {
+			b.waitFor("the job to finish", `document.querySelector("#job-head .st").textContent.trim().startsWith("completed with failures · ")`)
+			if got := b.text("#job-actions"); got != "Retry 1 VM" {
 				t.Errorf("job actions = %q", got)
 			}
 			if b.is(`!!document.querySelector("#job-items .tally")`) {
@@ -806,6 +845,17 @@ func TestBrowserTeardownForm(t *testing.T) {
 
 		})
 	}
+}
+
+// waitFor outlasts a check the page navigates away from: here the first
+// check itself leaves for /teardown.
+func TestBrowserWaitForOutlivesANavigation(t *testing.T) {
+	h, _ := bigHarness(t)
+	lead := h.login(asLead)
+	b := newBrowser(t, h, &lead, 1280, 800, false)
+	b.open("/")
+	b.waitFor("the teardown page", `location.pathname === "/teardown" || new Promise(() => { location.href = "/teardown" })`)
+	b.clean()
 }
 
 func TestBrowserGridSizes(t *testing.T) {

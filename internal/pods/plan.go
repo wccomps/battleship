@@ -38,13 +38,14 @@ const (
 	KindEnvCreate      Kind = "env-create"
 	KindEnvAdd         Kind = "env-add"
 	KindEnvDNS         Kind = "env-dns"
+	KindEnvTeardown    Kind = "env-teardown"
 )
 
 // Teamless reports whether kind acts on base images or environments rather
 // than team VMs.
 func (k Kind) Teamless() bool {
 	switch k {
-	case KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete, KindEnvCreate, KindEnvAdd, KindEnvDNS:
+	case KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete, KindEnvCreate, KindEnvAdd, KindEnvDNS, KindEnvTeardown:
 		return true
 	}
 	return false
@@ -52,7 +53,12 @@ func (k Kind) Teamless() bool {
 
 // OnEnvironment is whether the kind works on an existing environment, named
 // by its domain.
-func (k Kind) OnEnvironment() bool { return k == KindEnvAdd || k == KindEnvDNS }
+func (k Kind) OnEnvironment() bool { return k == KindEnvAdd || k == KindEnvDNS || k == KindEnvTeardown }
+
+// TearsDown is whether the kind deletes VMs with stop and delete steps: its
+// stop is a clean shutdown, and a VM already gone at its delete has only its
+// leftover disks freed.
+func (k Kind) TearsDown() bool { return k == KindTeardown || k == KindEnvTeardown }
 
 type Step string
 
@@ -80,9 +86,14 @@ const (
 	StepVerify    Step = "verify"
 )
 
-// TypedConfirm reports whether kind k needs the team range typed to
-// confirm (CLI and web): only a teardown, which deletes VMs.
-func (k Kind) TypedConfirm() bool { return k == KindTeardown }
+// TypedConfirm reports whether kind k needs what it deletes typed to confirm
+// (CLI and web): a teardown's team range, an environment's domain.
+func (k Kind) TypedConfirm() bool { return k.TearsDown() }
+
+// RetriedWhole reports whether a retry of a job of kind k plans it again
+// whole, not narrowed to the VMs that didn't finish: an environment's
+// teardown, in its slot, where what a failed delete left has new names.
+func (k Kind) RetriedWhole() bool { return k == KindEnvTeardown }
 
 // ChangesConfig reports whether the step can change the VM's config (its
 // disks, NICs, pool or snapshots); the power and guest steps can't.
@@ -102,6 +113,10 @@ type Source struct {
 	// Bridges are its NICs' bridges: Proxmox checks SDN.Use on them for a
 	// clone.
 	Bridges []string `json:"bridges,omitempty"`
+	// Base and Notes are the source's notes, for its review: the version it
+	// edits (ImageEdit), and user notes the copy keeps.
+	Base  string `json:"base,omitempty"`
+	Notes string `json:"notes,omitempty"`
 }
 
 // Builds is whether a deploy builds the template from its master (it
@@ -160,10 +175,12 @@ type Item struct {
 
 	// Base-image and environment items (Team is ""): Source is cloned instead
 	// of a template, into Pool. Tags is the whole tag list the label step sets
-	// ("" clears them); Notes, if set, is the notes line it writes. NICs maps
-	// NIC keys to the bridge the network step puts them on. Guest is what
-	// configure-guest sets inside the VM. Supersedes is the version a
-	// registered image replaces, tagged deprecated once it is a template.
+	// ("" clears them); Notes, if set, is the notes line it writes. An
+	// environment teardown's items carry the VM's tags and notes as they are,
+	// for its review. NICs maps NIC keys to the bridge the network step puts
+	// them on. Guest is what configure-guest sets inside the VM. Supersedes
+	// is the version a registered image replaces, tagged deprecated once it
+	// is a template.
 	Source     *Source           `json:"source,omitempty"`
 	Pool       string            `json:"pool,omitempty"`
 	Tags       string            `json:"tags,omitempty"`
@@ -171,6 +188,16 @@ type Item struct {
 	NICs       map[string]string `json:"nics,omitempty"`
 	Guest      *Guest            `json:"guest,omitempty"`
 	Supersedes *Source           `json:"supersedes,omitempty"`
+	// DNSWas is a Set DNS item's DNS server before the job, for its review.
+	DNSWas *DNSServer `json:"dns_was,omitempty"`
+}
+
+// DNSServer is a DNS choice as a host's notes record it (a host name, or
+// DNSRouter) and its address; Addr is "" when the choice names no host
+// that can serve DNS.
+type DNSServer struct {
+	Choice string `json:"choice"`
+	Addr   string `json:"addr,omitempty"`
 }
 
 // Plan is what an operation will do: the templates a deploy needs and one
@@ -190,7 +217,21 @@ type Plan struct {
 	// Notices are what a person should know the plan leaves alone, such as
 	// VMs named like team VMs that aren't; nothing acts on them.
 	Notices []string `json:"notices,omitempty"`
+	// Slot is an environment plan's dev slot (SlotName); Locks holds it.
+	// Plans stored before it have it only in Locks: read it with DevSlot.
+	Slot string `json:"slot,omitempty"`
+	// Kept are the VMs an environment's teardown leaves alone, and why.
+	Kept []KeptVM `json:"kept,omitempty"`
 }
+
+// KeptVM is a VM a plan leaves alone: Why completes "Name is ...".
+type KeptVM struct {
+	Name string `json:"name"`
+	Why  string `json:"why"`
+}
+
+// String is the notice the CLI prints for it.
+func (k KeptVM) String() string { return "Not touched: " + k.Name + " is " + k.Why + "." }
 
 // LockKeys are what a plan changes and, apart, what it only reads (its
 // items' Sources), as lock keys (see the store's blocksSQL). Besides its own
@@ -249,7 +290,7 @@ func ConfigHash(kind Kind, c config.Config) string {
 			Pool             string
 		}{c.Network, c.Deploy.Storage, c.Deploy.Linked, c.Deploy.DiskMBpsRead, c.Deploy.DiskMBpsWrite,
 			c.Deploy.SnapshotName, c.Deploy.BaselinePatterns, c.Naming.Pool}
-	case KindTeardown:
+	case KindTeardown, KindEnvTeardown:
 		v = c.Teardown.ShutdownTimeout
 	case KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete:
 		v = struct {
@@ -570,7 +611,12 @@ func (p Planner) Teardown(ctx context.Context, teams, hosts []string) (*Plan, er
 		return plan, err
 	}
 	p.halfDeleted(plan, vms)
-	if err := p.orphanedDisks(ctx, plan, vms); err != nil {
+	err = p.orphanedDisks(ctx, plan, vms, p.orphanCandidates(plan.Teams, vms), func(vmid int, node string) Item {
+		team, _ := p.Naming.TeamOfCloneVMID(vmid) // a candidate is a team's clone VMID
+		return Item{Team: team, Name: p.Naming.VMName(team, "disks-"+strconv.Itoa(vmid)), VMID: vmid, Node: node,
+			Steps: []Step{StepFreeDisks}}
+	})
+	if err != nil {
 		return nil, err
 	}
 	return plan, nil
@@ -607,12 +653,13 @@ func HalfDeletedText(vmid int, node string) string {
 		vmid, vmid, node)
 }
 
-// orphanedDisks adds a free-disks item for each team VMID with disks on
-// deploy.storage but no VM (a teardown cut off before freeing them). It
-// lists every node in storageNodes, so node-local storage is covered.
-// Proxmox shows a gone VM's disks only to users with Datastore.Allocate,
-// which freeing needs; others see none.
-func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM) error {
+// orphanedDisks adds a free-disks item, made by item, for each VMID of
+// cands with disks on deploy.storage but no VM (a teardown cut off before
+// freeing them). Only volumes a candidate owns count, so a file of no VMID
+// (VolumeOwner 0) is never an item. It lists every node in storageNodes, so
+// node-local storage is covered. Proxmox shows a gone VM's disks only to
+// users with Datastore.Allocate, which freeing needs; others see none.
+func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM, cands []int, item func(vmid int, node string) Item) error {
 	nodes, err := p.API.OnlineNodes(ctx)
 	if err != nil {
 		return err
@@ -622,10 +669,6 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 		return err
 	}
 	held := maps.Clone(use.listed) // and, as items are added, VMIDs already itemized
-	want := map[string]bool{}
-	for _, t := range plan.Teams {
-		want[t] = true
-	}
 	nodes, err = p.storageNodes(ctx, nodes)
 	if err != nil {
 		return err
@@ -633,13 +676,13 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	// Each candidate is asked about on its own: one VMID takes a moment, while
 	// a whole listing runs qemu-img on every disk on the storage and outgrows
 	// Proxmox's proxy timeout once a few hundred VMs are deployed.
-	candidates := p.orphanCandidates(plan.Teams, vms, held)
+	cands = slices.DeleteFunc(slices.Clone(cands), func(id int) bool { return held[id] })
 	listed := make([][]string, len(nodes))
 	var mu sync.Mutex
 	var g errgroup.Group
 	g.SetLimit(orphanListings)
 	for i, node := range nodes {
-		for _, vmid := range candidates {
+		for _, vmid := range cands {
 			g.Go(func() error {
 				vols, err := p.API.StorageContent(ctx, node, p.Cfg.Deploy.Storage, vmid)
 				switch {
@@ -661,8 +704,7 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	for i, node := range nodes {
 		for _, v := range listed[i] {
 			vmid, _ := VolumeOwner(v)
-			team, ok := p.Naming.TeamOfCloneVMID(vmid)
-			if !ok || !want[team] || held[vmid] {
+			if !slices.Contains(cands, vmid) || held[vmid] {
 				continue
 			}
 			held[vmid] = true // one item per VMID, from the first node that lists it
@@ -673,8 +715,7 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 				}
 				continue
 			}
-			plan.Items = append(plan.Items, Item{Team: team, Name: p.Naming.VMName(team, "disks-"+strconv.Itoa(vmid)),
-				VMID: vmid, Node: node, Steps: []Step{StepFreeDisks}})
+			plan.Items = append(plan.Items, item(vmid, node))
 		}
 	}
 	sort.SliceStable(plan.Items, func(i, j int) bool { return plan.Items[i].Name < plan.Items[j].Name })
@@ -684,18 +725,17 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 // orphanListings is how many storage listings run at once.
 const orphanListings = 8
 
-// orphanCandidates are the free VMIDs team VMs get when cloned from current
+// orphanCandidates are the VMIDs teams' VMs get when cloned from current
 // templates (CloneVMID), where a gone VM's disks would be. Disks of VMs
-// whose template is gone are only found by a whole-storage listing (more
-// than maxOrphanCandidates).
-func (p Planner) orphanCandidates(teams []string, vms []proxmox.VM, held map[int]bool) []int {
+// whose template is gone aren't looked for.
+func (p Planner) orphanCandidates(teams []string, vms []proxmox.VM) []int {
 	var out []int
 	for _, t := range teams {
 		for _, vm := range vms {
 			if !vm.Template || !p.Naming.IsTemplateName(vm.Name) {
 				continue
 			}
-			if id := p.Naming.CloneVMID(t, vm.VMID); !held[id] && !slices.Contains(out, id) {
+			if id := p.Naming.CloneVMID(t, vm.VMID); !slices.Contains(out, id) {
 				out = append(out, id)
 			}
 		}

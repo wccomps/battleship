@@ -12,6 +12,7 @@ import (
 
 func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tpl *tplBuild) error {
 	if len(it.Steps) == 0 {
+		e.emit(it.Name, "", EventStarted, "")
 		return e.endItem(ctx, it, "", -1, false, errors.New("no steps planned"))
 	}
 	vm, exists := e.lookup(it.VMID, it.Name)
@@ -19,9 +20,10 @@ func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tp
 		it.Node = vm.Node
 	}
 	if !exists && !slices.Contains(it.Steps, pods.StepClone) {
-		if kind == pods.KindTeardown {
+		if kind.TearsDown() {
 			// StepDelete, or StepFreeDisks for a VM already gone at planning.
 			step := it.Steps[len(it.Steps)-1]
+			e.emit(it.Name, step, EventStarted, "")
 			// Gone by name isn't enough: a half-deleted VM is listed as "VM <vmid>".
 			if err := e.checkVMIDFree(ctx, it.VMID); err != nil {
 				return e.endItem(ctx, it, step, -1, false, err)
@@ -35,8 +37,10 @@ func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tp
 			} else {
 				e.emit(it.Name, step, EventSkipped, "already deleted")
 			}
+			e.emit(it.Name, "", EventSucceeded, "")
 			return nil
 		}
+		e.emit(it.Name, "", EventStarted, "")
 		return e.endItem(ctx, it, "", -1, false, fmt.Errorf("VM %s (%d) no longer exists", it.Name, it.VMID))
 	}
 	for i, step := range it.Steps {
@@ -69,6 +73,7 @@ func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tp
 			exists = true
 		}
 	}
+	e.emit(it.Name, "", EventSucceeded, "")
 	return nil
 }
 
@@ -219,7 +224,7 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 	case pods.StepStart:
 		return e.power(ctx, it, "start")
 	case pods.StepStop:
-		if kind == pods.KindTeardown {
+		if kind.TearsDown() {
 			return e.shutdownForDelete(ctx, it)
 		}
 		return e.power(ctx, it, "stop") // reset: the rollback discards the state anyway

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -29,7 +30,36 @@ func (s Slot) LastVMID() int { return s.FirstVMID + 99 }
 
 // ExpandSlot replaces {slot} with n as two digits.
 func ExpandSlot(pattern string, n int) string {
-	return strings.ReplaceAll(pattern, "{slot}", fmt.Sprintf("%02d", n))
+	return strings.ReplaceAll(pattern, "{slot}", SlotName(n))
+}
+
+// SlotName is slot n's name: n as two digits.
+func SlotName(n int) string { return fmt.Sprintf("%02d", n) }
+
+// ParseSlotName is the slot number name stands for, if SlotName writes it
+// so: "02" is 2, while "2" and "002" are no slot's name.
+func ParseSlotName(name string) (int, bool) {
+	n, err := strconv.Atoi(name)
+	return n, err == nil && n >= 1 && SlotName(n) == name
+}
+
+// slotLock is the lock key of the slot named name.
+func slotLock(name string) string { return "slot:" + name }
+
+// DevSlot is the environment plan's slot name: its Slot, or the slot its
+// lock names in a plan stored before Slot.
+func (p Plan) DevSlot() string {
+	if p.Slot != "" {
+		return p.Slot
+	}
+	for _, l := range p.Locks {
+		if name, ok := strings.CutPrefix(l, slotLock("")); ok {
+			if _, ok := ParseSlotName(name); ok {
+				return name
+			}
+		}
+	}
+	return ""
 }
 
 // Slots lists the configured slots; the config is validated, so the range
@@ -38,7 +68,7 @@ func Slots(c config.Environments) []Slot {
 	lo, hi, _ := config.ParseRange(c.Slots)
 	var out []Slot
 	for n := lo; n <= hi; n++ {
-		out = append(out, Slot{N: n, Name: fmt.Sprintf("%02d", n), Pool: ExpandSlot(c.Pool, n),
+		out = append(out, Slot{N: n, Name: SlotName(n), Pool: ExpandSlot(c.Pool, n),
 			IntBridge: ExpandSlot(c.IntBridge, n), ExtBridge: ExpandSlot(c.ExtBridge, n), FirstVMID: c.VMIDBase + n*100})
 	}
 	return out
@@ -65,6 +95,8 @@ type EnvHost struct {
 	// UserNotes are its other notes, such as the logins its base image's
 	// notes carried over.
 	UserNotes string
+	// Addr is its address: the gateway for the router, else its notes'.
+	Addr string
 }
 
 // Environment is what a slot holds.
@@ -73,8 +105,13 @@ type Environment struct {
 	Domain string    // the domain its VMs share; "" when free or Mixed
 	Hosts  []EnvHost // the VMs in its pool, by name
 	// Users are VMs outside its pool with a NIC on one of its bridges.
-	Users []string
-	Mixed bool // its VMs don't all share one domain
+	Users   []string
+	Mixed   bool // its VMs don't all share one domain
+	Gateway string
+	// HalfDeleted are VMs, in its pool or else its VMIDs, that a failed
+	// destroy left locked as destroyed, without their names. Only tearing it
+	// down acts on them; they aren't Hosts.
+	HalfDeleted []EnvHost
 }
 
 // EnvByDomain is the environment, of envs, whose hosts share domain (the
@@ -88,7 +125,17 @@ func EnvByDomain(envs []Environment, domain string) (Environment, bool) {
 	return Environment{}, false
 }
 
-func (e Environment) Free() bool { return len(e.Hosts) == 0 && len(e.Users) == 0 }
+func slotN(envs []Environment, n int) (Environment, error) {
+	i := slices.IndexFunc(envs, func(e Environment) bool { return e.Slot.N == n })
+	if i < 0 {
+		return Environment{}, fmt.Errorf("there's no dev slot %s", SlotName(n))
+	}
+	return envs[i], nil
+}
+
+func (e Environment) Free() bool {
+	return len(e.Hosts) == 0 && len(e.Users) == 0 && len(e.HalfDeleted) == 0
+}
 
 func (e Environment) HasRouter() bool { return e.RouterName() != "" }
 
@@ -116,6 +163,19 @@ func (e Environment) dnsHost(choice string) (EnvHost, bool) {
 	}
 	h, ok := e.Host(choice + "." + e.Domain)
 	return h, ok && h.servesDNS()
+}
+
+// DNSAddress is the address its hosts use for DNS choice: the gateway for
+// DNSRouter (or ""), else the address of the host dnsHost accepts.
+func (e Environment) DNSAddress(choice string) (string, error) {
+	if choice == "" || choice == DNSRouter {
+		return e.Gateway, nil
+	}
+	h, ok := e.dnsHost(choice)
+	if !ok {
+		return "", fmt.Errorf("%s isn't a Windows or Linux host of %s with an address; choose router or one of those", choice, e.Domain)
+	}
+	return h.Addr, nil
 }
 
 // DNSChoices are what its DNS can be set to: DNSRouter, then each host
@@ -166,11 +226,11 @@ func (e Environment) DNS() string {
 // envReads is how many Proxmox reads environment planning makes at once.
 const envReads = 8
 
-// Environments reads every slot: the VMs in its pool with their notes, and
-// the other VMs on its bridges. Templates never run, so they hold no slot;
-// team VMs (see Classify) are on team bridges, so they aren't read, but a
-// VM only named like one may be anywhere. It also returns the VM listing it
-// read.
+// Environments reads every slot: the VMs in its pool with their notes, the
+// other VMs on its bridges, and its half-deleted VMs. Templates never run,
+// so they hold no slot; team VMs (see Classify) are on team bridges, so
+// they aren't read, but a VM only named like one may be anywhere. It also
+// returns the VM listing it read.
 func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM, error) {
 	vms, err := p.API.ClusterVMs(ctx)
 	if err != nil {
@@ -181,13 +241,22 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 	bridgeSlot := map[string]int{}
 	envs := make([]Environment, len(slots))
 	for i, s := range slots {
-		envs[i].Slot = s
+		envs[i].Slot, envs[i].Gateway = s, Gateway(p.Cfg.Environments.Subnet)
 		byPool[s.Pool] = i
 		bridgeSlot[s.IntBridge], bridgeSlot[s.ExtBridge] = i, i
 	}
 	var read []proxmox.VM
 	for _, vm := range vms {
-		_, inSlot := byPool[vm.Pool]
+		si, inSlot := byPool[vm.Pool]
+		if vm.Lock == "destroyed" {
+			if !inSlot {
+				si = slices.IndexFunc(slots, func(s Slot) bool { return vm.VMID >= s.FirstVMID && vm.VMID <= s.LastVMID() })
+			}
+			if si >= 0 { // its config is only the lock
+				envs[si].HalfDeleted = append(envs[si].HalfDeleted, EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node, Status: vm.Status})
+			}
+			continue
+		}
 		if kind, _, _ := p.Naming.Classify(vm); inSlot || (!vm.Template && kind != TeamVMKind) {
 			read = append(read, vm)
 		}
@@ -219,8 +288,12 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 		if si, ok := byPool[vm.Pool]; ok {
 			n, has := ParseNotes(cfg["description"])
 			n = n.Checked(p.Cfg.Environments.Subnet)
-			envs[si].Hosts = append(envs[si].Hosts, EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node,
-				Status: vm.Status, Tags: vm.Tags, Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has, UserNotes: UserNotes(cfg["description"])})
+			h := EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node, Status: vm.Status, Tags: vm.Tags,
+				Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has, UserNotes: UserNotes(cfg["description"]), Addr: n.IP}
+			if h.Router {
+				h.Addr = envs[si].Gateway
+			}
+			envs[si].Hosts = append(envs[si].Hosts, h)
 			continue
 		}
 		if vm.Template {
@@ -236,6 +309,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 		e := &envs[i]
 		sort.Slice(e.Hosts, func(a, b int) bool { return e.Hosts[a].Name < e.Hosts[b].Name })
 		sort.Strings(e.Users)
+		slices.SortFunc(e.HalfDeleted, func(a, b EnvHost) int { return a.VMID - b.VMID })
 		for _, h := range e.Hosts {
 			d := Domain(h.Name)
 			switch {

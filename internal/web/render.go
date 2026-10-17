@@ -49,7 +49,7 @@ func parsePages() map[string]*template.Template {
 // funcs are the template helpers. Times are formatted in Go against the
 // server's clock before they reach a template.
 var funcs = template.FuncMap{"asset": assetURL, "names": keepNames, "icon": icon, "opIcon": opIcon, "needs": needs,
-	"hasPrefix": strings.HasPrefix}
+	"hasPrefix": strings.HasPrefix, "imageKinds": func() []string { return pods.ImageKinds }, "familyHref": familyHref}
 
 // nameRE matches a name in prose: letter/digit/_/* runs joined by '-' or '.'
 // (team03-web, dc.kilo.alpha.tpl, *.kilo.alpha). keepNames skips matches
@@ -127,6 +127,9 @@ type view struct {
 	Initial string
 	// refresh, if set, is the URL the page goes on to at once; see Refresh.
 	refresh string
+	// Reload, if above 0, reloads the page every Reload seconds when the
+	// script doesn't run; the script follows the page's event stream instead.
+	Reload int
 }
 
 // Refresh is the URL the layout's page goes on to at once, if it is local.
@@ -153,7 +156,7 @@ func (s *Server) leadOps(ctx context.Context) []navItem {
 	var items []navItem
 	for _, op := range operations {
 		if op.page() && !op.Kind.Teamless() && s.mayRun(ctx, op.Kind) {
-			items = append(items, navItem{string(op.Kind), op.Title, op.Path})
+			items = append(items, navItem{string(op.Kind), op.Lead, op.Path})
 		}
 	}
 	return items
@@ -286,19 +289,11 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
 
 // opIcon is the icon of an operation kind, or of a power action.
 func opIcon(kind string) template.HTML {
-	switch {
-	case pods.IsPowerAction(kind), kind == string(pods.KindReset), kind == string(pods.KindSnapshot),
-		kind == string(pods.KindDeploy), kind == string(pods.KindTeardown):
+	if op, ok := operationFor(pods.Kind(kind)); ok {
+		return icon(op.Icon)
+	}
+	if pods.IsPowerAction(kind) {
 		return icon(kind)
-	case kind == string(pods.KindPower):
-		return icon("shutdown")
-	case kind == string(pods.KindEnvCreate), kind == string(pods.KindEnvAdd),
-		kind == string(pods.KindImageRegister), kind == string(pods.KindImageEdit):
-		return icon("deploy")
-	case kind == string(pods.KindImageDelete):
-		return icon("teardown")
-	case kind == string(pods.KindEnvDNS), kind == string(pods.KindImageDeprecate):
-		return icon("reset")
 	}
 	return icon("reboot")
 }

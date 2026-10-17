@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
@@ -202,10 +203,16 @@ func showJob(ctx context.Context, d deps, st *store.Store, id int64) int {
 		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n", clean(it.Name), orDash(it.VMID), clean(it.Status), clean(orDashStr(it.Step)), cleanLines(it.Error, "      "))
 	}
 	tw.Flush()
-	events, err := st.Events(ctx, id, 0, 100000)
+	all, err := st.Events(ctx, id, 0, 100000)
 	if err != nil {
 		fmt.Fprintln(d.stderr, err)
 		return 1
+	}
+	var events []store.Event
+	for _, ev := range all {
+		if apply.Logged(apply.EventStatus(ev.Status), ev.Message) {
+			events = append(events, ev)
+		}
 	}
 	const tail = 30
 	if len(events) > tail {

@@ -15,6 +15,7 @@ var iconPaths = map[string]string{
 	"deploy":   `<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>`,
 	"teardown": `<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>`,
 	"close":    `<path d="M6 6l12 12M18 6 6 18"/>`,
+	"plus":     `<path d="M12 5v14M5 12h14"/>`,
 	"lock":     `<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>`,
 	"blocked":  `<circle cx="12" cy="12" r="9"/><path d="M5.7 5.7l12.6 12.6"/>`,
 	"warn":     `<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>`,
@@ -25,6 +26,8 @@ var iconPaths = map[string]string{
 	"failed":   `<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>`,
 	"paused":   `<circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/>`,
 	"dash":     `<path d="M7 12h10"/>`,
+	"copy":     `<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>`,
+	"chev":     `<path d="m9 6 6 6-6 6"/>`,
 }
 
 // icon is the SVG of a named icon, with extra classes if given.

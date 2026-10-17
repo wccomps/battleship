@@ -64,7 +64,7 @@ func TestGridLayoutShowsUserAndNav(t *testing.T) {
 	contains(t, "lead's page", body,
 		`<a href="/" aria-current="page">Grid</a>`,
 		`<a href="/logs">Logs</a>`,
-		`<nav class="lead-ops" aria-label="Team operations">`, `<a class="btn" href="/deploy">`, "Deploy</a>",
+		`<nav class="lead-ops" aria-label="Team operations">`, `<a class="btn" href="/deploy">`, "Deploy teams</a>", "Tear down teams</a>",
 		`<summary aria-label="Account: Test lead, test-lead@auth.example.org"><span class="who" aria-hidden="true">T</span></summary>`,
 		"Test lead", `<span class="role">test-lead@auth.example.org · `,
 		`<form method="post" action="/auth/logout">`,

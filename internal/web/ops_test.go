@@ -33,7 +33,7 @@ func (h *harness) post(sess *authtest.Session, target string, form url.Values) *
 }
 
 var (
-	confirmFormRE = regexp.MustCompile(`(?s)<form class="sheet" method="post" action="(/[a-z/]+/confirm)"[^>]*>(.*?)</form>`)
+	confirmFormRE = regexp.MustCompile(`(?s)<form class="sheet" method="post" action="(/[a-z0-9./-]+/confirm)"[^>]*>(.*?)</form>`)
 	hiddenRE      = regexp.MustCompile(`<input type="hidden" name="([a-z_]+)" value="([^"]*)">`)
 )
 
@@ -748,11 +748,24 @@ func TestInputFieldsRoundTrip(t *testing.T) {
 		if got := formInputs(kind, hidden); !reflect.DeepEqual(got, in) {
 			t.Fatalf("%s: formInputs(inputFields(%#v)) = %#v", kind, in, got)
 		}
-		link, err := url.Parse(formQuery(operation{Kind: kind, Path: "/x"}, in))
+		op, _ := operationFor(kind)
+		link, err := url.Parse(formQuery(op, in))
 		if err != nil {
 			t.Fatalf("%s: %v", kind, err)
 		}
-		if got := formInputs(kind, link.Query()); !reflect.DeepEqual(got, in) {
+		q := link.Query()
+		if kind.OnEnvironment() {
+			// The domain is in the path; without a valid one, the link is
+			// the Environments page.
+			if pods.CheckDomain(in.Domain) != nil {
+				if link.String() != envsPath {
+					t.Fatalf("%s: formQuery(%#v) = %s", kind, in, link)
+				}
+				return
+			}
+			q.Set(fieldDomain, strings.Split(link.Path, "/")[2])
+		}
+		if got := formInputs(kind, q); !reflect.DeepEqual(got, in) {
 			t.Fatalf("%s: formInputs(formQuery(%#v)) = %#v", kind, in, got)
 		}
 	}

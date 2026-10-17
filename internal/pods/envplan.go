@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -16,82 +15,140 @@ import (
 // EnvRequest is an environment job's input.
 type EnvRequest struct {
 	Domain string
+	// Slot is the dev slot (Slot.N) a new environment goes in, or a teardown
+	// acts on; 0 takes the first free one, or the slot holding Domain.
+	Slot   int
 	Router HostSpec   // create (required); add (only if the environment has none)
 	Hosts  []HostSpec // create, add
 	DNS    string     // set DNS: DNSRouter or one of the environment's host names
 }
 
-func (p Planner) gateway() string {
-	return p.Cfg.Environments.Subnet + "." + strconv.Itoa(GatewayOctet)
+// envPlanIn is an empty plan of kind for domain in slot, locking both.
+func (p Planner) envPlanIn(kind Kind, slot Slot, domain string) *Plan {
+	return &Plan{Kind: kind, Config: ConfigHash(kind, p.Cfg), Slot: slot.Name, Locks: []string{slotLock(slot.Name), "domain:" + domain}}
 }
 
-// dnsAddress is the address hosts use for choice.
-func (p Planner) dnsAddress(env Environment, choice string) (string, error) {
-	if choice == "" || choice == DNSRouter {
-		return p.gateway(), nil
-	}
-	h, ok := env.dnsHost(choice)
-	if !ok {
-		return "", fmt.Errorf("%s isn't a Windows or Linux host of %s with an address; choose router or one of those", choice, env.Domain)
-	}
-	return h.Notes.IP, nil
-}
+// Gateway is the router's address on subnet, every environment's LAN.
+func Gateway(subnet string) string { return subnet + "." + strconv.Itoa(GatewayOctet) }
 
-// EnvCreate plans a new environment in the lowest free slot.
+// EnvCreate plans a new environment in req.Slot, or else the lowest free
+// slot. A chosen slot must be free, or hold req.Domain already: a create
+// that stopped partway, which is resumed there.
 func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if err := CheckDomain(req.Domain); err != nil {
 		return nil, err
 	}
 	if req.Router.Host == "" {
-		return nil, errors.New("a new environment needs a router")
+		return nil, errNoRouter
 	}
 	envs, vms, err := p.Environments(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for _, e := range envs {
-		if e.Domain == req.Domain {
-			return nil, fmt.Errorf("%s is already in dev slot %s; add hosts to it instead", req.Domain, e.Slot.Name)
-		}
+	hosts := append([]HostSpec{req.Router}, req.Hosts...)
+	var env Environment
+	if req.Slot != 0 {
+		env, err = p.chosenSlot(ctx, envs, vms, req)
+	} else {
+		env, err = p.firstOpenSlot(ctx, envs, vms, req.Domain)
 	}
-	var slot *Environment
-	var hidden []string // slots that look free but hold VMs this user can't see
-	var queued []string // slots that look free but a queued job will fill
-	reserved, err := p.reserved(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for i := range envs {
-		if !envs[i].Free() {
-			continue
-		}
-		if reserved["slot:"+envs[i].Slot.Name] {
-			queued = append(queued, envs[i].Slot.Name)
-			continue
-		}
-		held, err := p.slotHeld(ctx, envs[i].Slot, vms)
+	return p.envPlan(ctx, KindEnvCreate, env, hosts, true, vms)
+}
+
+// firstOpenSlot is the lowest slot of envs a new environment for domain may
+// take (slotState), or why none may.
+func (p Planner) firstOpenSlot(ctx context.Context, envs []Environment, vms []proxmox.VM, domain string) (Environment, error) {
+	if e, ok := EnvByDomain(envs, domain); ok {
+		return Environment{}, domainElsewhere(domain, e)
+	}
+	reserved, err := p.reserved(ctx)
+	if err != nil {
+		return Environment{}, err
+	}
+	var hidden, queued []string
+	for _, e := range envs {
+		st, err := p.slotState(ctx, e, reserved, vms)
 		if err != nil {
-			return nil, err
+			return Environment{}, err
 		}
-		if !held {
-			slot = &envs[i]
-			break
+		switch st {
+		case slotOpen:
+			return Environment{Slot: e.Slot, Domain: domain, Gateway: e.Gateway}, nil
+		case slotQueued:
+			queued = append(queued, e.Slot.Name)
+		case slotHidden:
+			hidden = append(hidden, e.Slot.Name)
 		}
-		hidden = append(hidden, envs[i].Slot.Name)
 	}
-	if slot == nil {
-		msg := "every dev slot is in use; archive an environment to free one"
-		if len(hidden) > 0 {
-			msg += fmt.Sprintf(" (dev slot %s holds VMs you can't see)", strings.Join(hidden, ", "))
-		}
-		if len(queued) > 0 {
-			msg += fmt.Sprintf(" (a queued job will fill dev slot %s)", strings.Join(queued, ", "))
-		}
-		return nil, errors.New(msg)
+	msg := allSlotsInUse
+	if len(hidden) > 0 {
+		msg += fmt.Sprintf(" (dev slot %s holds VMs you can't see)", strings.Join(hidden, ", "))
 	}
-	env := *slot
-	env.Domain = req.Domain
-	return p.envPlan(ctx, KindEnvCreate, env, append([]HostSpec{req.Router}, req.Hosts...), vms)
+	if len(queued) > 0 {
+		msg += fmt.Sprintf(" (a queued job will fill dev slot %s)", strings.Join(queued, ", "))
+	}
+	return Environment{}, EnvProblem{Field: FieldSlot, Why: msg}
+}
+
+// chosenSlot is the environment req.Domain is created in when req names
+// its slot: the slot, if a new environment may take it (slotState), or the
+// environment of that domain already there.
+func (p Planner) chosenSlot(ctx context.Context, envs []Environment, vms []proxmox.VM, req EnvRequest) (Environment, error) {
+	reserved, err := p.reserved(ctx)
+	if err != nil {
+		return Environment{}, err
+	}
+	env, resumed, err := chosenEnv(envs, reserved, req)
+	if err != nil || resumed {
+		return env, err
+	}
+	switch held, err := p.slotHeld(ctx, env.Slot, vms); {
+	case err != nil:
+		return Environment{}, err
+	case held:
+		return Environment{}, slotRefused(slotHidden, env.Slot)
+	}
+	return env, nil
+}
+
+// slotState says whether a new environment may take a slot: one free
+// (Environment.Free), not one a queued job will fill (reserved lock keys),
+// and without VMs the user can't see.
+type slotState int
+
+const (
+	slotOpen slotState = iota
+	slotInUse
+	slotQueued
+	slotHidden
+)
+
+// freeState is env's slotState as far as envs and reserved tell: never
+// slotHidden.
+func freeState(env Environment, reserved map[string]bool) slotState {
+	switch {
+	case !env.Free():
+		return slotInUse
+	case reserved[slotLock(env.Slot.Name)]:
+		return slotQueued
+	}
+	return slotOpen
+}
+
+// slotState is env's slotState, asking Proxmox about VMs the user can't see
+// (slotHeld) only of a slot open otherwise.
+func (p Planner) slotState(ctx context.Context, env Environment, reserved map[string]bool, vms []proxmox.VM) (slotState, error) {
+	if st := freeState(env, reserved); st != slotOpen {
+		return st, nil
+	}
+	held, err := p.slotHeld(ctx, env.Slot, vms)
+	if held {
+		return slotHidden, nil
+	}
+	return slotOpen, err
 }
 
 // slotHeld is whether any VMID in slot's block is in use, listed or not:
@@ -128,6 +185,25 @@ func (p Planner) slotHeld(ctx context.Context, slot Slot, vms []proxmox.VM) (boo
 
 var errSlotHeld = errors.New("slot holds a VM")
 
+// OpenSlots splits envs' free slots, in order, into those a new environment
+// may take and those a queued job will fill (Planner.Reserved). An open slot
+// may still hold VMs the user can't see; only EnvCreate asks (slotHeld).
+func (p Planner) OpenSlots(ctx context.Context, envs []Environment) (open, queued []Slot, err error) {
+	reserved, err := p.reserved(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, e := range envs {
+		switch freeState(e, reserved) {
+		case slotQueued:
+			queued = append(queued, e.Slot)
+		case slotOpen:
+			open = append(open, e.Slot)
+		}
+	}
+	return open, queued, nil
+}
+
 // EnvAdd plans adding hosts to the environment with req.Domain. Hosts that
 // already exist there are resumed.
 func (p Planner) EnvAdd(ctx context.Context, req EnvRequest) (*Plan, error) {
@@ -135,18 +211,17 @@ func (p Planner) EnvAdd(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := oneRouter(env, req); err != nil {
+		return nil, err
+	}
 	hosts := req.Hosts
 	if req.Router.Host != "" {
-		// The existing router may be named again, to resume a failed create.
-		if _, exists := env.Host(req.Router.Host + "." + env.Domain); env.HasRouter() && !exists {
-			return nil, fmt.Errorf("%s already has a router", req.Domain)
-		}
 		hosts = append([]HostSpec{req.Router}, hosts...)
 	}
 	if len(hosts) == 0 {
 		return nil, errors.New("name at least one host to add")
 	}
-	return p.envPlan(ctx, KindEnvAdd, env, hosts, vms)
+	return p.envPlan(ctx, KindEnvAdd, env, hosts, req.Router.Host != "", vms)
 }
 
 func (p Planner) findEnv(ctx context.Context, domain string) (Environment, []proxmox.VM, error) {
@@ -160,23 +235,24 @@ func (p Planner) findEnv(ctx context.Context, domain string) (Environment, []pro
 	if e, ok := EnvByDomain(envs, domain); ok {
 		return e, vms, nil
 	}
-	return Environment{}, nil, fmt.Errorf("no dev slot holds %s; create it first", domain)
+	return Environment{}, nil, noEnv(domain)
 }
 
-// envPlan plans hosts into env. The first router-kind host gets the slot's
-// WAN and LAN bridges; every other host the LAN.
-func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts []HostSpec, vms []proxmox.VM) (*Plan, error) {
+// envPlan plans hosts into env; with routerFirst, hosts[0] is the request's
+// router. The first router-kind host gets the slot's WAN and LAN bridges,
+// other hosts the LAN; checkHosts blocks a second router. What checkHosts
+// finds blocks a host; so does what only the cluster tells.
+func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts []HostSpec, routerFirst bool, vms []proxmox.VM) (*Plan, error) {
 	images := BaseImages(vms)
 	dnsChoice := env.DNS()
-	dnsAddr, err := p.dnsAddress(env, dnsChoice)
+	dnsAddr, err := env.DNSAddress(dnsChoice)
 	if err != nil {
-		dnsChoice, dnsAddr = DNSRouter, p.gateway() // the chosen host is gone: fall back for new hosts
+		dnsChoice, dnsAddr = DNSRouter, env.Gateway // the chosen host is gone: fall back for new hosts
 	}
-	plan := &Plan{Kind: kind, Config: ConfigHash(kind, p.Cfg),
-		Locks: []string{"slot:" + env.Slot.Name, "domain:" + env.Domain}}
-	used := env.UsedOctets()
-	claimed := map[int]string{} // octet -> host, from this request
-	seen := map[string]bool{}
+	plan := p.envPlanIn(kind, env.Slot, env.Domain)
+	problems := checkHosts(env, images, hosts, routerFirst)
+	// Explicit addresses are claimed first, so picked ones avoid them.
+	used, _ := claimOctets(env, hosts)
 	taken := map[int]bool{}
 	for _, h := range env.Hosts {
 		taken[h.VMID] = true
@@ -193,42 +269,25 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		imageCfg[im.VMID] = c
 		return c, nil
 	}
-	// Explicit addresses first, so picked ones avoid them.
-	for _, h := range hosts {
-		if existing, ok := env.Host(h.Host + "." + env.Domain); ok && existing.Notes.IP != "" {
-			continue // a resumed host keeps its address
-		}
-		if h.Octet != 0 && !used[h.Octet] && claimed[h.Octet] == "" {
-			claimed[h.Octet] = h.Host
-		}
-	}
-	for o := range claimed {
-		used[o] = true
-	}
-	for _, h := range hosts {
+	for i, h := range hosts {
 		name := h.Host + "." + env.Domain
 		it := Item{Name: name, Host: h.Host, Pool: env.Slot.Pool}
 		plan.Items = append(plan.Items, it)
 		ip := &plan.Items[len(plan.Items)-1]
-		if seen[h.Host] {
-			ip.Blocked = "named twice"
-			continue
+		im, found := Newest(images, h.Family)
+		if found {
+			ip.Source, ip.Node = &Source{VMID: im.VMID, Node: im.Node, Name: im.Name}, im.Node
 		}
-		seen[h.Host] = true
-		im, ok := Newest(images, h.Family)
-		if !ok {
-			ip.Blocked = fmt.Sprintf("no usable base image of family %q", h.Family)
-			continue
-		}
-		ip.Source, ip.Node = &Source{VMID: im.VMID, Node: im.Node, Name: im.Name}, im.Node
 		existing, resumed := env.Host(name)
+		if resumed {
+			ip.VMID, ip.Node = existing.VMID, existing.Node
+		}
+		if why := problems[i].Why; why != "" {
+			ip.Blocked = why
+			continue
+		}
 		switch {
 		case resumed:
-			ip.VMID, ip.Node = existing.VMID, existing.Node
-			if why := resumeMismatch(existing, im, h.Family); why != "" {
-				ip.Blocked = name + " already exists " + why
-				continue
-			}
 		case len(vmsNamed(vms, name)) > 0:
 			ip.Blocked = "a VM named " + name + " already exists outside " + env.Slot.Pool
 			continue
@@ -252,10 +311,6 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		}
 		switch im.Kind {
 		case ImageRouter:
-			if env.HasRouter() && !resumed || slices.ContainsFunc(plan.Items[:len(plan.Items)-1], func(o Item) bool { return o.NICs["net1"] != "" }) {
-				ip.Blocked = "an environment has one router"
-				continue
-			}
 			if cfg["net1"] == "" {
 				ip.Blocked = "base image " + im.Name + " has one NIC; a router needs two (WAN on net0, LAN on net1)"
 				continue
@@ -275,18 +330,11 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 			ip.Steps = ip.Steps[1:]
 		}
 		if im.Kind == ImageWindows || im.Kind == ImageLinux {
-			if im.Kind == ImageWindows && len(h.Host) > MaxWindowsHostname {
-				ip.Blocked = fmt.Sprintf("Windows host names are at most %d characters", MaxWindowsHostname)
-				continue
-			}
 			octet := LastOctet(existing.Notes.IP)
 			switch {
 			case resumed && octet != 0:
-			case h.Octet != 0 && claimed[h.Octet] == h.Host:
+			case h.Octet != 0: // checkHosts found it claimed by this host
 				octet = h.Octet
-			case h.Octet != 0:
-				ip.Blocked = fmt.Sprintf("address .%d is already taken in %s", h.Octet, env.Domain)
-				continue
 			default:
 				o, ok := PickOctet(env.Domain, h.Host, used)
 				if !ok {
@@ -297,7 +345,7 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 			}
 			addr := p.Cfg.Environments.Subnet + "." + strconv.Itoa(octet)
 			notes.IP, notes.OS = addr, im.Kind
-			ip.Guest = &Guest{OS: im.Kind, Hostname: h.Host, Domain: env.Domain, IP: addr, Prefix: HostPrefix, Gateway: p.gateway(), DNS: dnsAddr}
+			ip.Guest = &Guest{OS: im.Kind, Hostname: h.Host, Domain: env.Domain, IP: addr, Prefix: HostPrefix, Gateway: env.Gateway, DNS: dnsAddr}
 			if err := ip.Guest.Check(); err != nil {
 				ip.Blocked = err.Error()
 				continue
@@ -333,7 +381,8 @@ func orString(a, b string) string {
 }
 
 // EnvDNS plans pointing every Windows and Linux host of an environment at
-// req.DNS, and recording the choice on every host.
+// req.DNS, and recording the choice on every host. Each item keeps the DNS
+// its host had (DNSWas).
 func (p Planner) EnvDNS(ctx context.Context, req EnvRequest) (*Plan, error) {
 	env, _, err := p.findEnv(ctx, req.Domain)
 	if err != nil {
@@ -343,19 +392,20 @@ func (p Planner) EnvDNS(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if choice == "" {
 		choice = DNSRouter
 	}
-	addr, err := p.dnsAddress(env, choice)
+	addr, err := env.DNSAddress(choice)
 	if err != nil {
 		return nil, err
 	}
-	plan := &Plan{Kind: KindEnvDNS, Config: ConfigHash(KindEnvDNS, p.Cfg),
-		Locks: []string{"slot:" + env.Slot.Name, "domain:" + env.Domain}}
+	plan := p.envPlanIn(KindEnvDNS, env.Slot, env.Domain)
 	for _, h := range env.Hosts {
 		notes := h.Notes
 		notes.DNS = choice
-		it := Item{Name: h.Name, Host: h.Host, VMID: h.VMID, Node: h.Node, Tags: h.Tags, Notes: &notes, Steps: []Step{StepLabel}}
+		was := &DNSServer{Choice: h.Notes.DNS}
+		was.Addr, _ = env.DNSAddress(was.Choice)
+		it := Item{Name: h.Name, Host: h.Host, VMID: h.VMID, Node: h.Node, Tags: h.Tags, Notes: &notes, DNSWas: was, Steps: []Step{StepLabel}}
 		if h.servesDNS() {
 			it.Guest = &Guest{OS: h.Notes.OS, Hostname: h.Host, Domain: env.Domain, IP: h.Notes.IP, Prefix: HostPrefix,
-				Gateway: p.gateway(), DNS: addr, DNSOnly: true}
+				Gateway: env.Gateway, DNS: addr, DNSOnly: true}
 			if err := it.Guest.Check(); err != nil {
 				it.Blocked = err.Error()
 			}

@@ -313,7 +313,7 @@ func TestPanelFragments(t *testing.T) {
 	pb := page.Body.String()
 	lacks(t, "panel job page", pb, "<!doctype", "<header")
 	contains(t, "panel job page", pb,
-		`<div class="sheet" id="job-live" aria-labelledby="job-title" data-events="/events/jobs/`+id+`?after=0">`,
+		`<div class="sheet" id="job-live" aria-labelledby="job-title" `+h.dataNow()+` data-events="/events/jobs/`+id+`?after=0">`,
 		`<a class="btn ghost first" href="/logs/`+id+`">Log</a>`)
 
 	// A second click of the panel's confirm lands on the same job.
@@ -407,7 +407,7 @@ func TestGuidanceInPlace(t *testing.T) {
 	h.start(stale)
 	h.finish(stale, store.Outcome{Status: store.StatusStale})
 	body = h.get(&op, "/logs/"+itoa(stale)).Body.String()
-	contains(t, "stale job", body, `<span class="st b s-stale">`, "Preview again</a>", `href="/power?action=start&amp;teams=3"`, "not run</span>")
+	contains(t, "stale job", body, `<span class="st b s-stale">`, "Preview again</a>", `href="/power?action=start&amp;teams=3"`, "Not run</span>")
 
 	// Empty states say so in few words.
 	empty := newHarness(t)

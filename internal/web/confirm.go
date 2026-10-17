@@ -22,7 +22,7 @@ import (
 //   - the posted inputs and fingerprint match that preview's (no edited forms);
 //   - the new plan's fingerprint matches, so the cluster hasn't changed; else,
 //     or past previewTTL, the new plan is shown for re-checking;
-//   - the team range was typed, where required.
+//   - the team range or domain was typed, where required.
 //
 // The job consumes the preview in the transaction that stores it, so a
 // double-clicked confirm makes one job.
@@ -31,7 +31,7 @@ func (s *Server) opConfirm(op operation) http.Handler {
 		ctx := r.Context()
 		u, _ := auth.UserFrom(ctx)
 		form := postedForm(r)
-		in := formInputs(op.Kind, form)
+		in := op.scope(formInputs(op.Kind, form))
 		if err := in.Validate(); err != nil {
 			s.refuseConfirm(w, r, op, "the inputs are invalid: "+err.Error())
 			return
@@ -96,14 +96,14 @@ func (s *Server) opConfirm(op operation) http.Handler {
 			return
 		}
 		if op.Kind.TypedConfirm() {
-			typed := strings.TrimSpace(form.Get(fieldTyped))
-			if typed != in.Teams {
-				msg := fmt.Sprintf("To confirm, type the team range exactly as shown: %s.", in.Teams)
+			typed, want, what := strings.TrimSpace(form.Get(fieldTyped)), in.Typed(), in.TypedWhat()
+			if typed != want {
+				msg := fmt.Sprintf("To confirm, type %s exactly as shown: %s.", what, want)
 				if typed != "" {
-					msg = fmt.Sprintf("You typed %q, which isn't the team range. Type it exactly as shown: %s.", typed, in.Teams)
+					msg = fmt.Sprintf("You typed %q, which isn't %s. Type it exactly as shown: %s.", typed, what, want)
 				}
 				s.showPreview(w, r, http.StatusUnprocessableEntity, op, in, plan, allTeams, previewOptions{nonce: nonce, retryOf: retryOf, fromGrid: grid, problem: &banner{
-					Level: "bad", Title: "Type the team range to confirm", Text: []string{msg + " Nothing was submitted."},
+					Level: "bad", Title: "Type " + what + " to confirm", Text: []string{msg + " Nothing was submitted."},
 				}})
 				return
 			}

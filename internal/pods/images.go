@@ -219,6 +219,8 @@ type RegisterCandidate struct {
 	Name, Node string
 	Family     string // suggested (see RegisterCandidates); "" if nothing says
 	Kind       string // its family's kind, or by its OS type; "" if neither says
+	OSType     string // its Proxmox ostype
+	Base       string // the version an edit copy was made from (see ImageEdit), if its notes say
 	Notes      string
 	Blocked    string // why it can't be registered as it is (see ImageRegister)
 }
@@ -255,9 +257,9 @@ func KindForOSType(ostype string) string {
 
 // RegisterCandidates lists the VMs in the images pool that aren't templates,
 // busy (a lock, such as a register's clone in progress) or registered
-// already (an image's Source: its row's New version copies it in again;
-// images must carry their Source, see ReadNotes), by VMID, reading each
-// one's config as the user. Each gets a family: the one its notes say an
+// already (an image's Source: its family page's New version copies it in
+// again; images must carry their Source, see ReadNotes), by VMID, reading
+// each one's config as the user. Each gets a family: the one its notes say an
 // edit copy came from, else SuggestFamily; a kind; and why ImageRegister
 // would refuse it, if it would.
 func (p Planner) RegisterCandidates(ctx context.Context, vms []proxmox.VM, images []BaseImage) []RegisterCandidate {
@@ -278,8 +280,9 @@ func (p Planner) RegisterCandidates(ctx context.Context, vms []proxmox.VM, image
 		if err == nil {
 			c.Notes = UserNotes(cfg["description"])
 		}
+		c.OSType = cfg["ostype"]
 		if f, _, ok := ParseImageName(baseNote(cfg)); ok {
-			c.Family = f
+			c.Family, c.Base = f, baseNote(cfg)
 		}
 		if c.Family == "" {
 			c.Family = SuggestFamily(c.Name)
@@ -287,7 +290,7 @@ func (p Planner) RegisterCandidates(ctx context.Context, vms []proxmox.VM, image
 		if latest, ok := Latest(images, c.Family); ok {
 			c.Kind = latest.Kind
 		} else {
-			c.Kind = KindForOSType(cfg["ostype"])
+			c.Kind = KindForOSType(c.OSType)
 		}
 		if c.Blocked == "" && err == nil {
 			c.Blocked = agentBlock(srcs[i], cfg, c.Kind)

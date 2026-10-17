@@ -243,18 +243,25 @@ func (s *Server) volunteerRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /vm/{team}/{host}", s.require(http.HandlerFunc(s.cellPage)))
 
 	for _, op := range operations {
-		mux.Handle("GET "+op.Path, s.require(s.opForm(op)))
+		mux.Handle("GET "+op.Path, s.require(s.inEnv(op, s.opForm)))
 		if op.Kind == pods.KindReset || op.Kind == pods.KindSnapshot {
 			// The grid's "Reset to snapshot…" and "Take snapshot…" post the ticked VMs
 			// here.
 			mux.Handle("POST "+op.Path, s.require(s.opForm(op)))
 		}
-		mux.Handle("POST "+op.Path+"/preview", s.require(s.opPreview(op)))
-		mux.Handle("POST "+op.Path+"/confirm", s.require(s.opConfirm(op)))
+		mux.Handle("POST "+op.Path+"/preview", s.require(s.inEnv(op, s.opPreview)))
+		mux.Handle("POST "+op.Path+"/confirm", s.require(s.inEnv(op, s.opConfirm)))
+		if op.Kind == pods.KindEnvAdd || op.Kind == pods.KindEnvDNS {
+			s.oldEnvRoutes(mux, op)
+		}
 	}
 
-	mux.Handle("GET /environments", s.require(http.HandlerFunc(s.environmentsPage)))
+	mux.Handle("GET "+envsPath, s.require(http.HandlerFunc(s.environmentsPage)))
 	mux.Handle("GET /images", s.require(http.HandlerFunc(s.imagesPage)))
+	mux.Handle("GET "+familiesPath+"{family}", s.require(http.HandlerFunc(s.familyPage)))
+	// A family's page was /images/{family}; the image operations' paths are
+	// more specific, so they still win over an old link's.
+	mux.Handle("GET /images/{family}", s.require(http.HandlerFunc(s.oldFamilyPage)))
 
 	// Job history lives at /logs so nobody looks there to start something.
 	mux.Handle("GET /logs", s.require(http.HandlerFunc(s.jobsPage)))

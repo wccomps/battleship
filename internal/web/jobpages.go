@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,12 +13,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/auth"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
-	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/status"
 	"github.com/wccomps/battleship/internal/store"
 )
@@ -67,33 +69,26 @@ type opLabel struct {
 
 // opLabelOf names the operation of a job of kind with inputs in.
 func opLabelOf(kind string, in jobs.Inputs) opLabel {
-	switch pods.Kind(kind) {
-	case pods.KindPower:
-		return opLabel{Icon: in.Action, Label: powerLabel(in.Action)}
-	case pods.KindReset:
-		return opLabel{Icon: "reset", Label: "Reset to snapshot", Detail: in.Snapshot}
-	case pods.KindSnapshot:
-		return opLabel{Icon: "snapshot", Label: "Take snapshot", Detail: in.Snapshot}
-	case pods.KindDeploy:
-		return opLabel{Icon: "deploy", Label: "Deploy", Detail: strings.TrimPrefix(in.Pattern, "*.")}
-	case pods.KindTeardown:
-		return opLabel{Icon: "teardown", Label: "Teardown"}
-	case pods.KindEnvCreate:
-		return opLabel{Icon: "deploy", Label: "Create environment", Detail: in.Domain}
-	case pods.KindEnvAdd:
-		return opLabel{Icon: "deploy", Label: "Add hosts", Detail: in.Domain}
-	case pods.KindEnvDNS:
-		return opLabel{Icon: "reset", Label: "Set DNS", Detail: in.Domain + " → " + in.DNS}
-	case pods.KindImageRegister:
-		return opLabel{Icon: "deploy", Label: "Register base image", Detail: in.Family}
-	case pods.KindImageEdit:
-		return opLabel{Icon: "deploy", Label: "Open for editing", Detail: in.Family}
-	case pods.KindImageDeprecate:
-		return opLabel{Icon: "reset", Label: "Deprecate", Detail: in.Image}
-	case pods.KindImageDelete:
-		return opLabel{Icon: "teardown", Label: "Delete base image", Detail: in.Image}
+	op, ok := operationFor(pods.Kind(kind))
+	if !ok {
+		return opLabel{Icon: kind, Label: kind}
 	}
-	return opLabel{Icon: kind, Label: kind}
+	l := opLabel{Icon: kind, Label: cmp.Or(op.Label, op.Title)}
+	switch {
+	case op.Kind == pods.KindPower:
+		l.Icon, l.Label = in.Action, powerLabel(in.Action)
+	case op.Kind == pods.KindReset, op.Kind == pods.KindSnapshot:
+		l.Detail = in.Snapshot
+	case op.Kind == pods.KindDeploy:
+		l.Detail = strings.TrimPrefix(in.Pattern, "*.")
+	case op.Kind == pods.KindEnvDNS:
+		l.Detail = in.Domain + " → " + in.DNS
+	case op.Section == sectionEnvironments:
+		l.Detail = in.Domain
+	case op.Section == sectionImages:
+		l.Detail = cmp.Or(in.Image, in.Family)
+	}
+	return l
 }
 
 func lookOf(looks map[string]statusLook, status string) statusLook {
@@ -315,10 +310,22 @@ type jobView struct {
 	Queued     string  // pending and waiting for no job: freeWorker
 	Items      jobItems
 	Live       bool // the job is active: the page follows it
+	// Elapsed is how long it has run ("3:12") or ran; Since, while it runs,
+	// is when it started in Unix ms, from which the script keeps it current.
+	Elapsed string
+	Since   int64
+	// Now is the server's clock in Unix ms when the page was drawn: the
+	// script reckons running times from it, not the browser's clock.
+	Now int64
+	// Open is where a finished environment or image job's result is: the
+	// environment or the family.
+	Open *link
+	// LogOpen unfolds the log: a line or the job failed.
+	LogOpen    bool
 	CanCancel  bool
 	AskCancel  bool // the job could be cancelled, but not by this viewer
 	CanRetry   bool
-	RetryN     int    // how many VMs a retry runs again
+	RetryLabel string // the button: "Retry 2 VMs", or "Retry the teardown" (pods.Kind.RetriedWhole)
 	RetryTip   string // what to know before retrying
 	RetryLock  string // why this viewer can't retry it: they lack its privilege
 	RetryFault string // why the job can't be retried at all, when its stored job can't be read
@@ -328,6 +335,9 @@ type jobView struct {
 	Events     []eventView
 	EventsHref string
 }
+
+// link is a button to a page.
+type link struct{ Href, Label string }
 
 // summaryView is what a finished job's summary adds to its items.
 type summaryView struct {
@@ -371,9 +381,17 @@ func (t jobItems) TallyText() string {
 type jobItemView struct {
 	Name  string
 	VMID  string
-	Step  string     // the last step it reported
 	Steps []stepView // its planned steps and how far it got; none if the plan can't be read
-	Look  statusLook
+	// Look is its status; a done VM's says its outcome and address, e.g.
+	// "Ready · 192.168.100.4".
+	Look statusLook
+	// Doing is a running VM's current step in words, and Note the info
+	// line it last logged on that step.
+	Doing, Note string
+	// For is how long it has been on that step ("2:31"), while the job
+	// runs; Since is when that step began, in Unix ms.
+	For   string
+	Since int64
 	Error string
 	Fold  bool // a done row the panel folds away
 
@@ -400,9 +418,73 @@ func (v jobItemView) StepsText() string {
 	return strings.Join(parts, ", ")
 }
 
+// stepDoing is each step in words, as a VM's current step.
+var stepDoing = map[pods.Step]string{
+	pods.StepClone:      "Cloning",
+	pods.StepNetwork:    "Setting the network",
+	pods.StepDiskLimits: "Setting disk limits",
+	pods.StepCDROM:      "Ejecting the install disc",
+	pods.StepSnapshot:   "Taking the snapshot",
+	pods.StepStart:      "Starting",
+	pods.StepStop:       "Stopping",
+	pods.StepDelete:     "Deleting",
+	pods.StepRollback:   "Rolling back",
+	pods.StepPower:      "Changing power",
+	pods.StepFreeDisks:  "Freeing leftover disks",
+	pods.StepLabel:      "Setting tags and notes",
+	pods.StepConvert:    "Making it a template",
+	pods.StepRetire:     "Deprecating the previous version",
+	pods.StepWaitAgent:  "Waiting for the guest agent",
+	pods.StepGuest:      "Setting up the guest",
+	pods.StepVerify:     "Checking the guest",
+}
+
+// powerDoing is a power step in words, by action.
+var powerDoing = map[string]string{"start": "Starting", "shutdown": "Shutting down", "stop": "Stopping", "reboot": "Rebooting"}
+
+// doingOf is step of it in words; a step without words reads as its name.
+func doingOf(step pods.Step, it pods.Item) string {
+	if w, ok := powerDoing[it.Action]; ok && step == pods.StepPower {
+		return w
+	}
+	if w, ok := stepDoing[step]; ok {
+		return w
+	}
+	return string(step)
+}
+
+// addressOf is the address a plan item sets or keeps, if known.
+func addressOf(it pods.Item) string {
+	switch {
+	case it.Guest != nil && it.Guest.IP != "":
+		return it.Guest.IP
+	case it.Notes != nil:
+		return it.Notes.IP
+	}
+	return ""
+}
+
+func capital(s string) string {
+	if s == "" {
+		return ""
+	}
+	r, n := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(r)) + s[n:]
+}
+
+// clockText is d as a clock: "0:07", "3:12", "1:02:09".
+func clockText(d time.Duration) string {
+	s := max(int(d/time.Second), 0)
+	if s >= 3600 {
+		return fmt.Sprintf("%d:%02d:%02d", s/3600, s/60%60, s%60)
+	}
+	return fmt.Sprintf("%d:%02d", s/60, s%60)
+}
+
 // itemSteps is an item's planned steps: each one's reported outcome, the next
-// running, the rest waiting. A done item's unreported steps weren't needed
-// (an already-deleted VM's stop), except in old jobs that kept no outcomes.
+// running unless one failed, the rest waiting. A done item's unreported
+// steps weren't needed (an already-deleted VM's stop), except in old jobs
+// that kept no outcomes.
 func itemSteps(planned []pods.Step, it store.Item) []stepView {
 	pips := map[string]string{"done": "done", "skipped": "skip", "failed": "fail", "interrupted": "int"}
 	out := make([]stepView, 0, len(planned))
@@ -413,6 +495,7 @@ func itemSteps(planned []pods.Step, it store.Item) []stepView {
 		switch {
 		case ok:
 			v.State = pips[got]
+			running = running && got != "failed"
 		case running:
 			v.State, running = "run", false
 		case it.Status == store.ItemDone && len(it.Steps) == 0:
@@ -477,12 +560,20 @@ func (s *Server) jobPage(w http.ResponseWriter, r *http.Request) {
 	}
 	v.Events = events
 	v.EventsHref = fmt.Sprintf("/events/jobs/%d?after=%d", id, last)
-	view := s.newView(w, r, fmt.Sprintf("Log #%d", id), "logs", v)
+	for _, ev := range events {
+		v.LogOpen = v.LogOpen || ev.Err
+	}
+	op, _ := operationFor(pods.Kind(snap.job.Kind))
+	view := s.newView(w, r, fmt.Sprintf("Log #%d", id), cmp.Or(op.Section, "logs"), v)
 	if v.Live {
-		view.Live = "live"
+		view.Live, view.Reload = "live", followEvery
 	}
 	s.render(w, r, http.StatusOK, "job", view)
 }
+
+// followEvery is how often, in seconds, an active job's page reloads itself
+// without the script, which follows the job's event stream instead.
+const followEvery = 5
 
 // jobID reads the job ID from the path, answering 404 itself if invalid.
 func (s *Server) jobID(w http.ResponseWriter, r *http.Request) (int64, bool) {
@@ -547,6 +638,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	j, items := snap.job, snap.items
 	now := s.now()
 	in := readInputs(j)
+	op, _ := operationFor(pods.Kind(j.Kind))
 	v := jobView{
 		CSRF:       auth.CSRFToken(ctx),
 		ID:         j.ID,
@@ -555,7 +647,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 		Who:        whoShort(j.CreatedBy),
 		By:         j.CreatedBy,
 		Role:       actsAs(j),
-		Home:       listPage(pods.Kind(j.Kind)),
+		Home:       listPage(jobs.Inputs{Kind: op.Kind, Domain: in.Domain}),
 		BackHref:   "/logs",
 		BackLabel:  "Logs",
 		Teams:      jobTeams(in),
@@ -571,7 +663,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	}
 	v.Asked = askedFacts(in)
 	if in.Kind.Teamless() {
-		v.Teamless, v.Asked = true, teamlessFacts(in)
+		v.Teamless, v.Asked = true, teamlessFacts(in, s.cfg.Environments.Pool)
 	}
 	v.Ran, v.RanAt = minuteTime(now, j.CreatedAt), "made "+clockTime(now, j.CreatedAt)
 	if j.StartedAt != nil {
@@ -581,8 +673,20 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 			v.RanAt += ", finished " + clockTime(now, *j.FinishedAt)
 		}
 	}
+	v.Now = now.UnixMilli()
+	switch {
+	case j.StartedAt == nil:
+	case j.FinishedAt != nil:
+		v.Elapsed = clockText(j.FinishedAt.Sub(*j.StartedAt))
+	case j.Status == store.StatusRunning:
+		v.Elapsed, v.Since = clockText(now.Sub(*j.StartedAt)), j.StartedAt.UnixMilli()
+	}
+	v.LogOpen = j.Status == store.StatusFailed || j.Status == store.StatusCompletedWithFailures
+	if j.Status == store.StatusSucceeded || j.Status == store.StatusCompletedWithFailures {
+		v.Open = op.result(in)
+	}
 	v.Summary = readSummary(j.Summary)
-	v.Items = jobItemsOf(j, items)
+	v.Items = jobItemsOf(j, items, now)
 	v.Headline = fleetHeadline(j.Kind, j.Status, items, v.Summary)
 
 	u, _ := auth.UserFrom(ctx)
@@ -610,46 +714,74 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 			v.RetryFault = sentence(err.Error())
 		default:
 			v.CanRetry = true
-			v.RetryN = len(retry.VMs)
-			v.RetryTip = fmt.Sprintf("Runs the job again for %s, after a preview.", countVMs(len(retry.VMs)))
+			n := len(retry.VMs)
+			v.RetryLabel = "Retry " + countVMs(n)
+			v.RetryTip = fmt.Sprintf("Runs the job again for its %s that didn't finish (%s), after a preview.", countVMs(n), retriedStatuses(items, retry.VMs))
+			if op, _ := operationFor(retry.Kind); retry.Kind.RetriedWhole() {
+				v.RetryLabel = "Retry the " + op.Noun
+				v.RetryTip = "Plans the " + op.Noun + " again, of what is left, after a preview."
+			}
 			if n := s.cfg.Retry.Rounds; n > 0 && j.Status == store.StatusCompletedWithFailures {
 				rounds := "1 automatic round"
 				if n != 1 {
 					rounds = fmt.Sprintf("%d automatic rounds", n)
 				}
-				v.RetryTip = "Battleship already tried them again by itself (" + rounds + "), so fix the cause first. " + v.RetryTip
+				v.RetryTip = "Battleship already tried its failed VMs again by itself (" + rounds + "; none for a missing privilege), so fix the cause first. " + v.RetryTip
 			}
 		}
 	}
 	if v.CanRetry {
 		v.StartAgain = ""
 	}
-	switch v.Home {
-	case "/images":
-		v.BackHref, v.BackLabel = v.Home, "Images"
-	case "/environments":
-		v.BackHref, v.BackLabel = v.Home, "Environments"
+	if op.Section != "" {
+		v.BackHref, v.BackLabel = v.Home, op.sectionName()
 	}
 	return v
+}
+
+// retriedStatuses counts the statuses of items named in vms, e.g. "1 failed,
+// 2 interrupted".
+func retriedStatuses(items []store.Item, vms []string) string {
+	n := map[string]int{}
+	var order []string
+	for _, it := range items {
+		if !slices.Contains(vms, it.Name) {
+			continue
+		}
+		if n[it.Status] == 0 {
+			order = append(order, it.Status)
+		}
+		n[it.Status]++
+	}
+	slices.Sort(order)
+	parts := make([]string, len(order))
+	for i, st := range order {
+		parts[i] = strconv.Itoa(n[st]) + " " + st
+	}
+	return strings.Join(parts, ", ")
 }
 
 // foldAbove is the VM count above which the panel folds done rows into one
 // line, and the pips and tally sum the table up.
 const foldAbove = 12
 
-// jobItemsOf is job j's VM table: rows (needing attention first), pips and
-// the tally by status. It is the same for every viewer.
-func jobItemsOf(j store.Job, items []store.Item) jobItems {
+// jobItemsOf is job j's VM table at now: rows (needing attention first),
+// pips and the tally by status. It is the same for every viewer.
+func jobItemsOf(j store.Job, items []store.Item, now time.Time) jobItems {
 	t := jobItems{JobID: j.ID}
 	var plan pods.Plan
 	_ = json.Unmarshal(j.Plan, &plan) // unreadable: the rows show no steps
-	planned := map[string][]pods.Step{}
+	planned := map[string]pods.Item{}
 	for _, it := range plan.Items {
-		planned[it.Name] = it.Steps
+		planned[it.Name] = it
 	}
+	op, _ := operationFor(pods.Kind(j.Kind))
+	done := cmp.Or(op.Done, "Done")
 	n := map[string]int{}
 	var order []string
 	for _, it := range items {
+		p := planned[it.Name]
+		steps := itemSteps(p.Steps, it)
 		st := it.Status
 		if n[st] == 0 {
 			order = append(order, st)
@@ -657,9 +789,24 @@ func jobItemsOf(j store.Job, items []store.Item) jobItems {
 		n[st]++
 		look := lookOf(itemLooks, st)
 		t.Pips = append(t.Pips, look.Pip)
-		t.Rows = append(t.Rows, jobItemView{
-			Name: it.Name, VMID: orDash(it.VMID), Step: it.Step, Steps: itemSteps(planned[it.Name], it), Look: look, Error: it.Error, status: st,
-		})
+		row := jobItemView{Name: it.Name, VMID: orDash(it.VMID), Steps: steps, Error: it.Error, status: st}
+		look.Label = capital(look.Label) // to match the step words, e.g. "Starting"
+		if st == store.ItemDone {
+			look.Label = done
+			if a := addressOf(p); a != "" {
+				look.Label += " · " + a
+			}
+		}
+		row.Look = look
+		for i, sv := range steps {
+			if sv.State == "run" {
+				row.Doing, row.Note = doingOf(p.Steps[i], p), it.Note
+			}
+		}
+		if st == store.ItemRunning && j.Status == store.StatusRunning && !it.StepAt.IsZero() {
+			row.For, row.Since = clockText(now.Sub(it.StepAt)), it.StepAt.UnixMilli()
+		}
+		t.Rows = append(t.Rows, row)
 	}
 	sort.SliceStable(t.Rows, func(a, b int) bool { return itemRank(t.Rows[a].status) < itemRank(t.Rows[b].status) })
 	sort.SliceStable(order, func(a, b int) bool { return itemRank(order[a]) < itemRank(order[b]) })
@@ -757,8 +904,8 @@ func readSummary(raw json.RawMessage) *summaryView {
 const eventBatch = 500
 
 // jobEventsAfter reads the job's log after event ID after, and the last ID
-// read (after if none). Like the CLI, it skips bare "already done" lines, but
-// their IDs still count.
+// read (after if none). It shows the events the CLI does (apply.Logged), but
+// the IDs of the rest still count.
 func (s *Server) jobEventsAfter(ctx context.Context, id, after int64) ([]eventView, int64, error) {
 	now := s.now()
 	var out []eventView
@@ -769,7 +916,7 @@ func (s *Server) jobEventsAfter(ctx context.Context, id, after int64) ([]eventVi
 		}
 		for _, ev := range evs {
 			after = ev.ID
-			if ev.Status == string(apply.EventSkipped) && ev.Message == "" || ev.Status == string(apply.EventStarted) {
+			if !apply.Logged(apply.EventStatus(ev.Status), ev.Message) {
 				continue
 			}
 			out = append(out, eventView{
@@ -939,7 +1086,8 @@ func actsAs(j store.Job) string {
 	return j.CreatedRole
 }
 
-// retryJob previews re-running a job for the VMs it didn't finish. Confirming
+// retryJob previews re-running a job for the VMs it didn't finish, or all of
+// it for a kind retried whole (pods.Kind.RetriedWhole). Confirming
 // goes through the operation's usual confirm and checks.
 func (s *Server) retryJob(w http.ResponseWriter, r *http.Request) {
 	snap, ok := s.jobOf(w, r)
@@ -963,9 +1111,16 @@ func (s *Server) retryJob(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "working out job "+strconv.FormatInt(id, 10)+"'s retry", err)
 		return
 	}
+	if op.Kind.OnEnvironment() {
+		if pods.CheckDomain(retry.Domain) != nil {
+			s.serverError(w, r, "working out job "+strconv.FormatInt(id, 10)+"'s retry", fmt.Errorf("its domain %q isn't one", retry.Domain))
+			return
+		}
+		op = op.at(retry.Domain)
+	}
 	plan, err := jobs.BuildPlan(ctx, s.planner(r.Context()), retry)
 	if err != nil {
-		s.renderForm(w, r, http.StatusUnprocessableEntity, op, retry, "Couldn't make a plan: "+sentence(proxmox.Describe(err)))
+		s.planRefused(w, r, op, retry, err)
 		return
 	}
 	s.showPreview(w, r, http.StatusOK, op, retry, plan, !op.Kind.Teamless() && s.coversAllTeams(ctx, plan.Teams), previewOptions{retryOf: id})
@@ -986,10 +1141,10 @@ func (s *Server) sharedJobSnap(ctx context.Context, id int64, need uint64) (jobS
 		if err != nil {
 			return jobSnap{}, err
 		}
-		// Every viewer's VM table is the same and has no time words that go stale:
-		// render it once.
+		// Every viewer's VM table is the same: render it once. Its times go
+		// stale, but each carries when it began, from which the script ticks.
 		var v jobView
-		v.Items = jobItemsOf(snap.job, snap.items)
+		v.Items = jobItemsOf(snap.job, snap.items, s.now())
 		snap.itemsHTML, err = fragment("job", "job-items", v)
 		return snap, err
 	})

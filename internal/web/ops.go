@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"net/http"
 	"net/url"
@@ -13,30 +14,78 @@ import (
 	"github.com/wccomps/battleship/internal/pods"
 )
 
-// operation is something volunteers do to team VMs: a form (GET Path), a
-// preview (POST Path/preview) and a confirm (POST Path/confirm).
+// operation is something volunteers do to team VMs, environments or base
+// images: a form (GET Path), a preview (POST Path/preview) and a confirm
+// (POST Path/confirm).
 type operation struct {
 	Kind  pods.Kind
 	Path  string // e.g. "/reset"
-	Title string // e.g. "Deploy": the form's heading, and the header button for deploy and teardown
+	Title string // e.g. "Deploy": the form's heading
+	// Label names its jobs where Title doesn't read as one: "Reset to
+	// snapshot", not "Reset".
+	Label string
+	Icon  string // its icon (opIcon)
 	Noun  string // e.g. "reset", for the confirm's summary: "reset of team 01"
+	Lead  string // the header button of deploy and teardown, which act on whole teams
+	// Section is the page an image or environment operation belongs to:
+	// its nav entry, and where its pages close to (listPage).
+	Section string
+	// Doing names it as what a privilege line says the user can't do:
+	// "Adding hosts needs …" (lacksLine).
+	Doing string
+	// Done is how a VM its job finished reads; "" is "Done".
+	Done string
+	// Machines is whether its form has machine rows (envForm); Formless,
+	// whether it has no form, and opens on its review.
+	Machines, Formless bool
+	// domain is the environment an operation on one (its Path has {domain})
+	// was opened for: see at.
+	domain string
 }
+
+const (
+	sectionImages       = "images"
+	sectionEnvironments = "environments"
+)
 
 // operations are the operation pages; the header shows deploy and teardown in
 // this order.
 var operations = []operation{
-	{Kind: pods.KindPower, Path: "/power", Title: "Power", Noun: "power action"},
-	{Kind: pods.KindReset, Path: "/reset", Title: "Reset", Noun: "reset"},
-	{Kind: pods.KindSnapshot, Path: "/snapshot", Title: "Take snapshot", Noun: "snapshot"},
-	{Kind: pods.KindDeploy, Path: "/deploy", Title: "Deploy", Noun: "deploy"},
-	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Noun: "teardown"},
-	{Kind: pods.KindEnvCreate, Path: "/environments/new", Title: "Create environment", Noun: "environment"},
-	{Kind: pods.KindEnvAdd, Path: "/environments/add", Title: "Add hosts", Noun: "new hosts"},
-	{Kind: pods.KindEnvDNS, Path: "/environments/dns", Title: "Set DNS", Noun: "DNS change"},
-	{Kind: pods.KindImageRegister, Path: "/images/register", Title: "Register base image", Noun: "registration"},
-	{Kind: pods.KindImageEdit, Path: "/images/edit", Title: "Open for editing", Noun: "working copy"},
-	{Kind: pods.KindImageDeprecate, Path: "/images/deprecate", Title: "Deprecate base image", Noun: "deprecation"},
-	{Kind: pods.KindImageDelete, Path: "/images/delete", Title: "Delete base image", Noun: "deletion"},
+	{Kind: pods.KindPower, Path: "/power", Title: "Power", Icon: "shutdown", Noun: "power action"},
+	{Kind: pods.KindReset, Path: "/reset", Title: "Reset", Label: "Reset to snapshot", Icon: "reset", Noun: "reset"},
+	{Kind: pods.KindSnapshot, Path: "/snapshot", Title: "Take snapshot", Icon: "snapshot", Noun: "snapshot"},
+	{Kind: pods.KindDeploy, Path: "/deploy", Title: "Deploy", Icon: "deploy", Noun: "deploy", Lead: "Deploy teams", Done: "Ready"},
+	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Icon: "teardown", Noun: "teardown", Lead: "Tear down teams", Done: "Deleted"},
+	{Kind: pods.KindEnvCreate, Path: "/environments/new", Title: "Create environment", Icon: "deploy", Noun: "environment",
+		Section: sectionEnvironments, Doing: "Creating an environment", Done: "Ready", Machines: true},
+	{Kind: pods.KindEnvAdd, Path: "/environments/{domain}/add", Title: "Add hosts", Icon: "deploy", Noun: "new hosts",
+		Section: sectionEnvironments, Doing: "Adding hosts", Done: "Ready", Machines: true},
+	{Kind: pods.KindEnvDNS, Path: "/environments/{domain}/dns", Title: "Set DNS", Icon: "reset", Noun: "DNS change",
+		Section: sectionEnvironments, Doing: "Setting DNS"},
+	{Kind: pods.KindEnvTeardown, Path: "/environments/{domain}/teardown", Title: "Tear down", Icon: "teardown", Noun: "teardown",
+		Section: sectionEnvironments, Doing: "Tearing down an environment", Done: "Deleted", Formless: true},
+	{Kind: pods.KindImageRegister, Path: "/images/register", Title: "Register base image", Icon: "deploy", Noun: "registration",
+		Section: sectionImages, Doing: "Registering", Done: "Ready"},
+	{Kind: pods.KindImageEdit, Path: "/images/edit", Title: "Open for editing", Icon: "deploy", Noun: "working copy",
+		Section: sectionImages, Done: "Ready"},
+	{Kind: pods.KindImageDeprecate, Path: "/images/deprecate", Title: "Deprecate base image", Label: "Deprecate", Icon: "reset", Noun: "deprecation",
+		Section: sectionImages, Doing: "Deprecating"},
+	{Kind: pods.KindImageDelete, Path: "/images/delete", Title: "Delete base image", Icon: "teardown", Noun: "deletion",
+		Section: sectionImages, Doing: "Deleting", Done: "Deleted"},
+}
+
+// nav is the nav entry its pages mark current: its section, or else its
+// kind, which marks the header's Lead button for deploy and teardown.
+func (o operation) nav() string { return cmp.Or(o.Section, string(o.Kind)) }
+
+// sectionName is its section's name, as the nav says it.
+func (o operation) sectionName() string {
+	for _, n := range nav(&auth.User{}) {
+		if n.Key == o.Section {
+			return n.Label
+		}
+	}
+	return ""
 }
 
 // page reports whether the operation opens as its own page rather than in
@@ -47,6 +96,25 @@ var operations = []operation{
 // Image and environment operations have nothing to pick in the grid.
 func (o operation) page() bool {
 	return o.Kind == pods.KindDeploy || o.Kind == pods.KindTeardown || o.Kind.Teamless()
+}
+
+// at is an operation on one environment (pods.Kind.OnEnvironment, its Path
+// /environments/{domain}/...) opened for domain, a checked domain
+// (pods.CheckDomain): its paths name it, and it overrides any domain its
+// forms post.
+func (o operation) at(domain string) operation {
+	if o.Kind.OnEnvironment() && o.domain == "" {
+		o.Path, o.domain = strings.Replace(o.Path, "{domain}", domain, 1), domain
+	}
+	return o
+}
+
+// scope fixes in's domain to the one the operation was opened for.
+func (o operation) scope(in jobs.Inputs) jobs.Inputs {
+	if o.domain != "" {
+		in.Domain = o.domain
+	}
+	return in
 }
 
 func operationFor(kind pods.Kind) (operation, bool) {
@@ -74,10 +142,11 @@ const (
 	fieldAction      = "action"      // power
 	fieldNonce       = "nonce"       // confirm: names the preview
 	fieldFingerprint = "fingerprint"
-	fieldTyped       = "typed"    // confirm: the team range, typed
+	fieldTyped       = "typed"    // confirm: the team range or domain, typed (jobs.Inputs.Typed)
 	fieldRetryOf     = "retry_of" // confirm: the job a retry preview retries; shown only, never trusted
 	fieldFrom        = "from"     // "grid": the grid's form, which sends ticked VMs and no teams
 	fieldDomain      = "domain"
+	fieldSlot        = "slot"      // env-create, env-teardown: the slot's two digits
 	fieldRouter      = "router"    // name=family
 	fieldEnvHosts    = "env_hosts" // one name=family[:octet] per line
 	fieldDNS         = "dns"
@@ -85,6 +154,14 @@ const (
 	fieldFamily      = "family"
 	fieldImageKind   = "image_kind"
 	fieldImage       = "image"
+	// The environment forms' router and host rows (envForm), read into
+	// Router and EnvHosts when present.
+	fieldRouterName  = "router_name"
+	fieldRouterImage = "router_image"
+	fieldHostName    = "host_name"
+	fieldHostImage   = "host_image"
+	fieldHostOctet   = "host_octet"
+	fieldMore        = "more" // asks the form again with more host rows (blankRows)
 	fromGridValue    = "grid"
 	yes              = "yes"
 )
@@ -97,10 +174,25 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 	if kind.Teamless() {
 		in := jobs.Inputs{Kind: kind, Domain: strings.TrimSpace(form.Get(fieldDomain)), Router: strings.TrimSpace(form.Get(fieldRouter)),
 			DNS: strings.TrimSpace(form.Get(fieldDNS)), Family: strings.TrimSpace(form.Get(fieldFamily)),
-			ImageKind: strings.TrimSpace(form.Get(fieldImageKind)), Image: strings.TrimSpace(form.Get(fieldImage))}
+			ImageKind: strings.TrimSpace(form.Get(fieldImageKind)), Image: strings.TrimSpace(form.Get(fieldImage)),
+			Slot: slotName(form.Get(fieldSlot)), VMs: jobs.SplitList(strings.Join(form[fieldVMs], ","))}
 		for _, line := range strings.Split(form.Get(fieldEnvHosts), "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				in.EnvHosts = append(in.EnvHosts, line)
+			}
+		}
+		if form.Has(fieldRouterImage) {
+			in.Router = ""
+			if r := rawRow(form.Get(fieldRouterName), form.Get(fieldRouterImage), ""); r.Image != "" {
+				in.Router = r.line()
+			}
+		}
+		if form.Has(fieldHostName) {
+			in.EnvHosts = nil
+			for _, row := range postedRows(form) {
+				if line := row.line(); line != "" {
+					in.EnvHosts = append(in.EnvHosts, line)
+				}
 			}
 		}
 		in.VMID, _ = strconv.Atoi(strings.TrimSpace(form.Get(fieldVMID)))
@@ -145,7 +237,7 @@ type field struct{ Name, Value string }
 func inputFields(in jobs.Inputs) []field {
 	if in.Kind.Teamless() {
 		var fs []field
-		for _, f := range []field{{fieldDomain, in.Domain}, {fieldRouter, in.Router}, {fieldEnvHosts, strings.Join(in.EnvHosts, "\n")},
+		for _, f := range []field{{fieldDomain, in.Domain}, {fieldSlot, in.Slot}, {fieldVMs, strings.Join(in.VMs, ",")}, {fieldRouter, in.Router}, {fieldEnvHosts, strings.Join(in.EnvHosts, "\n")},
 			{fieldDNS, in.DNS}, {fieldFamily, in.Family}, {fieldImageKind, in.ImageKind}, {fieldImage, in.Image}} {
 			if f.Value != "" {
 				fs = append(fs, f)
@@ -203,11 +295,20 @@ func Normalize(in jobs.Inputs) jobs.Inputs {
 
 // formQuery is an operation's form URL prefilled with in, for "change" links.
 // A deploy's baseline box is always written, since the form ticks it when the
-// query is silent.
+// query is silent. An environment's form has its domain in the path; without
+// a valid one, it is the Environments page.
 func formQuery(op operation, in jobs.Inputs) string {
+	if op.Kind.OnEnvironment() && op.domain == "" {
+		if pods.CheckDomain(in.Domain) != nil {
+			return envsPath
+		}
+		op = op.at(in.Domain)
+	}
 	q := url.Values{}
 	for _, f := range inputFields(in) {
-		q.Set(f.Name, f.Value)
+		if f.Name != fieldDomain || !op.Kind.OnEnvironment() {
+			q.Set(f.Name, f.Value)
+		}
 	}
 	if in.Kind == pods.KindDeploy && in.NoSnapshot {
 		q.Set(fieldBaseline, "no")
@@ -257,14 +358,61 @@ func actor(u auth.User) string {
 	return u.Subject
 }
 
-// listPage is the page a job of kind belongs to, where closing its preview
-// or job page goes: Images or Environments for those, else the grid.
-func listPage(kind pods.Kind) string {
-	switch kind {
-	case pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete:
+// envsPath is the Environments page; envHref is an environment's block on it.
+const envsPath = "/environments"
+
+func envHref(domain string) string { return envsPath + "#" + domain }
+
+// listPage is the page a job with inputs in belongs to, where closing its
+// form, preview or job page goes: its operation's section (Images, or
+// Environments at the environment it acted on), else the grid.
+func listPage(in jobs.Inputs) string {
+	op, _ := operationFor(in.Kind)
+	switch op.Section {
+	case sectionImages:
 		return "/images"
-	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS:
-		return "/environments"
+	case sectionEnvironments:
+		if op.Kind.OnEnvironment() && pods.CheckDomain(in.Domain) == nil {
+			return envHref(in.Domain)
+		}
+		return envsPath
 	}
 	return "/"
+}
+
+// result is the page a finished job of op with inputs in shows its work
+// on: its environment or image family; nil for a team job, and for a
+// teardown, whose work is gone.
+func (o operation) result(in jobs.Inputs) *link {
+	switch {
+	case o.Kind.TearsDown():
+	case o.Section == sectionEnvironments && pods.CheckDomain(in.Domain) == nil:
+		return &link{envHref(in.Domain), "Open " + in.Domain}
+	case o.Section == sectionImages:
+		family := in.Family
+		if f, _, ok := pods.ParseImageName(in.Image); ok && family == "" {
+			family = f
+		}
+		if pods.CheckFamily(family) == nil {
+			return &link{familyHref(family), "Open " + family}
+		}
+	}
+	return nil
+}
+
+func nth(vs []string, i int) string {
+	if i < len(vs) {
+		return vs[i]
+	}
+	return ""
+}
+
+// slotName is a typed slot as its two-digit name ("2" is "02"); anything
+// but 1-99 is kept, trimmed, for validation to refuse.
+func slotName(typed string) string {
+	typed = strings.TrimSpace(typed)
+	if n, err := strconv.Atoi(typed); err == nil && n >= 1 && n <= 99 {
+		return pods.SlotName(n)
+	}
+	return typed
 }

@@ -83,7 +83,10 @@ func TestRegisterCandidates(t *testing.T) {
 	if c := got[1]; c.Kind != ImageLinux || !strings.Contains(c.Blocked, "guest agent") {
 		t.Errorf("303 = %+v, want linux, blocked for no guest agent", c)
 	}
-	if c := got[2]; c.Family != "alder" || c.Kind != ImageLinux || c.Blocked != "" {
+	if c := got[1]; c.OSType != "l26" || c.Base != "" {
+		t.Errorf("303 = %+v, want OS type l26 and no base", c)
+	}
+	if c := got[2]; c.Family != "alder" || c.Base != "alder-v1" || c.Kind != ImageLinux || c.Blocked != "" {
 		t.Errorf("304 = %+v, want family alder from its notes", c)
 	}
 }

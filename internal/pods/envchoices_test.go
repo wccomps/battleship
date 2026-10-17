@@ -11,7 +11,6 @@ import (
 // ones that pass its input check (router, or a lower-case host name) and
 // that EnvDNS accepts. Hosts' names and notes are anyone's to write.
 func TestPropDNSChoices(t *testing.T) {
-	p := NewPlanner(nil, envConfig())
 	names := []string{"teak", "oak", "DC", "router", "Alder"}
 	rapid.Check(t, func(t *rapid.T) {
 		env := Environment{Domain: "kilo.alpha"}
@@ -31,7 +30,7 @@ func TestPropDNSChoices(t *testing.T) {
 		}
 		for _, n := range append([]string{DNSRouter}, names...) {
 			takes := n == DNSRouter || CheckHostname(n) == nil
-			if _, err := p.dnsAddress(env, n); err != nil {
+			if _, err := env.DNSAddress(n); err != nil {
 				takes = false
 			}
 			if listed := slices.Contains(got, n); listed != takes {

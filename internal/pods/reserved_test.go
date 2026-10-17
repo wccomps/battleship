@@ -43,3 +43,30 @@ func TestEnvCreateSkipsAReservedSlot(t *testing.T) {
 		t.Errorf("err = %v, want every slot taken, two by queued jobs", err)
 	}
 }
+
+// OpenSlots lists the free slots in order, less those a queued job will
+// fill, which it lists apart; a slot with VMs, or with VMs on its bridges,
+// is in neither.
+func TestOpenSlots(t *testing.T) {
+	p := NewPlanner(envFake(), envConfig())
+	p.Reserved = func(context.Context) (map[string]bool, error) {
+		return map[string]bool{"slot:02": true, "vmid:2300": true}, nil
+	}
+	envs := []Environment{
+		{Slot: Slot{Name: "01"}, Hosts: []EnvHost{{Name: "gw.kilo.alpha"}}},
+		{Slot: Slot{Name: "02"}},
+		{Slot: Slot{Name: "03"}},
+		{Slot: Slot{Name: "04"}, Users: []string{"stray"}},
+		{Slot: Slot{Name: "05"}},
+	}
+	open, queued, err := p.OpenSlots(context.Background(), envs)
+	names := func(ss []Slot) (out []string) {
+		for _, s := range ss {
+			out = append(out, s.Name)
+		}
+		return out
+	}
+	if err != nil || strings.Join(names(open), ",") != "03,05" || strings.Join(names(queued), ",") != "02" {
+		t.Errorf("open %v, queued %v, %v; want 03,05 and 02", names(open), names(queued), err)
+	}
+}

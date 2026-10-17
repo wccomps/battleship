@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -108,11 +109,21 @@ func pageData(t *rapid.T, page string) any {
 	case "message":
 		return drawHostile[message](t, "message")
 	case "catalog":
-		p := drawHostile[catalogView](t, "catalog")
-		p.Show = rapid.SampledFrom([]string{"images", "environments"}).Draw(t, "show")
-		return p
+		return drawHostile[envsView](t, "catalog")
+	case "images":
+		return drawHostile[imagesView](t, "images")
+	case "family":
+		return drawHostile[familyView](t, "family")
 	case "teamless":
 		p := drawHostile[catalogPage](t, "teamless")
+		p.envForm = drawHostile[envForm](t, "teamless.envForm") // embedded and unexported: fillHostile skips it
+		bad := rapid.SampledFrom([]string{"", "name", "image", "addr"})
+		for i := range p.Rows {
+			p.Rows[i].Bad = bad.Draw(t, "bad")
+		}
+		if p.Router != nil {
+			p.Router.Bad = bad.Draw(t, "router bad")
+		}
 		p.Op = rapid.SampledFrom(slices.DeleteFunc(slices.Clone(operations), func(o operation) bool { return !o.Kind.Teamless() })).Draw(t, "op")
 		return p
 	}
@@ -150,6 +161,10 @@ func TestPropPagesEscapeHostileText(t *testing.T) {
 		if err := refreshesOnSite(tags); err != nil {
 			t.Fatalf("%s as %s: %v", page, root, err)
 		}
+		reloads := slices.ContainsFunc(tags, func(tag markupTag) bool { return tag.Name == "meta" && tag.Attrs["content"] == strconv.Itoa(v.Reload) })
+		if want := root == "layout" && v.Reload > 0; reloads != want {
+			t.Fatalf("%s as %s with Reload %d: reloads %v, want %v", page, root, v.Reload, reloads, want)
+		}
 	})
 }
 
@@ -181,13 +196,16 @@ func staysOnSite(u string) bool {
 }
 
 // refreshesOnSite checks that every meta refresh in tags goes to a path
-// on this site.
+// on this site, or reloads the page after some seconds.
 func refreshesOnSite(tags []markupTag) error {
 	for _, tag := range tags {
 		if tag.Name != "meta" || !strings.EqualFold(tag.Attrs["http-equiv"], "refresh") {
 			continue
 		}
 		content := html.UnescapeString(tag.Attrs["content"])
+		if n, err := strconv.Atoi(content); err == nil && n > 0 && strconv.Itoa(n) == content {
+			continue
+		}
 		to, ok := strings.CutPrefix(content, "0;url=")
 		if !ok || !staysOnSite(to) {
 			return fmt.Errorf("meta refresh %q leaves the site", content)

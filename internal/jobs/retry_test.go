@@ -10,6 +10,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/store"
 )
 
@@ -329,4 +330,129 @@ func TestPropRetryInputs(t *testing.T) {
 		}
 		checkRetry(t, job, orig, plan, items, garbage)
 	})
+}
+
+// A failed create is retried for its unfinished VMs, with its router and
+// hosts as asked and the slot it planned, so the planner resumes it there.
+func TestRetryInputsOfAnEnvironment(t *testing.T) {
+	plan := pods.Plan{Kind: pods.KindEnvCreate, Slot: "02", Locks: []string{"slot:02", "domain:kilo.alpha"},
+		Items: []pods.Item{{Name: "gw.kilo.alpha", Host: "gw"}, {Name: "dc.kilo.alpha", Host: "dc"}, {Name: "web.kilo.alpha", Host: "web"}}}
+	orig := Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.alpha", Router: "gw=gw", EnvHosts: []string{"dc=win2022:10", "web=debian-12"}}
+	items := []store.Item{
+		{Name: "gw.kilo.alpha", Status: store.ItemDone},
+		{Name: "web.kilo.alpha", Status: store.ItemInterrupted, Step: "clone"},
+		{Name: "dc.kilo.alpha", Status: store.ItemFailed, Error: "guest: timeout"},
+	}
+	r, err := RetryInputs(finishedJob(t, store.StatusCompletedWithFailures, orig, plan), items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := orig
+	want.Slot, want.VMs = "02", []string{"dc.kilo.alpha", "web.kilo.alpha"}
+	if !reflect.DeepEqual(r, want) || r.Validate() != nil {
+		t.Errorf("inputs = %+v (%v), want %+v", r, r.Validate(), want)
+	}
+	// An add keeps its inputs; it has no slot.
+	orig = Inputs{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"dc=win2022"}}
+	plan.Kind = pods.KindEnvAdd
+	r, err = RetryInputs(finishedJob(t, store.StatusCompletedWithFailures, orig, plan), items)
+	if err != nil || r.Slot != "" || !slices.Equal(r.VMs, want.VMs) || r.Validate() != nil {
+		t.Errorf("add retry = %+v, %v", r, err)
+	}
+	if _, err := RetryInputs(finishedJob(t, store.StatusCompletedWithFailures, orig, plan), items[:1]); !errors.Is(err, ErrNothingToRetry) {
+		t.Errorf("all done: err = %v", err)
+	}
+	if _, err := RetryInputs(finishedJob(t, store.StatusCompletedWithFailures, orig, plan), []store.Item{{Name: "oak.kilo.alpha", Status: store.ItemFailed}}); err == nil {
+		t.Error("a VM the plan lacks was retried")
+	}
+}
+
+// A failed environment teardown is retried whole in the slot it planned:
+// what it deleted is gone, and what a failed delete left is planned anew
+// (a half-deleted VM, leftover disks), so its VMs aren't narrowed.
+func TestRetryInputsOfAnEnvironmentTeardown(t *testing.T) {
+	plan := pods.Plan{Kind: pods.KindEnvTeardown, Slot: "03", Locks: []string{"slot:03", "domain:kilo.alpha"},
+		Items: []pods.Item{{Name: "gw.kilo.alpha", Host: "gw"}, {Name: "dc.kilo.alpha", Host: "dc"}}}
+	orig := Inputs{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"}
+	items := []store.Item{
+		{Name: "gw.kilo.alpha", Status: store.ItemDone},
+		{Name: "dc.kilo.alpha", Status: store.ItemFailed, Error: "delete: half-deleted"},
+	}
+	r, err := RetryInputs(finishedJob(t, store.StatusCompletedWithFailures, orig, plan), items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Inputs{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha", Slot: "03"}); !reflect.DeepEqual(r, want) || r.Validate() != nil {
+		t.Errorf("inputs = %+v (%v), want %+v", r, r.Validate(), want)
+	}
+	if _, err := RetryInputs(finishedJob(t, store.StatusCompletedWithFailures, orig, plan), items[:1]); !errors.Is(err, ErrNothingToRetry) {
+		t.Errorf("all done: err = %v", err)
+	}
+}
+
+// Plans stored before Plan.Slot name their slot only in a lock; the retry
+// still resumes in that slot.
+func TestRetryInputsOfAnOldEnvironmentPlan(t *testing.T) {
+	for _, kind := range []pods.Kind{pods.KindEnvCreate, pods.KindEnvTeardown} {
+		plan := pods.Plan{Kind: kind, Locks: []string{"domain:kilo.alpha", "slot:02"},
+			Items: []pods.Item{{Name: "gw.kilo.alpha", Host: "gw"}, {Name: "dc.kilo.alpha", Host: "dc"}}}
+		orig := Inputs{Kind: kind, Domain: "kilo.alpha"}
+		if kind == pods.KindEnvCreate {
+			orig.Router, orig.EnvHosts = "gw=gw", []string{"dc=win2022"}
+		}
+		items := []store.Item{{Name: "gw.kilo.alpha", Status: store.ItemDone}, {Name: "dc.kilo.alpha", Status: store.ItemFailed}}
+		r, err := RetryInputs(finishedJob(t, store.StatusCompletedWithFailures, orig, plan), items)
+		if err != nil || r.Slot != "02" || r.Validate() != nil {
+			t.Errorf("%s: retry = %+v, %v", kind, r, err)
+		}
+	}
+}
+
+// The retry of a teardown that failed partway plans what is left in its
+// slot, and only that: the deleted VMs are gone, the failed one is planned
+// again, and the leftover disks of one deleted are freed.
+func TestRetryOfAnEnvironmentTeardownPlansWhatIsLeft(t *testing.T) {
+	f := twoTeams()
+	for _, vm := range []proxmox.VM{
+		{VMID: 2300, Name: "gw.kilo.alpha", Node: "n1", Pool: "dev-03"},
+		{VMID: 2301, Name: "dc.kilo.alpha", Node: "n1", Pool: "dev-03"},
+		{VMID: 2302, Name: "web.kilo.alpha", Node: "n1", Pool: "dev-03"},
+	} {
+		f.Add(vm, nil)
+	}
+	p := pods.NewPlanner(f, testCfg())
+	orig := Inputs{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"}
+	plan, err := BuildPlan(bg, p, orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(f.VMs, 2300) // deleted
+	delete(f.VMs, 2302) // deleted, but its disk was left
+	f.Vols["competitions:vm-2302-disk-0"] = 2302
+	items := []store.Item{
+		{Name: "gw.kilo.alpha", Status: store.ItemDone},
+		{Name: "dc.kilo.alpha", Status: store.ItemFailed},
+		{Name: "web.kilo.alpha", Status: store.ItemFailed},
+	}
+	retry, err := RetryInputs(finishedJob(t, store.StatusCompletedWithFailures, orig, *plan), items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := BuildPlan(bg, p, retry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, it := range again.Items {
+		names = append(names, it.Name)
+	}
+	if !slices.Equal(names, []string{"dc.kilo.alpha", "disks-2302"}) {
+		t.Errorf("retry plans %q", names)
+	}
+	// Once all of it is gone, the retry still finds its slot: nothing to do.
+	delete(f.VMs, 2301)
+	delete(f.Vols, "competitions:vm-2302-disk-0")
+	if again, err := BuildPlan(bg, p, retry); err != nil || len(again.Items) != 0 {
+		t.Errorf("retry of a gone environment = %+v, %v", again, err)
+	}
 }

@@ -212,7 +212,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 			fmt.Fprintln(stdout, "\nNothing changed. Re-run with -yes to re-plan and apply.")
 			return 0
 		}
-		if !confirm(d, cmd, in.Teams) || ctx.Err() != nil {
+		if !confirm(d, in) || ctx.Err() != nil {
 			fmt.Fprintln(stdout, "Cancelled; nothing changed.")
 			return 1
 		}
@@ -266,12 +266,13 @@ func submitJob(ctx context.Context, d deps, cfg config.Config, in jobs.Inputs, p
 
 // confirm asks the volunteer to approve the plan just printed. Teardown
 // requires typing the -teams value as given, or, for -teams all, the teams
-// it stands for; everything else takes "yes".
-func confirm(d deps, cmd, teamSpec string) bool {
+// it stands for; an environment's teardown its -domain (jobs.Inputs.Typed);
+// everything else takes "yes".
+func confirm(d deps, in jobs.Inputs) bool {
 	want := "yes"
-	if pods.Kind(cmd).TypedConfirm() {
-		want = strings.TrimSpace(teamSpec)
-		fmt.Fprintf(d.stdout, "\nType the team range (%s) to delete these VMs: ", want)
+	if in.Kind.TypedConfirm() {
+		want = in.Typed()
+		fmt.Fprintf(d.stdout, "\nType %s (%s) to delete these VMs: ", in.TypedWhat(), want)
 	} else {
 		fmt.Fprint(d.stdout, "\nApply this plan? Type yes: ")
 	}

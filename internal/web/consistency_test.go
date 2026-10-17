@@ -21,6 +21,7 @@ func TestTemplatesFollowControlConventions(t *testing.T) {
 	var (
 		anchorRE  = regexp.MustCompile(`<a\b[^>]*>`)
 		hrefRE    = regexp.MustCompile(`href="([^"{]*)`)
+		fullRE    = regexp.MustCompile(`href="([^"]*)"`)
 		classRE   = regexp.MustCompile(`class="([^"]*)"`)
 		summaryRE = regexp.MustCompile(`<summary\b[^>]*>`)
 		joinedRE  = regexp.MustCompile(`</a>\s*(·|\||/|,)\s*<a\b`)
@@ -42,8 +43,12 @@ func TestTemplatesFollowControlConventions(t *testing.T) {
 			if m == nil {
 				continue
 			}
+			full := fullRE.FindStringSubmatch(tag)[1]
 			for _, op := range operations {
-				if (m[1] == op.Path || strings.HasPrefix(m[1], op.Path+"?")) && !isButton(tag) {
+				// An environment's form: /environments/{{.Domain}}/add.
+				before, after, onEnv := strings.Cut(op.Path, "{domain}")
+				envForm := onEnv && strings.HasPrefix(full, before) && strings.Contains(full+"?", after+"?")
+				if (m[1] == op.Path || strings.HasPrefix(m[1], op.Path+"?") || envForm) && !isButton(tag) {
 					t.Errorf("%s: %s links to the %s form but isn't a button", name, tag, op.Title)
 				}
 			}

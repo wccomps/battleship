@@ -22,13 +22,29 @@ const (
 	EventSkipped EventStatus = "skipped" // already in the desired state
 	EventFailed  EventStatus = "failed"
 	EventInfo    EventStatus = "info"
-	// EventStarted: the item's first step began, so it shows as running while
-	// a long step (a clone) waits on Proxmox. Logs leave it out.
+	// EventStarted: an attempt at the item began (its first step, or a gone
+	// VM's check), so it shows as running while a long step (a clone) waits
+	// on Proxmox. An attempt a stop cut off before then sends none.
 	EventStarted EventStatus = "started"
-	EventBlocked EventStatus = "blocked" // the plan blocked this item; Message says why
+	// EventSucceeded: the item ran its last step. An item's EventFailed or
+	// EventInterrupted ends it too.
+	EventSucceeded EventStatus = "succeeded"
+	EventBlocked   EventStatus = "blocked" // the plan blocked this item; Message says why
 	// EventInterrupted: a stop (cancel, shutdown) cut the item off.
 	EventInterrupted EventStatus = "interrupted"
 )
+
+// Logged reports whether a job's log shows an event: an attempt's start and
+// success show as the item's status instead, and a bare skip says nothing.
+func Logged(status EventStatus, message string) bool {
+	switch status {
+	case EventStarted, EventSucceeded:
+		return false
+	case EventSkipped:
+		return message != ""
+	}
+	return true
+}
 
 // ErrCancelRequested is the context cause when a job is cancelled. Unlike
 // other stops, a step that already sent a change gets jobs.cancel_grace to
@@ -332,6 +348,7 @@ func (e *Executor) runItems(ctx context.Context, kind pods.Kind, items []pods.It
 			run := func() error {
 				var err error
 				if clones && b.err != nil {
+					e.emit(it.Name, "", EventStarted, "")
 					err = e.endItem(ctx, it, "", -1, false, fmt.Errorf("template %s: %w", it.Template, b.err))
 				} else {
 					err = e.runItem(ctx, kind, it, b)

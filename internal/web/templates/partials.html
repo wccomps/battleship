@@ -39,3 +39,55 @@
 {{define "close" -}}
 <a class="btn ghost sq" href="{{.}}" data-close aria-label="Close">{{icon "close"}}</a>
 {{- end}}
+
+{{/* review is a review's sentence, then its facts or a row per VM (see
+       reviewView). */}}
+{{define "review" -}}
+<p class="say{{if or .Blocked .Deletes}} bad{{end}}">{{if .Blocked}}{{icon "blocked"}}{{else if .Deletes}}{{icon "teardown"}}{{else}}{{icon "copy"}}{{end}}<span>{{names .Say}}</span></p>
+{{- with .Facts}}
+<dl class="kv">
+{{- range $f := .}}
+<dt>{{.Label}}</dt><dd>{{with .Code}}<code>{{.}}</code>{{end}}{{with .Text}}{{if $f.Code}} · {{end}}{{.}}{{end}}{{with .Meta}} <span class="meta">· {{.}}</span>{{end}}{{with .Change}} <a class="btn sm" href="{{.}}">Change</a>{{end}}{{with .Notes}}<div class="notes box">{{.}}</div>{{end}}</dd>
+{{- end}}
+</dl>
+{{- end}}
+{{- $r := .}}
+{{- with .Rows}}
+<div class="tscroll">
+<table class="tbl rvw">
+<thead><tr><th scope="col">VM</th>{{if $r.Image}}<th scope="col">Image</th>{{end}}{{if $r.Addr}}<th scope="col">Address</th>{{end}}<th scope="col" class="r">VMID · node</th></tr></thead>
+<tbody>
+{{- range .}}
+<tr{{if .Blocked}} class="blk"{{end}}><td><span class="vm">{{.Name}}</span>{{if .Router}} <span class="chip">router</span>{{end}}</td>
+{{- if $r.Image}}<td class="wide">{{with .Image}}<code>{{.}}</code>{{else}}—{{end}}</td>{{end}}
+{{- if $r.Addr}}<td class="c2">{{with .Addr}}<code>{{.}}</code>{{else}}—{{end}}{{if .Picked}} <span class="meta">picked</span>{{end}}</td>{{end}}
+{{- if .Blocked}}<td class="r wide"><span class="st s-cancel">{{icon "blocked"}}<span>{{names .Blocked}}</span></span></td>{{else}}<td class="r wide meta">{{.Where}}</td>{{end}}</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- end}}
+{{- with .DNS}}
+<div class="tscroll">
+<table class="tbl dnsr">
+<thead><tr><th scope="col">Host</th><th scope="col">DNS now</th><th scope="col">After</th></tr></thead>
+<tbody>
+{{- range .}}
+<tr{{if .Blocked}} class="blk"{{end}}><td><span class="vm">{{.Host}}</span></td><td class="meta">{{with .Now}}<code>{{.}}</code>{{else}}—{{end}}</td>
+{{- if .Blocked}}<td><span class="st s-cancel">{{icon "blocked"}}<span>{{names .Blocked}}</span></span></td>{{else}}<td><code>{{.After}}</code>{{if .Itself}} <span class="meta">itself</span>{{end}}</td>{{end}}</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- end}}
+{{- with .Note}}<p class="meta">{{names .}}</p>{{end}}
+{{- with .Kept}}
+<div class="sec">
+<h2 class="sub">Not touched</h2>
+{{- range .}}
+<p class="fix">{{icon "dash"}}<span>{{names .}}</span></p>
+{{- end}}
+</div>
+{{- end}}
+{{- with .Retry}}<p class="meta">{{.}}</p>{{end}}
+{{- end}}
