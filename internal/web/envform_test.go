@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"html"
 	"net/http"
 	"net/http/httptest"
@@ -401,9 +402,12 @@ func TestPropMachineRows(t *testing.T) {
 			o, err := strconv.Atoi(octet)
 			return name != "" && pods.CheckHostname(name) == nil && (octet == "" || err == nil && strconv.Itoa(o) == octet && o >= 4 && o <= 254)
 		}
+		// The router row reaches the planner once it has a name and an
+		// image; it is then refused unless the image is the router gw, and
+		// its name counts as taken either way.
 		seen, claimed := map[string]bool{}, map[int]string{}
 		bad := !shapeOK(strings.TrimSpace(routerName), "") || strings.TrimSpace(routerImage) != "gw"
-		if !bad {
+		if shapeOK(strings.TrimSpace(routerName), "") && strings.TrimSpace(routerImage) != "" {
 			seen[strings.TrimSpace(routerName)] = true
 		}
 		var kept []string // the rows' specs, blank ones dropped
@@ -479,8 +483,9 @@ func TestPropMachineRows(t *testing.T) {
 	})
 }
 
-// A typed slot is read as typed, trimmed; Validate takes it just when it
-// is a slot's name (pods.ParseSlotName): "02", not "2".
+// A typed slot is read trimmed, and a number 1-99 as its two-digit name
+// ("2" is "02", as the CLI's -slot 2 means); Validate takes it just when
+// that is a slot's name (pods.ParseSlotName).
 func TestPropSlotInput(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		typed := rapid.OneOf(
@@ -490,9 +495,12 @@ func TestPropSlotInput(t *testing.T) {
 		).Draw(t, "slot")
 		in := formInputs(pods.KindEnvCreate, url.Values{"domain": {"kilo.alpha"}, "router": {"gw=gw"}, "slot": {typed}})
 		trimmed := strings.TrimSpace(typed)
+		if v, err := strconv.Atoi(trimmed); err == nil && v >= 1 && v <= 99 {
+			trimmed = fmt.Sprintf("%02d", v)
+		}
 		n, name := pods.ParseSlotName(trimmed)
 		if in.Slot != trimmed {
-			t.Fatalf("slot %q reads %q", typed, in.Slot)
+			t.Fatalf("slot %q reads %q, want %q", typed, in.Slot, trimmed)
 		}
 		switch verr := in.Validate(); {
 		case trimmed == "":

@@ -239,8 +239,6 @@ func (p *catalogPage) request() (pods.EnvRequest, map[int]*machineRow) {
 		case !shapeOK(r, "the router"):
 		case r.Image == "":
 			r.Err, r.Bad = "Choose the router's image.", "image"
-		case !slices.ContainsFunc(p.Routers, func(im pods.BaseImage) bool { return im.Family == r.Image }):
-			r.Err, r.Bad = r.Image+" has no usable router version; choose another image.", "image"
 		default:
 			req.Router, rows[0] = pods.HostSpec{Host: r.Name, Family: r.Image}, r
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"pgregory.net/rapid"
@@ -139,4 +140,40 @@ func TestCheckEnvResumes(t *testing.T) {
 		[]EnvProblem{{Field: FieldSlot, Why: "every dev slot is in use; archive an environment to free one"}}) {
 		t.Errorf("no free slot: %+v", got)
 	}
+}
+
+// The request's router must be a router image: a host image in the router
+// row is refused by the check and blocked by the planner, on create and on
+// add to an environment without a router.
+func TestRouterRowNeedsARouterImage(t *testing.T) {
+	p := NewPlanner(envFake(), envConfig())
+	req := EnvRequest{Domain: "kilo.bravo", Router: HostSpec{Host: "gw", Family: "debian-12"}}
+	plan, err := p.EnvCreate(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := plan.Items[0]; it.Name != "gw.kilo.bravo" || !strings.Contains(it.Blocked, "not a router") {
+		t.Errorf("router row = %s blocked %q, want it blocked as not a router", it.Name, it.Blocked)
+	}
+	envs, _, err := p.Environments(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	probs := CheckEnv(KindEnvCreate, envs, nil, BaseImages(mustVMs(t, p)), req)
+	if len(probs) != 1 || probs[0].Row != 0 || probs[0].Field != FieldImage || !strings.Contains(probs[0].Why, "not a router") {
+		t.Errorf("CheckEnv = %+v, want the router row's image", probs)
+	}
+	req.Router.Family = "gw"
+	if probs := CheckEnv(KindEnvCreate, envs, nil, BaseImages(mustVMs(t, p)), req); len(probs) != 0 {
+		t.Errorf("a router image is refused: %+v", probs)
+	}
+}
+
+func mustVMs(t *testing.T, p Planner) []proxmox.VM {
+	t.Helper()
+	vms, err := p.API.ClusterVMs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return vms
 }

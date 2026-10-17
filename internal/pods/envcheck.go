@@ -76,7 +76,7 @@ func CheckEnv(kind Kind, envs []Environment, queued []Slot, images []BaseImage, 
 	if withRouter {
 		hosts = append([]HostSpec{req.Router}, hosts...)
 	}
-	for i, pr := range checkHosts(env, images, hosts) {
+	for i, pr := range checkHosts(env, images, hosts, withRouter) {
 		if pr.Why != "" {
 			if pr.Row = i; !withRouter {
 				pr.Row++
@@ -89,8 +89,9 @@ func CheckEnv(kind Kind, envs []Environment, queued []Slot, images []BaseImage, 
 
 // checkHosts is what blocks each of hosts in env, by index, before
 // Proxmox is asked anything; Why is "" for a host without a problem. A
-// host already in env is resumed.
-func checkHosts(env Environment, images []BaseImage, hosts []HostSpec) []EnvProblem {
+// host already in env is resumed. With routerFirst, hosts[0] is the
+// request's router, so its image must be a router.
+func checkHosts(env Environment, images []BaseImage, hosts []HostSpec, routerFirst bool) []EnvProblem {
 	out := make([]EnvProblem, len(hosts))
 	_, claimed := claimOctets(env, hosts)
 	seen := map[string]bool{}
@@ -109,6 +110,8 @@ func checkHosts(env Environment, images []BaseImage, hosts []HostSpec) []EnvProb
 			out[i] = EnvProblem{Field: FieldImage, Why: fmt.Sprintf("no usable base image of family %q", h.Family)}
 		case mismatch != "":
 			out[i] = EnvProblem{Field: FieldImage, Why: existing.Name + " already exists " + mismatch}
+		case i == 0 && routerFirst && im.Kind != ImageRouter:
+			out[i] = EnvProblem{Field: FieldImage, Why: fmt.Sprintf("%s is a %s image, not a router", h.Family, im.Kind)}
 		case im.Kind == ImageRouter && (env.HasRouter() && !resumed || router):
 			out[i] = EnvProblem{Field: FieldImage, Why: "an environment has one router"}
 		case im.Kind == ImageWindows && len(h.Host) > MaxWindowsHostname:

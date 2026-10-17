@@ -175,7 +175,7 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 		in := jobs.Inputs{Kind: kind, Domain: strings.TrimSpace(form.Get(fieldDomain)), Router: strings.TrimSpace(form.Get(fieldRouter)),
 			DNS: strings.TrimSpace(form.Get(fieldDNS)), Family: strings.TrimSpace(form.Get(fieldFamily)),
 			ImageKind: strings.TrimSpace(form.Get(fieldImageKind)), Image: strings.TrimSpace(form.Get(fieldImage)),
-			Slot: strings.TrimSpace(form.Get(fieldSlot)), VMs: jobs.SplitList(strings.Join(form[fieldVMs], ","))}
+			Slot: slotName(form.Get(fieldSlot)), VMs: jobs.SplitList(strings.Join(form[fieldVMs], ","))}
 		for _, line := range strings.Split(form.Get(fieldEnvHosts), "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				in.EnvHosts = append(in.EnvHosts, line)
@@ -406,4 +406,14 @@ func nth(vs []string, i int) string {
 		return vs[i]
 	}
 	return ""
+}
+
+// slotName is a typed slot as its two-digit name ("2" is "02"); anything
+// that isn't a number is kept as typed, for validation to refuse.
+func slotName(typed string) string {
+	typed = strings.TrimSpace(typed)
+	if n, err := strconv.Atoi(typed); err == nil && n >= 1 && n <= 99 {
+		return pods.SlotName(n)
+	}
+	return typed
 }

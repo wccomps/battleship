@@ -55,7 +55,7 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return p.envPlan(ctx, KindEnvCreate, env, hosts, vms)
+	return p.envPlan(ctx, KindEnvCreate, env, hosts, true, vms)
 }
 
 // firstOpenSlot is the lowest slot of envs a new environment for domain may
@@ -221,7 +221,7 @@ func (p Planner) EnvAdd(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if len(hosts) == 0 {
 		return nil, errors.New("name at least one host to add")
 	}
-	return p.envPlan(ctx, KindEnvAdd, env, hosts, vms)
+	return p.envPlan(ctx, KindEnvAdd, env, hosts, req.Router.Host != "", vms)
 }
 
 func (p Planner) findEnv(ctx context.Context, domain string) (Environment, []proxmox.VM, error) {
@@ -238,10 +238,11 @@ func (p Planner) findEnv(ctx context.Context, domain string) (Environment, []pro
 	return Environment{}, nil, noEnv(domain)
 }
 
-// envPlan plans hosts into env. The first router-kind host gets the slot's
-// WAN and LAN bridges; every other host the LAN. What checkHosts finds
-// blocks a host; so does what only the cluster tells.
-func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts []HostSpec, vms []proxmox.VM) (*Plan, error) {
+// envPlan plans hosts into env; with routerFirst, hosts[0] is the request's
+// router. The first router-kind host gets the slot's WAN and LAN bridges;
+// every other host the LAN. What checkHosts finds blocks a host; so does
+// what only the cluster tells.
+func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts []HostSpec, routerFirst bool, vms []proxmox.VM) (*Plan, error) {
 	images := BaseImages(vms)
 	dnsChoice := env.DNS()
 	dnsAddr, err := env.DNSAddress(dnsChoice)
@@ -249,7 +250,7 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		dnsChoice, dnsAddr = DNSRouter, env.Gateway // the chosen host is gone: fall back for new hosts
 	}
 	plan := p.envPlanIn(kind, env.Slot, env.Domain)
-	problems := checkHosts(env, images, hosts)
+	problems := checkHosts(env, images, hosts, routerFirst)
 	// Explicit addresses are claimed first, so picked ones avoid them.
 	used, _ := claimOctets(env, hosts)
 	taken := map[int]bool{}
