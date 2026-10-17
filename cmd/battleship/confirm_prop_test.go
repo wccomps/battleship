@@ -65,5 +65,9 @@ func TestPropConfirm(t *testing.T) {
 		if got != wantOK {
 			t.Fatalf("confirm(%q, spec %q) on %q = %v, want %v", cmd, spec, input, got, wantOK)
 		}
+		ask := map[string]string{"teardown": "the team range", "env-teardown": "the domain"}[cmd]
+		if prompt := "Type " + ask + " (" + want + ") to delete these VMs: "; ask != "" && !strings.Contains(out.String(), prompt) {
+			t.Fatalf("%s asked %q, want %q", cmd, out.String(), prompt)
+		}
 	})
 }

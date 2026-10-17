@@ -34,7 +34,9 @@ form ──> preview ──> confirm ──> stored job ──> worker claims it
    what it half-built (and reports what it couldn't, such as when the
    claim is unsure).
 6. **Finish.** The worker records the outcome (`store.Finish`). Retrying a
-   job's failed VMs previews and submits a new job for just those VMs.
+   job previews and submits a new job for just the VMs that didn't finish,
+   except an environment's teardown, which is planned again whole in its
+   slot.
 
 Every Proxmox call is made with the submitter's credential; battleship holds
 none of its own. Postgres LISTEN/NOTIFY wakes idle workers, cancels jobs at

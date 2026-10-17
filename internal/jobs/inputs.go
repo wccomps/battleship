@@ -58,6 +58,18 @@ func (in Inputs) Typed() string {
 	return ""
 }
 
+// TypedWhat names what Typed is, for asking for it: "the team range" or
+// "the domain"; "" when nothing is typed.
+func (in Inputs) TypedWhat() string {
+	switch in.Kind {
+	case pods.KindTeardown:
+		return "the team range"
+	case pods.KindEnvTeardown:
+		return "the domain"
+	}
+	return ""
+}
+
 // MaxSnapshotDescription is the longest snapshot description, in characters.
 const MaxSnapshotDescription = 500
 

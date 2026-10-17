@@ -90,6 +90,11 @@ const (
 // (CLI and web): a teardown's team range, an environment's domain.
 func (k Kind) TypedConfirm() bool { return k.TearsDown() }
 
+// RetriedWhole reports whether a retry of a job of kind k plans it again
+// whole, not narrowed to the VMs that didn't finish: an environment's
+// teardown, in its slot, where what a failed delete left has new names.
+func (k Kind) RetriedWhole() bool { return k == KindEnvTeardown }
+
 // ChangesConfig reports whether the step can change the VM's config (its
 // disks, NICs, pool or snapshots); the power and guest steps can't.
 func (s Step) ChangesConfig() bool {

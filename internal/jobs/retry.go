@@ -24,8 +24,7 @@ var (
 // which would block every VM of the retry. An environment's create or add
 // keeps its hosts, so the plan is the same, and is narrowed to the VMs; a
 // create keeps its slot, where the planner resumes it. An environment's
-// teardown is planned again whole in its slot: what it deleted is gone, and
-// what a failed delete left (half-deleted VMs, disks) has new names.
+// teardown is planned again whole in its slot (pods.Kind.RetriedWhole).
 func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 	if !store.JobStatus(job.Status).CanRetry() {
 		return Inputs{}, fmt.Errorf("job %d is %s: %w", job.ID, job.Status, ErrNotRetryable)
@@ -96,7 +95,7 @@ func envRetry(id int64, in Inputs, plan pods.Plan, planned map[string]pods.Item,
 	if len(names) == 0 {
 		return Inputs{}, ErrNothingToRetry
 	}
-	if in.Kind != pods.KindEnvTeardown {
+	if !in.Kind.RetriedWhole() {
 		in.VMs = sortedUnique(names)
 	}
 	if (in.Kind == pods.KindEnvCreate || in.Kind == pods.KindEnvTeardown) && in.Slot == "" {

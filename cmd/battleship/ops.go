@@ -266,18 +266,14 @@ func submitJob(ctx context.Context, d deps, cfg config.Config, in jobs.Inputs, p
 
 // confirm asks the volunteer to approve the plan just printed. Teardown
 // requires typing the -teams value as given, or, for -teams all, the teams
-// it stands for; an environment's teardown its -domain; everything else
-// takes "yes".
+// it stands for; an environment's teardown its -domain (jobs.Inputs.Typed);
+// everything else takes "yes".
 func confirm(d deps, in jobs.Inputs) bool {
 	want := "yes"
-	switch {
-	case in.Kind == pods.KindEnvTeardown:
+	if in.Kind.TypedConfirm() {
 		want = in.Typed()
-		fmt.Fprintf(d.stdout, "\nType the domain (%s) to delete its VMs: ", want)
-	case in.Kind.TypedConfirm():
-		want = in.Typed()
-		fmt.Fprintf(d.stdout, "\nType the team range (%s) to delete these VMs: ", want)
-	default:
+		fmt.Fprintf(d.stdout, "\nType %s (%s) to delete these VMs: ", in.TypedWhat(), want)
+	} else {
 		fmt.Fprint(d.stdout, "\nApply this plan? Type yes: ")
 	}
 	line, _ := bufio.NewReader(d.in).ReadString('\n')
