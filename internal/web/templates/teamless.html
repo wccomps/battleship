@@ -110,6 +110,22 @@
 <legend>Kind <span class="muted">· for a new family</span></legend>
 <div class="opts">{{range imageKinds}}<label class="opt"><input type="radio" name="image_kind" value="{{.}}"{{if eq . $.Data.In.ImageKind}} checked{{end}}><span>{{.}}</span></label>{{end}}</div>
 </fieldset>
+<fieldset class="field">
+<legend>Details <span class="muted">· written into the new image's notes; empty writes none</span></legend>
+{{template "details-fields" .Details}}
+</fieldset>
+{{- end}}
+{{- if eq .Op.Kind "image-details"}}
+<div class="field">
+<label class="lbl" for="family">Family</label>
+<input class="inp" type="text" id="family" name="family" value="{{.In.Family}}" required list="families" autocomplete="off" spellcheck="false" aria-describedby="family-hint">
+<span class="hint" id="family-hint">its newest version's details: hosts made from it copy them</span>
+<datalist id="families">{{range .Families}}<option value="{{.}}"></option>{{end}}</datalist>
+</div>
+<fieldset class="field">
+<legend>Details</legend>
+{{template "details-fields" .Details}}
+</fieldset>
 {{- end}}
 {{- if eq .Op.Kind "image-edit"}}
 <div class="field">
@@ -134,4 +150,4 @@
 {{- end}}
 {{- end}}
 
-{{define "imgnote"}}<li>{{names .Name}} <span class="muted">· {{.Kind}}</span>{{with .Notes}}<div class="notes">{{.}}</div>{{end}}</li>{{end}}
+{{define "imgnote"}}<li>{{names .Name}} <span class="muted">· {{.Kind}}</span>{{with details .Details .Unreadable}}{{template "details" .}}{{end}}{{with .Notes}}<div class="notes">{{.}}</div>{{end}}</li>{{end}}

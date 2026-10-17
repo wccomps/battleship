@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
 // Every environment's LAN: the router is .2, .3 is the team VPN endpoint,
@@ -141,12 +140,7 @@ const maxUserNotes = 4000
 // characters (bidi overrides, zero widths) are dropped so notes can't
 // disguise what they say.
 func UserNotes(desc string) string {
-	desc = strings.Map(func(r rune) rune {
-		if unicode.Is(unicode.Cf, r) {
-			return -1
-		}
-		return r
-	}, desc)
+	desc = dropFormat(desc)
 	var keep []string
 	for _, line := range strings.Split(desc, "\n") {
 		if !strings.HasPrefix(strings.TrimSpace(line), notesPrefix) {

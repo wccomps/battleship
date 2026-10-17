@@ -302,6 +302,8 @@ type jobView struct {
 	// RanAt is the full time, for a title.
 	Ran, RanAt string
 	Asked      []fact // the inputs beyond teams and hosts, e.g. the snapshot
+	// Details are the details a register or Edit details writes.
+	Details    *detailsView
 	Error      string
 	Headline   string // a succeeded deploy's or teardown's result (fleetHeadline)
 	Summary    *summaryView
@@ -434,6 +436,7 @@ var stepDoing = map[pods.Step]string{
 	pods.StepLabel:      "Setting tags and notes",
 	pods.StepConvert:    "Making it a template",
 	pods.StepRetire:     "Deprecating the previous version",
+	pods.StepDetails:    "Writing the details",
 	pods.StepWaitAgent:  "Waiting for the guest agent",
 	pods.StepGuest:      "Setting up the guest",
 	pods.StepVerify:     "Checking the guest",
@@ -664,6 +667,10 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	v.Asked = askedFacts(in)
 	if in.Kind.Teamless() {
 		v.Teamless, v.Asked = true, teamlessFacts(in, s.cfg.Environments.Pool)
+	}
+	var plan pods.Plan
+	if json.Unmarshal(j.Plan, &plan) == nil && len(plan.Items) == 1 && plan.Items[0].Details != nil {
+		v.Details = detailsOf(*plan.Items[0].Details, false)
 	}
 	v.Ran, v.RanAt = minuteTime(now, j.CreatedAt), "made "+clockTime(now, j.CreatedAt)
 	if j.StartedAt != nil {

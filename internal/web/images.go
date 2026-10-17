@@ -38,10 +38,11 @@ type kindGroup struct {
 }
 
 // familyRow is a family in the catalogue: its current version (for a
-// retired family, its newest) and the first line of that version's notes.
+// retired family, its newest) and what it is: the OS its details give,
+// else the first line of its notes.
 type familyRow struct {
-	Image     pods.BaseImage
-	FirstLine string
+	Image pods.BaseImage
+	What  string
 }
 
 // kindLabels are the catalogue's group headings.
@@ -83,9 +84,9 @@ func catalogue(images []pods.BaseImage) (groups []kindGroup, retired []familyRow
 	byKind := map[string][]familyRow{}
 	for _, f := range pods.FamilyNames(images) {
 		if cur, ok := pods.Newest(images, f); ok {
-			byKind[cur.Kind] = append(byKind[cur.Kind], familyRow{cur, firstLine(cur.Notes)})
+			byKind[cur.Kind] = append(byKind[cur.Kind], familyRow{cur, what(cur)})
 		} else if latest, ok := pods.Latest(images, f); ok {
-			retired = append(retired, familyRow{latest, firstLine(latest.Notes)})
+			retired = append(retired, familyRow{latest, what(latest)})
 		}
 	}
 	for _, k := range pods.ImageKinds {
@@ -96,9 +97,17 @@ func catalogue(images []pods.BaseImage) (groups []kindGroup, retired []familyRow
 	return groups, retired
 }
 
-// firstLine is the first line of notes with text, usually the login.
-func firstLine(notes string) string {
-	for line := range strings.Lines(notes) {
+// what says what im is: the OS its details give, else the first line of
+// its notes with text; nothing when its details are unreadable, since that
+// line is the block's.
+func what(im pods.BaseImage) string {
+	if im.Unreadable {
+		return ""
+	}
+	if im.Details.OS != "" {
+		return im.Details.OS
+	}
+	for line := range strings.Lines(im.Notes) {
 		if line = strings.TrimSpace(line); line != "" {
 			return line
 		}
@@ -151,13 +160,17 @@ func (s *Server) imagesPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, http.StatusOK, "images", s.newView(w, r, "Images", "images", p))
 }
 
-// familyView is a family's page: its current version, how to make the
-// next one, and its versions.
+// familyView is a family's page: its current version, its details and
+// notes, how to make the next one, and its versions.
 type familyView struct {
 	Family, Kind string
 	Current      *pods.BaseImage // nil when every version is deprecated
-	Notes        string          // the current version's, else the newest's
-	Next         int             // the next version's number
+	// Details, Unreadable and Notes are the current version's, else the
+	// newest's (see pods.BaseImage).
+	Details    pods.ImageDetails
+	Unreadable bool
+	Notes      string
+	Next       int // the next version's number
 	// Edit is an open edit copy (see pods.ImageEdit), registered as Next.
 	Edit *pods.RegisterCandidate
 	// Source is the VM the newest version whose source VM still exists was
@@ -169,6 +182,8 @@ type familyView struct {
 	// lack.
 	MayClone bool
 	Lacks    []string
+	// MayDetails is whether the user may edit the current version's details.
+	MayDetails bool
 }
 
 // versionRow is a version of a family, with its one action: Deprecate on
@@ -233,6 +248,11 @@ func (s *Server) familyPage(w http.ResponseWriter, r *http.Request) {
 			noDelete = noDelete || !v.May && v.Deprecated
 		}
 	}
+	if p.Current != nil {
+		if p.MayDetails = s.mayOn(ctx, p.Current.VMID, pods.OfferPrivileges(pods.KindImageDetails)...); !p.MayDetails {
+			p.Lacks = append(p.Lacks, lacksOf(pods.KindImageDetails, p.Current.Name))
+		}
+	}
 	if noDeprecate {
 		p.Lacks = append(p.Lacks, lacksOf(pods.KindImageDeprecate, p.Current.Name))
 	}
@@ -249,10 +269,12 @@ func newFamilyView(family string, rd imagesRead) (familyView, bool) {
 	if !ok {
 		return familyView{}, false
 	}
-	p := familyView{Family: family, Kind: latest.Kind, Next: latest.Version + 1, Notes: latest.Notes}
+	shown := latest
+	p := familyView{Family: family, Kind: latest.Kind, Next: latest.Version + 1}
 	if cur, ok := pods.Newest(rd.images, family); ok {
-		p.Current, p.Notes = &cur, cur.Notes
+		p.Current, shown = &cur, cur
 	}
+	p.Details, p.Unreadable, p.Notes = shown.Details, shown.Unreadable, shown.Notes
 	sourced := 0
 	for _, im := range rd.images {
 		if im.Family != family {

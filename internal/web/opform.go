@@ -79,7 +79,8 @@ type snapshotPicker struct {
 }
 
 // opForm serves an operation's form, prefilled from the query string ("change"
-// links, retries) or, for reset and snapshot, from the grid's ticked VMs.
+// links, retries) or, for reset and snapshot, from the grid's ticked VMs, and
+// for a register, from its review's inputs.
 func (s *Server) opForm(op operation) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -88,6 +89,9 @@ func (s *Server) opForm(op operation) http.Handler {
 			return
 		}
 		if op.Kind.Teamless() {
+			if r.Method == http.MethodPost {
+				q = postedForm(r)
+			}
 			s.teamlessForm(w, r, http.StatusOK, op, op.scope(formInputs(op.Kind, q)), "")
 			return
 		}

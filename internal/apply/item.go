@@ -173,6 +173,17 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		return e.applyConfig(ctx, it, false, func(cur map[string]string) map[string]string {
 			return pods.LabelChanges(cur, it.Tags, it.Notes)
 		})
+	case pods.StepDetails:
+		if it.Details == nil {
+			return false, nil
+		}
+		if err := pods.CheckDetails(*it.Details); err != nil {
+			return false, err
+		}
+		return e.applyConfig(ctx, it, false, func(cur map[string]string) map[string]string {
+			ch, _ := pods.DetailsChanges(cur, *it.Details) // checked: it can't refuse them
+			return ch
+		})
 	case pods.StepConvert:
 		cfg, gone, err := e.readVM(ctx, it.Node, it.VMID)
 		if err != nil {

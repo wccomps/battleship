@@ -390,6 +390,7 @@
     ticks();
     typedConfirm(sheet);
     machineRows(sheet);
+    passwords(sheet);
     var typed = sheet.querySelector("input[data-typed], input[type=text]");
     var pb = sheet.querySelector(".pb");
     if (pb) pb.scrollTop = 0;
@@ -544,6 +545,29 @@
       row.querySelector("input").focus();
     }
     machineRows(box.parentNode);
+  });
+
+  // -- Passwords
+
+  // A password shows when its toggle opens; without this script that is
+  // all. Where the clipboard can be written, its Copy button shows and
+  // copies it, shown or not.
+  function passwords(root) {
+    if (!navigator.clipboard) return;
+    each(root.querySelectorAll(".pw [data-copy]"), function (b) { b.hidden = false; });
+  }
+  passwords(document);
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest(".pw [data-copy]");
+    if (!b) return;
+    var say = b.querySelector("span");
+    navigator.clipboard.writeText(b.closest(".pw").querySelector("code").textContent).then(function () {
+      say.textContent = "Copied";
+    }, function () {
+      say.textContent = "Couldn't copy";
+    }).then(function () {
+      setTimeout(function () { say.textContent = "Copy"; }, 2000);
+    });
   });
 
   // -- Start

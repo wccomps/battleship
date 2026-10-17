@@ -44,6 +44,9 @@ type Inputs struct {
 	Family    string `json:"family,omitempty"`     // register, edit
 	ImageKind string `json:"image_kind,omitempty"` // register a new family
 	Image     string `json:"image,omitempty"`      // deprecate, delete
+	// Details are what Edit details writes, or a register's in place of
+	// those of its source's notes (pods.RegisterDetails).
+	Details *pods.ImageDetails `json:"details,omitempty"`
 }
 
 // Typed is what a person types to confirm in (pods.Kind.TypedConfirm): a
@@ -131,6 +134,12 @@ func (in Inputs) checkText() error {
 		{"snapshot", []string{in.Snapshot}}, {"description", []string{in.Description}}, {"action", []string{in.Action}},
 		{"domain", []string{in.Domain}}, {"slot", []string{in.Slot}}, {"router", []string{in.Router}}, {"env hosts", in.EnvHosts}, {"dns", []string{in.DNS}},
 		{"family", []string{in.Family}}, {"image kind", []string{in.ImageKind}}, {"image", []string{in.Image}},
+	}
+	if d := in.Details; d != nil {
+		fields = append(fields, struct {
+			name   string
+			values []string
+		}{"details", []string{d.OS, d.User, d.Password, d.Built, d.Generalized, d.Installed, d.Licence}})
 	}
 	var errs []error
 	for _, f := range fields {
@@ -253,9 +262,11 @@ func planFor(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*p
 		}
 		return p.EnvDNS(ctx, req)
 	case pods.KindImageRegister:
-		return p.ImageRegister(ctx, pods.ImageRequest{VMID: in.VMID, Family: in.Family, Kind: in.ImageKind})
+		return p.ImageRegister(ctx, pods.ImageRequest{VMID: in.VMID, Family: in.Family, Kind: in.ImageKind, Details: in.Details})
 	case pods.KindImageEdit:
 		return p.ImageEdit(ctx, pods.ImageRequest{Family: in.Family})
+	case pods.KindImageDetails:
+		return p.ImageSetDetails(ctx, pods.ImageRequest{Family: in.Family, Details: in.Details})
 	case pods.KindImageDeprecate:
 		return p.ImageDeprecate(ctx, pods.ImageRequest{Image: in.Image})
 	case pods.KindImageDelete:
@@ -327,6 +338,18 @@ func (in Inputs) validateTeamless() []error {
 	if in.Slot != "" && in.Kind != pods.KindEnvCreate && in.Kind != pods.KindEnvTeardown {
 		errs = append(errs, errors.New("a slot applies only to creating or tearing down an environment"))
 	}
+	switch {
+	case in.Details == nil:
+		if in.Kind == pods.KindImageDetails {
+			errs = append(errs, errors.New("name the details to write"))
+		}
+	case in.Kind != pods.KindImageRegister && in.Kind != pods.KindImageDetails:
+		errs = append(errs, errors.New("details apply only to registering a base image and editing its details"))
+	default:
+		if err := pods.CheckDetails(*in.Details); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	switch in.Kind {
 	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS, pods.KindEnvTeardown:
 		if err := pods.CheckDomain(strings.TrimSpace(in.Domain)); err != nil {
@@ -356,7 +379,7 @@ func (in Inputs) validateTeamless() []error {
 		if in.ImageKind != "" && !slices.Contains(pods.ImageKinds, in.ImageKind) {
 			errs = append(errs, fmt.Errorf("image kind must be one of %s", strings.Join(pods.ImageKinds, ", ")))
 		}
-	case pods.KindImageEdit:
+	case pods.KindImageEdit, pods.KindImageDetails:
 		if err := pods.CheckFamily(in.Family); err != nil {
 			errs = append(errs, err)
 		}

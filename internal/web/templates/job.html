@@ -12,6 +12,7 @@
 </div>
 <div class="pb">
 {{template "job-head" .}}
+{{template "job-details" .}}
 {{template "job-items" .}}
 {{template "job-log" .}}
 </div>
@@ -29,12 +30,21 @@
 {{template "job-actions" .}}
 </div>
 {{template "job-head" .}}
+{{template "job-details" .}}
 <div class="stack">
 {{template "job-items" .}}
 {{template "job-log" .}}
 </div>
 </div>
 {{- end}}
+{{- end}}
+{{- end}}
+
+{{/* job-details are the details an image job writes; outside job-head,
+     so a password shown stays shown while the job runs. */}}
+{{define "job-details" -}}
+{{- with .Details}}
+<div class="sec"><h2 class="sub">Details</h2>{{template "details" .}}</div>
 {{- end}}
 {{- end}}
 

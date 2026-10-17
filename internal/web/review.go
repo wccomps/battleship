@@ -29,17 +29,26 @@ type reviewView struct {
 	Kept []string
 	// Retry says which job this retries, and what of it.
 	Retry string
+	// Details are what a register writes, DetailsSay where they come from,
+	// and EditDetails the register form to change them, which the review's
+	// inputs are posted to (keeping a password out of the address).
+	Details     *detailsView
+	DetailsSay  string
+	EditDetails string
+	// Changes are an Edit details's details, before and after.
+	Changes []detailChange
+	// Notes are the notes people wrote that the copy keeps, in a box.
+	Notes string
 }
 
 // reviewFact is a labelled fact of a review: a name, text and a muted note,
-// a link to change it, or notes in a box.
+// and a link to change it.
 type reviewFact struct {
 	Label  string
 	Code   string
 	Text   string
 	Meta   string
 	Change string // the form, filled in, to change it
-	Notes  string
 }
 
 // reviewRow is a VM a review lists: its full name, the exact image version
@@ -87,6 +96,11 @@ func review(op operation, in jobs.Inputs, plan *pods.Plan, nothing string) *revi
 		r = dnsReview(in, plan)
 	case op.Kind == pods.KindEnvTeardown:
 		r = teardownReview(in, plan)
+	case op.Kind == pods.KindImageDetails:
+		if len(plan.Items) != 1 {
+			return nil
+		}
+		return detailsReview(plan.Items[0])
 	case op.Section == sectionImages:
 		r = imageReview(op, in, plan)
 	default:
@@ -99,8 +113,8 @@ func review(op operation, in jobs.Inputs, plan *pods.Plan, nothing string) *revi
 }
 
 // registerReview describes registering it: the source VM, the image it
-// becomes and how, its kind, where the template lands, and the source's
-// notes, which the copy keeps.
+// becomes and how, its kind, where the template lands, the details it
+// writes, and the source's notes, which the copy keeps.
 func registerReview(op operation, in jobs.Inputs, it pods.Item) *reviewView {
 	src := pods.Source{Name: "?"}
 	if it.Source != nil {
@@ -125,9 +139,43 @@ func registerReview(op operation, in jobs.Inputs, it pods.Item) *reviewView {
 	if it.Supersedes != nil {
 		r.Facts = append(r.Facts, reviewFact{Label: "Replaces", Code: it.Supersedes.Name, Meta: "deprecated once this is registered"})
 	}
-	if src.Notes != "" {
-		r.Facts = append(r.Facts, reviewFact{Label: "Notes", Notes: src.Notes})
+	switch {
+	case it.Details != nil:
+		r.Details = detailsOf(*it.Details, false)
+		if in.Details == nil {
+			r.DetailsSay = "Read from the notes of " + src.Name + ": check them."
+		}
+	case src.Unreadable:
+		r.DetailsSay = "The details in the notes of " + src.Name + " are unreadable; the copy keeps them as they are."
+	default:
+		r.DetailsSay = "None: add them here, or later with Edit details on its family's page."
 	}
+	if !r.Blocked {
+		r.EditDetails = op.Path
+	}
+	r.Notes = src.Notes
+	return r
+}
+
+// detailsReview describes an Edit details: each detail before and after,
+// and that the rest of the image's notes stay.
+func detailsReview(it pods.Item) *reviewView {
+	r := &reviewView{Verb: "Edit details of", Subject: it.Name,
+		Say: "Writes these details into the notes of " + it.Name + ", which new hosts copy. The rest of its notes, and older versions, stay as they are."}
+	var before, after pods.ImageDetails
+	if it.DetailsWas != nil {
+		before = it.DetailsWas.Details
+		if it.DetailsWas.Unreadable {
+			r.DetailsSay = "Its details block is unreadable: these replace it."
+		}
+	}
+	if it.Details != nil {
+		after = *it.Details
+	}
+	if it.Blocked != "" {
+		r.Say, r.Blocked = sentence(it.Blocked), true
+	}
+	r.Changes = detailChanges(before, after)
 	return r
 }
 
@@ -341,13 +389,13 @@ func imageReview(op operation, in jobs.Inputs, plan *pods.Plan) *reviewView {
 
 // reviewBack is where a review's Back goes: the form, filled in; the page
 // it was opened from for a register (Images, whose row was the form) and a
-// teardown (Environments); and the family page for an edit, deprecate or
-// delete, which start there.
+// teardown (Environments); and the family page for an edit, deprecate,
+// delete or Edit details, which start there.
 func reviewBack(op operation, in jobs.Inputs) string {
 	switch op.Kind {
 	case pods.KindImageRegister, pods.KindEnvTeardown:
 		return listPage(in)
-	case pods.KindImageEdit:
+	case pods.KindImageEdit, pods.KindImageDetails:
 		return familyHref(in.Family)
 	case pods.KindImageDeprecate, pods.KindImageDelete:
 		if f, _, ok := pods.ParseImageName(in.Image); ok {

@@ -72,6 +72,8 @@ var operations = []operation{
 		Section: sectionImages, Doing: "Deprecating"},
 	{Kind: pods.KindImageDelete, Path: "/images/delete", Title: "Delete base image", Icon: "teardown", Noun: "deletion",
 		Section: sectionImages, Doing: "Deleting", Done: "Deleted"},
+	{Kind: pods.KindImageDetails, Path: "/images/details", Title: "Edit details", Icon: "edit", Noun: "details change",
+		Section: sectionImages, Doing: "Editing details", Done: "Saved"},
 }
 
 // nav is the nav entry its pages mark current: its section, or else its
@@ -162,6 +164,15 @@ const (
 	fieldHostImage   = "host_image"
 	fieldHostOctet   = "host_octet"
 	fieldMore        = "more" // asks the form again with more host rows (blankRows)
+	// The details fields (detailsFields); fieldDetails says they were posted.
+	fieldDetails     = "details"
+	fieldOS          = "detail_os"
+	fieldUser        = "detail_user"
+	fieldPassword    = "detail_password"
+	fieldBuilt       = "detail_built"
+	fieldGeneralized = "detail_generalized"
+	fieldInstalled   = "detail_installed"
+	fieldLicence     = "detail_licence"
 	fromGridValue    = "grid"
 	yes              = "yes"
 )
@@ -196,6 +207,12 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 			}
 		}
 		in.VMID, _ = strconv.Atoi(strings.TrimSpace(form.Get(fieldVMID)))
+		if form.Get(fieldDetails) == yes {
+			d := pods.ImageDetails{OS: form.Get(fieldOS), User: form.Get(fieldUser), Password: form.Get(fieldPassword),
+				Built: form.Get(fieldBuilt), Generalized: form.Get(fieldGeneralized), Installed: form.Get(fieldInstalled),
+				Licence: form.Get(fieldLicence)}.Trimmed()
+			in.Details = &d
+		}
 		return in
 	}
 	in := jobs.Inputs{
@@ -246,7 +263,7 @@ func inputFields(in jobs.Inputs) []field {
 		if in.VMID != 0 {
 			fs = append(fs, field{fieldVMID, strconv.Itoa(in.VMID)})
 		}
-		return fs
+		return append(fs, detailsFields(in.Details)...)
 	}
 	fs := []field{{fieldTeams, in.Teams}}
 	if len(in.Hosts) > 0 {
@@ -293,9 +310,26 @@ func Normalize(in jobs.Inputs) jobs.Inputs {
 	return formInputs(in.Kind, form)
 }
 
+// detailsFields are details as the form fields formInputs reads: the
+// fields set, and fieldDetails, which says details were given even when
+// none is set.
+func detailsFields(d *pods.ImageDetails) []field {
+	if d == nil {
+		return nil
+	}
+	fs := []field{{fieldDetails, yes}}
+	for _, f := range []field{{fieldOS, d.OS}, {fieldUser, d.User}, {fieldPassword, d.Password}, {fieldBuilt, d.Built},
+		{fieldGeneralized, d.Generalized}, {fieldInstalled, d.Installed}, {fieldLicence, d.Licence}} {
+		if f.Value != "" {
+			fs = append(fs, f)
+		}
+	}
+	return fs
+}
+
 // formQuery is an operation's form URL prefilled with in, for "change" links.
 // A deploy's baseline box is always written, since the form ticks it when the
-// query is silent. An environment's form has its domain in the path; without
+// query is silent. Details are left out, and the form fills them in afresh. An environment's form has its domain in the path; without
 // a valid one, it is the Environments page.
 func formQuery(op operation, in jobs.Inputs) string {
 	if op.Kind.OnEnvironment() && op.domain == "" {
@@ -305,6 +339,7 @@ func formQuery(op operation, in jobs.Inputs) string {
 		op = op.at(in.Domain)
 	}
 	q := url.Values{}
+	in.Details = nil // a password stays out of addresses: the form reads them again
 	for _, f := range inputFields(in) {
 		if f.Name != fieldDomain || !op.Kind.OnEnvironment() {
 			q.Set(f.Name, f.Value)

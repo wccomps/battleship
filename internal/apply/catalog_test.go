@@ -107,3 +107,23 @@ func TestRegisterKeepsConvertedImageWhenRetireFails(t *testing.T) {
 		t.Errorf("converted image must survive a failed retire: %+v", v)
 	}
 }
+
+// The details step rewrites only the notes' details block, and refuses
+// details that would break it, however the plan came by them.
+func TestDetailsStepWritesTheBlock(t *testing.T) {
+	const desc = "Patched monthly.\nbattleship: source=150"
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 8000, Name: "deb-v1", Node: "alder", Template: true, Tags: "base;linux"}, map[string]string{"description": desc})
+	plan := func(d pods.ImageDetails) *pods.Plan {
+		return &pods.Plan{Kind: pods.KindImageDetails, Items: []pods.Item{{Name: "deb-v1", VMID: 8000, Node: "alder",
+			Steps: []pods.Step{pods.StepDetails}, Details: &d}}}
+	}
+	res := catalogExec(f).Run(context.Background(), plan(pods.ImageDetails{OS: "a\nbattleship: ip=10.0.0.1"}))
+	if len(res.Failed) != 1 || f.VMs[8000].Config["description"] != desc {
+		t.Errorf("bad details: result %+v, notes %q", res, f.VMs[8000].Config["description"])
+	}
+	res = catalogExec(f).Run(context.Background(), plan(pods.ImageDetails{OS: "Debian 12", User: "root"}))
+	if want := "**Details**\n- OS: Debian 12\n- Login: root\n\n" + desc; len(res.Succeeded) != 1 || f.VMs[8000].Config["description"] != want {
+		t.Errorf("result %+v, notes %q, want %q", res, f.VMs[8000].Config["description"], want)
+	}
+}

@@ -28,6 +28,7 @@ var iconPaths = map[string]string{
 	"dash":     `<path d="M7 12h10"/>`,
 	"copy":     `<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>`,
 	"chev":     `<path d="m9 6 6 6-6 6"/>`,
+	"edit":     `<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>`,
 }
 
 // icon is the SVG of a named icon, with extra classes if given.

@@ -92,9 +92,12 @@ type EnvHost struct {
 	Router   bool
 	Notes    Notes
 	HasNotes bool
-	// UserNotes are its other notes, such as the logins its base image's
-	// notes carried over.
-	UserNotes string
+	// UserNotes are its other notes, such as what its base image's notes
+	// carried over, less their details block, which Details holds; all of
+	// them when Unreadable says the block is (see ParseDetails).
+	UserNotes  string
+	Details    ImageDetails
+	Unreadable bool
 	// Addr is its address: the gateway for the router, else its notes'.
 	Addr string
 }
@@ -289,7 +292,10 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			n, has := ParseNotes(cfg["description"])
 			n = n.Checked(p.Cfg.Environments.Subnet)
 			h := EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node, Status: vm.Status, Tags: vm.Tags,
-				Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has, UserNotes: UserNotes(cfg["description"]), Addr: n.IP}
+				Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has, Addr: n.IP}
+			var derr error
+			h.Details, h.UserNotes, derr = ParseDetails(cfg["description"])
+			h.Unreadable = derr != nil
 			if h.Router {
 				h.Addr = envs[si].Gateway
 			}

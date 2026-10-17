@@ -28,6 +28,9 @@ type catalogPage struct {
 	// DNSCards are Set DNS's choices; DNSHint says whose DNS it changes.
 	DNSCards []dnsCard
 	DNSHint  string
+	// Details fill a register's and an Edit details's fields: those given,
+	// else those of the VM's notes or the family's newest version.
+	Details pods.ImageDetails
 	envForm
 }
 
@@ -147,6 +150,14 @@ func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, prob
 				p.dnsForm()
 			}
 		}
+	}
+	switch {
+	case in.Details != nil:
+		p.Details = *in.Details
+	case op.Kind == pods.KindImageRegister && in.VMID != 0:
+		p.Details = s.registerDetails(ctx, in.VMID)
+	case op.Kind == pods.KindImageDetails:
+		p.Details = s.currentDetails(ctx, p.Images, in.Family)
 	}
 	if op.Machines {
 		form := r.URL.Query()

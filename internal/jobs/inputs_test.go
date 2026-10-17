@@ -233,7 +233,7 @@ func TestTeamlessLockKeys(t *testing.T) {
 // Image jobs and DNS changes are started again from their forms; a slot
 // is only a create's, and VMs only a create's or an add's.
 func TestRetryInputsRefusesTeamless(t *testing.T) {
-	for _, kind := range []pods.Kind{pods.KindEnvDNS, pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete} {
+	for _, kind := range []pods.Kind{pods.KindEnvDNS, pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete, pods.KindImageDetails} {
 		job := store.Job{ID: 7, Kind: string(kind), Status: string(store.StatusCompletedWithFailures)}
 		if _, err := RetryInputs(job, nil); !errors.Is(err, ErrNotRetryable) {
 			t.Errorf("%s: err = %v", kind, err)
@@ -246,6 +246,28 @@ func TestRetryInputsRefusesTeamless(t *testing.T) {
 	} {
 		if err := in.Validate(); err == nil {
 			t.Errorf("%+v is valid", in)
+		}
+	}
+}
+
+// Details are an Edit details's, which needs them, and a register's; no
+// other kind takes them.
+func TestValidateDetails(t *testing.T) {
+	d := &pods.ImageDetails{OS: "Debian 12"}
+	for _, c := range []struct {
+		in Inputs
+		ok bool
+	}{
+		{Inputs{Kind: pods.KindImageDetails, Family: "debian-12", Details: d}, true},
+		{Inputs{Kind: pods.KindImageDetails, Family: "debian-12"}, false},
+		{Inputs{Kind: pods.KindImageDetails, Family: "debian-12-v1", Details: d}, false},
+		{Inputs{Kind: pods.KindImageRegister, VMID: 150, Family: "debian-12", Details: d}, true},
+		{Inputs{Kind: pods.KindImageRegister, VMID: 150, Family: "debian-12"}, true},
+		{Inputs{Kind: pods.KindImageEdit, Family: "debian-12", Details: d}, false},
+		{Inputs{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", Details: d}, false},
+	} {
+		if err := c.in.Validate(); (err == nil) != c.ok {
+			t.Errorf("Validate(%s, details %v) = %v, want ok %v", c.in.Kind, c.in.Details != nil, err, c.ok)
 		}
 	}
 }

@@ -2,6 +2,7 @@ package web
 
 import (
 	"cmp"
+	"context"
 	"net/http"
 	"slices"
 	"strings"
@@ -48,15 +49,19 @@ type envBlock struct {
 func (b envBlock) Acts() bool { return b.Domain != "" && b.Twin == "" }
 
 // envHostRow is a VM in a slot: its name (the host part, or the whole VM
-// name in a block without one domain), address, power, image and notes.
+// name in a block without one domain), address, power, image, details and
+// notes. Its details are those of its own notes, which a clone copies from
+// its base image; else, while its base image is there, the image's.
 type envHostRow struct {
-	Name    string
-	Router  bool
-	Addr    string
-	Running bool
-	Status  string
-	Image   string
-	Notes   string
+	Name       string
+	Router     bool
+	Addr       string
+	Running    bool
+	Status     string
+	Image      string
+	Details    pods.ImageDetails
+	Unreadable bool
+	Notes      string
 }
 
 func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
@@ -64,11 +69,11 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 	p := envsView{MayCreate: s.mayRun(ctx, pods.KindEnvCreate), MayAdd: s.mayRun(ctx, pods.KindEnvAdd), MayDNS: s.mayRun(ctx, pods.KindEnvDNS),
 		MayTearDown: s.mayRun(ctx, pods.KindEnvTeardown)}
 	planner := s.planner(ctx)
-	envs, _, err := planner.Environments(ctx)
+	envs, vms, err := planner.Environments(ctx)
 	if err != nil {
 		p.ReadErr = "Couldn't read the cluster: " + sentence(proxmox.Describe(err))
 	} else {
-		p.Envs = envBlocks(envs)
+		p.Envs = envBlocks(envs, s.hostBases(ctx, envs, vms))
 		open, queued, err := planner.OpenSlots(ctx, envs)
 		if err != nil {
 			p.FreeErr = "Couldn't tell which free slots queued jobs will fill: " + sentence(err.Error())
@@ -95,8 +100,33 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, http.StatusOK, "catalog", s.newView(w, r, "Environments", "environments", p))
 }
 
-// envBlocks are the slots in use, in slot order.
-func envBlocks(envs []pods.Environment) []envBlock {
+// hostBases are, by name, the base images of envs's hosts whose own notes
+// have no details, with their notes read.
+func (s *Server) hostBases(ctx context.Context, envs []pods.Environment, vms []proxmox.VM) map[string]pods.BaseImage {
+	want := map[string]bool{}
+	for _, e := range envs {
+		for _, h := range e.Hosts {
+			if h.Details.Empty() && !h.Unreadable && h.Notes.Base != "" {
+				want[h.Notes.Base] = true
+			}
+		}
+	}
+	var images []pods.BaseImage
+	for _, im := range pods.BaseImages(vms) {
+		if want[im.Name] {
+			images = append(images, im)
+		}
+	}
+	out := map[string]pods.BaseImage{}
+	for _, im := range s.planner(ctx).ReadNotes(ctx, images) {
+		out[im.Name] = im
+	}
+	return out
+}
+
+// envBlocks are the slots in use, in slot order; bases are the hosts' base
+// images by name, for hosts whose notes have no details (hostBases).
+func envBlocks(envs []pods.Environment, bases map[string]pods.BaseImage) []envBlock {
 	var out []envBlock
 	for _, e := range envs {
 		if e.Free() {
@@ -113,7 +143,10 @@ func envBlocks(envs []pods.Environment) []envBlock {
 		}
 		for _, h := range e.Hosts {
 			row := envHostRow{Name: h.Name, Router: h.Router, Addr: h.Addr, Running: h.Status == "running",
-				Status: cmp.Or(h.Status, "unknown"), Image: h.Notes.Base, Notes: h.UserNotes}
+				Status: cmp.Or(h.Status, "unknown"), Image: h.Notes.Base, Details: h.Details, Unreadable: h.Unreadable, Notes: h.UserNotes}
+			if base, ok := bases[h.Notes.Base]; ok && h.Details.Empty() && !h.Unreadable && !base.Unreadable {
+				row.Details = base.Details
+			}
 			if e.Domain != "" {
 				row.Name = h.Host
 			}

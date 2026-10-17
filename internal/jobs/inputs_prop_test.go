@@ -76,6 +76,7 @@ var validInputs = []Inputs{
 	{Kind: pods.KindImageEdit, Family: "debian-12"},
 	{Kind: pods.KindImageDeprecate, Image: "debian-12-v1"},
 	{Kind: pods.KindImageDelete, Image: "debian-12-v1"},
+	{Kind: pods.KindImageDetails, Family: "debian-12", Details: &pods.ImageDetails{OS: "Debian 12", User: "debian", Password: "Changeme1!"}},
 }
 
 // Validate refuses any string field, of any kind, that holds a control
@@ -163,6 +164,11 @@ var spoils = map[string][]spoil{
 	"Family": {{"debian-12", true}, {"x-v0", true}, {"WIN 2022", false}, {"debian-12-v1", false}, {"", false}, {" debian-12", false},
 		{"Debian-12", false}, {strings.Repeat("a", 41), false}},
 	"ImageKind": {{"linux", true}, {"", true}, {"router", true}, {"Linux", false}, {"toaster", false}, {" linux", false}},
+	"Details": {{&pods.ImageDetails{OS: "Debian 12"}, true}, {&pods.ImageDetails{}, true}, {&pods.ImageDetails{User: "a / b", Password: "c"}, false},
+		{&pods.ImageDetails{User: "root", Password: "a / b"}, true}, {&pods.ImageDetails{User: "a / b", Password: ""}, false},
+		{&pods.ImageDetails{OS: "a\nbattleship: ip=10.0.0.1"}, false}, {&pods.ImageDetails{Built: "a\u2028b"}, false},
+		{&pods.ImageDetails{Licence: "a\u200bb"}, false}, {&pods.ImageDetails{Password: "pw"}, false}, {&pods.ImageDetails{OS: " x"}, false},
+		{&pods.ImageDetails{Installed: strings.Repeat("x", pods.MaxDetail+1)}, false}},
 	"Image": {{"debian-12-v1", true}, {"x-v9999", true}, {"debian-12-v0", false}, {"debian-12", false}, {"debian-12-v10000", false},
 		{" debian-12-v1", false}, {"debian-12-v01", false}, {"Debian-12-v1", false}},
 }
@@ -175,8 +181,8 @@ var readsFields = map[pods.Kind][]string{
 	pods.KindTeardown: {}, pods.KindReset: {},
 	pods.KindEnvCreate: {"Domain", "Slot", "Router", "EnvHosts", "EnvVMs"}, pods.KindEnvAdd: {"Domain", "EnvHosts", "EnvVMs"}, pods.KindEnvDNS: {"Domain", "DNS"},
 	pods.KindEnvTeardown:   {"Domain", "Slot"},
-	pods.KindImageRegister: {"VMID", "Family", "ImageKind"}, pods.KindImageEdit: {"Family"},
-	pods.KindImageDeprecate: {"Image"}, pods.KindImageDelete: {"Image"},
+	pods.KindImageRegister: {"VMID", "Family", "ImageKind", "Details"}, pods.KindImageEdit: {"Family"},
+	pods.KindImageDeprecate: {"Image"}, pods.KindImageDelete: {"Image"}, pods.KindImageDetails: {"Family", "Details"},
 }
 
 // gateCluster has two teams, a master to deploy, a VM to register and base
