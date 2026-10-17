@@ -54,7 +54,7 @@ var jobRules = map[JobStatus]jobRule{
 	StatusCompletedWithFailures: {retry: true, cancelTooLate: true},
 	StatusFailed:                {ranNothing: true, startAgain: true, cancelTooLate: true},
 	StatusCancelled:             {stopped: true, retry: true, startAgain: true},
-	StatusInterrupted:           {stopped: true, retry: true},
+	StatusInterrupted:           {stopped: true, retry: true, startAgain: true},
 	StatusStale:                 {ranNothing: true, startAgain: true},
 }
 

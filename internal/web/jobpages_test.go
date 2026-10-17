@@ -1105,3 +1105,19 @@ func TestQueuedJobSaysWhatItWaitsFor(t *testing.T) {
 	lacks(t, "next job", page, "waiting for a free worker")
 	contains(t, "job list", h.get(&op, "/logs").Body.String(), "waiting for a free worker", "after #"+itoa(first))
 }
+
+// A job a shutdown interrupted can always be started again: one that can't
+// be retried (an image job) offers its form, filled in, instead.
+func TestInterruptedJobCanBeStartedAgain(t *testing.T) {
+	h := newHarness(t)
+	addImages(h)
+	h.poll()
+	op := h.login(asLead)
+	id := h.submitJob(jobs.Inputs{Kind: pods.KindImageDelete, Image: "debian-12-v1"}, byOperator)
+	h.start(id)
+	h.finish(id, store.Outcome{Status: store.StatusInterrupted, Error: "the worker shut down during the job; re-run it to finish"})
+	page := h.get(&op, logHref(id)).Body.String()
+	if !strings.Contains(page, `href="/images/delete?image=debian-12-v1"`) || !strings.Contains(page, "Preview again</a>") {
+		t.Errorf("an interrupted image job offers no way to run it again:\n%s", page)
+	}
+}
