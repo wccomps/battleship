@@ -40,9 +40,11 @@ var confirmFields = []string{
 	fieldDNS, fieldVMID, fieldFamily, fieldImageKind, fieldImage,
 }
 
+// operationOf is kind's operation, opened for lab.env if it acts on an
+// environment.
 func operationOf(kind pods.Kind) operation {
 	i := slices.IndexFunc(operations, func(o operation) bool { return o.Kind == kind })
-	return operations[i]
+	return operations[i].at("lab.env")
 }
 
 func cloneForm(f url.Values) url.Values {
@@ -54,10 +56,12 @@ func cloneForm(f url.Values) url.Values {
 }
 
 // sameConfirm reports whether a confirm of b is the confirm a: the inputs
-// formInputs reads, the nonce and fingerprint, and a teardown's typed range.
+// formInputs reads (an environment's domain is its path's), the nonce and
+// fingerprint, and a teardown's typed range.
 func sameConfirm(kind pods.Kind, a, b url.Values) bool {
-	in := formInputs(kind, a)
-	return reflect.DeepEqual(in, formInputs(kind, b)) && a.Get(fieldNonce) == b.Get(fieldNonce) &&
+	op := operationOf(kind)
+	in := op.scope(formInputs(kind, a))
+	return reflect.DeepEqual(in, op.scope(formInputs(kind, b))) && a.Get(fieldNonce) == b.Get(fieldNonce) &&
 		a.Get(fieldFingerprint) == b.Get(fieldFingerprint) &&
 		(!kind.TypedConfirm() || strings.TrimSpace(b.Get(fieldTyped)) == in.Teams)
 }

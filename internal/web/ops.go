@@ -18,8 +18,12 @@ import (
 type operation struct {
 	Kind  pods.Kind
 	Path  string // e.g. "/reset"
-	Title string // e.g. "Deploy": the form's heading, and the header button for deploy and teardown
+	Title string // e.g. "Deploy": the form's heading
 	Noun  string // e.g. "reset", for the confirm's summary: "reset of team 01"
+	Lead  string // the header button of deploy and teardown, which act on whole teams
+	// domain is the environment an operation on one (its Path has {domain})
+	// was opened for: see at.
+	domain string
 }
 
 // operations are the operation pages; the header shows deploy and teardown in
@@ -28,11 +32,11 @@ var operations = []operation{
 	{Kind: pods.KindPower, Path: "/power", Title: "Power", Noun: "power action"},
 	{Kind: pods.KindReset, Path: "/reset", Title: "Reset", Noun: "reset"},
 	{Kind: pods.KindSnapshot, Path: "/snapshot", Title: "Take snapshot", Noun: "snapshot"},
-	{Kind: pods.KindDeploy, Path: "/deploy", Title: "Deploy", Noun: "deploy"},
-	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Noun: "teardown"},
+	{Kind: pods.KindDeploy, Path: "/deploy", Title: "Deploy", Noun: "deploy", Lead: "Deploy teams"},
+	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Noun: "teardown", Lead: "Tear down teams"},
 	{Kind: pods.KindEnvCreate, Path: "/environments/new", Title: "Create environment", Noun: "environment"},
-	{Kind: pods.KindEnvAdd, Path: "/environments/add", Title: "Add hosts", Noun: "new hosts"},
-	{Kind: pods.KindEnvDNS, Path: "/environments/dns", Title: "Set DNS", Noun: "DNS change"},
+	{Kind: pods.KindEnvAdd, Path: "/environments/{domain}/add", Title: "Add hosts", Noun: "new hosts"},
+	{Kind: pods.KindEnvDNS, Path: "/environments/{domain}/dns", Title: "Set DNS", Noun: "DNS change"},
 	{Kind: pods.KindImageRegister, Path: "/images/register", Title: "Register base image", Noun: "registration"},
 	{Kind: pods.KindImageEdit, Path: "/images/edit", Title: "Open for editing", Noun: "working copy"},
 	{Kind: pods.KindImageDeprecate, Path: "/images/deprecate", Title: "Deprecate base image", Noun: "deprecation"},
@@ -47,6 +51,25 @@ var operations = []operation{
 // Image and environment operations have nothing to pick in the grid.
 func (o operation) page() bool {
 	return o.Kind == pods.KindDeploy || o.Kind == pods.KindTeardown || o.Kind.Teamless()
+}
+
+// at is an operation on one environment (pods.Kind.OnEnvironment, its Path
+// /environments/{domain}/...) opened for domain, a checked domain
+// (pods.CheckDomain): its paths name it, and it overrides any domain its
+// forms post.
+func (o operation) at(domain string) operation {
+	if o.Kind.OnEnvironment() && o.domain == "" {
+		o.Path, o.domain = strings.Replace(o.Path, "{domain}", domain, 1), domain
+	}
+	return o
+}
+
+// scope fixes in's domain to the one the operation was opened for.
+func (o operation) scope(in jobs.Inputs) jobs.Inputs {
+	if o.domain != "" {
+		in.Domain = o.domain
+	}
+	return in
 }
 
 func operationFor(kind pods.Kind) (operation, bool) {
@@ -226,11 +249,20 @@ func Normalize(in jobs.Inputs) jobs.Inputs {
 
 // formQuery is an operation's form URL prefilled with in, for "change" links.
 // A deploy's baseline box is always written, since the form ticks it when the
-// query is silent.
+// query is silent. An environment's form has its domain in the path; without
+// a valid one, it is the Environments page.
 func formQuery(op operation, in jobs.Inputs) string {
+	if op.Kind.OnEnvironment() && op.domain == "" {
+		if pods.CheckDomain(in.Domain) != nil {
+			return envsPath
+		}
+		op = op.at(in.Domain)
+	}
 	q := url.Values{}
 	for _, f := range inputFields(in) {
-		q.Set(f.Name, f.Value)
+		if f.Name != fieldDomain || !op.Kind.OnEnvironment() {
+			q.Set(f.Name, f.Value)
+		}
 	}
 	if in.Kind == pods.KindDeploy && in.NoSnapshot {
 		q.Set(fieldBaseline, "no")
@@ -280,14 +312,25 @@ func actor(u auth.User) string {
 	return u.Subject
 }
 
-// listPage is the page a job of kind belongs to, where closing its preview
-// or job page goes: Images or Environments for those, else the grid.
-func listPage(kind pods.Kind) string {
-	switch kind {
+// envsPath is the Environments page; envHref is an environment's block on it.
+const envsPath = "/environments"
+
+func envHref(domain string) string { return envsPath + "#" + domain }
+
+// listPage is the page a job with inputs in belongs to, where closing its
+// form, preview or job page goes: Images, Environments at the environment
+// changed, or the grid.
+func listPage(in jobs.Inputs) string {
+	switch in.Kind {
 	case pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete:
 		return "/images"
-	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS:
-		return "/environments"
+	case pods.KindEnvAdd, pods.KindEnvDNS:
+		if pods.CheckDomain(in.Domain) == nil {
+			return envHref(in.Domain)
+		}
+		return envsPath
+	case pods.KindEnvCreate:
+		return envsPath
 	}
 	return "/"
 }

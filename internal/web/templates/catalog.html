@@ -1,35 +1,58 @@
 {{define "content" -}}
 {{- with .Data}}
-<div class="sheet">
-<div class="ph"><h1 id="form-title">Environments</h1><span class="sp"></span>
-<a class="btn pri" href="/environments/new">Create environment</a>
-</div>
-<div class="pb">
-{{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
-{{- if .Envs}}
-<div class="tscroll">
-<table class="tbl cards">
-<thead><tr><th scope="col">Slot</th><th scope="col">Domain</th><th scope="col">Hosts</th><th scope="col">DNS</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
-<tbody>
-{{- range .Envs}}
-<tr{{if .Free}} class="free"{{end}}>
-<td>{{names .Slot.Pool}}</td>
-{{- if .Free}}
-<td colspan="3" class="muted">free</td><td></td>
-{{- else}}
-<td data-label="Domain">{{if .Mixed}}<span class="muted">mixed</span>{{else}}{{names .Domain}}{{end}}{{with .Users}} <span class="muted">· also on its networks: {{range $i, $u := .}}{{if $i}}, {{end}}{{names $u}}{{end}}</span>{{end}}</td>
-<td data-label="Hosts">{{range .Hosts}}<div>{{names .Name}} <span class="muted">{{.Status}}{{with .Notes.IP}} · {{.}}{{end}}</span>
-{{- with .UserNotes}}<details class="notes-d"><summary class="disc">notes</summary><div class="notes">{{.}}</div></details>{{end}}</div>{{end}}</td>
-<td data-label="DNS">{{.DNS}}</td>
-<td class="act">{{if .Domain}}<div class="acts"><a class="btn sm" href="/environments/add?domain={{.Domain}}">Add hosts</a><a class="btn sm" href="/environments/dns?domain={{.Domain}}">Set DNS</a></div>{{end}}</td>
+{{- $d := .}}
+<div class="page mid envs">
+<div class="phead"><h1 class="ptitle">Environments</h1><span class="sp"></span>
+{{- if .MayCreate}}<a class="btn pri" href="/environments/new">Create environment</a>{{else}}<button class="btn pri" type="button" disabled>Create environment</button>{{end}}</div>
+{{- range .Lacks}}
+<p class="lock">{{icon "lock"}}{{.}}</p>
 {{- end}}
-</tr>
+{{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
+{{- range .Envs}}
+{{- $b := .}}
+<section class="env" id="{{.ID}}" aria-labelledby="{{.ID}}-h">
+<div class="envh">
+<h2 id="{{.ID}}-h">{{if .Domain}}{{.Domain}}{{else}}{{.Slot}}{{end}}</h2>
+<div class="facts">
+{{- if .Domain}}<span>{{.Slot}}</span><span>router <b>{{or .Router "none"}}</b></span><span>DNS <b>{{.DNS}}</b></span>
+{{- else}}<span class="chip">{{if .Mixed}}mixed domains{{else}}in use{{end}}</span>{{end}}</div>
+{{- if .Acts}}
+<div class="acts">
+{{- if $d.MayAdd}}<a class="btn sm" href="/environments/{{.Domain}}/add">Add hosts</a>{{else}}<button class="btn sm" type="button" disabled>Add hosts</button>{{end}}
+{{- if $d.MayDNS}}<a class="btn sm" href="/environments/{{.Domain}}/dns">Set DNS</a>{{else}}<button class="btn sm" type="button" disabled>Set DNS</button>{{end}}
+</div>
+{{- end}}
+</div>
+{{- if .Mixed}}
+<p class="fix">{{icon "warn"}}<span>Its VMs don't share one domain, so Add hosts and Set DNS can't act on it. Rename them to one domain, or move the others out of {{.Slot}}.</span></p>
+{{- else if .Twin}}
+<p class="fix">{{icon "warn"}}<span>{{.Domain}} is also in {{.Twin}}: Add hosts and Set DNS act on that one.</span></p>
+{{- end}}
+{{- with .Users}}
+<p class="fix">{{icon "warn"}}<span>{{if $b.Hosts}}Also on its networks, from outside {{$b.Slot}}{{else}}Nothing is in {{$b.Slot}}, but VMs outside it are on its networks, so Create skips it{{end}}: {{range $i, $u := .}}{{if $i}}, {{end}}<code>{{$u}}</code>{{end}}.</span></p>
+{{- end}}
+{{- with .Hosts}}
+<table class="tbl envt">
+<thead><tr><th scope="col">Host</th><th scope="col">Address</th><th scope="col">Status · image</th><th scope="col">Notes</th></tr></thead>
+<tbody>
+{{- range .}}
+<tr><td class="hn"><span class="hname">{{.Name}}</span>{{if .Router}} <span class="chip">router</span>{{end}}</td>
+<td class="ad">{{with .Addr}}<code>{{.}}</code>{{else}}<span class="meta">no address</span>{{end}}</td>
+<td class="si"><span class="gl is-{{if .Running}}running{{else}}stopped{{end}}"><i class="g" aria-hidden="true"></i>{{.Status}}</span>{{with .Image}} <span class="meta">· {{.}}</span>{{end}}</td>
+<td class="nt">{{with .Notes}}<div class="notes">{{.}}</div>{{end}}</td></tr>
 {{- end}}
 </tbody>
 </table>
-</div>
 {{- end}}
-</div>
+</section>
+{{- end}}
+{{- with .FreeErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
+{{- if not .ReadErr}}
+<p class="free"><span class="sub">Free</span>
+{{- if .Free}}<span class="vm">{{.Free}}</span><span class="meta">· Create uses {{.Create}}</span>
+{{- else}}<span class="meta">none: every slot is in use</span>{{end}}
+{{- with .Queued}}<span class="meta">· a queued job will fill {{.}}</span>{{end}}</p>
+{{- end}}
 </div>
 {{- end}}
 {{- end}}

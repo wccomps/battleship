@@ -31,7 +31,7 @@ func (s *Server) opConfirm(op operation) http.Handler {
 		ctx := r.Context()
 		u, _ := auth.UserFrom(ctx)
 		form := postedForm(r)
-		in := formInputs(op.Kind, form)
+		in := op.scope(formInputs(op.Kind, form))
 		if err := in.Validate(); err != nil {
 			s.refuseConfirm(w, r, op, "the inputs are invalid: "+err.Error())
 			return

@@ -204,7 +204,7 @@ type previewOptions struct {
 func (s *Server) opPreview(op operation) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		form := postedForm(r)
-		in := formInputs(op.Kind, form)
+		in := op.scope(formInputs(op.Kind, form))
 		if op.Kind.Teamless() && form.Get(fieldMore) == yes {
 			s.teamlessForm(w, r, http.StatusOK, op, in, "")
 			return
@@ -344,7 +344,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 	}
 	p.Heading = p.Title.Label
 	if op.Kind.Teamless() {
-		p.CloseHref = listPage(op.Kind)
+		p.CloseHref = listPage(in)
 	}
 	if opts.fromGrid {
 		p.EditHref, p.CloseHref = "/", "/"

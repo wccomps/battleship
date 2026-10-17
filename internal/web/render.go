@@ -153,7 +153,7 @@ func (s *Server) leadOps(ctx context.Context) []navItem {
 	var items []navItem
 	for _, op := range operations {
 		if op.page() && !op.Kind.Teamless() && s.mayRun(ctx, op.Kind) {
-			items = append(items, navItem{string(op.Kind), op.Title, op.Path})
+			items = append(items, navItem{string(op.Kind), op.Lead, op.Path})
 		}
 	}
 	return items

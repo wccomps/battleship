@@ -54,30 +54,22 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 			return nil, fmt.Errorf("%s is already in dev slot %s; add hosts to it instead", req.Domain, e.Slot.Name)
 		}
 	}
-	var slot *Environment
-	var hidden []string // slots that look free but hold VMs this user can't see
-	var queued []string // slots that look free but a queued job will fill
-	reserved, err := p.reserved(ctx)
+	open, queued, err := p.OpenSlots(ctx, envs)
 	if err != nil {
 		return nil, err
 	}
-	for i := range envs {
-		if !envs[i].Free() {
-			continue
-		}
-		if reserved["slot:"+envs[i].Slot.Name] {
-			queued = append(queued, envs[i].Slot.Name)
-			continue
-		}
-		held, err := p.slotHeld(ctx, envs[i].Slot, vms)
+	var slot *Slot
+	var hidden []string // slots that look free but hold VMs this user can't see
+	for _, s := range open {
+		held, err := p.slotHeld(ctx, s, vms)
 		if err != nil {
 			return nil, err
 		}
 		if !held {
-			slot = &envs[i]
+			slot = &s
 			break
 		}
-		hidden = append(hidden, envs[i].Slot.Name)
+		hidden = append(hidden, s.Name)
 	}
 	if slot == nil {
 		msg := "every dev slot is in use; archive an environment to free one"
@@ -85,12 +77,15 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 			msg += fmt.Sprintf(" (dev slot %s holds VMs you can't see)", strings.Join(hidden, ", "))
 		}
 		if len(queued) > 0 {
-			msg += fmt.Sprintf(" (a queued job will fill dev slot %s)", strings.Join(queued, ", "))
+			var names []string
+			for _, s := range queued {
+				names = append(names, s.Name)
+			}
+			msg += fmt.Sprintf(" (a queued job will fill dev slot %s)", strings.Join(names, ", "))
 		}
 		return nil, errors.New(msg)
 	}
-	env := *slot
-	env.Domain = req.Domain
+	env := Environment{Slot: *slot, Domain: req.Domain}
 	return p.envPlan(ctx, KindEnvCreate, env, append([]HostSpec{req.Router}, req.Hosts...), vms)
 }
 
@@ -127,6 +122,26 @@ func (p Planner) slotHeld(ctx context.Context, slot Slot, vms []proxmox.VM) (boo
 }
 
 var errSlotHeld = errors.New("slot holds a VM")
+
+// OpenSlots splits envs' free slots, in order, into those a new environment
+// may take and those a queued job will fill (Planner.Reserved). An open slot
+// may still hold VMs the user can't see; only EnvCreate asks (slotHeld).
+func (p Planner) OpenSlots(ctx context.Context, envs []Environment) (open, queued []Slot, err error) {
+	reserved, err := p.reserved(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, e := range envs {
+		switch {
+		case !e.Free():
+		case reserved["slot:"+e.Slot.Name]:
+			queued = append(queued, e.Slot)
+		default:
+			open = append(open, e.Slot)
+		}
+	}
+	return open, queued, nil
+}
 
 // EnvAdd plans adding hosts to the environment with req.Domain. Hosts that
 // already exist there are resumed.

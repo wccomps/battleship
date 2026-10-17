@@ -84,7 +84,7 @@ func (s *Server) opForm(op operation) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if op.Kind.Teamless() {
-			s.teamlessForm(w, r, http.StatusOK, op, formInputs(op.Kind, q), "")
+			s.teamlessForm(w, r, http.StatusOK, op, op.scope(formInputs(op.Kind, q)), "")
 			return
 		}
 		grid := false

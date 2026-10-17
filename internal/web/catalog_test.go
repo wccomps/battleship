@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -20,19 +21,6 @@ func addImages(h *harness) {
 		map[string]string{"net0": "virtio=BC:24:11:00:80:00,bridge=vmbr0", "net1": "virtio=BC:24:11:00:80:01,bridge=vmbr0"})
 	h.api.Add(proxmox.VM{VMID: 8001, Name: "debian-12-v1", Node: "n1", Template: true, Tags: "base;linux"},
 		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:80:02,bridge=vmbr0"})
-}
-
-func TestEnvironmentsPageListsSlots(t *testing.T) {
-	h := newHarness(t)
-	h.api.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "dev;kilo.alpha;router"},
-		map[string]string{"description": "battleship: base=gw-v1 dns=router"})
-	sess := h.login(asLead)
-	body := h.get(&sess, "/environments").Body.String()
-	for _, want := range []string{"kilo.alpha", "gw.kilo.alpha", "dev-02", "free", "/environments/new"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("page lacks %q", want)
-		}
-	}
 }
 
 func TestNewEnvironmentPreviewShowsSlotAndAddresses(t *testing.T) {
@@ -101,7 +89,7 @@ func TestImageFormsPrefill(t *testing.T) {
 	for path, want := range map[string]string{
 		"/images/deprecate?image=debian-12-v1": `value="debian-12-v1"`,
 		"/images/edit?family=debian-12":        `value="debian-12"`,
-		"/environments/dns?domain=kilo.alpha":  `<input type="hidden" name="domain" value="kilo.alpha">`,
+		"/environments/kilo.alpha/dns":         `action="/environments/kilo.alpha/dns/preview"`,
 		"/images/register":                     `name="vmid"`,
 	} {
 		rec := h.get(&sess, path)
@@ -112,12 +100,26 @@ func TestImageFormsPrefill(t *testing.T) {
 }
 
 // The Environments and Images pages, a family's page and sheet, the
-// register review, and the new environment form and preview fit a phone
-// without scrolling sideways.
+// register review, the environment forms and the new environment preview
+// fit a phone without scrolling sideways; leaving an environment's form
+// lands on its block.
 func TestBrowserCatalogPages(t *testing.T) {
 	h := browserHarness(t)
 	addCatalog(h)
-	addEnv(h, true)
+	addEnvs(h)
+	// A slot of two domains, and one used from outside.
+	h.api.Add(proxmox.VM{VMID: 2200, Name: "a.kilo.bravo", Node: "n1", Pool: "dev-02", Status: "running"},
+		map[string]string{"description": "a long login line that wraps: Administrator / Changeme1! then more words to fill it\nbattleship: ip=192.168.100.20"})
+	h.api.Add(proxmox.VM{VMID: 2201, Name: "b.other.zone", Node: "n1", Pool: "dev-02", Status: "stopped"}, nil)
+	h.api.Add(proxmox.VM{VMID: 160, Name: "stray-vm", Node: "n1", Status: "running"},
+		map[string]string{"net0": "virtio=BC:24:11:00:16:00,bridge=devint03"})
+	// Enough below oscar.lima that its block can scroll to the top.
+	for i, d := range []string{"lima.papa", "mike.november"} {
+		for j, host := range []string{"dc", "web", "app", "db", "wks1", "wks2"} {
+			h.api.Add(proxmox.VM{VMID: 2600 + 100*i + j, Name: host + "." + d, Node: "n1", Pool: "dev-0" + strconv.Itoa(6+i), Status: "running"},
+				map[string]string{"description": "user / Changeme1!\nbattleship: ip=192.168.100." + strconv.Itoa(10+j)})
+		}
+	}
 	lead := h.login(asLead)
 	for _, size := range sizes {
 		t.Run(size.name, func(t *testing.T) {
@@ -130,14 +132,27 @@ func TestBrowserCatalogPages(t *testing.T) {
 				{"/images/gw", "family-source"},
 				{"/environments/new", "env-new"},
 				{"/images/register", "image-register"},
-				{"/environments/add?domain=kilo.alpha", "env-add"},
-				{"/environments/dns?domain=kilo.alpha", "env-dns"},
-				{"/environments/add", "env-pick"},
+				{"/environments/kilo.alpha/add", "env-add"},
+				{"/environments/kilo.alpha/dns", "env-dns"},
 			} {
 				b.open(page.path)
 				b.noSideways(page.name)
 				b.shot(page.name + "-" + size.name)
 			}
+			b.open("/environments")
+			b.fullShot("environments-full-" + size.name)
+
+			// Cancel on Add hosts lands on its environment's block.
+			b.open("/environments/oscar.lima/add")
+			b.click(`.pf a[href="/environments#oscar.lima"]`)
+			b.waitFor("the Environments page", `location.pathname === "/environments" && location.hash === "#oscar.lima" && document.readyState === "complete"`)
+			// Its top shows just below the sticky header.
+			var at []float64
+			b.eval(`[document.getElementById("oscar.lima").getBoundingClientRect().top, document.querySelector(".top").getBoundingClientRect().bottom]`, &at)
+			if len(at) != 2 || at[0] < at[1]-1 || at[0] > at[1]+24 {
+				t.Errorf("after Cancel, oscar.lima's block is at %vpx, the header ends at %vpx", at[0], at[1])
+			}
+			b.shot("environments-anchor-" + size.name)
 
 			// A kind to pick dims Register until one is picked.
 			b.open("/images")
@@ -204,7 +219,7 @@ func TestNotesShowAsText(t *testing.T) {
 		map[string]string{"description": xssNotes, "agent": "1", "net0": "virtio=BC:24:11:00:80:03,bridge=vmbr0"})
 	sess := h.login(asLead)
 	pages := map[string]string{}
-	for _, path := range []string{"/images", "/images/debian-12", "/environments", "/environments/new", "/environments/add?domain=kilo.alpha"} {
+	for _, path := range []string{"/images", "/images/debian-12", "/environments", "/environments/new", "/environments/kilo.alpha/add"} {
 		pages[path] = h.get(&sess, path).Body.String()
 		pages["panel "+path] = h.panelGet(&sess, path, nil).Body.String()
 	}
@@ -240,7 +255,7 @@ func addEnv(h *harness, router bool) {
 		map[string]string{"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1 dns=teak"})
 }
 
-// Opened from an environment, Add hosts names it rather than asking, and
+// Add hosts at an environment's path names it rather than asking, and
 // asks for a router only when it has none.
 func TestAddHostsFormKnowsItsEnvironment(t *testing.T) {
 	for _, router := range []bool{true, false} {
@@ -248,8 +263,9 @@ func TestAddHostsFormKnowsItsEnvironment(t *testing.T) {
 		addImages(h)
 		addEnv(h, router)
 		sess := h.login(asLead)
-		body := h.get(&sess, "/environments/add?domain=kilo.alpha").Body.String()
-		if !strings.Contains(body, `<input type="hidden" name="domain" value="kilo.alpha">`) || strings.Contains(body, `id="domain"`) {
+		body := h.get(&sess, "/environments/kilo.alpha/add").Body.String()
+		if !strings.Contains(body, `action="/environments/kilo.alpha/add/preview"`) || strings.Contains(body, `name="domain"`) ||
+			!strings.Contains(body, `<dt>Environment</dt><dd><span class="name">kilo.alpha</span>`) {
 			t.Errorf("router %v: the domain isn't fixed:\n%s", router, body)
 		}
 		if hasInput := strings.Contains(body, `name="router_image"`); hasInput == router {
@@ -259,32 +275,14 @@ func TestAddHostsFormKnowsItsEnvironment(t *testing.T) {
 			t.Errorf("the environment's router isn't shown:\n%s", body)
 		}
 		// A router given (to resume one a failed create left) is kept.
-		body = h.get(&sess, "/environments/add?domain=kilo.alpha&router=gw%3Dgw").Body.String()
+		body = h.get(&sess, "/environments/kilo.alpha/add?router=gw%3Dgw").Body.String()
 		if !strings.Contains(body, `<option value="gw" selected>gw</option>`) || !strings.Contains(body, `name="router_name" value="gw"`) {
 			t.Errorf("router %v: a given router is dropped:\n%s", router, body)
 		}
 		// A refused preview keeps the environment fixed.
-		body = h.post(&sess, "/environments/add/preview", url.Values{"domain": {"kilo.alpha"}, "env_hosts": {""}}).Body.String()
-		if !strings.Contains(body, `<input type="hidden" name="domain" value="kilo.alpha">`) || !strings.Contains(body, `role="alert"`) {
+		body = h.post(&sess, "/environments/kilo.alpha/add/preview", url.Values{"env_hosts": {""}}).Body.String()
+		if !strings.Contains(body, `action="/environments/kilo.alpha/add/preview"`) || !strings.Contains(body, `role="alert"`) {
 			t.Errorf("router %v: a refused preview loses the environment:\n%s", router, body)
-		}
-	}
-}
-
-// Without an environment, Add hosts and Set DNS ask which one, from a list.
-func TestEnvironmentFormsPickAnEnvironment(t *testing.T) {
-	h := newHarness(t)
-	addImages(h)
-	addEnv(h, true)
-	sess := h.login(asLead)
-	for _, path := range []string{"/environments/add", "/environments/dns", "/environments/add?domain=kilo.bravo"} {
-		body := h.get(&sess, path).Body.String()
-		if !strings.Contains(body, `method="get"`) || !strings.Contains(body, `<option value="kilo.alpha">kilo.alpha</option>`) ||
-			strings.Contains(body, `name="env_hosts"`) {
-			t.Errorf("%s doesn't ask for the environment:\n%s", path, body)
-		}
-		if bad := strings.Contains(path, "bravo"); bad != strings.Contains(body, "There&#39;s no environment kilo.bravo") {
-			t.Errorf("%s: says the environment is missing = %v", path, !bad)
 		}
 	}
 }
@@ -296,35 +294,9 @@ func TestSetDNSFormListsChoices(t *testing.T) {
 	addImages(h)
 	addEnv(h, true)
 	sess := h.login(asLead)
-	body := h.get(&sess, "/environments/dns?domain=kilo.alpha").Body.String()
+	body := h.get(&sess, "/environments/kilo.alpha/dns").Body.String()
 	if !strings.Contains(body, `<option value="router">router</option><option value="teak" selected>teak</option></select>`) {
 		t.Errorf("DNS choices wrong:\n%s", body)
-	}
-}
-
-// A refused preview for an environment that's gone asks which environment,
-// keeping what was typed for the form it leads to.
-func TestEnvironmentPickerKeepsWhatWasTyped(t *testing.T) {
-	h := newHarness(t)
-	addImages(h)
-	addEnv(h, true)
-	sess := h.login(asLead)
-	body := h.post(&sess, "/environments/add/preview", url.Values{
-		"domain": {"kilo.bravo"}, "router": {"gw=gw"}, "env_hosts": {"oak=debian-12\nelm=debian-12"}}).Body.String()
-	for _, want := range []string{`method="get"`, `<input type="hidden" name="router" value="gw=gw">`,
-		`<input type="hidden" name="env_hosts" value="oak=debian-12` + "\n" + `elm=debian-12">`, `<option value="kilo.alpha">`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("picker lacks %s:\n%s", want, body)
-		}
-	}
-	if strings.Contains(body, `name="domain" value="kilo.bravo"`) {
-		t.Errorf("picker carries the missing domain")
-	}
-	// Picking carries them into the form.
-	form := h.get(&sess, "/environments/add?domain=kilo.alpha&router=gw%3Dgw&env_hosts=oak%3Ddebian-12%0Aelm%3Ddebian-12").Body.String()
-	if !strings.Contains(form, `<option value="gw" selected>gw</option>`) || !strings.Contains(form, `name="host_name" value="oak"`) ||
-		!strings.Contains(form, `name="host_name" value="elm"`) {
-		t.Errorf("the form loses what was carried:\n%s", form)
 	}
 }
 
@@ -341,19 +313,6 @@ func TestCreateFormDoesNotFixAnExistingDomain(t *testing.T) {
 	}
 }
 
-// Two slots holding one domain list it once.
-func TestEnvironmentPickerListsADomainOnce(t *testing.T) {
-	h := newHarness(t)
-	addImages(h)
-	addEnv(h, true)
-	h.api.Add(proxmox.VM{VMID: 2201, Name: "oak.kilo.alpha", Node: "n1", Pool: "dev-02", Tags: "dev;kilo.alpha;linux", Status: "running"},
-		map[string]string{"description": "battleship: ip=192.168.100.11 os=linux base=debian-12-v1"})
-	sess := h.login(asLead)
-	if n := strings.Count(h.get(&sess, "/environments/dns").Body.String(), `<option value="kilo.alpha">`); n != 1 {
-		t.Errorf("kilo.alpha listed %d times", n)
-	}
-}
-
 // A DNS choice whose host is gone is said, not silently replaced.
 func TestSetDNSFormSaysAGoneChoice(t *testing.T) {
 	h := newHarness(t)
@@ -363,7 +322,7 @@ func TestSetDNSFormSaysAGoneChoice(t *testing.T) {
 	h.api.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "dev;kilo.alpha;linux", Status: "running"},
 		map[string]string{"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1 dns=dc"})
 	sess := h.login(asLead)
-	if body := h.get(&sess, "/environments/dns?domain=kilo.alpha").Body.String(); !strings.Contains(body, "it was dc, which is no longer one") {
+	if body := h.get(&sess, "/environments/kilo.alpha/dns").Body.String(); !strings.Contains(body, "it was dc, which is no longer one") {
 		t.Errorf("the gone choice isn't said:\n%s", body)
 	}
 }

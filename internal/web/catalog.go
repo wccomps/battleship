@@ -12,8 +12,7 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// catalogPage is the data of the Environments page and of the image and
-// environment forms.
+// catalogPage is the data of the image and environment forms.
 type catalogPage struct {
 	Op       operation // set on forms
 	In       jobs.Inputs
@@ -26,10 +25,8 @@ type catalogPage struct {
 	Kinds    []string
 	Subnet   string
 	ReadErr  string // why the cluster couldn't be read
-	// Env is the environment an env-add or env-dns form works on; Picking,
-	// that the form must first ask which.
-	Env     *pods.Environment
-	Picking bool
+	// Env is the environment an env-add or env-dns form works on.
+	Env *pods.Environment
 	// ExtraRows is how many empty host rows to add: one after Add host
 	// without JavaScript.
 	ExtraRows int
@@ -53,17 +50,6 @@ func (s *Server) newCatalogPage(ctx context.Context) catalogPage {
 		p.Others = append(p.Others, pods.Families(p.Images, k)...)
 	}
 	return p
-}
-
-// EnvDomains are the environments a form can pick from, each once.
-func (p catalogPage) EnvDomains() []string {
-	var out []string
-	for _, e := range p.Envs {
-		if e.Domain != "" && !slices.Contains(out, e.Domain) {
-			out = append(out, e.Domain)
-		}
-	}
-	return out
 }
 
 // AsksRouter is whether the form has a router field: a new environment
@@ -92,16 +78,6 @@ func (p catalogPage) StaleDNS() string {
 	return cur
 }
 
-// Carry is what the picker step carries to the form it leads to: what was
-// already typed, less the domain it asks for.
-func (p catalogPage) Carry() []field {
-	return slices.DeleteFunc(inputFields(p.In), func(f field) bool { return f.Name == fieldDomain })
-}
-
-func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, http.StatusOK, "catalog", s.newView(w, r, "Environments", "environments", s.newCatalogPage(r.Context())))
-}
-
 // withNotes reads the notes of the images an environment form lists.
 func (s *Server) withNotes(ctx context.Context, p catalogPage) catalogPage {
 	both := s.planner(ctx).ReadNotes(ctx, append(slices.Clone(p.Routers), p.Others...))
@@ -110,7 +86,8 @@ func (s *Server) withNotes(ctx context.Context, p catalogPage) catalogPage {
 }
 
 // teamlessForm serves an image or environment form, prefilled from the
-// query (the pages' links) or the inputs a preview refused.
+// query (the pages' links) or the inputs a preview refused. An environment
+// that isn't there (any more) sends the user back to Environments.
 func (s *Server) teamlessForm(w http.ResponseWriter, r *http.Request, status int, op operation, in jobs.Inputs, problem string) {
 	p := s.newCatalogPage(r.Context())
 	p.Op, p.In, p.Error = op, in, problem
@@ -118,16 +95,16 @@ func (s *Server) teamlessForm(w http.ResponseWriter, r *http.Request, status int
 		p.ExtraRows = 1
 	}
 	if op.Kind.OnEnvironment() {
-		if e, ok := pods.EnvByDomain(p.Envs, in.Domain); ok {
+		e, ok := pods.EnvByDomain(p.Envs, in.Domain)
+		if !ok && p.ReadErr == "" {
+			s.noEnv(w, r, in.Domain)
+			return
+		}
+		if ok {
 			p.Env = &e
-		} else {
-			p.Picking = true
-			if in.Domain != "" && p.Error == "" && p.ReadErr == "" {
-				p.Error = "There's no environment " + in.Domain + "; pick one."
-			}
 		}
 	}
-	if (op.Kind == pods.KindEnvCreate || op.Kind == pods.KindEnvAdd) && !p.Picking {
+	if op.Kind == pods.KindEnvCreate || op.Kind == pods.KindEnvAdd {
 		p = s.withNotes(r.Context(), p)
 	}
 	s.render(w, r, status, "teamless", s.newView(w, r, op.Title, string(op.Kind), p))
@@ -159,6 +136,9 @@ func (p catalogPage) HostRows() []hostRow {
 	}
 	return rows
 }
+
+// Back is where the form's close and Cancel go.
+func (p catalogPage) Back() string { return listPage(p.In) }
 
 // RouterRow is the router given, or the usual name, gw, with no image yet.
 func (p catalogPage) RouterRow() hostRow {

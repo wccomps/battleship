@@ -285,6 +285,22 @@ func (b *browser) shot(name string) {
 	}
 }
 
+// fullShot saves a screenshot of the whole page named name, if
+// BATTLESHIP_SHOTS is set.
+func (b *browser) fullShot(name string) {
+	b.t.Helper()
+	dir := os.Getenv("BATTLESHIP_SHOTS")
+	if dir == "" {
+		return
+	}
+	b.settle()
+	var png []byte
+	b.run("screenshot", chromedp.FullScreenshot(&png, 100))
+	if err := os.WriteFile(filepath.Join(dir, name+".png"), png, 0o644); err != nil {
+		b.t.Fatal(err)
+	}
+}
+
 // sizes are the laptop and phone sizes of the designs, light and dark.
 var sizes = []struct {
 	name          string

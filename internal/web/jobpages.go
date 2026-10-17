@@ -555,7 +555,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 		Who:        whoShort(j.CreatedBy),
 		By:         j.CreatedBy,
 		Role:       actsAs(j),
-		Home:       listPage(pods.Kind(j.Kind)),
+		Home:       listPage(jobs.Inputs{Kind: pods.Kind(j.Kind), Domain: in.Domain}),
 		BackHref:   "/logs",
 		BackLabel:  "Logs",
 		Teams:      jobTeams(in),
@@ -624,10 +624,10 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	if v.CanRetry {
 		v.StartAgain = ""
 	}
-	switch v.Home {
+	switch page, _, _ := strings.Cut(v.Home, "#"); page {
 	case "/images":
 		v.BackHref, v.BackLabel = v.Home, "Images"
-	case "/environments":
+	case envsPath:
 		v.BackHref, v.BackLabel = v.Home, "Environments"
 	}
 	return v

@@ -108,7 +108,7 @@ func pageData(t *rapid.T, page string) any {
 	case "message":
 		return drawHostile[message](t, "message")
 	case "catalog":
-		return drawHostile[catalogPage](t, "catalog")
+		return drawHostile[envsView](t, "catalog")
 	case "images":
 		return drawHostile[imagesView](t, "images")
 	case "family":

@@ -978,7 +978,7 @@ func TestJobPageGoesBackToItsList(t *testing.T) {
 	op := h.login(asLead)
 	for in, want := range map[*jobs.Inputs][2]string{
 		{Kind: pods.KindImageDeprecate, Image: "debian-12-v1"}:       {`href="/images">`, "Images</a>"},
-		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"}: {`href="/environments">`, "Environments</a>"},
+		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"}: {`href="/environments#kilo.alpha">`, "Environments</a>"},
 		{Kind: pods.KindPower, Teams: "1", Action: "stop"}:           {`href="/logs">`, "Logs</a>"},
 	} {
 		id := h.submitJob(*in, byOperator)
@@ -987,7 +987,7 @@ func TestJobPageGoesBackToItsList(t *testing.T) {
 			t.Errorf("%s: back link isn't %v:\n%s", in.Kind, want, page)
 		}
 		panel := h.panelGet(&op, "/logs/"+itoa(id), nil).Body.String()
-		home := map[pods.Kind]string{pods.KindImageDeprecate: "/images", pods.KindEnvDNS: "/environments", pods.KindPower: "/"}[in.Kind]
+		home := map[pods.Kind]string{pods.KindImageDeprecate: "/images", pods.KindEnvDNS: "/environments#kilo.alpha", pods.KindPower: "/"}[in.Kind]
 		if !strings.Contains(panel, `href="`+home+`" data-close`) {
 			t.Errorf("%s: panel doesn't close to %s:\n%s", in.Kind, home, panel)
 		}
