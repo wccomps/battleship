@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 	"unicode/utf16"
 
 	"pgregory.net/rapid"
@@ -237,4 +238,36 @@ func TestPropNameChecksAdmitOnlyPlainASCII(t *testing.T) {
 			}
 		}
 	})
+}
+
+// Setup has finished exactly when the setup state read prints
+// IMAGE_STATE_COMPLETE, in any case, or nothing, between blank space and
+// byte order marks; any other state, or more output, means it hasn't.
+func TestPropSetupComplete(t *testing.T) {
+	states := []string{"IMAGE_STATE_COMPLETE", "image_state_complete", "IMAGE_STATE_UNDEPLOYABLE", "IMAGE_STATE_SPECIALIZE_RESEAL_TO_OOBE",
+		"IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE", "IMAGE_STATE_COMPLETE_X", "IMAGE STATE COMPLETE", "COMPLETE", ""}
+	blank := []string{"", " ", "\r\n", "\n", "\t", "\ufeff"}
+	rapid.Check(t, func(t *rapid.T) {
+		lines := rapid.SliceOfN(rapid.OneOf(rapid.SampledFrom(states), rapid.String()), 0, 2).Draw(t, "lines")
+		out := rapid.SampledFrom(blank).Draw(t, "lead") + strings.Join(lines, "\r\n") + rapid.SampledFrom(blank).Draw(t, "trail")
+		var said []string
+		for _, f := range strings.FieldsFunc(out, func(r rune) bool { return r == '\r' || r == '\n' }) {
+			if f = strings.TrimFunc(f, func(r rune) bool { return unicode.IsSpace(r) || r == '\ufeff' }); f != "" {
+				said = append(said, f)
+			}
+		}
+		want := len(said) == 0 || len(said) == 1 && strings.EqualFold(said[0], "IMAGE_STATE_COMPLETE")
+		if got := SetupComplete(out); got != want {
+			t.Fatalf("SetupComplete(%q) = %v, want %v", out, got, want)
+		}
+	})
+}
+
+// The setup state read names the registry value it prints, and only reads.
+func TestSetupStateCommand(t *testing.T) {
+	cmd := strings.Join(SetupStateCommand, " ")
+	if !strings.Contains(cmd, `HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\State`) || !strings.Contains(cmd, "ImageState") ||
+		!strings.Contains(cmd, "Get-ItemProperty") || strings.ContainsAny(cmd, ";|") || strings.Contains(cmd, "Set-") {
+		t.Errorf("command = %q", cmd)
+	}
 }

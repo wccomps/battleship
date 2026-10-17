@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf16"
 )
 
@@ -29,6 +30,22 @@ type Guest struct {
 const RebootMarker = "battleship: reboot"
 
 func NeedsReboot(out string) bool { return strings.Contains(out, RebootMarker) }
+
+// SetupStateCommand is the agent command that prints Windows setup's
+// ImageState. A clone of a sysprepped image can restart during first-boot
+// setup (the specialize pass, then OOBE), killing any command running then,
+// until that reads IMAGE_STATE_COMPLETE.
+var SetupStateCommand = []string{"powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+	`(Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\State' -Name ImageState -ErrorAction SilentlyContinue).ImageState`}
+
+// SetupComplete reports whether out, SetupStateCommand's output, says
+// first-boot setup has finished: IMAGE_STATE_COMPLETE, or nothing, from a
+// Windows that records no state. Blank space and byte order marks around
+// it don't count.
+func SetupComplete(out string) bool {
+	s := strings.TrimFunc(out, func(r rune) bool { return unicode.IsSpace(r) || r == '\ufeff' })
+	return s == "" || strings.EqualFold(s, "IMAGE_STATE_COMPLETE")
+}
 
 var macRE = regexp.MustCompile(`^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$`)
 

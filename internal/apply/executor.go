@@ -148,7 +148,7 @@ type Executor struct {
 
 	// api wraps API so no change is sent after a stop (see stepContext) or
 	// once Held says no.
-	api pods.API
+	api guardedAPI
 
 	naming     pods.Naming
 	classifier proxmox.Classifier
