@@ -15,7 +15,8 @@ import (
 
 // leaseWorld is a lease with fake clocks and the real time the database
 // reaps by. The machine may sleep (real and wall time pass, monotonic
-// doesn't) and NTP may step the wall clock by up to the margin.
+// doesn't) and NTP may step the wall clock, back by at most the margin in
+// all between beats.
 type leaseWorld struct {
 	l                *lease
 	real, mono, wall time.Time
@@ -109,8 +110,9 @@ func TestPropLeaseNeverOutlastsTheReap(t *testing.T) {
 				lw.pass(time.Duration(rapid.Int64Range(0, int64(5*time.Second)).Draw(t, "beat took "+label)))
 			case 3: // a beat fails
 				lw.pass(time.Duration(rapid.Int64Range(0, int64(5*time.Second)).Draw(t, "failed beat took "+label)))
-			case 4: // NTP steps the wall clock, by at most the margin
-				lw.wall = lw.wall.Add(time.Duration(rapid.Int64Range(-int64(margin), int64(margin)).Draw(t, "ntp "+label)))
+			case 4: // NTP steps the wall clock, never more than the margin back in all since the beat
+				back := margin + lw.wall.Sub(lw.real) - lw.beatWall.Sub(lw.beatReal)
+				lw.wall = lw.wall.Add(time.Duration(rapid.Int64Range(-int64(back), int64(margin)).Draw(t, "ntp "+label)))
 			case 5:
 				if rapid.IntRange(0, 4).Draw(t, "lose "+label) == 0 {
 					lw.l.lose()
