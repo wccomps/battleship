@@ -426,6 +426,7 @@ var stepDoing = map[pods.Step]string{
 	pods.StepNetwork:    "Setting the network",
 	pods.StepDiskLimits: "Setting disk limits",
 	pods.StepCDROM:      "Ejecting the install disc",
+	pods.StepNotes:      "Clearing the notes",
 	pods.StepSnapshot:   "Taking the snapshot",
 	pods.StepStart:      "Starting",
 	pods.StepStop:       "Stopping",

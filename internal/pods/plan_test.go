@@ -67,7 +67,7 @@ func TestDeployPlanFromScratch(t *testing.T) {
 	if t1.VMID != 10121 || t1.Blocked != "" {
 		t.Errorf("team01-teak = %+v", t1)
 	}
-	wantSteps := []Step{StepClone, StepNetwork, StepDiskLimits, StepCDROM, StepSnapshot, StepStart}
+	wantSteps := []Step{StepClone, StepNetwork, StepDiskLimits, StepCDROM, StepNotes, StepSnapshot, StepStart}
 	if !reflect.DeepEqual(t1.Steps, wantSteps) {
 		t.Errorf("steps = %v, want %v", t1.Steps, wantSteps)
 	}

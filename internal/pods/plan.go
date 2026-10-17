@@ -69,6 +69,7 @@ const (
 	StepNetwork    Step = "network"
 	StepDiskLimits Step = "disk-limits"
 	StepCDROM      Step = "cdrom"
+	StepNotes      Step = "clear-notes" // empty a team VM's Proxmox notes (NotesChanges)
 	StepSnapshot   Step = "snapshot"
 	StepStart      Step = "start"
 	StepStop       Step = "stop"
@@ -611,7 +612,7 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snap
 		}
 		it.Steps = append(it.Steps, StepClone)
 	}
-	it.Steps = append(it.Steps, StepNetwork, StepDiskLimits, StepCDROM)
+	it.Steps = append(it.Steps, StepNetwork, StepDiskLimits, StepCDROM, StepNotes)
 	if snapshot {
 		it.Steps = append(it.Steps, StepSnapshot)
 	}

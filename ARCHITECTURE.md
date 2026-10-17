@@ -74,7 +74,7 @@ once, and pushes changes to open pages.
 | **fingerprint** | A hash of a plan, to tell whether the cluster changed since the preview |
 | **round** | One pass over a job's items; failed items get a retry round, except failures for a missing privilege |
 | **baseline** | The `initial` snapshot taken at deploy; a reset rolls back to it |
-| **drift** | A VM whose config no longer matches the rules |
+| **drift** | A team VM whose config no longer matches the rules a deploy sets: NICs, disk limits, empty notes, pool, baseline |
 | **leftover / orphaned disks** | Disks a deleted VM left on the storage |
 | **view** | One user's live grid, read with their own ticket |
 | **base image, family** | A template tagged `base` and a kind, named `<family>-v<N>`; the versions of one OS build make its family |
