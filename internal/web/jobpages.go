@@ -44,7 +44,7 @@ var jobLooks = map[string]statusLook{
 
 var itemLooks = map[string]statusLook{
 	store.ItemPending:     {"wait", "pending", "s-wait", "wait"},
-	store.ItemRunning:     {"spin", "running", "", "run"},
+	store.ItemRunning:     {"start", "running", "", "run"},
 	store.ItemDone:        {"done", "done", "s-ok", "done"},
 	store.ItemFailed:      {"close", "failed", "s-fail", "fail"},
 	store.ItemBlocked:     {"blocked", "blocked", "s-cancel", "skip"},

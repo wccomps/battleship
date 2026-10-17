@@ -997,3 +997,44 @@ func TestJobPageGoesBackToItsList(t *testing.T) {
 		}
 	}
 }
+
+// A running VM spins once, at its current step; the job's status spins
+// once; its tally pip and status cell don't spin as well.
+func TestRunningJobSpinsOncePerLevel(t *testing.T) {
+	h := newHarness(t)
+	h.poll()
+	id := h.submitJob(jobs.Inputs{Kind: pods.KindReset, Teams: "1", Hosts: []string{"dc"}, Snapshot: "initial"}, byOperator)
+	h.start(id)
+	items, err := h.st.Items(context.Background(), id)
+	if err != nil || len(items) == 0 {
+		t.Fatalf("items = %v, %v", items, err)
+	}
+	h.event(id, items[0].Name, "stop", "started", "")
+	op := h.login(asOperator)
+	body := h.get(&op, "/logs/"+itoa(id)).Body.String()
+	if n := strings.Count(body, `class="spin"`); n != 1 {
+		t.Errorf("%d status spinners, want the job's only:\n%s", n, body)
+	}
+	if !strings.Contains(body, `<span class="pip run" title="stop: running">`) {
+		t.Errorf("the running step isn't marked:\n%s", body)
+	}
+}
+
+// In the browser, the running step's pip spins and the tally's doesn't.
+func TestBrowserRunningJobSpinsAtTheStep(t *testing.T) {
+	h := browserHarness(t)
+	h.poll()
+	id := h.submitJob(jobs.Inputs{Kind: pods.KindReset, Teams: "1", Hosts: []string{"dc"}, Snapshot: "initial"}, byOperator)
+	h.start(id)
+	items, err := h.st.Items(context.Background(), id)
+	if err != nil || len(items) == 0 {
+		t.Fatalf("items = %v, %v", items, err)
+	}
+	h.event(id, items[0].Name, "stop", "started", "")
+	op := h.login(asOperator)
+	b := newBrowser(t, h, &op, 1280, 800, false)
+	b.open("/logs/" + itoa(id))
+	b.waitFor("the step pip spinning and the tally still",
+		`getComputedStyle(document.querySelector(".steps .pip.run")).animationName === "spin" && `+
+			`getComputedStyle(document.querySelector(".pips .pip.run")).animationName === "none"`)
+}
