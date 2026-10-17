@@ -27,7 +27,7 @@
 {{- if .StaleSlot}}<option value="{{.In.Slot}}" selected>{{.In.Slot}} · not free</option>{{end}}
 </select>
 {{- else if not .ReadErr}}
-<span class="hint">Every dev slot is in use{{with .SlotsErr}} ({{.}}){{end}}.</span>
+<span class="hint">{{if .Queued}}Queued jobs will fill every free dev slot ({{.QueuedRuns}}){{else}}Every dev slot is in use{{end}}{{with .SlotsErr}} ({{.}}){{end}}.</span>
 {{- end}}
 {{- with .SlotsErr}}{{if $.Data.Slots}}<span class="hint">{{.}}</span>{{end}}{{end}}
 {{- with .SlotErr}}<span class="ferr" id="slot-err">{{.}}</span>{{end}}

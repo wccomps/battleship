@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -166,12 +167,28 @@ func (s *Server) opPreview(op operation) http.Handler {
 		}
 		plan, err := jobs.BuildPlan(r.Context(), s.planner(r.Context()), in)
 		if err != nil {
-			s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, "Couldn't make a plan: "+sentence(proxmox.Describe(err)))
+			s.planRefused(w, r, op, in, err)
 			return
 		}
 		allTeams := !op.Kind.Teamless() && s.coversAllTeams(r.Context(), plan.Teams)
 		s.showPreview(w, r, http.StatusOK, op, in, plan, allTeams, previewOptions{fromGrid: fromGrid(form)})
 	})
+}
+
+// planRefused shows op's form again with why planning in failed: on the
+// field it names, for a pods.EnvProblem on a form with machine rows.
+func (s *Server) planRefused(w http.ResponseWriter, r *http.Request, op operation, in jobs.Inputs, err error) {
+	var pr pods.EnvProblem
+	if errors.As(err, &pr) && (op.Kind == pods.KindEnvCreate || op.Kind == pods.KindEnvAdd) {
+		if p, ok := s.catalogForm(r, op, in, ""); ok {
+			_, rows := p.request()
+			p.mark(pr, rows)
+			p.marked()
+			s.renderCatalogForm(w, r, http.StatusUnprocessableEntity, p)
+			return
+		}
+	}
+	s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, "Couldn't make a plan: "+sentence(proxmox.Describe(err)))
 }
 
 // showPreview renders plan's preview. If anything can run, it adds a confirm

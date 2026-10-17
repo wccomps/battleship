@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"html"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"github.com/chromedp/chromedp/kb"
 	"pgregory.net/rapid"
 
+	"github.com/wccomps/battleship/internal/auth/authtest"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
@@ -139,6 +141,19 @@ func TestCreateEnvironmentForm(t *testing.T) {
 	lacks(t, "two router images", router, "selected")
 }
 
+// With no slot free, Create says so; with the free ones all taken by
+// queued jobs, it says which those are.
+func TestCreateFormWithoutAFreeSlot(t *testing.T) {
+	h := newHarness(t, func(c *config.Config) { c.Environments.Slots = "1-2" })
+	addFormImages(h)
+	addEnv(h, true) // dev-01
+	sess := h.login(asLead)
+	h.submitJob(jobs.Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.bravo", Router: "gw=gw"}, byLead)
+	contains(t, "the form", h.get(&sess, "/environments/new").Body.String(), `<span class="hint">Queued jobs will fill every free dev slot (dev-02).</span>`)
+	h.api.Add(proxmox.VM{VMID: 2200, Name: "gw.kilo.bravo", Node: "n1", Pool: "dev-02", Tags: "dev;kilo.bravo;router"}, nil)
+	contains(t, "the form", h.get(&sess, "/environments/new").Body.String(), `<span class="hint">Every dev slot is in use.</span>`)
+}
+
 // A chosen slot goes through the preview and confirm into the job, which
 // is planned there; one no longer free is marked on the field.
 func TestCreateEnvironmentInAChosenSlot(t *testing.T) {
@@ -171,7 +186,7 @@ func TestCreateEnvironmentInAChosenSlot(t *testing.T) {
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("a slot in use = %d", rec.Code)
 	}
-	contains(t, "a slot in use", rec.Body.String(), `<span class="ferr" id="slot-err">Slot 01 isn&#39;t free any more; choose another.</span>`,
+	contains(t, "a slot in use", rec.Body.String(), `<span class="ferr" id="slot-err">Dev slot 01 is in use; choose a free one.</span>`,
 		`name="slot" aria-invalid="true" aria-describedby="slot-err"`, `<option value="01" selected>01 · not free</option>`,
 		`value="teak"`, `value="kilo.bravo"`)
 }
@@ -205,7 +220,7 @@ func TestMachineFieldErrors(t *testing.T) {
 	}
 	body := rec.Body.String()
 	contains(t, "the form", body, `<p class="warn" role="alert">`, "Fix the marked fields, then review again.",
-		`<span class="ferr" id="domain-err">Write two or more lower-case labels joined by dots, like kilo.alpha.</span>`,
+		`<span class="ferr" id="domain-err">Domain &#34;Kilo&#34; must be two or more labels like kilo.alpha.</span>`,
 		`id="domain" name="domain" value="Kilo" required autocomplete="off" spellcheck="false" aria-describedby="domain-hint domain-err" aria-invalid="true"`,
 		`name="router_image" aria-label="Router image" aria-invalid="true" aria-describedby="r-err"`,
 		`<span class="ferr" id="r-err">Choose the router&#39;s image.</span>`)
@@ -214,16 +229,16 @@ func TestMachineFieldErrors(t *testing.T) {
 	want := []formRow{
 		{name: "dc", image: "win2022", octet: "10"},
 		{name: "web", image: "debian-12"},
-		{name: "dc", image: "debian-12", err: "dc is named twice.", bad: "name"},
+		{name: "dc", image: "debian-12", err: "Named twice.", bad: "name"},
 		{image: "debian-12", err: "Name this host, or clear its row.", bad: "name"},
 		{name: "wks1", err: "Choose an image for wks1, or clear its row.", bad: "image"},
-		{name: "files", image: "debian-12", octet: "10", err: ".10 is dc's address. " + pick, bad: "octet"},
+		{name: "files", image: "debian-12", octet: "10", err: "Address .10 is already taken in Kilo. " + pick, bad: "octet"},
 		{name: "db", image: "debian-12", octet: "300", err: "Hosts take .4 to .254. " + pick, bad: "octet"},
 		{name: "Bad_Name", image: "debian-12", err: "Use lower-case letters, digits and dashes, like dc or wks-1.", bad: "name"},
 		{name: "averyveryverylongname", image: "win2022", err: "Windows host names are at most 15 characters.", bad: "name"},
-		{name: "old", image: "win10", err: "win10 has no usable host version; choose another image.", bad: "image"},
+		{name: "old", image: "win10", err: `No usable base image of family "win10".`, bad: "image"},
 		{octet: "12", err: "Name this host, or clear its row.", bad: "name"},
-		{name: "gw", image: "appliance", octet: "3", err: "gw is named twice.", bad: "name"},
+		{name: "gw", image: "appliance", octet: "3", err: "Hosts take .4 to .254. " + pick, bad: "octet"},
 		{},
 	}
 	if got := formRows(body); !slices.Equal(got, want) {
@@ -245,7 +260,7 @@ func TestMachineFieldErrors(t *testing.T) {
 	addEnv(h, true)
 	form.Set("domain", "kilo.alpha")
 	contains(t, "an existing domain", h.post(&sess, "/environments/new/preview", form).Body.String(),
-		`<span class="ferr" id="domain-err">kilo.alpha already exists, in dev-01: add hosts to it from Environments instead.</span>`)
+		`<span class="ferr" id="domain-err">kilo.alpha is already in dev slot 01; add hosts to it instead.</span>`)
 }
 
 // Without JavaScript, Add host asks for the form again with four more
@@ -284,8 +299,8 @@ func TestAddHostWithoutJS(t *testing.T) {
 
 // Add hosts names its environment in the title, shows what is already
 // there (names and addresses, router first), and has no router row when
-// the environment has a router. Names and addresses already used are
-// marked after Review.
+// the environment has a router. After Review, addresses already used are
+// marked; a host already there is resumed.
 func TestAddHostsForm(t *testing.T) {
 	h := newHarness(t)
 	addImages(h)
@@ -308,9 +323,9 @@ func TestAddHostsForm(t *testing.T) {
 	}
 	pick := "Leave it blank to have one picked."
 	want := []formRow{
-		{name: "teak", image: "debian-12", err: "teak is already in kilo.alpha.", bad: "name"},
-		{name: "oak", image: "debian-12", octet: "10", err: ".10 is teak's address. " + pick, bad: "octet"},
-		{name: "ash", image: "debian-12", octet: "5", err: ".5 is yew's address. " + pick, bad: "octet"},
+		{name: "teak", image: "debian-12"},
+		{name: "oak", image: "debian-12", octet: "10", err: "Address .10 is already taken in kilo.alpha. " + pick, bad: "octet"},
+		{name: "ash", image: "debian-12", octet: "5", err: "Address .5 is already taken in kilo.alpha. " + pick, bad: "octet"},
 		{name: "fir", image: "debian-12", octet: "11"},
 	}
 	if got := formRows(rec.Body.String()); !slices.Equal(got, want) {
@@ -377,18 +392,27 @@ func TestPropMachineRows(t *testing.T) {
 		form := rowsForm(routerName, routerImage, rows...)
 		form.Set("domain", "env"+strconv.Itoa(n)+".kilo") // a new domain each time
 
-		// The oracle.
-		seen, owner := map[string]bool{}, map[int]bool{}
-		nameOK := func(name string) bool {
-			ok := name != "" && pods.CheckHostname(name) == nil && !seen[name]
-			if ok {
-				seen[name] = true
-			}
-			return ok
+		// The oracle. A row is filled in as a host when it has a DNS-label
+		// name, an image and, if any, a host's address; the planner's
+		// rules then hold among those rows and the router: a name once, a
+		// usable image, a Windows name short enough, a Windows or Linux
+		// host's address not claimed first by another.
+		shapeOK := func(name, octet string) bool {
+			o, err := strconv.Atoi(octet)
+			return name != "" && pods.CheckHostname(name) == nil && (octet == "" || err == nil && strconv.Itoa(o) == octet && o >= 4 && o <= 254)
 		}
-		bad := !nameOK(strings.TrimSpace(routerName)) || strings.TrimSpace(routerImage) != "gw"
+		seen, claimed := map[string]bool{}, map[int]string{}
+		bad := !shapeOK(strings.TrimSpace(routerName), "") || strings.TrimSpace(routerImage) != "gw"
+		if !bad {
+			seen[strings.TrimSpace(routerName)] = true
+		}
 		var kept []string // the rows' specs, blank ones dropped
 		var wantBad []bool
+		type host struct {
+			name, image string
+			octet       int
+		}
+		var hosts []host
 		for _, r := range rows {
 			name, image, octet := strings.TrimSpace(r[0]), strings.TrimSpace(r[1]), strings.TrimPrefix(strings.TrimSpace(r[2]), ".")
 			if name == "" && image == "" && octet == "" {
@@ -399,14 +423,28 @@ func TestPropMachineRows(t *testing.T) {
 				spec += ":" + octet
 			}
 			kept = append(kept, spec)
-			o, err := strconv.Atoi(octet)
-			rowBad := !nameOK(name) || usable[image] == "" || usable[image] == pods.ImageWindows && len(name) > 15 ||
-				octet != "" && (err != nil || strconv.Itoa(o) != octet || o < 4 || o > 254 || owner[o])
-			if !rowBad && octet != "" {
-				owner[o] = true
+			wantBad = append(wantBad, !shapeOK(name, octet) || image == "")
+			if !wantBad[len(wantBad)-1] {
+				o, _ := strconv.Atoi(octet)
+				hosts = append(hosts, host{name, image, o})
+				if o != 0 && claimed[o] == "" {
+					claimed[o] = name
+				}
+			} else {
+				hosts = append(hosts, host{})
 			}
-			wantBad = append(wantBad, rowBad)
-			bad = bad || rowBad
+		}
+		for i, h := range hosts {
+			if h.name == "" {
+				continue
+			}
+			kind := usable[h.image]
+			wantBad[i] = seen[h.name] || kind == "" || kind == pods.ImageWindows && len(h.name) > 15 ||
+				(kind == pods.ImageWindows || kind == pods.ImageLinux) && h.octet != 0 && claimed[h.octet] != h.name
+			seen[h.name] = true
+		}
+		for _, b := range wantBad {
+			bad = bad || b
 		}
 
 		rec := h.post(&sess, "/environments/new/preview", form)
@@ -533,6 +571,114 @@ func TestRetryAFailedCreate(t *testing.T) {
 		!strings.HasPrefix(got["oak.kilo.bravo"], "22") || !strings.Contains(got["oak.kilo.bravo"], " clone") {
 		t.Errorf("retry job items %+v, plan %v; want oak cloned and teak resumed, in dev-02", items, got)
 	}
+}
+
+var (
+	backRE   = regexp.MustCompile(`<a class="btn first" href="([^"]*)" data-panel-link>Back</a>`)
+	domainRE = regexp.MustCompile(`id="domain" name="domain" value="([^"]*)"`)
+	routerRE = regexp.MustCompile(`name="router_name" value="([^"]*)"`)
+)
+
+// reviewAgain opens a review's Back (the form, filled in) and presses
+// Review on it as it is, returning the response.
+func (h *harness) reviewAgain(sess *authtest.Session, review string) *httptest.ResponseRecorder {
+	h.t.Helper()
+	m := backRE.FindStringSubmatch(review)
+	if m == nil {
+		h.t.Fatalf("no Back in:\n%s", review)
+	}
+	back := html.UnescapeString(m[1])
+	page := h.get(sess, back).Body.String()
+	form := url.Values{}
+	if d := domainRE.FindStringSubmatch(page); d != nil {
+		form.Set("domain", html.UnescapeString(d[1]))
+	}
+	if strings.Contains(page, `name="slot"`) {
+		if s := selectedRE.FindStringSubmatch(selectOf(h.t, page, "slot")); s != nil {
+			form.Set("slot", s[1])
+		}
+	}
+	if r := routerRE.FindStringSubmatch(page); r != nil {
+		form.Set("router_name", html.UnescapeString(r[1]))
+		form.Set("router_image", "")
+		if s := selectedRE.FindStringSubmatch(selectOf(h.t, page, "router_image")); s != nil {
+			form.Set("router_image", html.UnescapeString(s[1]))
+		}
+	}
+	for _, r := range formRows(page) {
+		form.Add("host_name", r.name)
+		form.Add("host_image", r.image)
+		form.Add("host_octet", r.octet)
+	}
+	path, _, _ := strings.Cut(back, "?")
+	return h.post(sess, path+"/preview", form)
+}
+
+// A retry's Back opens the form filled in with the job's machines, and
+// Review on it reviews: a domain, slot and hosts already there are
+// resumed, not marked.
+func TestRetryChangedReviews(t *testing.T) {
+	h := newHarness(t)
+	addImages(h)
+	addEnv(h, true)
+	sess := h.login(asLead)
+	create := h.submitJob(jobs.Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.bravo", Slot: "02", Router: "gw=gw", EnvHosts: []string{"teak=debian-12:10"}}, byLead)
+	add := h.submitJob(jobs.Inputs{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"oak=debian-12", "ash=debian-12"}}, byLead)
+	for _, id := range []int64{create, add} {
+		h.start(id)
+	}
+	h.finish(create, store.Outcome{Status: store.StatusCompletedWithFailures, Items: map[string]store.ItemOutcome{
+		"gw.kilo.bravo": {Status: store.ItemDone}, "teak.kilo.bravo": {Status: store.ItemFailed, Error: "wait-agent: timeout"}}})
+	h.finish(add, store.Outcome{Status: store.StatusCompletedWithFailures, Items: map[string]store.ItemOutcome{
+		"oak.kilo.alpha": {Status: store.ItemDone}, "ash.kilo.alpha": {Status: store.ItemFailed, Error: "clone: storage full"}}})
+	h.api.Add(proxmox.VM{VMID: 2200, Name: "gw.kilo.bravo", Node: "n1", Pool: "dev-02", Tags: "dev;kilo.bravo;router", Status: "running"},
+		map[string]string{"description": "battleship: base=gw-v1 dns=router"})
+	h.api.Add(proxmox.VM{VMID: 2201, Name: "teak.kilo.bravo", Node: "n1", Pool: "dev-02", Tags: "dev;kilo.bravo", Status: "running"},
+		map[string]string{"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1 dns=router", "net0": "virtio=BC:24:11:00:22:01,bridge=devint02"})
+	h.api.Add(proxmox.VM{VMID: 2104, Name: "oak.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "running"},
+		map[string]string{"description": "battleship: ip=192.168.100.20 os=linux base=debian-12-v1 dns=router", "net0": "virtio=BC:24:11:00:21:04,bridge=devint01"})
+	for _, c := range []struct {
+		id      int64
+		confirm string
+		want    []string
+	}{
+		{create, "/environments/new/confirm", []string{"Picks up gw and teak where they stopped.", "Create 2 VMs</button>"}},
+		{add, "/environments/kilo.alpha/add/confirm", []string{"Clones ash into", "Picks up oak where it stopped.", "Add 2 hosts</button>"}},
+	} {
+		retry := h.post(&sess, "/logs/"+itoa(c.id)+"/retry", url.Values{})
+		if retry.Code != http.StatusOK {
+			t.Fatalf("retry of #%d = %d\n%s", c.id, retry.Code, retry.Body)
+		}
+		rec := h.reviewAgain(&sess, retry.Body.String())
+		if rec.Code != http.StatusOK {
+			t.Fatalf("job #%d's retry changed: Review = %d\n%s", c.id, rec.Code, rec.Body)
+		}
+		contains(t, "the review", rec.Body.String(), c.want...)
+		if action, _ := confirmOf(t, rec.Body.String()); action != c.confirm {
+			t.Errorf("confirms at %s, want %s", action, c.confirm)
+		}
+	}
+}
+
+// What only planning finds, such as a slot holding VMs the user can't
+// see, is marked on its field too.
+func TestPlanRefusalMarksItsField(t *testing.T) {
+	h := newHarness(t)
+	addImages(h)
+	h.api.Mu.Lock()
+	h.api.Unseen = map[int]bool{2305: true}
+	h.api.Mu.Unlock()
+	sess := h.login(asLead)
+	form := rowsForm("gw", "gw", [3]string{"teak", "debian-12", ""})
+	form.Set("domain", "kilo.bravo")
+	form.Set("slot", "03")
+	rec := h.post(&sess, "/environments/new/preview", form)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("preview = %d\n%s", rec.Code, rec.Body)
+	}
+	contains(t, "the form", rec.Body.String(), `<span class="ferr" id="slot-err">Dev slot 03 holds VMs you can&#39;t see; choose another.</span>`,
+		"Fix the marked fields, then review again.", `value="teak"`)
+	lacks(t, "the form", rec.Body.String(), "Couldn&#39;t make a plan")
 }
 
 // A failed add's retry opens Add hosts at its environment's path.

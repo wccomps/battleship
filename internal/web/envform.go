@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"net/url"
 	"slices"
@@ -21,15 +22,15 @@ type envForm struct {
 	// router's. Each is a family's newest usable version.
 	HostImages   []imageGroup
 	RouterImages []imageOpt
-	// Slots are the slots Create may take (Planner.OpenSlots), the first
-	// chosen unless In.Slot names one; SlotsErr says why they couldn't be
-	// told.
+	// Slots are the slots Create may take and Queued the free ones queued
+	// jobs will fill (Planner.OpenSlots), the first of Slots chosen unless
+	// In.Slot names one; SlotsErr says why they couldn't be told.
 	Slots    []pods.Slot
+	Queued   []pods.Slot
 	SlotsErr string
 	// Here are the hosts Add hosts' environment has, router first.
 	Here []hereChip
-	// Gateway, FirstOctet and LastOctet are the router's and the hosts'
-	// last address octets.
+	// Gateway is the router's octet; FirstOctet to LastOctet, the hosts'.
 	Gateway, FirstOctet, LastOctet int
 	// DomainErr and SlotErr say what is wrong with those fields, after
 	// Review (checkFields).
@@ -46,6 +47,35 @@ type machineRow struct {
 }
 
 func (m machineRow) blank() bool { return m.Name == "" && m.Image == "" && m.Octet == "" }
+
+// Inputs carry a row as its raw line, name=image[:octet] as typed. Unlike
+// pods.HostSpec, which holds only a valid host, a raw line keeps a
+// half-filled or invalid row, for Validate to refuse and the form to show
+// again; a valid row's line reads as its HostSpec's String.
+
+// rawRow is a row as posted: trimmed, its octet without the dot it may be
+// typed with.
+func rawRow(name, image, octet string) machineRow {
+	return machineRow{Name: strings.TrimSpace(name), Image: strings.TrimSpace(image), Octet: strings.TrimPrefix(strings.TrimSpace(octet), ".")}
+}
+
+// line is the row's raw line, or "" for a blank row.
+func (m machineRow) line() string {
+	if m.blank() {
+		return ""
+	}
+	if m.Octet == "" {
+		return m.Name + "=" + m.Image
+	}
+	return m.Name + "=" + m.Image + ":" + m.Octet
+}
+
+// rowOfLine reads a raw line back as its row.
+func rowOfLine(line string) machineRow {
+	name, rest, _ := strings.Cut(line, "=")
+	image, octet, _ := strings.Cut(rest, ":")
+	return rawRow(name, image, octet)
+}
 
 // hereChip is a host already in the environment: its name, and its
 // address's last octet as ".10", if it has one.
@@ -72,9 +102,8 @@ func imageOpts(ims []pods.BaseImage) []imageOpt {
 // Add host adds without JavaScript.
 const blankRows = 4
 
-// newEnvForm reads p's machine rows from form, which posted them, or else
-// from p.In, filled ones first, as many as were posted and at least
-// blankRows; more (Add host without JavaScript) adds blankRows.
+// newEnvForm reads p's rows from form if it posted them, else from p.In:
+// at least blankRows, plus blankRows for Add host without JavaScript.
 func (s *Server) newEnvForm(ctx context.Context, p catalogPage, form url.Values) envForm {
 	f := envForm{RouterImages: imageOpts(p.Routers), Gateway: pods.GatewayOctet, FirstOctet: pods.FirstHostOctet, LastOctet: pods.LastHostOctet}
 	for _, im := range p.Others { // by kind (newCatalogPage)
@@ -88,9 +117,11 @@ func (s *Server) newEnvForm(ctx context.Context, p catalogPage, form url.Values)
 	if p.Op.Kind == pods.KindEnvCreate || p.Env != nil && !p.Env.HasRouter() {
 		switch {
 		case form.Has(fieldRouterImage):
-			f.Router = &machineRow{Name: strings.TrimSpace(form.Get(fieldRouterName)), Image: strings.TrimSpace(form.Get(fieldRouterImage))}
+			r := rawRow(form.Get(fieldRouterName), form.Get(fieldRouterImage), "")
+			f.Router = &r
 		case p.In.Router != "":
-			f.Router = rowOf(p.In.Router)
+			r := rowOfLine(p.In.Router)
+			f.Router = &r
 		case !posted || p.Op.Kind == pods.KindEnvCreate: // a posted Add hosts without it had it removed
 			f.Router = &machineRow{Name: "gw"}
 			if len(p.Routers) == 1 {
@@ -98,19 +129,18 @@ func (s *Server) newEnvForm(ctx context.Context, p catalogPage, form url.Values)
 			}
 		}
 	}
-	n := blankRows // rows to show
+	n := blankRows
 	if posted {
-		names, images, octets := form[fieldHostName], form[fieldHostImage], form[fieldHostOctet]
-		n = max(n, len(names), len(images), len(octets))
-		for i := range max(len(names), len(images), len(octets)) {
-			row := machineRow{Name: strings.TrimSpace(at(names, i)), Image: strings.TrimSpace(at(images, i)), Octet: octetOf(at(octets, i))}
+		rows := postedRows(form)
+		n = max(n, len(rows))
+		for _, row := range rows {
 			if !row.blank() {
 				f.Rows = append(f.Rows, row)
 			}
 		}
 	} else {
-		for _, spec := range p.In.EnvHosts {
-			f.Rows = append(f.Rows, *rowOf(spec))
+		for _, line := range p.In.EnvHosts {
+			f.Rows = append(f.Rows, rowOfLine(line))
 		}
 	}
 	n = max(n, len(f.Rows))
@@ -125,11 +155,11 @@ func (s *Server) newEnvForm(ctx context.Context, p catalogPage, form url.Values)
 	}
 	switch {
 	case p.Op.Kind == pods.KindEnvCreate && p.ReadErr == "":
-		open, _, err := s.planner(ctx).OpenSlots(ctx, p.Envs)
+		open, queued, err := s.planner(ctx).OpenSlots(ctx, p.Envs)
 		if err != nil {
 			f.SlotsErr = "Couldn't tell which free slots queued jobs will fill: " + sentence(err.Error())
 		}
-		f.Slots = open
+		f.Slots, f.Queued = open, queued
 	case p.Env != nil:
 		var here []envHostRow
 		for _, h := range p.Env.Hosts {
@@ -147,15 +177,18 @@ func (s *Server) newEnvForm(ctx context.Context, p catalogPage, form url.Values)
 	return f
 }
 
-// rowOf reads a stored name=image[:octet] line as a row.
-func rowOf(spec string) *machineRow {
-	name, rest, _ := strings.Cut(spec, "=")
-	image, octet, _ := strings.Cut(rest, ":")
-	return &machineRow{Name: strings.TrimSpace(name), Image: strings.TrimSpace(image), Octet: octetOf(octet)}
+// postedRows are the host rows form posts, blank ones too.
+func postedRows(form url.Values) []machineRow {
+	names, images, octets := form[fieldHostName], form[fieldHostImage], form[fieldHostOctet]
+	rows := make([]machineRow, max(len(names), len(images), len(octets)))
+	for i := range rows {
+		rows[i] = rawRow(nth(names, i), nth(images, i), nth(octets, i))
+	}
+	return rows
 }
 
-// octetOf is a typed address octet, without the dot it may be typed with.
-func octetOf(s string) string { return strings.TrimPrefix(strings.TrimSpace(s), ".") }
+// QueuedRuns names the free slots queued jobs will fill (slotRuns).
+func (f envForm) QueuedRuns() string { return slotRuns(f.Queued) }
 
 // ChosenSlot is the slot the Slot select shows chosen: In.Slot, else the
 // first free one.
@@ -171,98 +204,123 @@ func (p catalogPage) StaleSlot() bool {
 	return p.In.Slot != "" && !slices.ContainsFunc(p.Slots, func(s pods.Slot) bool { return s.Name == p.In.Slot })
 }
 
-// checkFields marks the domain, slot and machine rows with what is wrong
-// with them, as the planner would refuse or block it, and reports whether
-// anything is: a half-filled row, a name that isn't a DNS label or is used
-// twice, an image with no usable version, a Windows name too long, an
-// address out of range or someone else's.
+// checkFields marks each field the planner would refuse (pods.CheckEnv),
+// and each row not filled in as a host, so Review shows it in place; it
+// reports whether any is.
 func (p *catalogPage) checkFields() bool {
-	bad := false
-	if p.Op.Kind == pods.KindEnvCreate {
-		if e, ok := pods.EnvByDomain(p.Envs, p.In.Domain); ok {
-			p.DomainErr = p.In.Domain + " already exists, in " + e.Slot.Pool + ": add hosts to it from Environments instead."
-		} else if pods.CheckDomain(p.In.Domain) != nil {
-			p.DomainErr = "Write two or more lower-case labels joined by dots, like kilo.alpha."
+	req, rows := p.request()
+	if p.ReadErr == "" {
+		for _, pr := range pods.CheckEnv(p.Op.Kind, p.Envs, p.Queued, p.Images, req) {
+			p.mark(pr, rows)
 		}
-		if p.StaleSlot() {
-			p.SlotErr = "Slot " + p.In.Slot + " isn't free any more; choose another."
-		}
-		bad = p.DomainErr != "" || p.SlotErr != ""
 	}
-	domain := p.In.Domain
+	return p.marked()
+}
+
+// request is the environment request the form's fields make, and the rows
+// of its hosts by pods.EnvProblem.Row (0 the router). A row not filled in
+// as a host is marked and left out.
+func (p *catalogPage) request() (pods.EnvRequest, map[int]*machineRow) {
+	create := p.Op.Kind == pods.KindEnvCreate
+	req := pods.EnvRequest{Domain: p.In.Domain}
 	if p.Env != nil {
-		domain = p.Env.Domain
+		req.Domain = p.Env.Domain
 	}
-	here := map[string]bool{} // the environment's host names
-	owner := map[int]string{} // octet -> the host with it
-	for _, h := range p.Here {
-		here[h.Name] = true
-		if o, err := strconv.Atoi(strings.TrimPrefix(h.Addr, ".")); err == nil {
-			owner[o] = h.Name
+	if create && p.In.Slot != "" {
+		n, ok := pods.ParseSlotName(p.In.Slot)
+		if !ok {
+			p.SlotErr = "Choose a slot from the list."
 		}
+		req.Slot = n
 	}
-	seen := map[string]bool{} // the names of the rows checked
-	name := func(m *machineRow, what string) bool {
+	rows := map[int]*machineRow{}
+	if r := p.Router; r != nil && (create || r.Image != "") {
 		switch {
-		case m.Name == "":
-			m.Err = "Name " + what + ", or clear its row."
-		case pods.CheckHostname(m.Name) != nil:
-			m.Err = "Use lower-case letters, digits and dashes, like dc or wks-1."
-		case here[m.Name]:
-			m.Err = m.Name + " is already in " + domain + "."
-		case seen[m.Name]:
-			m.Err = m.Name + " is named twice."
-		default:
-			seen[m.Name] = true
-			return true
-		}
-		m.Bad = "name"
-		return false
-	}
-	if r := p.Router; r != nil && (p.Op.Kind == pods.KindEnvCreate || r.Image != "") {
-		switch {
-		case !name(r, "the router"):
+		case !shapeOK(r, "the router"):
 		case r.Image == "":
 			r.Err, r.Bad = "Choose the router's image.", "image"
 		case !slices.ContainsFunc(p.Routers, func(im pods.BaseImage) bool { return im.Family == r.Image }):
 			r.Err, r.Bad = r.Image+" has no usable router version; choose another image.", "image"
+		default:
+			req.Router, rows[0] = pods.HostSpec{Host: r.Name, Family: r.Image}, r
 		}
-		bad = bad || r.Err != ""
 	}
 	for i := range p.Rows {
 		m := &p.Rows[i]
-		if m.blank() {
-			continue
-		}
-		im, found := pods.Newest(p.Others, m.Image)
 		switch {
-		case !name(m, "this host"):
+		case m.blank(), !shapeOK(m, "this host"):
 		case m.Image == "":
 			m.Err, m.Bad = "Choose an image for "+m.Name+", or clear its row.", "image"
-		case !found:
-			m.Err, m.Bad = m.Image+" has no usable host version; choose another image.", "image"
-		case im.Kind == pods.ImageWindows && len(m.Name) > pods.MaxWindowsHostname:
-			m.Err, m.Bad = "Windows host names are at most "+strconv.Itoa(pods.MaxWindowsHostname)+" characters.", "name"
-		case m.Octet != "":
-			o, err := strconv.Atoi(m.Octet)
-			switch {
-			case err != nil || strconv.Itoa(o) != m.Octet || o < pods.FirstHostOctet || o > pods.LastHostOctet:
-				m.Err = "Hosts take ." + strconv.Itoa(pods.FirstHostOctet) + " to ." + strconv.Itoa(pods.LastHostOctet) + ". Leave it blank to have one picked."
-			case owner[o] != "":
-				m.Err = "." + m.Octet + " is " + owner[o] + "'s address. Leave it blank to have one picked."
-			default:
-				owner[o] = m.Name
-			}
-			if m.Err != "" {
-				m.Bad = "addr"
-			}
+		default:
+			o, _ := strconv.Atoi(m.Octet)
+			req.Hosts = append(req.Hosts, pods.HostSpec{Host: m.Name, Family: m.Image, Octet: o})
+			rows[len(req.Hosts)] = m
 		}
-		bad = bad || m.Err != ""
 	}
-	if bad {
+	return req, rows
+}
+
+// mark puts pr on the field it names: the domain, the slot, or the input
+// of the row (of rows, by request) it is about; the form's error if the
+// form has no such field.
+func (p *catalogPage) mark(pr pods.EnvProblem, rows map[int]*machineRow) {
+	why := problemText(pr.Why)
+	m := rows[pr.Row]
+	if m == nil && pr.Row == 0 {
+		m = p.Router
+	}
+	switch {
+	case pr.Field == pods.FieldDomain:
+		p.DomainErr = cmp.Or(p.DomainErr, why)
+	case pr.Field == pods.FieldSlot:
+		p.SlotErr = cmp.Or(p.SlotErr, why)
+	case m == nil:
+		p.Error = cmp.Or(p.Error, why)
+	case m.Err != "":
+	case pr.Field == pods.FieldAddress:
+		m.Err, m.Bad = why+" Leave it blank to have one picked.", "addr"
+	case pr.Field == pods.FieldImage:
+		m.Err, m.Bad = why, "image"
+	default:
+		m.Err, m.Bad = why, "name"
+	}
+}
+
+// marked reports whether a field is marked, and if so says so above them.
+func (p *catalogPage) marked() bool {
+	bad := p.DomainErr != "" || p.SlotErr != "" || p.Error != "" || p.Router != nil && p.Router.Err != "" ||
+		slices.ContainsFunc(p.Rows, func(m machineRow) bool { return m.Err != "" })
+	if bad && p.Error == "" {
 		p.Error = "Fix the marked fields, then review again."
 	}
 	return bad
+}
+
+// problemText is a planner's problem as a field's message: a sentence,
+// but not capitalised when it starts with a name, such as a domain.
+func problemText(why string) string {
+	if first, _, _ := strings.Cut(strings.TrimSpace(why), " "); strings.Contains(first, ".") {
+		return strings.TrimSuffix(strings.TrimSpace(why), ".") + "."
+	}
+	return sentence(why)
+}
+
+// shapeOK marks a row (what names it in the message) whose name is
+// missing or no DNS label, or whose address isn't a host's; it reports
+// whether neither is.
+func shapeOK(m *machineRow, what string) bool {
+	o, err := strconv.Atoi(m.Octet)
+	switch {
+	case m.Name == "":
+		m.Err, m.Bad = "Name "+what+", or clear its row.", "name"
+	case pods.CheckHostname(m.Name) != nil:
+		m.Err, m.Bad = "Use lower-case letters, digits and dashes, like dc or wks-1.", "name"
+	case m.Octet != "" && (err != nil || strconv.Itoa(o) != m.Octet || o < pods.FirstHostOctet || o > pods.LastHostOctet):
+		m.Err, m.Bad = "Hosts take ."+strconv.Itoa(pods.FirstHostOctet)+" to ."+strconv.Itoa(pods.LastHostOctet)+". Leave it blank to have one picked.", "addr"
+	default:
+		return true
+	}
+	return false
 }
 
 // machineInputs reports whether form is an environment form's rows.

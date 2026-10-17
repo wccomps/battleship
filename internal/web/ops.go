@@ -139,16 +139,15 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 		}
 		if form.Has(fieldRouterImage) {
 			in.Router = ""
-			if image := strings.TrimSpace(form.Get(fieldRouterImage)); image != "" {
-				in.Router = hostSpec(form.Get(fieldRouterName), image, "")
+			if r := rawRow(form.Get(fieldRouterName), form.Get(fieldRouterImage), ""); r.Image != "" {
+				in.Router = r.line()
 			}
 		}
 		if form.Has(fieldHostName) {
 			in.EnvHosts = nil
-			names, images, octets := form[fieldHostName], form[fieldHostImage], form[fieldHostOctet]
-			for i, name := range names {
-				if spec := hostSpec(name, at(images, i), at(octets, i)); spec != "" {
-					in.EnvHosts = append(in.EnvHosts, spec)
+			for _, row := range postedRows(form) {
+				if line := row.line(); line != "" {
+					in.EnvHosts = append(in.EnvHosts, line)
 				}
 			}
 		}
@@ -338,23 +337,8 @@ func listPage(in jobs.Inputs) string {
 	return "/"
 }
 
-// hostSpec is a host row as the name=image[:octet] line jobs store, or ""
-// for a row left empty. A half-filled row still makes a line, which
-// Validate refuses.
-func hostSpec(name, image, octet string) string {
-	name, image, octet = strings.TrimSpace(name), strings.TrimSpace(image), octetOf(octet)
-	if name == "" && image == "" && octet == "" {
-		return ""
-	}
-	spec := name + "=" + image
-	if octet != "" {
-		spec += ":" + octet
-	}
-	return spec
-}
-
-// at is vs[i], or "" past its end.
-func at(vs []string, i int) string {
+// nth is vs[i], or "" past its end.
+func nth(vs []string, i int) string {
 	if i < len(vs) {
 		return vs[i]
 	}

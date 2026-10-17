@@ -19,7 +19,6 @@ import (
 	"github.com/wccomps/battleship/internal/auth"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
-	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/status"
 	"github.com/wccomps/battleship/internal/store"
 )
@@ -1139,7 +1138,7 @@ func (s *Server) retryJob(w http.ResponseWriter, r *http.Request) {
 	}
 	plan, err := jobs.BuildPlan(ctx, s.planner(r.Context()), retry)
 	if err != nil {
-		s.renderForm(w, r, http.StatusUnprocessableEntity, op, retry, "Couldn't make a plan: "+sentence(proxmox.Describe(err)))
+		s.planRefused(w, r, op, retry, err)
 		return
 	}
 	s.showPreview(w, r, http.StatusOK, op, retry, plan, !op.Kind.Teamless() && s.coversAllTeams(ctx, plan.Teams), previewOptions{retryOf: id})
