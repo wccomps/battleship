@@ -24,16 +24,27 @@ const (
 	EventInfo    EventStatus = "info"
 	// EventStarted: an attempt at the item began (its first step, or a gone
 	// VM's check), so it shows as running while a long step (a clone) waits
-	// on Proxmox. Every attempt, in every round, starts with one. The web
-	// log leaves it out.
+	// on Proxmox. An attempt a stop cut off before then sends none.
 	EventStarted EventStatus = "started"
-	// EventSucceeded: the item ran its last step; the web log leaves it out.
-	// An item's EventFailed (with its step) or EventInterrupted ends it too.
+	// EventSucceeded: the item ran its last step. An item's EventFailed or
+	// EventInterrupted ends it too.
 	EventSucceeded EventStatus = "succeeded"
 	EventBlocked   EventStatus = "blocked" // the plan blocked this item; Message says why
 	// EventInterrupted: a stop (cancel, shutdown) cut the item off.
 	EventInterrupted EventStatus = "interrupted"
 )
+
+// Logged reports whether a job's log shows an event: an attempt's start and
+// success show as the item's status instead, and a bare skip says nothing.
+func Logged(status EventStatus, message string) bool {
+	switch status {
+	case EventStarted, EventSucceeded:
+		return false
+	case EventSkipped:
+		return message != ""
+	}
+	return true
+}
 
 // ErrCancelRequested is the context cause when a job is cancelled. Unlike
 // other stops, a step that already sent a change gets jobs.cancel_grace to

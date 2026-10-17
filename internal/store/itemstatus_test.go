@@ -87,6 +87,39 @@ func TestItemStatusFollowsItsEvents(t *testing.T) {
 	}
 }
 
+// A retry round's attempt starts afresh: an item that failed in round 1 and
+// succeeded in round 2 is done with no error, before the job's outcome.
+func TestRetryRoundClearsTheEarlierError(t *testing.T) {
+	s := storetest.New(t)
+	nj := newJob("team:01")
+	nj.Items = []store.NewItem{{Name: "team01-oak", Team: "01", VMID: 10122}}
+	id, err := s.CreateJob(ctx, nj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustClaim(t, s, "w")
+	at := time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
+	for i, ev := range []store.Event{
+		{Item: "team01-oak", Step: "stop", Status: "started"},
+		{Item: "team01-oak", Step: "stop", Status: "failed", Message: "round 1 boom"},
+		{Item: "team01-oak", Step: "stop", Status: "started"},
+		{Item: "team01-oak", Step: "stop", Status: "done"},
+		{Item: "team01-oak", Status: "succeeded"},
+	} {
+		ev.At = at.Add(time.Duration(i) * time.Minute)
+		if err := s.AddEvent(ctx, id, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.Items(ctx, id)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("items = %+v, %v", got, err)
+	}
+	if oak := got[0]; oak.Status != store.ItemDone || oak.Error != "" || oak.Steps["stop"] != "done" {
+		t.Errorf("after round 2 succeeded: status %q, error %q, steps %v", oak.Status, oak.Error, oak.Steps)
+	}
+}
+
 // A stopped job's items keep their last event's time too.
 func TestEndItemsLeavesStepTime(t *testing.T) {
 	s := storetest.New(t)

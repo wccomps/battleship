@@ -14,8 +14,9 @@ import (
 // teardown does. VMs outside the pool on its networks (Users) are never
 // touched; the plan keeps them (Kept). Its half-deleted VMs are listed
 // blocked, and disks gone VMs left in the slot's VMIDs are freed. Every
-// item carries the slot's pool. req.Slot, if set (a retry's), names the slot, which may by then
-// hold nothing of the domain but what a failed delete left.
+// item carries the slot's pool. req.Slot, if set (a retry's), names the
+// slot, which may by then hold nothing of the domain but what a failed
+// delete left.
 func (p Planner) EnvTeardown(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if err := CheckDomain(req.Domain); err != nil {
 		return nil, err

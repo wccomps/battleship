@@ -99,7 +99,7 @@ func envRetry(id int64, in Inputs, plan pods.Plan, planned map[string]pods.Item,
 		in.VMs = sortedUnique(names)
 	}
 	if (in.Kind == pods.KindEnvCreate || in.Kind == pods.KindEnvTeardown) && in.Slot == "" {
-		in.Slot = plan.Slot
+		in.Slot = plan.DevSlot()
 	}
 	return in, nil
 }

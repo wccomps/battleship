@@ -390,6 +390,24 @@ func TestRetryInputsOfAnEnvironmentTeardown(t *testing.T) {
 	}
 }
 
+// Plans stored before Plan.Slot name their slot only in a lock; the retry
+// still resumes in that slot.
+func TestRetryInputsOfAnOldEnvironmentPlan(t *testing.T) {
+	for _, kind := range []pods.Kind{pods.KindEnvCreate, pods.KindEnvTeardown} {
+		plan := pods.Plan{Kind: kind, Locks: []string{"domain:kilo.alpha", "slot:02"},
+			Items: []pods.Item{{Name: "gw.kilo.alpha", Host: "gw"}, {Name: "dc.kilo.alpha", Host: "dc"}}}
+		orig := Inputs{Kind: kind, Domain: "kilo.alpha"}
+		if kind == pods.KindEnvCreate {
+			orig.Router, orig.EnvHosts = "gw=gw", []string{"dc=win2022"}
+		}
+		items := []store.Item{{Name: "gw.kilo.alpha", Status: store.ItemDone}, {Name: "dc.kilo.alpha", Status: store.ItemFailed}}
+		r, err := RetryInputs(finishedJob(t, store.StatusCompletedWithFailures, orig, plan), items)
+		if err != nil || r.Slot != "02" || r.Validate() != nil {
+			t.Errorf("%s: retry = %+v, %v", kind, r, err)
+		}
+	}
+}
+
 // The retry of a teardown that failed partway plans what is left in its
 // slot, and only that: the deleted VMs are gone, the failed one is planned
 // again, and the leftover disks of one deleted are freed.

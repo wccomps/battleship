@@ -48,13 +48,8 @@ type machineRow struct {
 
 func (m machineRow) blank() bool { return m.Name == "" && m.Image == "" && m.Octet == "" }
 
-// Inputs carry a row as its raw line, name=image[:octet] as typed. Unlike
-// pods.HostSpec, which holds only a valid host, a raw line keeps a
-// half-filled or invalid row, for Validate to refuse and the form to show
-// again; a valid row's line reads as its HostSpec's String.
-
 // rawRow is a row as posted: trimmed, its octet without the dot it may be
-// typed with.
+// typed with. Inputs carry it as its line, so an invalid row comes back.
 func rawRow(name, image, octet string) machineRow {
 	return machineRow{Name: strings.TrimSpace(name), Image: strings.TrimSpace(image), Octet: strings.TrimPrefix(strings.TrimSpace(octet), ".")}
 }
@@ -70,7 +65,6 @@ func (m machineRow) line() string {
 	return m.Name + "=" + m.Image + ":" + m.Octet
 }
 
-// rowOfLine reads a raw line back as its row.
 func rowOfLine(line string) machineRow {
 	name, rest, _ := strings.Cut(line, "=")
 	image, octet, _ := strings.Cut(rest, ":")
@@ -262,7 +256,7 @@ func (p *catalogPage) request() (pods.EnvRequest, map[int]*machineRow) {
 // of the row (of rows, by request) it is about; the form's error if the
 // form has no such field.
 func (p *catalogPage) mark(pr pods.EnvProblem, rows map[int]*machineRow) {
-	why := problemText(pr.Why)
+	why := sentence(pr.Why)
 	m := rows[pr.Row]
 	if m == nil && pr.Row == 0 {
 		m = p.Router
@@ -292,15 +286,6 @@ func (p *catalogPage) marked() bool {
 		p.Error = "Fix the marked fields, then review again."
 	}
 	return bad
-}
-
-// problemText is a planner's problem as a field's message: a sentence,
-// but not capitalised when it starts with a name, such as a domain.
-func problemText(why string) string {
-	if first, _, _ := strings.Cut(strings.TrimSpace(why), " "); strings.Contains(first, ".") {
-		return strings.TrimSuffix(strings.TrimSpace(why), ".") + "."
-	}
-	return sentence(why)
 }
 
 // shapeOK marks a row (what names it in the message) whose name is

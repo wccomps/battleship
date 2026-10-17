@@ -92,8 +92,8 @@ type Item struct {
 	Status string
 	Error  string
 	// Steps maps step name to its last outcome (done, skipped, failed,
-	// interrupted) in its latest run: each attempt's started event, a retry
-	// round's too, starts it afresh.
+	// interrupted) in its latest attempt: a started event clears it and
+	// Error. An attempt stopped before its first step sends none.
 	Steps map[string]string
 	// StepAt is when its last step began or ended: the time, by the worker's
 	// clock, of its last event other than an info line; when it was created
@@ -290,7 +290,7 @@ func (s *Store) AddEvent(ctx context.Context, jobID int64, ev Event) error {
 					WHEN $4 = 'failed' THEN 'failed'
 					WHEN status IN `+endedItemsSQL+` AND $4 <> 'started' THEN status
 					ELSE 'running' END,
-				error = CASE WHEN $4 = 'failed' THEN $5 ELSE error END,
+				error = CASE WHEN $4 = 'failed' THEN $5 WHEN $4 = 'started' THEN '' ELSE error END,
 				note = CASE WHEN $4 = 'info' THEN $5 ELSE '' END,
 				updated_at = CASE WHEN $4 = 'info' THEN updated_at ELSE $6 END
 			WHERE job_id = $1 AND name = $2`, jobID, ev.Item, ev.Step, ev.Status, ev.Message, ev.At); err != nil {
@@ -355,7 +355,7 @@ func (s *Store) RequestCancel(ctx context.Context, jobID int64, by string) error
 	return tx.Commit(ctx)
 }
 
-// BusyVMs maps each VM that active jobs still have to work on (or retry) to
+// BusyVMs maps each VM that active jobs still have to work on (or may retry) to
 // the oldest such job's ID, at most limit entries. Blocked items aren't busy.
 func (s *Store) BusyVMs(ctx context.Context, limit int) (map[string]int64, error) {
 	rows, err := s.pool.Query(ctx, `SELECT i.name, min(j.id) FROM jobs j JOIN job_items i ON i.job_id = j.id

@@ -307,7 +307,7 @@ func TestJobPageOfAFinishedJob(t *testing.T) {
 		`<span class="vm">team01-web</span><span class="err">power failed: start: VM is locked (backup)</span></li>`,
 		// An operator may retry a power job.
 		`<form method="post" action="/logs/`+itoa(id)+`/retry">`,
-		`Runs the job again for 1 VM, after a preview."`, "Retry 1 failed VM</button>",
+		`Runs the job again for its 1 VM that didn&#39;t finish (1 failed), after a preview."`, "Retry 1 VM</button>",
 	)
 	lacks(t, "finished job", body, "data-events", "skipped", "/cancel")
 }

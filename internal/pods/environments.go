@@ -46,6 +46,22 @@ func ParseSlotName(name string) (int, bool) {
 // slotLock is the lock key of the slot named name.
 func slotLock(name string) string { return "slot:" + name }
 
+// DevSlot is the environment plan's slot name: its Slot, or the slot its
+// lock names in a plan stored before Slot.
+func (p Plan) DevSlot() string {
+	if p.Slot != "" {
+		return p.Slot
+	}
+	for _, l := range p.Locks {
+		if name, ok := strings.CutPrefix(l, slotLock("")); ok {
+			if _, ok := ParseSlotName(name); ok {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
 // Slots lists the configured slots; the config is validated, so the range
 // parses.
 func Slots(c config.Environments) []Slot {
@@ -89,9 +105,8 @@ type Environment struct {
 	Domain string    // the domain its VMs share; "" when free or Mixed
 	Hosts  []EnvHost // the VMs in its pool, by name
 	// Users are VMs outside its pool with a NIC on one of its bridges.
-	Users []string
-	Mixed bool // its VMs don't all share one domain
-	// Gateway is its router's address (Gateway).
+	Users   []string
+	Mixed   bool // its VMs don't all share one domain
 	Gateway string
 	// HalfDeleted are VMs, in its pool or else its VMIDs, that a failed
 	// destroy left locked as destroyed, without their names. Only tearing it
@@ -110,7 +125,6 @@ func EnvByDomain(envs []Environment, domain string) (Environment, bool) {
 	return Environment{}, false
 }
 
-// slotN is the environment of envs in slot n.
 func slotN(envs []Environment, n int) (Environment, error) {
 	i := slices.IndexFunc(envs, func(e Environment) bool { return e.Slot.N == n })
 	if i < 0 {

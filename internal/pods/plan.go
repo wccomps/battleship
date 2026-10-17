@@ -113,9 +113,8 @@ type Source struct {
 	// Bridges are its NICs' bridges: Proxmox checks SDN.Use on them for a
 	// clone.
 	Bridges []string `json:"bridges,omitempty"`
-	// Base and Notes are a register's source's notes as planned, for its
-	// review: the version it is an edit copy of (see ImageEdit), if they
-	// say, and what people wrote, which the copy keeps.
+	// Base and Notes are the source's notes, for its review: the version it
+	// edits (ImageEdit), and user notes the copy keeps.
 	Base  string `json:"base,omitempty"`
 	Notes string `json:"notes,omitempty"`
 }
@@ -219,6 +218,7 @@ type Plan struct {
 	// VMs named like team VMs that aren't; nothing acts on them.
 	Notices []string `json:"notices,omitempty"`
 	// Slot is an environment plan's dev slot (SlotName); Locks holds it.
+	// Plans stored before it have it only in Locks: read it with DevSlot.
 	Slot string `json:"slot,omitempty"`
 	// Kept are the VMs an environment's teardown leaves alone, and why.
 	Kept []KeptVM `json:"kept,omitempty"`

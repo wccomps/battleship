@@ -22,8 +22,9 @@ func statuses(rec *recorder, item string) []EventStatus {
 	return out
 }
 
-// Every attempt at an item starts with a started event, a gone VM's in a
-// retry round too, and an item that ran its last step ends with succeeded.
+// An attempt at an item that reaches its work starts with a started event,
+// a gone VM's in a retry round too, and an item that ran its last step ends
+// with succeeded.
 func TestEveryAttemptStartsAndSuccessEnds(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
@@ -81,5 +82,28 @@ func TestEveryAttemptStartsAndSuccessEnds(t *testing.T) {
 	ex.Run(context.Background(), plan)
 	if got, want := statuses(rec, "team01-teak"), []EventStatus{EventStarted, EventFailed}; !slices.Equal(got, want) {
 		t.Errorf("unbuilt template: events %v, want %v", got, want)
+	}
+}
+
+// A log leaves out an attempt's start and success, and a bare skip.
+func TestLogged(t *testing.T) {
+	for _, c := range []struct {
+		status  EventStatus
+		message string
+		want    bool
+	}{
+		{EventStarted, "", false},
+		{EventSucceeded, "", false},
+		{EventSkipped, "", false},
+		{EventSkipped, "already deleted", true},
+		{EventDone, "", true},
+		{EventFailed, "boom", true},
+		{EventInfo, "waiting", true},
+		{EventBlocked, "in use", true},
+		{EventInterrupted, "", true},
+	} {
+		if got := Logged(c.status, c.message); got != c.want {
+			t.Errorf("Logged(%s, %q) = %v, want %v", c.status, c.message, got, c.want)
+		}
 	}
 }

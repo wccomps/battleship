@@ -191,6 +191,6 @@ func TestHelpKnowledgeInPlace(t *testing.T) {
 	h.finish(failed, store.Outcome{Status: store.StatusCompletedWithFailures, Items: map[string]store.ItemOutcome{
 		"team02-dc": {Status: store.ItemDone}, "team02-web": {Status: store.ItemFailed, Error: "locked"}}})
 	contains(t, "failed job", h.get(&op, "/logs/"+itoa(failed)).Body.String(),
-		`title="Battleship already tried them again by itself (1 automatic round), so fix the cause first. Runs the job again for 1 VM, after a preview."`,
-		"Retry 1 failed VM</button>")
+		`title="Battleship already tried its failed VMs again by itself (1 automatic round; none for a missing privilege), so fix the cause first. Runs the job again for its 1 VM that didn&#39;t finish (1 failed), after a preview."`,
+		"Retry 1 VM</button>")
 }

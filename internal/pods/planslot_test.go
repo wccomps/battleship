@@ -51,5 +51,25 @@ func TestEnvPlansCarryTheirSlot(t *testing.T) {
 		if got.Slot != want[name] || !slices.Contains(got.Locks, "slot:"+want[name]) {
 			t.Errorf("%s: slot %q, locks %q; want %s", name, got.Slot, got.Locks, want[name])
 		}
+		if got.Slot = ""; got.DevSlot() != want[name] {
+			t.Errorf("%s: without Slot, DevSlot = %q", name, got.DevSlot())
+		}
+	}
+}
+
+// A plan stored before Plan.Slot names its slot only in its lock.
+func TestPlanDevSlot(t *testing.T) {
+	for _, c := range []struct {
+		plan Plan
+		want string
+	}{
+		{Plan{Slot: "03", Locks: []string{"slot:03"}}, "03"},
+		{Plan{Locks: []string{"domain:kilo.alpha", "slot:07"}}, "07"},
+		{Plan{Locks: []string{"slot:7", "family:debian-12"}}, ""},
+		{Plan{}, ""},
+	} {
+		if got := c.plan.DevSlot(); got != c.want {
+			t.Errorf("%+v.DevSlot() = %q, want %q", c.plan, got, c.want)
+		}
 	}
 }

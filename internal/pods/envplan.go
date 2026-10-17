@@ -239,9 +239,9 @@ func (p Planner) findEnv(ctx context.Context, domain string) (Environment, []pro
 }
 
 // envPlan plans hosts into env; with routerFirst, hosts[0] is the request's
-// router. The first router-kind host gets the slot's WAN and LAN bridges;
-// every other host the LAN. What checkHosts finds blocks a host; so does
-// what only the cluster tells.
+// router. The first router-kind host gets the slot's WAN and LAN bridges,
+// other hosts the LAN; checkHosts blocks a second router. What checkHosts
+// finds blocks a host; so does what only the cluster tells.
 func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts []HostSpec, routerFirst bool, vms []proxmox.VM) (*Plan, error) {
 	images := BaseImages(vms)
 	dnsChoice := env.DNS()

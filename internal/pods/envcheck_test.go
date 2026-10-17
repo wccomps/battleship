@@ -60,6 +60,15 @@ func TestPropCheckEnvAgreesWithThePlanner(t *testing.T) {
 			req.Hosts = append(req.Hosts, spec("host"))
 		}
 		problems := CheckEnv(kind, envs, nil, BaseImages(vms), req)
+		names := []string{req.Domain}
+		for _, h := range append([]HostSpec{req.Router}, req.Hosts...) {
+			names = append(names, h.Host, h.Family)
+		}
+		for _, pr := range problems { // a form capitalises it as a sentence
+			if first, _, _ := strings.Cut(pr.Why, " "); slices.Contains(names, first) || strings.Contains(first, ".") {
+				t.Fatalf("%q starts with a name", pr.Why)
+			}
+		}
 		plan, err := p.EnvCreate(ctx, req)
 		if kind == KindEnvAdd {
 			plan, err = p.EnvAdd(ctx, req)
@@ -108,16 +117,16 @@ func TestCheckEnvResumes(t *testing.T) {
 		{KindEnvAdd, EnvRequest{Domain: "kilo.alpha", Hosts: []HostSpec{teak}}, nil},
 		{KindEnvAdd, EnvRequest{Domain: "kilo.alpha", Hosts: []HostSpec{{Host: "teak", Family: "debian-12", Octet: 20}}}, nil}, // it keeps its .10
 		{KindEnvCreate, EnvRequest{Domain: "kilo.alpha", Slot: 1, Router: gw, Hosts: []HostSpec{teak}}, nil},
-		{KindEnvCreate, EnvRequest{Domain: "kilo.alpha", Slot: 2, Router: gw}, []EnvProblem{{Field: FieldDomain, Why: "kilo.alpha is already in dev slot 01; add hosts to it instead"}}},
+		{KindEnvCreate, EnvRequest{Domain: "kilo.alpha", Slot: 2, Router: gw}, []EnvProblem{{Field: FieldDomain, Why: "domain kilo.alpha is already in dev slot 01; add hosts to it instead"}}},
 		{KindEnvCreate, EnvRequest{Domain: "kilo.bravo", Slot: 1, Router: gw}, []EnvProblem{{Field: FieldSlot, Why: "dev slot 01 is in use; choose a free one"}}},
 		{KindEnvCreate, EnvRequest{Domain: "kilo.bravo", Slot: 9, Router: gw}, []EnvProblem{{Field: FieldSlot, Why: "there's no dev slot 09"}}},
 		{KindEnvCreate, EnvRequest{Domain: "kilo.bravo", Slot: 2, Router: gw, Hosts: []HostSpec{teak, {Host: "web", Family: "debian-12", Octet: 10}, teak}},
 			[]EnvProblem{{Row: 3, Field: FieldName, Why: "named twice"}}},
 		{KindEnvAdd, EnvRequest{Domain: "kilo.alpha", Hosts: []HostSpec{{Host: "web", Family: "debian-12", Octet: 10}, {Host: "oak", Family: "debian-12"}}},
 			[]EnvProblem{{Row: 1, Field: FieldAddress, Why: "address .10 is already taken in kilo.alpha"},
-				{Row: 2, Field: FieldImage, Why: "oak.kilo.alpha already exists as a different kind of host than debian-12 (linux)"}}},
+				{Row: 2, Field: FieldImage, Why: "host oak.kilo.alpha already exists as a different kind of host than debian-12 (linux)"}}},
 		{KindEnvAdd, EnvRequest{Domain: "kilo.alpha", Router: HostSpec{Host: "fw", Family: "gw"}, Hosts: []HostSpec{{Host: "workstation-0001", Family: "win2022"}}},
-			[]EnvProblem{{Field: FieldName, Why: "kilo.alpha already has a router"},
+			[]EnvProblem{{Field: FieldName, Why: "environment kilo.alpha already has a router"},
 				{Row: 1, Field: FieldName, Why: "Windows host names are at most 15 characters"}}},
 		{KindEnvAdd, EnvRequest{Domain: "kilo.zulu", Hosts: []HostSpec{teak}}, []EnvProblem{{Field: FieldDomain, Why: "no dev slot holds kilo.zulu; create it first"}}},
 		{KindEnvAdd, EnvRequest{Domain: "kilo.alpha", Hosts: []HostSpec{{Host: "fw", Family: "gw"}}}, []EnvProblem{{Row: 1, Field: FieldImage, Why: "an environment has one router"}}},
@@ -152,7 +161,7 @@ func TestRouterRowNeedsARouterImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if it := plan.Items[0]; it.Name != "gw.kilo.bravo" || !strings.Contains(it.Blocked, "not a router") {
+	if it := plan.Items[0]; it.Name != "gw.kilo.bravo" || !strings.Contains(it.Blocked, "needs a router image") {
 		t.Errorf("router row = %s blocked %q, want it blocked as not a router", it.Name, it.Blocked)
 	}
 	envs, _, err := p.Environments(context.Background())
@@ -160,7 +169,7 @@ func TestRouterRowNeedsARouterImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	probs := CheckEnv(KindEnvCreate, envs, nil, BaseImages(mustVMs(t, p)), req)
-	if len(probs) != 1 || probs[0].Row != 0 || probs[0].Field != FieldImage || !strings.Contains(probs[0].Why, "not a router") {
+	if len(probs) != 1 || probs[0].Row != 0 || probs[0].Field != FieldImage || !strings.Contains(probs[0].Why, "needs a router image") {
 		t.Errorf("CheckEnv = %+v, want the router row's image", probs)
 	}
 	req.Router.Family = "gw"

@@ -277,3 +277,42 @@ func TestFollowerNamesBlockers(t *testing.T) {
 		t.Errorf("job 2 = %s, want cancelled", j.Status)
 	}
 }
+
+// jobs show prints the events the web log does: no attempt's start or
+// success, no bare skip.
+func TestJobsShowLeavesOutStartAndSuccess(t *testing.T) {
+	e := newEnv(t, false, "", vm(10701, "team07-dc"))
+	st := withStore(t, e)
+	if code := e.run("teardown", "-teams", "7", "-yes", "-queue"); code != 0 {
+		t.Fatalf("queue: exit %d", code)
+	}
+	ctx := context.Background()
+	if j, err := st.Claim(ctx, "w", time.Minute); err != nil || j == nil {
+		t.Fatalf("claim = %+v, %v", j, err)
+	}
+	at := time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
+	for i, ev := range []store.Event{
+		{Item: "team07-dc", Step: "stop", Status: "started"},
+		{Item: "team07-dc", Step: "stop", Status: "skipped"},
+		{Item: "team07-dc", Step: "delete", Status: "done"},
+		{Item: "team07-dc", Status: "succeeded"},
+	} {
+		ev.At = at.Add(time.Duration(i) * time.Second)
+		if err := st.AddEvent(ctx, 1, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.reset()
+	if code := e.run("jobs", "show", "1"); code != 0 {
+		t.Fatalf("show: exit %d, stderr: %s", code, e.stderr.String())
+	}
+	_, out, _ := strings.Cut(e.stdout.String(), "Events:")
+	if !strings.Contains(out, "done     team07-dc delete") {
+		t.Errorf("show lacks the done line:\n%s", out)
+	}
+	for _, not := range []string{"started", "succeeded", "skipped"} {
+		if strings.Contains(out, not) {
+			t.Errorf("show prints %q:\n%s", not, out)
+		}
+	}
+}

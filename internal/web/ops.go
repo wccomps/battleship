@@ -74,8 +74,8 @@ var operations = []operation{
 		Section: sectionImages, Doing: "Deleting", Done: "Deleted"},
 }
 
-// nav is the nav entry its pages mark current: its section, or for a team
-// operation its kind, which marks the header's Lead button (leadOps).
+// nav is the nav entry its pages mark current: its section, or else its
+// kind, which marks the header's Lead button for deploy and teardown.
 func (o operation) nav() string { return cmp.Or(o.Section, string(o.Kind)) }
 
 // sectionName is its section's name, as the nav says it.
@@ -400,7 +400,6 @@ func (o operation) result(in jobs.Inputs) *link {
 	return nil
 }
 
-// nth is vs[i], or "" past its end.
 func nth(vs []string, i int) string {
 	if i < len(vs) {
 		return vs[i]
@@ -409,7 +408,7 @@ func nth(vs []string, i int) string {
 }
 
 // slotName is a typed slot as its two-digit name ("2" is "02"); anything
-// that isn't a number is kept as typed, for validation to refuse.
+// but 1-99 is kept, trimmed, for validation to refuse.
 func slotName(typed string) string {
 	typed = strings.TrimSpace(typed)
 	if n, err := strconv.Atoi(typed); err == nil && n >= 1 && n <= 99 {

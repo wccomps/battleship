@@ -325,7 +325,7 @@ type jobView struct {
 	CanCancel  bool
 	AskCancel  bool // the job could be cancelled, but not by this viewer
 	CanRetry   bool
-	RetryLabel string // the button: "Retry 2 failed VMs", or "Retry the teardown" (pods.Kind.RetriedWhole)
+	RetryLabel string // the button: "Retry 2 VMs", or "Retry the teardown" (pods.Kind.RetriedWhole)
 	RetryTip   string // what to know before retrying
 	RetryLock  string // why this viewer can't retry it: they lack its privilege
 	RetryFault string // why the job can't be retried at all, when its stored job can't be read
@@ -714,11 +714,10 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 			v.RetryFault = sentence(err.Error())
 		default:
 			v.CanRetry = true
-			n, them := len(retry.VMs), "them"
-			v.RetryLabel = "Retry " + strconv.Itoa(n) + byCount(n, " failed VM", " failed VMs")
-			v.RetryTip = fmt.Sprintf("Runs the job again for %s, after a preview.", countVMs(n))
+			n := len(retry.VMs)
+			v.RetryLabel = "Retry " + countVMs(n)
+			v.RetryTip = fmt.Sprintf("Runs the job again for its %s that didn't finish (%s), after a preview.", countVMs(n), retriedStatuses(items, retry.VMs))
 			if op, _ := operationFor(retry.Kind); retry.Kind.RetriedWhole() {
-				them = "its failed VMs"
 				v.RetryLabel = "Retry the " + op.Noun
 				v.RetryTip = "Plans the " + op.Noun + " again, of what is left, after a preview."
 			}
@@ -727,7 +726,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 				if n != 1 {
 					rounds = fmt.Sprintf("%d automatic rounds", n)
 				}
-				v.RetryTip = "Battleship already tried " + them + " again by itself (" + rounds + "), so fix the cause first. " + v.RetryTip
+				v.RetryTip = "Battleship already tried its failed VMs again by itself (" + rounds + "; none for a missing privilege), so fix the cause first. " + v.RetryTip
 			}
 		}
 	}
@@ -738,6 +737,28 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 		v.BackHref, v.BackLabel = v.Home, op.sectionName()
 	}
 	return v
+}
+
+// retriedStatuses counts the statuses of items named in vms, e.g. "1 failed,
+// 2 interrupted".
+func retriedStatuses(items []store.Item, vms []string) string {
+	n := map[string]int{}
+	var order []string
+	for _, it := range items {
+		if !slices.Contains(vms, it.Name) {
+			continue
+		}
+		if n[it.Status] == 0 {
+			order = append(order, it.Status)
+		}
+		n[it.Status]++
+	}
+	slices.Sort(order)
+	parts := make([]string, len(order))
+	for i, st := range order {
+		parts[i] = strconv.Itoa(n[st]) + " " + st
+	}
+	return strings.Join(parts, ", ")
 }
 
 // foldAbove is the VM count above which the panel folds done rows into one
@@ -769,7 +790,7 @@ func jobItemsOf(j store.Job, items []store.Item, now time.Time) jobItems {
 		look := lookOf(itemLooks, st)
 		t.Pips = append(t.Pips, look.Pip)
 		row := jobItemView{Name: it.Name, VMID: orDash(it.VMID), Steps: steps, Error: it.Error, status: st}
-		look.Label = capital(look.Label) // as the running rows' steps in words read, e.g. "Starting"
+		look.Label = capital(look.Label) // to match the step words, e.g. "Starting"
 		if st == store.ItemDone {
 			look.Label = done
 			if a := addressOf(p); a != "" {
@@ -883,8 +904,8 @@ func readSummary(raw json.RawMessage) *summaryView {
 const eventBatch = 500
 
 // jobEventsAfter reads the job's log after event ID after, and the last ID
-// read (after if none). Like the CLI, it skips bare "already done" lines, but
-// their IDs still count.
+// read (after if none). It shows the events the CLI does (apply.Logged), but
+// the IDs of the rest still count.
 func (s *Server) jobEventsAfter(ctx context.Context, id, after int64) ([]eventView, int64, error) {
 	now := s.now()
 	var out []eventView
@@ -895,7 +916,7 @@ func (s *Server) jobEventsAfter(ctx context.Context, id, after int64) ([]eventVi
 		}
 		for _, ev := range evs {
 			after = ev.ID
-			if ev.Status == string(apply.EventSkipped) && ev.Message == "" || ev.Status == string(apply.EventStarted) || ev.Status == string(apply.EventSucceeded) {
+			if !apply.Logged(apply.EventStatus(ev.Status), ev.Message) {
 				continue
 			}
 			out = append(out, eventView{

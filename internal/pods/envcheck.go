@@ -17,6 +17,7 @@ const (
 // EnvProblem is something the planner refuses or blocks in an environment
 // request. Field says which part: the domain, the slot, or a host's name,
 // image or address, where Row is the host: 0 the router, n req.Hosts[n-1].
+// Why starts with a word, never a name, so a form can capitalise it.
 type EnvProblem struct {
 	Row   int
 	Field string
@@ -25,13 +26,10 @@ type EnvProblem struct {
 
 func (p EnvProblem) Error() string { return p.Why }
 
-// CheckEnv checks a create's or add's req as EnvCreate and EnvAdd do,
-// against envs and images as Environments and BaseImages read them and
-// queued, the free slots a queued job will fill (Planner.OpenSlots). It
-// asks Proxmox nothing, so planning may still find more: VMs the user
-// can't see in a slot, a base image with too few NICs, a host name taken
-// outside the slot. A domain already in its chosen slot, and a host
-// already in the environment, are resumed, not problems.
+// CheckEnv checks a create's or add's req as EnvCreate and EnvAdd do, given
+// what they read and the slots queued jobs will fill. It asks Proxmox
+// nothing; planning may find more. A domain already in its chosen slot, or
+// a host already in it, is resumed, not a problem.
 func CheckEnv(kind Kind, envs []Environment, queued []Slot, images []BaseImage, req EnvRequest) []EnvProblem {
 	var out []EnvProblem
 	add := func(err error) {
@@ -95,7 +93,7 @@ func checkHosts(env Environment, images []BaseImage, hosts []HostSpec, routerFir
 	out := make([]EnvProblem, len(hosts))
 	_, claimed := claimOctets(env, hosts)
 	seen := map[string]bool{}
-	router := false // an earlier host is the request's router
+	router := false // an earlier host is a router this request adds
 	for i, h := range hosts {
 		im, found := Newest(images, h.Family)
 		existing, resumed := env.Host(h.Host + "." + env.Domain)
@@ -109,9 +107,9 @@ func checkHosts(env Environment, images []BaseImage, hosts []HostSpec, routerFir
 		case !found:
 			out[i] = EnvProblem{Field: FieldImage, Why: fmt.Sprintf("no usable base image of family %q", h.Family)}
 		case mismatch != "":
-			out[i] = EnvProblem{Field: FieldImage, Why: existing.Name + " already exists " + mismatch}
+			out[i] = EnvProblem{Field: FieldImage, Why: "host " + existing.Name + " already exists " + mismatch}
 		case i == 0 && routerFirst && im.Kind != ImageRouter:
-			out[i] = EnvProblem{Field: FieldImage, Why: fmt.Sprintf("%s is a %s image, not a router", h.Family, im.Kind)}
+			out[i] = EnvProblem{Field: FieldImage, Why: fmt.Sprintf("the router needs a router image, not %s (%s)", h.Family, im.Kind)}
 		case im.Kind == ImageRouter && (env.HasRouter() && !resumed || router):
 			out[i] = EnvProblem{Field: FieldImage, Why: "an environment has one router"}
 		case im.Kind == ImageWindows && len(h.Host) > MaxWindowsHostname:
@@ -126,9 +124,9 @@ func checkHosts(env Environment, images []BaseImage, hosts []HostSpec, routerFir
 	return out
 }
 
-// claimOctets is the octets env's hosts' notes claim plus those hosts
-// claim, and which host claims each of the latter: the first to name a
-// free one. A host already in env with an address keeps that.
+// claimOctets is the octets in use after this request's explicit claims,
+// and which host claims each: the first to name a free one. A resumed host
+// keeps its own.
 func claimOctets(env Environment, hosts []HostSpec) (used map[int]bool, claimed map[int]string) {
 	used, claimed = env.UsedOctets(), map[int]string{}
 	for _, h := range hosts {
@@ -192,7 +190,7 @@ func slotRefused(st slotState, s Slot) error {
 }
 
 func domainElsewhere(domain string, e Environment) error {
-	return EnvProblem{Field: FieldDomain, Why: fmt.Sprintf("%s is already in dev slot %s; add hosts to it instead", domain, e.Slot.Name)}
+	return EnvProblem{Field: FieldDomain, Why: fmt.Sprintf("domain %s is already in dev slot %s; add hosts to it instead", domain, e.Slot.Name)}
 }
 
 func noEnv(domain string) error {
@@ -203,7 +201,7 @@ func noEnv(domain string) error {
 // existing one again resumes it.
 func oneRouter(env Environment, req EnvRequest) error {
 	if _, exists := env.Host(req.Router.Host + "." + env.Domain); req.Router.Host != "" && env.HasRouter() && !exists {
-		return EnvProblem{Field: FieldName, Why: req.Domain + " already has a router"}
+		return EnvProblem{Field: FieldName, Why: "environment " + req.Domain + " already has a router"}
 	}
 	return nil
 }

@@ -94,7 +94,7 @@ type itemRule struct {
 	keptOnEvent   bool // an event doesn't make it running again
 	keptOnOutcome bool // the worker's outcome doesn't overwrite it
 	ended         bool // the run ended it; only a started event makes it running again
-	busy          bool // in an active job, still to be worked on, or retried by a later round
+	busy          bool // in an active job, still to be worked on, or may be retried by a later round
 }
 
 // itemRules is every item status's rules; an unknown status has none.

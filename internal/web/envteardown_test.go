@@ -224,7 +224,7 @@ func TestEnvTeardownRetry(t *testing.T) {
 	// Its page offers the teardown again, not its failed VMs: a retry
 	// plans what is left whole.
 	page := h.get(&sess, "/logs/"+itoa(id)).Body.String()
-	contains(t, "the job page", page, `title="Battleship already tried its failed VMs again by itself (1 automatic round), so fix the cause first. Plans the teardown again, of what is left, after a preview.">`,
+	contains(t, "the job page", page, `title="Battleship already tried its failed VMs again by itself (1 automatic round; none for a missing privilege), so fix the cause first. Plans the teardown again, of what is left, after a preview.">`,
 		"Retry the teardown</button>")
 	lacks(t, "the job page", page, "Retry 0", "for 0 VMs")
 	rec := h.post(&sess, "/logs/"+itoa(id)+"/retry", url.Values{})

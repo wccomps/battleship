@@ -118,10 +118,11 @@ func TestPropPrintersEscapeUntrustedText(t *testing.T) {
 			}
 		case "event":
 			e := apply.Event{Time: time.Unix(0, 0), Item: untrusted(t, "item"), Step: pods.Step(untrusted(t, "step")),
-				Status:  rapid.SampledFrom([]apply.EventStatus{apply.EventSkipped, apply.EventStatus(untrusted(t, "status"))}).Draw(t, "status"),
+				Status: rapid.SampledFrom([]apply.EventStatus{apply.EventSkipped, apply.EventStarted, apply.EventSucceeded,
+					apply.EventStatus(untrusted(t, "status"))}).Draw(t, "status"),
 				Message: untrusted(t, "message")}
 			printEvent(&buf, e)
-			if e.Status != apply.EventSkipped || e.Message != "" {
+			if apply.Logged(e.Status, e.Message) {
 				// A message's own lines are indented under it.
 				lines = 1 + strings.Count(e.Message, "\n")
 				fields = append(fields, e.Item)

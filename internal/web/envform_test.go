@@ -261,7 +261,12 @@ func TestMachineFieldErrors(t *testing.T) {
 	addEnv(h, true)
 	form.Set("domain", "kilo.alpha")
 	contains(t, "an existing domain", h.post(&sess, "/environments/new/preview", form).Body.String(),
-		`<span class="ferr" id="domain-err">kilo.alpha is already in dev slot 01; add hosts to it instead.</span>`)
+		`<span class="ferr" id="domain-err">Domain kilo.alpha is already in dev slot 01; add hosts to it instead.</span>`)
+	// The planner's problems read as sentences, a family's name kept as it is.
+	form = rowsForm("gw", "debian-12", [3]string{"dc", "win2022", ""})
+	form.Set("domain", "kilo.bravo")
+	contains(t, "a host image as router", h.post(&sess, "/environments/new/preview", form).Body.String(),
+		`The router needs a router image, not debian-12 (linux).`)
 }
 
 // Without JavaScript, Add host asks for the form again with four more
@@ -547,7 +552,8 @@ func TestRetryAFailedCreate(t *testing.T) {
 	sess := h.login(asLead)
 
 	page := h.get(&sess, "/logs/"+itoa(id)).Body.String()
-	contains(t, "the job page", page, `<form method="post" action="/logs/`+itoa(id)+`/retry">`, "Retry 2 failed VMs</button>")
+	contains(t, "the job page", page, `<form method="post" action="/logs/`+itoa(id)+`/retry">`, "Retry 2 VMs</button>",
+		`Runs the job again for its 2 VMs that didn&#39;t finish (1 failed, 1 not run), after a preview.`)
 
 	rec := h.post(&sess, "/logs/"+itoa(id)+"/retry", url.Values{})
 	if rec.Code != http.StatusOK {

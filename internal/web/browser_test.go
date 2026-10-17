@@ -516,7 +516,7 @@ func TestBrowserPreviewAndJob(t *testing.T) {
 			}})
 			publishJob(h, n)
 			b.waitFor("the job to finish", `document.querySelector("#job-head .st").textContent.trim().startsWith("completed with failures · ")`)
-			if got := b.text("#job-actions"); got != "Retry 1 failed VM" {
+			if got := b.text("#job-actions"); got != "Retry 1 VM" {
 				t.Errorf("job actions = %q", got)
 			}
 			if b.is(`!!document.querySelector("#job-items .tally")`) {
