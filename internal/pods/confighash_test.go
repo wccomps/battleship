@@ -37,7 +37,7 @@ var hashedFor = map[string]map[string][]Kind{
 		"VMIDBase": envKinds, "Subnet": envKinds, "AgentTimeout": envKinds,
 	},
 	"Teardown": {
-		"ShutdownTimeout": {KindTeardown},
+		"ShutdownTimeout": {KindTeardown, KindEnvTeardown},
 	},
 }
 
@@ -63,7 +63,7 @@ func TestEveryRunConfigFieldIsClassified(t *testing.T) {
 }
 
 func TestConfigHashFollowsClassification(t *testing.T) {
-	kinds := append([]Kind{KindDeploy, KindTeardown, KindReset, KindPower, KindSnapshot}, append(slices.Clone(imageKinds), envKinds...)...)
+	kinds := append([]Kind{KindDeploy, KindTeardown, KindReset, KindPower, KindSnapshot, KindEnvTeardown}, append(slices.Clone(imageKinds), envKinds...)...)
 	for section, fields := range hashedFor {
 		for name, hashed := range fields {
 			c := config.Default()

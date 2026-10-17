@@ -19,7 +19,7 @@ func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tp
 		it.Node = vm.Node
 	}
 	if !exists && !slices.Contains(it.Steps, pods.StepClone) {
-		if kind == pods.KindTeardown {
+		if kind.TearsDown() {
 			// StepDelete, or StepFreeDisks for a VM already gone at planning.
 			step := it.Steps[len(it.Steps)-1]
 			// Gone by name isn't enough: a half-deleted VM is listed as "VM <vmid>".
@@ -219,7 +219,7 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 	case pods.StepStart:
 		return e.power(ctx, it, "start")
 	case pods.StepStop:
-		if kind == pods.KindTeardown {
+		if kind.TearsDown() {
 			return e.shutdownForDelete(ctx, it)
 		}
 		return e.power(ctx, it, "stop") // reset: the rollback discards the state anyway

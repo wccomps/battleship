@@ -68,6 +68,9 @@ type EnvHost struct {
 	// UserNotes are its other notes, such as the logins its base image's
 	// notes carried over.
 	UserNotes string
+	// HalfDeleted: a failed destroy left it locked as destroyed, without its
+	// name, so it doesn't count toward the slot's domain.
+	HalfDeleted bool
 }
 
 // Environment is what a slot holds.
@@ -223,7 +226,8 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			n, has := ParseNotes(cfg["description"])
 			n = n.Checked(p.Cfg.Environments.Subnet)
 			envs[si].Hosts = append(envs[si].Hosts, EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node,
-				Status: vm.Status, Tags: vm.Tags, Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has, UserNotes: UserNotes(cfg["description"])})
+				Status: vm.Status, Tags: vm.Tags, Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has, UserNotes: UserNotes(cfg["description"]),
+				HalfDeleted: vm.Lock == "destroyed"})
 			continue
 		}
 		if vm.Template {
@@ -242,6 +246,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 		for _, h := range e.Hosts {
 			d := Domain(h.Name)
 			switch {
+			case h.HalfDeleted:
 			case d == "" || (e.Domain != "" && d != e.Domain):
 				e.Mixed = true
 			case e.Domain == "":

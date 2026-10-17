@@ -22,10 +22,11 @@ type envsView struct {
 	Create  string
 	Queued  string
 	FreeErr string // why the queued jobs couldn't be read
-	// MayCreate, MayAdd and MayDNS say whether the user holds each action's
-	// privilege anywhere; Lacks says, a line each, what they lack.
-	MayCreate, MayAdd, MayDNS bool
-	Lacks                     []string
+	// MayCreate, MayAdd, MayDNS and MayTearDown say whether the user holds
+	// each action's privilege anywhere; Lacks says, a line each, what they
+	// lack.
+	MayCreate, MayAdd, MayDNS, MayTearDown bool
+	Lacks                                  []string
 }
 
 // envBlock is a slot in use. Domain is set when its VMs share one: Add hosts
@@ -44,7 +45,7 @@ type envBlock struct {
 	Twin  string
 }
 
-// Acts reports whether the block offers Add hosts and Set DNS.
+// Acts reports whether the block offers Add hosts, Set DNS and Tear down.
 func (b envBlock) Acts() bool { return b.Domain != "" && b.Twin == "" }
 
 // envHostRow is a VM in a slot: its name (the host part, or the whole VM
@@ -61,7 +62,8 @@ type envHostRow struct {
 
 func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	p := envsView{MayCreate: s.mayRun(ctx, pods.KindEnvCreate), MayAdd: s.mayRun(ctx, pods.KindEnvAdd), MayDNS: s.mayRun(ctx, pods.KindEnvDNS)}
+	p := envsView{MayCreate: s.mayRun(ctx, pods.KindEnvCreate), MayAdd: s.mayRun(ctx, pods.KindEnvAdd), MayDNS: s.mayRun(ctx, pods.KindEnvDNS),
+		MayTearDown: s.mayRun(ctx, pods.KindEnvTeardown)}
 	planner := s.planner(ctx)
 	envs, _, err := planner.Environments(ctx)
 	if err != nil {
@@ -86,6 +88,9 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 		}
 		if !p.MayDNS {
 			p.Lacks = append(p.Lacks, lacksLine("Setting DNS", pods.KindEnvDNS, ""))
+		}
+		if !p.MayTearDown {
+			p.Lacks = append(p.Lacks, lacksLine("Tearing down an environment", pods.KindEnvTeardown, ""))
 		}
 	}
 	s.render(w, r, http.StatusOK, "catalog", s.newView(w, r, "Environments", "environments", p))
@@ -186,7 +191,7 @@ func (s *Server) inEnv(op operation, next func(operation) http.Handler) http.Han
 // noEnv sends an environment operation without an environment (domain, if
 // it names one that doesn't exist) back to Environments, saying why.
 func (s *Server) noEnv(w http.ResponseWriter, r *http.Request, domain string) {
-	msg := "Add hosts and Set DNS start from an environment: pick one below."
+	msg := "Add hosts, Set DNS and Tear down start from an environment: pick one below."
 	if domain != "" {
 		msg = "There's no environment " + domain + ". It may have been torn down or renamed; pick one below."
 	}

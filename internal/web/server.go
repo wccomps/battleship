@@ -251,7 +251,7 @@ func (s *Server) volunteerRoutes(mux *http.ServeMux) {
 		}
 		mux.Handle("POST "+op.Path+"/preview", s.require(s.inEnv(op, s.opPreview)))
 		mux.Handle("POST "+op.Path+"/confirm", s.require(s.inEnv(op, s.opConfirm)))
-		if op.Kind.OnEnvironment() {
+		if op.Kind == pods.KindEnvAdd || op.Kind == pods.KindEnvDNS {
 			s.oldEnvRoutes(mux, op)
 		}
 	}

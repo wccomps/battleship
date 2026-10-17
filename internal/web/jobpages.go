@@ -84,6 +84,8 @@ func opLabelOf(kind string, in jobs.Inputs) opLabel {
 		return opLabel{Icon: "deploy", Label: "Add hosts", Detail: in.Domain}
 	case pods.KindEnvDNS:
 		return opLabel{Icon: "reset", Label: "Set DNS", Detail: in.Domain + " → " + in.DNS}
+	case pods.KindEnvTeardown:
+		return opLabel{Icon: "teardown", Label: "Tear down", Detail: in.Domain}
 	case pods.KindImageRegister:
 		return opLabel{Icon: "deploy", Label: "Register base image", Detail: in.Family}
 	case pods.KindImageEdit:

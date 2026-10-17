@@ -18,15 +18,18 @@ type reviewView struct {
 	Verb, Subject string // the title: "Register teak-build"
 	Say           string // what confirming does, or why it can't
 	Blocked       bool
+	Deletes       bool // confirming deletes VMs: Say reads as a warning
 	Facts         []reviewFact
 	// Rows are the VMs, in the plan's order; Image and Addr say whether the
 	// table has those columns.
 	Rows        []reviewRow
 	Image, Addr bool
 	// DNS are a Set DNS's hosts, their DNS server now and after.
-	DNS   []dnsRow
-	Note  string // a line after the rows
-	Retry int64  // the job this retries
+	DNS  []dnsRow
+	Note string // a line after the rows
+	// Kept are VMs a teardown leaves alone, each with why.
+	Kept  []string
+	Retry int64 // the job this retries
 }
 
 // reviewFact is a labelled fact of a review: a name, text and a muted note,
@@ -83,6 +86,8 @@ func (s *Server) review(ctx context.Context, op operation, in jobs.Inputs, plan 
 		r = s.envReview(op, in, plan)
 	case pods.KindEnvDNS:
 		r = s.dnsReview(ctx, in, plan)
+	case pods.KindEnvTeardown:
+		r = s.teardownReview(in, plan)
 	case pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete:
 		r = imageReview(op, in, plan)
 	default:
@@ -212,6 +217,65 @@ func (s *Server) envReview(op operation, in jobs.Inputs, plan *pods.Plan) *revie
 	return r
 }
 
+// teardownReview describes tearing an environment down: a row per VM it
+// deletes, with its image and address from its notes, and the VMs on its
+// networks it leaves alone.
+func (s *Server) teardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
+	r := &reviewView{Verb: "Tear down", Subject: in.Domain, Image: true, Addr: true, Deletes: true}
+	pool := "its slot"
+	for _, k := range plan.Locks {
+		if v, ok := strings.CutPrefix(k, "slot:"); ok {
+			if n, err := strconv.Atoi(v); err == nil {
+				pool = pods.ExpandSlot(s.cfg.Environments.Pool, n)
+			}
+		}
+	}
+	deletes, blocked := 0, 0
+	var disks []string
+	for _, it := range plan.Items {
+		row := reviewRow{Name: it.Name, Router: slices.Contains(pods.Tags(it.Tags), pods.ImageRouter),
+			Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}
+		if it.Notes != nil {
+			row.Image = it.Notes.Base
+			if o := pods.LastOctet(it.Notes.IP); o != 0 {
+				row.Addr = "." + strconv.Itoa(o)
+			}
+		}
+		if row.Router {
+			row.Addr = "." + strconv.Itoa(pods.GatewayOctet)
+		}
+		r.Rows = append(r.Rows, row)
+		switch {
+		case it.Blocked != "":
+			blocked++
+		case slices.Contains(it.Steps, pods.StepDelete):
+			deletes++
+		case slices.Contains(it.Steps, pods.StepFreeDisks):
+			disks = append(disks, strconv.Itoa(it.VMID))
+		}
+	}
+	for _, n := range plan.Notices {
+		r.Kept = append(r.Kept, strings.TrimPrefix(n, "Not touched: "))
+	}
+	var say []string
+	if deletes > 0 {
+		say = append(say, "Deletes "+countVMs(deletes)+" in "+pool+".")
+	}
+	if len(disks) > 0 {
+		say = append(say, "Frees the disks deleted VMs left at VMID "+andList(disks)+".")
+	}
+	switch {
+	case blocked > 0:
+		say = append(say, "The blocked "+byCount(blocked, "VM stays", "VMs stay")+", so the slot isn't free afterwards.")
+	case len(r.Kept) > 0:
+		say = append(say, "VMs outside "+pool+" stay on its networks, so the slot isn't free afterwards.")
+	default:
+		say = append(say, "The slot is free again afterwards.")
+	}
+	r.Say = strings.Join(say, " ")
+	return r
+}
+
 // gateway is every environment's router address.
 func (s *Server) gateway() string {
 	return s.cfg.Environments.Subnet + "." + strconv.Itoa(pods.GatewayOctet)
@@ -319,6 +383,8 @@ func reviewBack(op operation, in jobs.Inputs) string {
 		if f, _, ok := pods.ParseImageName(in.Image); ok {
 			return "/images/" + url.PathEscape(f)
 		}
+		return listPage(in)
+	case pods.KindEnvTeardown:
 		return listPage(in)
 	}
 	return formQuery(op, in)

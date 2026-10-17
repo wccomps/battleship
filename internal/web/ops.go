@@ -37,6 +37,7 @@ var operations = []operation{
 	{Kind: pods.KindEnvCreate, Path: "/environments/new", Title: "Create environment", Noun: "environment"},
 	{Kind: pods.KindEnvAdd, Path: "/environments/{domain}/add", Title: "Add hosts", Noun: "new hosts"},
 	{Kind: pods.KindEnvDNS, Path: "/environments/{domain}/dns", Title: "Set DNS", Noun: "DNS change"},
+	{Kind: pods.KindEnvTeardown, Path: "/environments/{domain}/teardown", Title: "Tear down", Noun: "teardown"},
 	{Kind: pods.KindImageRegister, Path: "/images/register", Title: "Register base image", Noun: "registration"},
 	{Kind: pods.KindImageEdit, Path: "/images/edit", Title: "Open for editing", Noun: "working copy"},
 	{Kind: pods.KindImageDeprecate, Path: "/images/deprecate", Title: "Deprecate base image", Noun: "deprecation"},
@@ -97,11 +98,11 @@ const (
 	fieldAction      = "action"      // power
 	fieldNonce       = "nonce"       // confirm: names the preview
 	fieldFingerprint = "fingerprint"
-	fieldTyped       = "typed"    // confirm: the team range, typed
+	fieldTyped       = "typed"    // confirm: the team range or domain, typed (jobs.Inputs.Typed)
 	fieldRetryOf     = "retry_of" // confirm: the job a retry preview retries; shown only, never trusted
 	fieldFrom        = "from"     // "grid": the grid's form, which sends ticked VMs and no teams
 	fieldDomain      = "domain"
-	fieldSlot        = "slot"      // env-create: the slot's two digits
+	fieldSlot        = "slot"      // env-create, env-teardown: the slot's two digits
 	fieldRouter      = "router"    // name=family
 	fieldEnvHosts    = "env_hosts" // one name=family[:octet] per line
 	fieldDNS         = "dns"
@@ -326,7 +327,7 @@ func listPage(in jobs.Inputs) string {
 	switch in.Kind {
 	case pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete:
 		return "/images"
-	case pods.KindEnvAdd, pods.KindEnvDNS:
+	case pods.KindEnvAdd, pods.KindEnvDNS, pods.KindEnvTeardown:
 		if pods.CheckDomain(in.Domain) == nil {
 			return envHref(in.Domain)
 		}

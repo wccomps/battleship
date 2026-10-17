@@ -36,7 +36,7 @@ type Inputs struct {
 
 	// Environments.
 	Domain   string   `json:"domain,omitempty"`
-	Slot     string   `json:"slot,omitempty"`      // create: two digits, e.g. "02"; empty takes the first free
+	Slot     string   `json:"slot,omitempty"`      // create, teardown: two digits, e.g. "02"; empty takes the first free, or the domain's
 	Router   string   `json:"router,omitempty"`    // create: "name=family"
 	EnvHosts []string `json:"env_hosts,omitempty"` // create, add: "name=family[:octet]" each
 	DNS      string   `json:"dns,omitempty"`       // env-dns: "router" or a host name
@@ -45,6 +45,18 @@ type Inputs struct {
 	Family    string `json:"family,omitempty"`     // register, edit
 	ImageKind string `json:"image_kind,omitempty"` // register a new family
 	Image     string `json:"image,omitempty"`      // deprecate, delete
+}
+
+// Typed is what a person types to confirm in (pods.Kind.TypedConfirm): a
+// teardown's team range or an environment's domain, as given.
+func (in Inputs) Typed() string {
+	switch in.Kind {
+	case pods.KindTeardown:
+		return strings.TrimSpace(in.Teams)
+	case pods.KindEnvTeardown:
+		return strings.TrimSpace(in.Domain)
+	}
+	return ""
 }
 
 // MaxSnapshotDescription is the longest snapshot description, in characters.
@@ -215,7 +227,7 @@ func planFor(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*p
 		return p.Snapshot(ctx, pods.SnapshotRequest{
 			Teams: teams, Hosts: in.Hosts, Name: in.Snapshot, Description: in.Description, VMState: in.VMState,
 		})
-	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS:
+	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS, pods.KindEnvTeardown:
 		req, err := in.EnvRequest()
 		if err != nil {
 			return nil, err
@@ -225,6 +237,8 @@ func planFor(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*p
 			return p.EnvCreate(ctx, req)
 		case pods.KindEnvAdd:
 			return p.EnvAdd(ctx, req)
+		case pods.KindEnvTeardown:
+			return p.EnvTeardown(ctx, req)
 		}
 		return p.EnvDNS(ctx, req)
 	case pods.KindImageRegister:
@@ -299,11 +313,11 @@ func (in Inputs) validateTeamless() []error {
 			}
 		}
 	}
-	if in.Slot != "" && in.Kind != pods.KindEnvCreate {
-		errs = append(errs, errors.New("a slot applies only to creating an environment"))
+	if in.Slot != "" && in.Kind != pods.KindEnvCreate && in.Kind != pods.KindEnvTeardown {
+		errs = append(errs, errors.New("a slot applies only to creating or tearing down an environment"))
 	}
 	switch in.Kind {
-	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS:
+	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS, pods.KindEnvTeardown:
 		if err := pods.CheckDomain(strings.TrimSpace(in.Domain)); err != nil {
 			errs = append(errs, err)
 		}

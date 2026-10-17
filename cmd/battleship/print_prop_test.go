@@ -31,7 +31,7 @@ var terminalTricks = []string{
 
 var allKinds = []pods.Kind{pods.KindDeploy, pods.KindTeardown, pods.KindReset, pods.KindPower, pods.KindSnapshot,
 	pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete,
-	pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS}
+	pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS, pods.KindEnvTeardown}
 
 // untrusted draws text a web user, an IdP, Proxmox or a guest could write.
 func untrusted(t *rapid.T, label string) string {

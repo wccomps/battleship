@@ -43,7 +43,7 @@
 {{/* review is a review's sentence, then its facts or a row per VM (see
        reviewView). */}}
 {{define "review" -}}
-<p class="say{{if .Blocked}} bad{{end}}">{{if .Blocked}}{{icon "blocked"}}{{else}}{{icon "copy"}}{{end}}<span>{{names .Say}}</span></p>
+<p class="say{{if or .Blocked .Deletes}} bad{{end}}">{{if .Blocked}}{{icon "blocked"}}{{else if .Deletes}}{{icon "teardown"}}{{else}}{{icon "copy"}}{{end}}<span>{{names .Say}}</span></p>
 {{- with .Facts}}
 <dl class="kv">
 {{- range $f := .}}
@@ -81,5 +81,13 @@
 </div>
 {{- end}}
 {{- with .Note}}<p class="meta">{{names .}}</p>{{end}}
+{{- with .Kept}}
+<div class="sec">
+<h2 class="sub">Not touched</h2>
+{{- range .}}
+<p class="fix">{{icon "dash"}}<span>{{names .}}</span></p>
+{{- end}}
+</div>
+{{- end}}
 {{- with .Retry}}<p class="meta">Retry of #{{.}}: only the VMs that didn't finish.</p>{{end}}
 {{- end}}

@@ -20,13 +20,14 @@
 <div class="acts">
 {{- if $d.MayAdd}}<a class="btn sm" href="/environments/{{.Domain}}/add">Add hosts</a>{{else}}<button class="btn sm" type="button" disabled>Add hosts</button>{{end}}
 {{- if $d.MayDNS}}<a class="btn sm" href="/environments/{{.Domain}}/dns">Set DNS</a>{{else}}<button class="btn sm" type="button" disabled>Set DNS</button>{{end}}
+{{- if $d.MayTearDown}}<a class="btn sm bad" href="/environments/{{.Domain}}/teardown">Tear down {{.Domain}}</a>{{else}}<button class="btn sm bad" type="button" disabled>Tear down {{.Domain}}</button>{{end}}
 </div>
 {{- end}}
 </div>
 {{- if .Mixed}}
-<p class="fix">{{icon "warn"}}<span>Its VMs don't share one domain, so Add hosts and Set DNS can't act on it. Rename them to one domain, or move the others out of {{.Slot}}.</span></p>
+<p class="fix">{{icon "warn"}}<span>Its VMs don't share one domain, so Add hosts, Set DNS and Tear down can't act on it. Rename them to one domain, or move the others out of {{.Slot}}.</span></p>
 {{- else if .Twin}}
-<p class="fix">{{icon "warn"}}<span>{{.Domain}} is also in {{.Twin}}: Add hosts and Set DNS act on that one.</span></p>
+<p class="fix">{{icon "warn"}}<span>{{.Domain}} is also in {{.Twin}}: Add hosts, Set DNS and Tear down act on that one.</span></p>
 {{- end}}
 {{- with .Users}}
 <p class="fix">{{icon "warn"}}<span>{{if $b.Hosts}}Also on its networks, from outside {{$b.Slot}}{{else}}Nothing is in {{$b.Slot}}, but VMs outside it are on its networks, so Create skips it{{end}}: {{range $i, $u := .}}{{if $i}}, {{end}}<code>{{$u}}</code>{{end}}.</span></p>

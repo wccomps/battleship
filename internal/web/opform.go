@@ -83,6 +83,10 @@ type snapshotPicker struct {
 func (s *Server) opForm(op operation) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
+		if op.Kind == pods.KindEnvTeardown {
+			s.teardownPreview(w, r, op, op.scope(formInputs(op.Kind, q)))
+			return
+		}
 		if op.Kind.Teamless() {
 			s.teamlessForm(w, r, http.StatusOK, op, op.scope(formInputs(op.Kind, q)), "")
 			return
@@ -107,6 +111,21 @@ func (s *Server) opForm(op operation) http.Handler {
 		p.FromGrid = grid
 		s.render(w, r, http.StatusOK, "opform", s.newView(w, r, op.Title, string(op.Kind), p))
 	})
+}
+
+// teardownPreview is an environment teardown's page: it has nothing to
+// fill in, so it opens on its review.
+func (s *Server) teardownPreview(w http.ResponseWriter, r *http.Request, op operation, in jobs.Inputs) {
+	if err := in.Validate(); err != nil {
+		s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, sentence(err.Error()))
+		return
+	}
+	plan, err := jobs.BuildPlan(r.Context(), s.planner(r.Context()), in)
+	if err != nil {
+		s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, "Couldn't make a plan: "+sentence(proxmox.Describe(err)))
+		return
+	}
+	s.showPreview(w, r, http.StatusOK, op, in, plan, false, previewOptions{})
 }
 
 // newFormPage prepares an operation's form for in. picked means the reset
@@ -159,6 +178,10 @@ func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, 
 
 // renderForm shows the form again with a problem, keeping what was typed.
 func (s *Server) renderForm(w http.ResponseWriter, r *http.Request, status int, op operation, in jobs.Inputs, problem string) {
+	if op.Kind == pods.KindEnvTeardown { // it has no form: its review is its page
+		s.errorPage(w, r, status, "Can't tear down "+in.Domain, problem, listPage(in), "Back to Environments")
+		return
+	}
 	if op.Kind.Teamless() {
 		s.teamlessForm(w, r, status, op, in, problem)
 		return

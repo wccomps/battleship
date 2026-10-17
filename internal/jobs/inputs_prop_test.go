@@ -71,6 +71,7 @@ var validInputs = []Inputs{
 	{Kind: pods.KindEnvCreate, Domain: "kilo.alpha", Slot: "02", Router: "gw=opnsense", EnvHosts: []string{"dc=windows"}},
 	{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"web=debian:20"}},
 	{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "dc"},
+	{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"},
 	{Kind: pods.KindImageRegister, VMID: 100, Family: "debian-12", ImageKind: pods.ImageKinds[0]},
 	{Kind: pods.KindImageEdit, Family: "debian-12"},
 	{Kind: pods.KindImageDeprecate, Image: "debian-12-v1"},
@@ -173,6 +174,7 @@ var readsFields = map[pods.Kind][]string{
 	pods.KindDeploy: {"Pattern", "Rebuild", "NoSnapshot"}, pods.KindPower: {"Action"}, pods.KindSnapshot: {"Snapshot", "Description", "VMState"},
 	pods.KindTeardown: {}, pods.KindReset: {},
 	pods.KindEnvCreate: {"Domain", "Slot", "Router", "EnvHosts", "EnvVMs"}, pods.KindEnvAdd: {"Domain", "EnvHosts", "EnvVMs"}, pods.KindEnvDNS: {"Domain", "DNS"},
+	pods.KindEnvTeardown:   {"Domain", "Slot"},
 	pods.KindImageRegister: {"VMID", "Family", "ImageKind"}, pods.KindImageEdit: {"Family"},
 	pods.KindImageDeprecate: {"Image"}, pods.KindImageDelete: {"Image"},
 }
@@ -201,7 +203,7 @@ func checkGate(t interface{ Fatalf(string, ...any) }, p pods.Planner, in Inputs,
 	if uerr := json.Unmarshal(data, &back); merr != nil || uerr != nil || !reflect.DeepEqual(back, in) || back.Validate() != nil {
 		t.Fatalf("%#v reads back from its job as %#v (%v, %v)", in, back, merr, uerr)
 	}
-	if in.Kind == pods.KindEnvCreate || in.Kind == pods.KindEnvAdd || in.Kind == pods.KindEnvDNS {
+	if in.Kind == pods.KindEnvCreate || in.Kind == pods.KindEnvAdd || in.Kind == pods.KindEnvDNS || in.Kind == pods.KindEnvTeardown {
 		if _, err := in.EnvRequest(); err != nil {
 			t.Fatalf("EnvRequest(%#v): %v", in, err)
 		}
@@ -262,5 +264,49 @@ func TestPropValidateIsTheGate(t *testing.T) {
 			return
 		}
 		checkGate(t, p, in, s.ok)
+	})
+}
+
+// An environment teardown's domain, typed anyhow, passes Validate just
+// when it is printable and, trimmed, a domain; what passes is the text to
+// type to confirm, and plans only that domain's VMs.
+func TestPropEnvTeardownDomain(t *testing.T) {
+	f := twoTeams()
+	for _, vm := range []proxmox.VM{
+		{VMID: 2100, Name: "gw.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "dev;kilo.alpha;router"},
+		{VMID: 2101, Name: "dc.kilo.alpha", Node: "n1", Pool: "dev-01"},
+		{VMID: 2200, Name: "dc.kilo.bravo", Node: "n1", Pool: "dev-02"},
+	} {
+		f.Add(vm, nil)
+	}
+	p := pods.NewPlanner(f, testCfg())
+	rapid.Check(t, func(t *rapid.T) {
+		domain := strings.Join(rapid.SliceOfN(rapid.OneOf(textPiece, rapid.SampledFrom([]string{"kilo.alpha", "kilo.bravo", " ", "KILO", ".alpha"})), 1, 3).Draw(t, "domain"), "")
+		in := Inputs{Kind: pods.KindEnvTeardown, Domain: domain}
+		err := in.Validate()
+		if wantOK := printable(domain) && pods.CheckDomain(strings.TrimSpace(domain)) == nil; (err == nil) != wantOK {
+			t.Fatalf("Validate(%q) = %v, want ok %v", domain, err, wantOK)
+		}
+		plan, berr := BuildPlan(bg, p, in)
+		if err != nil {
+			if berr == nil {
+				t.Fatalf("BuildPlan planned %q, which Validate refused: %v", domain, err)
+			}
+			return
+		}
+		if in.Typed() != strings.TrimSpace(domain) {
+			t.Fatalf("Typed() = %q for %q", in.Typed(), domain)
+		}
+		if berr != nil {
+			return // no slot holds it
+		}
+		for _, it := range plan.Items {
+			if plan.Kind != pods.KindEnvTeardown || !slices.Contains(it.Steps, pods.StepDelete) || pods.Domain(it.Name) != strings.TrimSpace(domain) {
+				t.Fatalf("a teardown of %q plans %s", domain, it.Name)
+			}
+		}
+		if len(plan.Items) == 0 {
+			t.Fatalf("a teardown of %q plans nothing", domain)
+		}
 	})
 }

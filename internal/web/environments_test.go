@@ -136,11 +136,11 @@ func TestEnvironmentsPageOddSlots(t *testing.T) {
 	mixed := envSection(t, body, "slot-02")
 	contains(t, "the mixed slot", mixed, `<h2 id="slot-02-h">dev-02</h2>`, `<span class="chip">mixed domains</span>`,
 		"don't share one domain", `<span class="hname">a.kilo.bravo</span>`, `<span class="hname">b.other.zone</span>`)
-	lacks(t, "the mixed slot", mixed, "Add hosts</a>", "Set DNS</a>")
+	lacks(t, "the mixed slot", mixed, "Add hosts</a>", "Set DNS</a>", "/teardown")
 
 	twin := envSection(t, body, "slot-05")
-	contains(t, "the second kilo.alpha", twin, `<h2 id="slot-05-h">kilo.alpha</h2>`, "kilo.alpha is also in dev-01: Add hosts and Set DNS act on that one.")
-	lacks(t, "the second kilo.alpha", twin, "Add hosts</a>")
+	contains(t, "the second kilo.alpha", twin, `<h2 id="slot-05-h">kilo.alpha</h2>`, "kilo.alpha is also in dev-01: Add hosts, Set DNS and Tear down act on that one.")
+	lacks(t, "the second kilo.alpha", twin, "Add hosts</a>", "/teardown")
 	if n := strings.Count(body, `id="kilo.alpha"`); n != 1 {
 		t.Errorf("%d blocks anchored at kilo.alpha", n)
 	}
@@ -150,7 +150,8 @@ func TestEnvironmentsPageOddSlots(t *testing.T) {
 		"Nothing is in dev-03, but VMs outside it are on its networks, so Create skips it: <code>stray-one</code>.")
 	lacks(t, "the slot used from outside", users, "<table")
 	contains(t, "kilo.alpha", envSection(t, body, "kilo.alpha"), "Also on its networks, from outside dev-01: <code>stray-two</code>.",
-		`<a class="btn sm" href="/environments/kilo.alpha/add">Add hosts</a>`)
+		`<a class="btn sm" href="/environments/kilo.alpha/add">Add hosts</a>`,
+		`<a class="btn sm bad" href="/environments/kilo.alpha/teardown">Tear down kilo.alpha</a>`)
 
 	contains(t, "the free line", body, `<span class="vm">dev-06 – dev-10</span><span class="meta">· Create uses dev-06</span>`)
 }
@@ -165,9 +166,11 @@ func TestEnvironmentsPageLacksPrivileges(t *testing.T) {
 		`<button class="btn pri" type="button" disabled>Create environment</button>`,
 		`<button class="btn sm" type="button" disabled>Add hosts</button>`,
 		`<button class="btn sm" type="button" disabled>Set DNS</button>`,
+		`<button class="btn sm bad" type="button" disabled>Tear down kilo.alpha</button>`,
 		"Creating an environment needs VM.Clone, which you don&#39;t have.",
 		"Adding hosts needs VM.Clone, which you don&#39;t have.",
-		"Setting DNS needs VM.GuestAgent.Unrestricted, which you don&#39;t have.")
+		"Setting DNS needs VM.GuestAgent.Unrestricted, which you don&#39;t have.",
+		"Tearing down an environment needs VM.Allocate, which you don&#39;t have.")
 	lead := h.login(asLead)
 	lacks(t, "as a lead", h.get(&lead, "/environments").Body.String(), "disabled", "which you don&#39;t have")
 }
@@ -194,7 +197,7 @@ func TestEnvironmentRoutes(t *testing.T) {
 		}
 	}
 	gone := "There's no environment kilo.bravo. It may have been torn down or renamed; pick one below."
-	pick := "Add hosts and Set DNS start from an environment: pick one below."
+	pick := "Add hosts, Set DNS and Tear down start from an environment: pick one below."
 	goesBack(h.get(&sess, "/environments/kilo.bravo/add"), "an unknown environment", gone)
 	goesBack(h.post(&sess, "/environments/kilo.bravo/dns/preview", url.Values{"dns": {"router"}}), "an unknown environment's preview", gone)
 	before, _, _ := h.api.readCounts()

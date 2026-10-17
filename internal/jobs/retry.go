@@ -24,13 +24,15 @@ var (
 // cleared: the planner blocks rebuilding a template team VMs still use,
 // which would block every VM of the retry. An environment's create or add
 // keeps its hosts, so the plan is the same, and is narrowed to the VMs; a
-// create keeps its slot, where the planner resumes it.
+// create keeps its slot, where the planner resumes it. An environment's
+// teardown is planned again whole in its slot: what it deleted is gone, and
+// what a failed delete left (half-deleted VMs, disks) has new names.
 func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 	if !store.JobStatus(job.Status).CanRetry() {
 		return Inputs{}, fmt.Errorf("job %d is %s: %w", job.ID, job.Status, ErrNotRetryable)
 	}
 	kind := pods.Kind(job.Kind)
-	if kind.Teamless() && kind != pods.KindEnvCreate && kind != pods.KindEnvAdd {
+	if kind.Teamless() && kind != pods.KindEnvCreate && kind != pods.KindEnvAdd && kind != pods.KindEnvTeardown {
 		return Inputs{}, fmt.Errorf("job %d: run it again from its form; image jobs and DNS changes resume what exists: %w", job.ID, ErrNotRetryable)
 	}
 	var in Inputs
@@ -80,7 +82,7 @@ func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 	return in, nil
 }
 
-// envRetry is RetryInputs for an environment's create or add.
+// envRetry is RetryInputs for an environment's create, add or teardown.
 func envRetry(id int64, in Inputs, plan pods.Plan, planned map[string]pods.Item, items []store.Item) (Inputs, error) {
 	var names []string
 	for _, it := range items {
@@ -95,8 +97,10 @@ func envRetry(id int64, in Inputs, plan pods.Plan, planned map[string]pods.Item,
 	if len(names) == 0 {
 		return Inputs{}, ErrNothingToRetry
 	}
-	in.VMs = sortedUnique(names)
-	if in.Kind == pods.KindEnvCreate && in.Slot == "" {
+	if in.Kind != pods.KindEnvTeardown {
+		in.VMs = sortedUnique(names)
+	}
+	if (in.Kind == pods.KindEnvCreate || in.Kind == pods.KindEnvTeardown) && in.Slot == "" {
 		for _, k := range plan.Locks {
 			if slot, ok := strings.CutPrefix(k, "slot:"); ok {
 				in.Slot = slot

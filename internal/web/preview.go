@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -106,16 +107,19 @@ type itemRow struct {
 type confirmForm struct {
 	Nonce       string
 	Fingerprint string
-	TypeTeams   string // if set, the team range to type to confirm
-	RetryOf     int64  // the job this retries, so a preview shown again by the confirm still says so
-	Button      string
-	Danger      bool
+	// Typed, if set, is what to type to confirm (jobs.Inputs.Typed); TypedRE is
+	// it as the input's pattern.
+	Typed   string
+	TypedRE string
+	RetryOf int64 // the job this retries, so a preview shown again by the confirm still says so
+	Button  string
+	Danger  bool
 }
 
 // destructive reports whether in destroys or discards something, so the
 // confirm button says so.
 func destructive(in jobs.Inputs) bool {
-	return in.Kind == pods.KindTeardown || in.Kind == pods.KindReset || (in.Kind == pods.KindPower && in.Action == "stop") ||
+	return in.Kind.TearsDown() || in.Kind == pods.KindReset || (in.Kind == pods.KindPower && in.Action == "stop") ||
 		in.Kind == pods.KindImageDelete
 }
 
@@ -204,7 +208,8 @@ func (s *Server) showPreview(w http.ResponseWriter, r *http.Request, code int, o
 			Danger:      destructive(in),
 		}
 		if op.Kind.TypedConfirm() {
-			p.Confirm.TypeTeams = in.Teams
+			p.Confirm.Typed = in.Typed()
+			p.Confirm.TypedRE = regexp.QuoteMeta(p.Confirm.Typed)
 		}
 	}
 	s.render(w, r, code, "preview", s.newView(w, r, p.Heading, string(op.Kind), p))
@@ -278,6 +283,8 @@ func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
 		return powerLabel(in.Action) + " " + vms
 	case pods.KindTeardown:
 		return "Delete " + vms
+	case pods.KindEnvTeardown:
+		return "Tear down " + in.Domain
 	case pods.KindSnapshot:
 		return "Snapshot " + vms
 	default:
@@ -394,7 +401,9 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 			p.AlreadyN, p.AlreadyWord = s.alreadyDone(ctx, in.Action, plan.Runnable())
 		}
 	}
-	p.Warnings = append(p.Warnings, plan.Notices...) // what was left alone, even when nothing runs
+	if op.Kind != pods.KindEnvTeardown { // its review lists them as not touched
+		p.Warnings = append(p.Warnings, plan.Notices...) // what was left alone, even when nothing runs
+	}
 	if p.Review = s.review(ctx, op, in, plan, p.Nothing); p.Review != nil {
 		p.Heading = p.Review.Verb + " " + p.Review.Subject
 		p.EditHref, p.Review.Retry = reviewBack(op, in), opts.retryOf

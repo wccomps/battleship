@@ -186,6 +186,8 @@ func TestTeamlessInputsValidate(t *testing.T) {
 		{Kind: pods.KindEnvCreate, Domain: "kilo.alpha", Router: "gw=opnsense", EnvHosts: []string{"teak=debian-12:10"}},
 		{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"oak=win2022"}},
 		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"},
+		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"},
+		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha", Slot: "03"},
 		{Kind: pods.KindImageRegister, VMID: 150, Family: "debian-12", ImageKind: "linux"},
 		{Kind: pods.KindImageEdit, Family: "debian-12"},
 		{Kind: pods.KindImageDelete, Image: "debian-12-v1"},
@@ -203,6 +205,11 @@ func TestTeamlessInputsValidate(t *testing.T) {
 		{Kind: pods.KindImageRegister, Family: "debian-12"},
 		{Kind: pods.KindImageDeprecate, Image: "debian-12"},
 		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", Teams: "1"},
+		{Kind: pods.KindEnvTeardown},
+		{Kind: pods.KindEnvTeardown, Domain: "kilo"},
+		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha", Slot: "3"},
+		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha", VMs: []string{"dc.kilo.alpha"}},
+		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha", Teams: "1"},
 	}
 	for _, in := range bad {
 		if in.Validate() == nil {

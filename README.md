@@ -98,6 +98,8 @@ else the name less `-build`) and, where it can tell, the kind, or says why it ca
 (`battleship env create -domain kilo.alpha -router gw=opnsense -host dc=win2022:10 -host web=debian-12`).
 Windows and Linux hosts get their name, a static address on the slot's LAN (`.2` is the gateway) and DNS through
 the QEMU guest agent. **Set DNS** (`env dns -domain kilo.alpha -server dc`) points them at a domain controller once it is promoted.
+**Tear down** (`env teardown -domain kilo.alpha`, confirmed by typing the domain) deletes the VMs in its slot's pool,
+never VMs from outside it on its networks.
 Proxmox privileges decide who may do each step, including `VM.GuestAgent.Unrestricted` for the setup.
 
 ## Configuration
