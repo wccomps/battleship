@@ -28,7 +28,10 @@ func agentEnabled(v string) bool {
 // freeVMID is the lowest VMID in lo..hi that no listed VM, no VM the user
 // can't see (VMIDHeld) and nothing in taken holds.
 func (p Planner) freeVMID(ctx context.Context, vms []proxmox.VM, lo, hi int, taken map[int]bool) (int, error) {
-	use := newVMIDUse(p.API, vms)
+	use, err := p.vmidUse(ctx, vms)
+	if err != nil {
+		return 0, err
+	}
 	for id := lo; id <= hi; id++ {
 		if taken[id] {
 			continue

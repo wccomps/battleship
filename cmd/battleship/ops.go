@@ -159,7 +159,19 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 		fmt.Fprintln(stdout)
 		in.Teams = spec
 	}
-	plan, err := jobs.BuildPlan(ctx, pods.NewPlanner(api, cfg), in)
+	planner := pods.NewPlanner(api, cfg)
+	if cfg.Database.URL != "" {
+		// The job will queue: don't plan a VMID or slot a queued job will create.
+		planner.Reserved = func(ctx context.Context) (map[string]bool, error) {
+			st, closeStore, err := d.openStore(ctx, cfg.Database)
+			if err != nil {
+				return nil, err
+			}
+			defer closeStore()
+			return st.ReservedKeys(ctx, 0)
+		}
+	}
+	plan, err := jobs.BuildPlan(ctx, planner, in)
 	if err != nil {
 		fmt.Fprintln(stderr, "planning:", cleanLines(proxmox.Describe(err), "  "))
 		return 1

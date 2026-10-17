@@ -300,7 +300,9 @@ func (w *Worker) execute(ctx, bg context.Context, halt <-chan struct{}, job *sto
 	if err := json.Unmarshal(job.Inputs, &in); err != nil {
 		return store.Outcome{Status: store.StatusFailed, Error: "reading job inputs: " + err.Error()}, false
 	}
-	plan, err := BuildPlan(ctx, pods.NewPlanner(api, w.Cfg), in)
+	planner := pods.NewPlanner(api, w.Cfg)
+	planner.Reserved = func(ctx context.Context) (map[string]bool, error) { return w.Store.ReservedKeys(ctx, job.ID) }
+	plan, err := BuildPlan(ctx, planner, in)
 	if err != nil {
 		if ctx.Err() != nil {
 			// Stopped, not failed: runJob records why.

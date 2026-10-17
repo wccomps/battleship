@@ -346,6 +346,7 @@ func (s *Server) planner(ctx context.Context) pods.Planner {
 	if acc := s.accessFor(ctx); acc != nil {
 		p.Access = acc
 	}
+	p.Reserved = func(ctx context.Context) (map[string]bool, error) { return s.st.ReservedKeys(ctx, 0) }
 	return p
 }
 

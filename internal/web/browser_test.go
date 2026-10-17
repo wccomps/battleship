@@ -460,7 +460,7 @@ func TestBrowserPreviewAndJob(t *testing.T) {
 			b.click(`#panel button.pri.bad`)
 			b.waitFor("the job panel", `!!document.querySelector("#panel[open] #job-title")`)
 			id := strings.TrimPrefix(b.text("#panel .ph .vm"), "#")
-			if b.text("#job-head .st") != "pending" {
+			if b.text("#job-head .st") != "queued" {
 				t.Errorf("new job status = %q", b.text("#job-head .st"))
 			}
 			n, _ := parseID(id)
@@ -480,8 +480,8 @@ func TestBrowserPreviewAndJob(t *testing.T) {
 			if got := b.text("#job-actions"); got != "Retry 1 failed VM" {
 				t.Errorf("job actions = %q", got)
 			}
-			if got := b.text("#job-items .tally"); got != "1 failed2 done" {
-				t.Errorf("tally = %q", got)
+			if b.is(`!!document.querySelector("#job-items .tally")`) {
+				t.Errorf("a 3-VM job has a tally")
 			}
 			b.noSideways("job panel")
 			b.shot("job-failures-" + size.name)

@@ -985,3 +985,52 @@ func TestWorkerKeepsALongJobWhileBeatsLand(t *testing.T) {
 		t.Errorf("job = %s: %s", got.Status, got.Error)
 	}
 }
+
+// submitReserving previews in as the web UI does, skipping what queued jobs
+// will create, and stores the job.
+func submitReserving(t *testing.T, st *store.Store, f *fakeAPI, in Inputs) int64 {
+	t.Helper()
+	p := pods.NewPlanner(f, testCfg())
+	p.Reserved = func(ctx context.Context) (map[string]bool, error) { return st.ReservedKeys(ctx, 0) }
+	plan, err := BuildPlan(bg, p, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := Submit(bg, st, in, plan, Submitter{User: "alice", Credential: aliceTicket(), Seal: mustCreds()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// Two registers queued together get different VMIDs, and each one's replan
+// matches its preview: a job's own reservation doesn't push it to the next.
+func TestQueuedRegistersEachRunAsPreviewed(t *testing.T) {
+	st := storetest.New(t)
+	f := newFake(
+		proxmox.VM{VMID: 150, Name: "teak-build", Node: "n1", Status: "stopped"},
+		proxmox.VM{VMID: 151, Name: "oak-build", Node: "n1", Status: "stopped"},
+	)
+	for _, id := range []int{150, 151} {
+		f.Mu.Lock()
+		f.VMs[id].Config["agent"] = "1"
+		f.Mu.Unlock()
+	}
+	first := submitReserving(t, st, f, Inputs{Kind: pods.KindImageRegister, VMID: 150, Family: "teak", ImageKind: pods.ImageLinux})
+	second := submitReserving(t, st, f, Inputs{Kind: pods.KindImageRegister, VMID: 151, Family: "oak", ImageKind: pods.ImageLinux})
+	w := newWorker(st, f)
+	for range 2 {
+		w.runJob(bg, claim(t, st))
+	}
+	var vmids []int
+	for _, id := range []int64{first, second} {
+		if j := job(t, st, id); j.Status != store.StatusSucceeded {
+			t.Errorf("job %d = %s: %s", id, j.Status, j.Error)
+		}
+		items, _ := st.Items(bg, id)
+		vmids = append(vmids, items[0].VMID)
+	}
+	if vmids[0] == vmids[1] {
+		t.Errorf("both registers made VMID %d", vmids[0])
+	}
+}

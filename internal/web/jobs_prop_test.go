@@ -147,14 +147,19 @@ func TestPropJobsList(t *testing.T) {
 				if err != nil || !b.Active() || !slices.ContainsFunc(j.LockKeys, func(k string) bool { return slices.Contains(b.LockKeys, k) }) {
 					t.Fatalf("job %d is after job %d (%s), which isn't active or shares no lock key with it", j.ID, n, b.Status)
 				}
+			case row.Note == "waiting for a free worker":
+				// A queued job that waits for no job waits for a worker.
+				if j.Status != store.StatusPending || j.CancelRequested {
+					t.Fatalf("job %d (%s, cancel requested %v): note %q", j.ID, j.Status, j.CancelRequested, row.Note)
+				}
+				if w, err := h.st.Blockers(ctx, j.ID); err != nil || len(w) != 0 {
+					t.Fatalf("job %d waits for %v (%v) but its row says it waits for a worker", j.ID, w, err)
+				}
 			case row.Note != "" && row.Note != "cancel requested" && row.Note != "nothing ran":
 				t.Fatalf("job %d: note %q", j.ID, row.Note)
 			}
 			if j.Status == store.StatusPending && !j.CancelRequested && row.Note == "" {
-				// A pending job that waits for nothing could start now.
-				if w, err := h.st.Blockers(ctx, j.ID); err != nil || len(w) != 0 {
-					t.Fatalf("job %d waits for %v (%v) but its row doesn't say so", j.ID, w, err)
-				}
+				t.Fatalf("job %d is queued but its row doesn't say what for", j.ID)
 			}
 		}
 	})
