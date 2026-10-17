@@ -168,7 +168,7 @@ func jobDrift(r store.ItemResult) (Drift, bool) {
 }
 
 // driftKinds are the job kinds that converge what the scan judges (NICs,
-// disk limits, pool, baseline). Power and snapshot jobs touch none of it.
+// disk limits, notes, pool, baseline). Power and snapshot jobs touch none of it.
 var driftKinds = []string{string(pods.KindDeploy), string(pods.KindReset), string(pods.KindTeardown)}
 
 // supersedes reports whether a re-converging job (deploy or reset) finished
@@ -193,6 +193,10 @@ func (r rules) configDrift(team string, cfg map[string]string, snaps []proxmox.S
 	if disk := pods.DiskLimitChanges(cfg, rd, wr); len(disk) > 0 {
 		out = append(out, Drift{Kind: DriftDiskLimits,
 			Reason: fmt.Sprintf("disk limits differ on %s (want %d MB/s read and %d MB/s write)", strings.Join(slices.Sorted(maps.Keys(disk)), ", "), rd, wr)})
+	}
+	if len(pods.NotesChanges(cfg)) > 0 {
+		out = append(out, Drift{Kind: DriftNotes,
+			Reason: "has Proxmox notes, which team members can read; a deploy clears them"})
 	}
 	if !pods.HasBaseline(r.cfg.Deploy, snaps) {
 		out = append(out, Drift{Kind: DriftSnapshot, Reason: pods.NoBaseline(r.cfg.Deploy)})

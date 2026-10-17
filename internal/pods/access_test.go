@@ -92,7 +92,7 @@ func TestDeployNeeds(t *testing.T) {
 	tpl := TemplateSpec{Name: "teak.x.tpl", Host: "teak", VMID: 9021, MasterVMID: 121, MasterName: "teak.x", Interfaces: 2,
 		CloudInit: true, CPU: "custom-lab-baseline,flags=+aes"}
 	item := Item{Team: "01", Host: "teak", Name: "team01-teak", VMID: 10121, Template: tpl.Name,
-		Steps: []Step{StepClone, StepNetwork, StepDiskLimits, StepCDROM, StepSnapshot, StepStart}}
+		Steps: []Step{StepClone, StepNetwork, StepDiskLimits, StepCDROM, StepNotes, StepSnapshot, StepStart}}
 	plan := &Plan{Kind: KindDeploy, Teams: []string{"01"}, Templates: []TemplateSpec{tpl}, Items: []Item{item}}
 	everything := grants{
 		"/vms/121":                  {"VM.Clone"},
@@ -101,7 +101,7 @@ func TestDeployNeeds(t *testing.T) {
 		"/storage/competitions":     {"Datastore.AllocateSpace"},
 		"/mapping/cpu/lab-baseline": {"Mapping.Use"},
 		"/pool/pool-01": {"VM.Allocate", "VM.Config.Network", "VM.Config.Cloudinit", "VM.Config.Disk",
-			"VM.Config.CDROM", "VM.Snapshot", "VM.PowerMgmt"},
+			"VM.Config.CDROM", "VM.Config.Options", "VM.Snapshot", "VM.PowerMgmt"},
 		"/sdn/zones/teams/ext01": {"SDN.Use"},
 		"/sdn/zones/teams/int01": {"SDN.Use"},
 	}

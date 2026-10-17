@@ -146,6 +146,8 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		})
 	case pods.StepCDROM:
 		return e.applyConfig(ctx, it, false, pods.CDROMChanges)
+	case pods.StepNotes:
+		return e.applyConfig(ctx, it, false, pods.NotesChanges)
 
 	case pods.StepSnapshot:
 		if kind == pods.KindSnapshot {

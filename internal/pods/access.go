@@ -306,7 +306,7 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config) []need {
 			ns = append(ns, one(VMPath(it.VMID), "VM.Allocate"))
 		case StepFreeDisks:
 			ns = append(ns, one("/storage/"+cfg.Deploy.Storage, "Datastore.Allocate"))
-		case StepLabel, StepDetails:
+		case StepLabel, StepDetails, StepNotes:
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Options"))
 		case StepConvert:
 			ns = append(ns, one(VMPath(it.VMID), "VM.Allocate"))

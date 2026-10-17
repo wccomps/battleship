@@ -241,7 +241,7 @@ func TestPreviewOfDeploy(t *testing.T) {
 		"<tr><td><span class=\"vm\">dc.kilo.alpha.tpl</span></td><td><span class=\"vm\">n1</span></td><td>create · stops its master</td><td></td></tr>",
 		"Building the templates stops 2 running masters, each until its copy finishes.",
 		"2 VMs will be created or repaired from <span class=\"name\">kilo.alpha</span> on n1.",
-		"<td>network · disk-limits · cdrom · snapshot · start</td>",
+		"<td>network · disk-limits · cdrom · clear-notes · snapshot · start</td>",
 		"Deploy 2 VMs</button>",
 	)
 	lacks(t, "deploy preview", body, `name="typed"`) // only a teardown is typed

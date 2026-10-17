@@ -34,6 +34,7 @@ const (
 	DriftNetwork    DriftKind = "network"     // the scan found NICs, IP settings or cloud-init snippet not as a deploy sets them
 	DriftDiskLimits DriftKind = "disk-limits" // the scan found disks without the configured limits
 	DriftSnapshot   DriftKind = "snapshot"    // the scan found no baseline snapshot
+	DriftNotes      DriftKind = "notes"       // the scan found Proxmox notes, which a deploy clears
 )
 
 // Drift is one reason a VM is drifted.

@@ -80,6 +80,7 @@ naming the missing privilege.
 | Build template | `VM.Clone`; `VM.Allocate`; `Datastore.AllocateSpace` | master; `<images.pool>` (rebuild: also the old template); `/storage/<deploy.storage>` |
 | Network | `VM.Config.Network`, `VM.Config.Cloudinit`; `SDN.Use` | VM; `/sdn/zones/<proxmox.sdn_zone>/<bridge>` |
 | Disk limits / CD-ROM | `VM.Config.Disk` / `VM.Config.CDROM` | VM |
+| Clear notes (a clone copies its master's, which can hold a login) | `VM.Config.Options` | VM |
 | Snapshot / roll back | `VM.Snapshot` (or `VM.Snapshot.Rollback`) | VM |
 | Power | `VM.PowerMgmt` | VM |
 | Delete | `VM.Allocate` | VM |

@@ -159,6 +159,17 @@ func CDROMChanges(cur map[string]string) map[string]string {
 	return diff(cur, want)
 }
 
+// NotesChanges empties a team VM's notes. A clone copies its template's,
+// which can hold a base image's login (see ImageDetails), and anyone with
+// VM.Audit on the team VM can read them. Nothing reads a battleship line
+// from a team VM, so none is kept.
+func NotesChanges(cur map[string]string) map[string]string {
+	if _, ok := cur["description"]; !ok {
+		return map[string]string{}
+	}
+	return map[string]string{"delete": "description"}
+}
+
 func diff(cur, want map[string]string) map[string]string {
 	out := map[string]string{}
 	for k, v := range want {

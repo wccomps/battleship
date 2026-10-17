@@ -457,3 +457,28 @@ func TestScanResultsKeepTheLatestRead(t *testing.T) {
 		t.Errorf("a read as late as the recorded one = VMID %d, want it recorded (10199)", got)
 	}
 }
+
+// Notes on a team VM are drift: a clone deployed before deploys cleared
+// them still shows its image's login. Empty-but-present notes count too,
+// since a deploy deletes the key.
+func TestScanFindsNotes(t *testing.T) {
+	h := newHarness(t, nil)
+	h.api.add(teamVM("01", "dc", 10101), cleanConfig("01"), "initial")
+	for vmid, desc := range map[int]string{10102: "**Details**\n- Login: alice / Hunter-2", 10103: ""} {
+		cfg := cleanConfig("01")
+		cfg["description"] = desc
+		h.api.add(teamVM("01", fmt.Sprintf("web%d", vmid), vmid), cfg, "initial")
+	}
+	h.poll(t)
+	h.scan(t)
+	g := h.p.Grid()
+	if c := cell(t, g, "01", "dc"); c.Drift != nil {
+		t.Errorf("01/dc without notes: drift %+v", c.Drift)
+	}
+	for _, host := range []string{"web10102", "web10103"} {
+		c := cell(t, g, "01", host)
+		if !reflect.DeepEqual(kinds(c), []DriftKind{DriftNotes}) || c.State != StateDrifted {
+			t.Errorf("01/%s with notes: %s drift %+v, want notes", host, c.State, c.Drift)
+		}
+	}
+}
