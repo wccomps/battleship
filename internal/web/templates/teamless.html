@@ -2,33 +2,27 @@
 {{- $csrf := .CSRF}}
 {{- with .Data}}
 {{- $back := "/environments"}}{{if hasPrefix .Op.Path "/images"}}{{$back = "/images"}}{{end}}
-{{- if and (or (eq .Op.Kind "env-add") (eq .Op.Kind "env-dns")) (not .Env)}}
+{{- if .Picking}}
 <form class="sheet" method="get" action="{{.Op.Path}}" aria-labelledby="form-title">
+{{- range .Carry}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+{{- else}}
+<form class="sheet" method="post" action="{{.Op.Path}}/preview" aria-labelledby="form-title">
+{{template "csrf" $csrf}}
+{{- end}}
 <div class="ph"><h1 id="form-title">{{opIcon (print .Op.Kind)}}{{.Op.Title}}</h1><span class="sp"></span>{{template "close" $back}}</div>
 <div class="pb form">
 {{- with .Error}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
 {{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
+{{- if .Picking}}
 {{- with .EnvDomains}}
 <div class="field">
 <label class="lbl" for="domain">Environment</label>
 <select class="inp" id="domain" name="domain" required>{{range .}}<option value="{{.}}">{{.}}</option>{{end}}</select>
 </div>
 {{- else}}{{if not .ReadErr}}
-<p class="say">No environments yet. <a class="btn sm" href="/environments/new">Create environment</a></p>
+<p class="say">No environment has hosts on one domain to pick. <a class="btn sm" href="/environments/new">Create environment</a></p>
 {{- end}}{{end}}
-</div>
-<div class="pf">
-<a class="btn" href="{{$back}}">Cancel</a>
-{{- if .EnvDomains}}<button type="submit" class="btn pri">Next</button>{{end}}
-</div>
-</form>
 {{- else}}
-<form class="sheet" method="post" action="{{.Op.Path}}/preview" aria-labelledby="form-title">
-{{template "csrf" $csrf}}
-<div class="ph"><h1 id="form-title">{{opIcon (print .Op.Kind)}}{{.Op.Title}}</h1><span class="sp"></span>{{template "close" $back}}</div>
-<div class="pb form">
-{{- with .Error}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
-{{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
 {{- if eq .Op.Kind "env-create"}}
 <div class="field">
 <label class="lbl" for="domain">Domain</label>
@@ -45,9 +39,9 @@
 {{- end}}{{end}}
 </dl>
 {{- end}}
-{{- if or (eq .Op.Kind "env-create") (and (eq .Op.Kind "env-add") (not .Env.HasRouter))}}
+{{- if .AsksRouter}}
 <div class="field">
-<label class="lbl" for="router">Router <span class="muted">· name=image{{if eq .Op.Kind "env-add"}} · this environment has none; leave empty to add hosts only{{end}}</span></label>
+<label class="lbl" for="router">Router <span class="muted">· name=image{{if eq .Op.Kind "env-add"}}{{if .Env.HasRouter}} · only to resume this one{{else}} · this environment has none; leave empty to add hosts only{{end}}{{end}}</span></label>
 <input class="inp" type="text" id="router" name="router" value="{{.In.Router}}"{{if eq .Op.Kind "env-create"}} required{{end}} autocomplete="off" spellcheck="false" aria-describedby="router-hint">
 <span class="hint" id="router-hint">router images: {{range $i, $r := .Routers}}{{if $i}}, {{end}}{{$r.Family}}{{else}}none registered{{end}} · its LAN is .2</span>
 </div>
@@ -74,7 +68,7 @@
 <label class="lbl" for="dns">DNS server</label>
 {{- $cur := or .In.DNS .Env.DNS}}
 <select class="inp" id="dns" name="dns" required aria-describedby="dns-hint">{{range .Env.DNSChoices}}<option value="{{.}}"{{if eq . $cur}} selected{{end}}>{{.}}</option>{{end}}</select>
-<span class="hint" id="dns-hint">the router, or a Windows or Linux host of this environment</span>
+<span class="hint" id="dns-hint">the router, or a Windows or Linux host of this environment{{with .StaleDNS}} · it was {{.}}, which is no longer one{{end}}</span>
 </div>
 {{- end}}
 {{- if eq .Op.Kind "image-register"}}
@@ -108,13 +102,17 @@
 <datalist id="images">{{range .Images}}<option value="{{.Name}}"></option>{{end}}</datalist>
 </div>
 {{- end}}
+{{- end}}
 </div>
 <div class="pf">
 <a class="btn" href="{{$back}}">Cancel</a>
+{{- if not .Picking}}
 <button type="submit" class="btn pri">Preview</button>
+{{- else if .EnvDomains}}
+<button type="submit" class="btn pri">Next</button>
+{{- end}}
 </div>
 </form>
-{{- end}}
 {{- end}}
 {{- end}}
 

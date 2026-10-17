@@ -71,3 +71,5 @@ once, and pushes changes to open pages.
 | **drift** | A VM whose config no longer matches the rules |
 | **leftover / orphaned disks** | Disks a deleted VM left on the storage |
 | **view** | One user's live grid, read with their own ticket |
+| **base image, family** | A template tagged `base` and a kind, named `<family>-v<N>`; the versions of one OS build make its family |
+| **environment, dev slot** | A dev slot is a numbered pool with its own bridges and VMID block; the environment is the domain-named set of VMs in it |

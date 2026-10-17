@@ -108,18 +108,11 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		it.Supersedes = &Source{VMID: newest.VMID, Node: newest.Node, Name: newest.Name}
 		it.Steps = append(it.Steps, StepRetire)
 	}
-	srcKind, srcTeam, _ := p.Naming.Classify(src)
 	switch {
 	case version > MaxImageVersion:
 		it.Blocked = fmt.Sprintf("family %s is at v%d, the last version a base image name holds; register it as a new family", req.Family, MaxImageVersion)
-	case src.Template:
-		it.Blocked = src.Name + " is a template; register the VM it was made from, or open the family for editing"
-	case srcKind == TeamVMKind:
-		it.Blocked = src.Name + " is a team VM"
-	case srcKind == OutsideBlock:
-		it.Blocked = src.Name + " " + outsideBlock(src, srcTeam)
-	case src.Status != "stopped":
-		it.Blocked = fmt.Sprintf("%s is %s; shut it down first so the copy is consistent", src.Name, src.Status)
+	case p.sourceBlock(src) != "":
+		it.Blocked = p.sourceBlock(src)
 	case len(vmsNamed(vms, it.Name)) > 0:
 		it.Blocked = "a VM named " + it.Name + " already exists"
 	}
@@ -129,13 +122,40 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 			return nil, fmt.Errorf("reading %s: %w", src.Name, err)
 		}
 		it.Source.Bridges = sourceBridges(cfg)
-		if (kind == ImageWindows || kind == ImageLinux) && !agentEnabled(cfg["agent"]) {
-			it.Blocked = src.Name + " has no QEMU guest agent enabled (Options, QEMU Guest Agent); environments set hostname and address through it"
-		}
+		it.Blocked = agentBlock(src, cfg, kind)
 	}
 	return &Plan{Kind: KindImageRegister, Config: ConfigHash(KindImageRegister, p.Cfg), Items: []Item{it},
 		Locks: []string{"family:" + req.Family}}, nil
 }
+
+// sourceBlock is why ImageRegister won't copy src in, whatever its family,
+// or "".
+func (p Planner) sourceBlock(src proxmox.VM) string {
+	srcKind, srcTeam, _ := p.Naming.Classify(src)
+	switch {
+	case src.Template:
+		return src.Name + " is a template; register the VM it was made from, or open the family for editing"
+	case srcKind == TeamVMKind:
+		return src.Name + " is a team VM"
+	case srcKind == OutsideBlock:
+		return src.Name + " " + outsideBlock(src, srcTeam)
+	case src.Status != "stopped":
+		return fmt.Sprintf("%s is %s; shut it down first so the copy is consistent", src.Name, src.Status)
+	}
+	return ""
+}
+
+// agentBlock is why src, with config cfg, can't be a base image of kind, or
+// "": environments set a Windows or Linux host up through the guest agent.
+func agentBlock(src proxmox.VM, cfg map[string]string, kind string) string {
+	if (kind == ImageWindows || kind == ImageLinux) && !agentEnabled(cfg["agent"]) {
+		return src.Name + " has no QEMU guest agent enabled (Options, QEMU Guest Agent); environments set hostname and address through it"
+	}
+	return ""
+}
+
+// EditSuffix ends the name of a family's working copy (see ImageEdit).
+const EditSuffix = "-edit"
 
 // ImageEdit plans a working copy of a family's newest version, every NIC on
 // the edit bridge, with its tags cleared so it isn't taken for a base image.
@@ -153,10 +173,10 @@ func (p Planner) ImageEdit(ctx context.Context, req ImageRequest) (*Plan, error)
 	if err != nil {
 		return nil, err
 	}
-	it := Item{Name: req.Family + "-edit", VMID: vmid, Node: newest.Node, Pool: p.Cfg.Images.Pool,
-		Source: &Source{VMID: newest.VMID, Node: newest.Node, Name: newest.Name},
-		NICs:   map[string]string{"net0": p.Cfg.Images.EditBridge},
-		Steps:  []Step{StepClone, StepLabel, StepNetwork}}
+	it := Item{Name: req.Family + EditSuffix, VMID: vmid, Node: newest.Node, Pool: p.Cfg.Images.Pool,
+		Source: &Source{VMID: newest.VMID, Node: newest.Node, Name: newest.Name}, Notes: &Notes{Base: newest.Name},
+		NICs:  map[string]string{"net0": p.Cfg.Images.EditBridge},
+		Steps: []Step{StepClone, StepLabel, StepNetwork}}
 	if len(vmsNamed(vms, it.Name)) > 0 {
 		it.Blocked = it.Name + " already exists: register it as the next version, or delete it in Proxmox, first"
 	} else {

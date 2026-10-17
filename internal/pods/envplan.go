@@ -30,8 +30,8 @@ func (p Planner) dnsAddress(env Environment, choice string) (string, error) {
 	if choice == "" || choice == DNSRouter {
 		return p.gateway(), nil
 	}
-	h, ok := env.Host(choice + "." + env.Domain)
-	if !ok || h.Notes.IP == "" || (h.Notes.OS != ImageWindows && h.Notes.OS != ImageLinux) {
+	h, ok := env.dnsHost(choice)
+	if !ok {
 		return "", fmt.Errorf("%s isn't a Windows or Linux host of %s with an address; choose router or one of those", choice, env.Domain)
 	}
 	return h.Notes.IP, nil
@@ -142,10 +142,8 @@ func (p Planner) findEnv(ctx context.Context, domain string) (Environment, []pro
 	if err != nil {
 		return Environment{}, nil, err
 	}
-	for _, e := range envs {
-		if e.Domain == domain {
-			return e, vms, nil
-		}
+	if e, ok := EnvByDomain(envs, domain); ok {
+		return e, vms, nil
 	}
 	return Environment{}, nil, fmt.Errorf("no dev slot holds %s; create it first", domain)
 }
@@ -340,7 +338,7 @@ func (p Planner) EnvDNS(ctx context.Context, req EnvRequest) (*Plan, error) {
 		notes := h.Notes
 		notes.DNS = choice
 		it := Item{Name: h.Name, Host: h.Host, VMID: h.VMID, Node: h.Node, Tags: h.Tags, Notes: &notes, Steps: []Step{StepLabel}}
-		if h.Notes.IP != "" && (h.Notes.OS == ImageWindows || h.Notes.OS == ImageLinux) {
+		if h.servesDNS() {
 			it.Guest = &Guest{OS: h.Notes.OS, Hostname: h.Host, Domain: env.Domain, IP: h.Notes.IP, Prefix: HostPrefix,
 				Gateway: p.gateway(), DNS: addr, DNSOnly: true}
 			if err := it.Guest.Check(); err != nil {

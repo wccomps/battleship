@@ -50,6 +50,10 @@ func (k Kind) Teamless() bool {
 	return false
 }
 
+// OnEnvironment is whether the kind works on an existing environment, named
+// by its domain.
+func (k Kind) OnEnvironment() bool { return k == KindEnvAdd || k == KindEnvDNS }
+
 type Step string
 
 const (

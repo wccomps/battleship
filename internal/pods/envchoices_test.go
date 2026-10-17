@@ -7,14 +7,14 @@ import (
 	"pgregory.net/rapid"
 )
 
-// The DNS choices a form lists are exactly what EnvDNS accepts: the router,
-// and each Windows or Linux host with an address. Hosts' notes are anyone's
-// to write.
+// The DNS choices a form lists are exactly the names a Set DNS job takes:
+// ones that pass its input check (router, or a lower-case host name) and
+// that EnvDNS accepts. Hosts' names and notes are anyone's to write.
 func TestPropDNSChoices(t *testing.T) {
 	p := NewPlanner(nil, envConfig())
+	names := []string{"teak", "oak", "DC", "router", "Alder"}
 	rapid.Check(t, func(t *rapid.T) {
 		env := Environment{Domain: "kilo.alpha"}
-		names := []string{"teak", "oak", "alder", "birch", "cedar"}
 		for i := range rapid.IntRange(0, len(names)).Draw(t, "hosts") {
 			env.Hosts = append(env.Hosts, EnvHost{
 				Name:   names[i] + ".kilo.alpha",
@@ -26,13 +26,16 @@ func TestPropDNSChoices(t *testing.T) {
 			})
 		}
 		got := env.DNSChoices()
-		if len(got) == 0 || got[0] != DNSRouter {
-			t.Fatalf("DNSChoices = %v, want the router first", got)
+		if len(got) == 0 || got[0] != DNSRouter || slices.Index(got[1:], DNSRouter) >= 0 {
+			t.Fatalf("DNSChoices = %v, want the router first, once", got)
 		}
 		for _, n := range append([]string{DNSRouter}, names...) {
-			_, err := p.dnsAddress(env, n)
-			if listed := slices.Contains(got, n); listed != (err == nil) {
-				t.Fatalf("%s: listed %v, but EnvDNS's check says %v (choices %v)", n, listed, err, got)
+			takes := n == DNSRouter || CheckHostname(n) == nil
+			if _, err := p.dnsAddress(env, n); err != nil {
+				takes = false
+			}
+			if listed := slices.Contains(got, n); listed != takes {
+				t.Fatalf("%s: listed %v, but a job takes it: %v (choices %v)", n, listed, takes, got)
 			}
 		}
 	})
@@ -43,7 +46,7 @@ func TestRouterName(t *testing.T) {
 	if env.RouterName() != "gw.kilo.alpha" || !env.HasRouter() {
 		t.Errorf("RouterName = %q", env.RouterName())
 	}
-	if (Environment{Hosts: env.Hosts[:1]}).RouterName() != "" {
+	if (Environment{Hosts: env.Hosts[:1]}).HasRouter() {
 		t.Errorf("an environment without a router has one")
 	}
 }

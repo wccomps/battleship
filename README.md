@@ -89,7 +89,8 @@ naming the missing privilege.
 
 Base images are templates tagged `base` plus `router`, `windows`, `linux` or `other`, named `<family>-v<N>`.
 Install and generalize an OS on a VM in the images pool, shut it down, then **Register** it from
-the Images page's ready list, which fills in the family (the name less `-build`) and kind
+the Images page, which suggests the family (the one it was registered as before, else its name less
+`-build`) and, where it can tell, the kind, or says why it can't be registered yet
 (`battleship image register -vm 101 -family win2022 -kind windows`). A new version deprecates the previous one;
 **Open for editing** (`image edit -family`) makes a working copy to patch and register as the next version.
 
