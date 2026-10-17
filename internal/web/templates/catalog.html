@@ -46,11 +46,11 @@
 </details>
 {{- end}}
 {{- else if not .ReadErr}}
-<p class="say">No base images yet. Install an OS on a VM in Proxmox, generalize it, shut it down, then register it here.</p>
+<p class="say">No base images yet. Install an OS on a VM in the images pool, generalize it, shut it down, then register it here.</p>
 {{- end}}
 {{- with .Ready}}
-<h2 class="sub" id="ready">Ready to register</h2>
-<p class="meta">Stopped VMs in the images pool. Register one to copy it in as a base image; the VM stays as it is.</p>
+<h2 class="sub" id="ready">VMs in the images pool</h2>
+<p class="meta">Register one to copy it in as a base image; the VM stays as it is.</p>
 <div class="tscroll">
 <table class="tbl cards" aria-labelledby="ready">
 <thead><tr><th scope="col">VM</th><th scope="col">Notes</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
@@ -58,10 +58,11 @@
 {{- range .}}
 <tr>
 <td class="img"><div class="iname">{{names .Name}}</div>
-<div class="meta">VMID {{.VMID}} · {{.Node}}{{with .Registered}} · registered as {{names .}}{{end}}</div></td>
+<div class="meta">VMID {{.VMID}} · {{.Node}}{{with .From.Name}} · registered as {{names .}}{{end}}</div>
+{{- with .Blocked}}<div class="meta">{{icon "warn"}} {{.}}</div>{{end}}</td>
 <td>{{with .Notes}}<div class="notes">{{.}}</div>{{else}}<span class="meta">none</span>{{end}}</td>
 <td class="act"><div class="acts">
-<a class="btn sm" href="/images/register?vmid={{.VMID}}{{with .Family}}&amp;family={{.}}{{end}}{{with .Kind}}&amp;image_kind={{.}}{{end}}">Register</a>
+{{- if not .Blocked}}<a class="btn sm" href="/images/register?vmid={{.VMID}}{{with .Family}}&amp;family={{.}}{{end}}{{with .Kind}}&amp;image_kind={{.}}{{end}}">Register</a>{{end}}
 </div></td>
 </tr>
 {{- end}}
@@ -84,7 +85,7 @@
 <td data-label="Hosts">{{range .Hosts}}<div>{{names .Name}} <span class="muted">{{.Status}}{{with .Notes.IP}} · {{.}}{{end}}</span>
 {{- with .UserNotes}}<details class="notes-d"><summary class="disc">notes</summary><div class="notes">{{.}}</div></details>{{end}}</div>{{end}}</td>
 <td data-label="DNS">{{.DNS}}</td>
-<td class="act">{{if and .Domain (not .Mixed)}}<div class="acts"><a class="btn sm" href="/environments/add?domain={{.Domain}}">Add hosts</a><a class="btn sm" href="/environments/dns?domain={{.Domain}}">Set DNS</a></div>{{end}}</td>
+<td class="act">{{if .Domain}}<div class="acts"><a class="btn sm" href="/environments/add?domain={{.Domain}}">Add hosts</a><a class="btn sm" href="/environments/dns?domain={{.Domain}}">Set DNS</a></div>{{end}}</td>
 {{- end}}
 </tr>
 {{- end}}

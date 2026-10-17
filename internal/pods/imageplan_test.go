@@ -85,6 +85,9 @@ func TestImageEditMakesWorkingCopy(t *testing.T) {
 		!slices.Equal(it.Steps, []Step{StepClone, StepLabel, StepNetwork}) {
 		t.Errorf("item = %+v", it)
 	}
+	if it.Notes == nil || *it.Notes != (Notes{Base: "debian-12-v1"}) {
+		t.Errorf("notes = %+v, want the base it copies, for registering it back into the family", it.Notes)
+	}
 }
 
 func TestImageDeprecateAndDelete(t *testing.T) {

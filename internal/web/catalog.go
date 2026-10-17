@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"net/http"
 	"slices"
@@ -23,9 +24,13 @@ type catalogPage struct {
 	Families []string         // every family, once
 	Kinds    []string
 	Subnet   string
-	ReadErr  string              // why the cluster couldn't be read
-	Ready    []pods.Unregistered // VMs ready to register (the images page)
-	vms      []proxmox.VM
+	ReadErr  string                   // why the cluster couldn't be read
+	Ready    []pods.RegisterCandidate // VMs to register from (the images page)
+	// Env is the environment an env-add or env-dns form works on; Picking,
+	// that the form must first ask which.
+	Env     *pods.Environment
+	Picking bool
+	vms     []proxmox.VM
 }
 
 // newCatalogPage reads environments and images as the user, without the
@@ -45,6 +50,49 @@ func (s *Server) newCatalogPage(ctx context.Context) catalogPage {
 		p.Others = append(p.Others, pods.Families(p.Images, k)...)
 	}
 	return p
+}
+
+// EnvDomains are the environments a form can pick from, each once.
+func (p catalogPage) EnvDomains() []string {
+	var out []string
+	for _, e := range p.Envs {
+		if e.Domain != "" && !slices.Contains(out, e.Domain) {
+			out = append(out, e.Domain)
+		}
+	}
+	return out
+}
+
+// AsksRouter is whether the form has a router field: a new environment
+// needs one; Add hosts takes one for an environment without a router, or to
+// resume the one a failed create left (see pods.EnvAdd), when one was given.
+func (p catalogPage) AsksRouter() bool {
+	switch p.Op.Kind {
+	case pods.KindEnvCreate:
+		return true
+	case pods.KindEnvAdd:
+		return p.Env != nil && (!p.Env.HasRouter() || p.In.Router != "")
+	}
+	return false
+}
+
+// StaleDNS is the environment's DNS choice if it can no longer be chosen
+// (its host is gone), or "".
+func (p catalogPage) StaleDNS() string {
+	if p.Env == nil {
+		return ""
+	}
+	cur := cmp.Or(p.In.DNS, p.Env.DNS())
+	if slices.Contains(p.Env.DNSChoices(), cur) {
+		return ""
+	}
+	return cur
+}
+
+// Carry is what the picker step carries to the form it leads to: what was
+// already typed, less the domain it asks for.
+func (p catalogPage) Carry() []field {
+	return slices.DeleteFunc(inputFields(p.In), func(f field) bool { return f.Name == fieldDomain })
 }
 
 // CurrentImages are the versions that aren't deprecated.
@@ -73,7 +121,7 @@ func (s *Server) imagesPage(w http.ResponseWriter, r *http.Request) {
 	p := s.newCatalogPage(r.Context())
 	planner := s.planner(r.Context())
 	p.Images = planner.ReadNotes(r.Context(), p.Images)
-	p.Ready = planner.ReadUnregistered(r.Context(), pods.UnregisteredVMs(p.vms, s.cfg.Images.Pool, p.Images))
+	p.Ready = planner.RegisterCandidates(r.Context(), p.vms, p.Images)
 	s.render(w, r, http.StatusOK, "catalog", s.newView(w, r, "Images", "images", catalogView{p, "images"}))
 }
 
@@ -88,9 +136,19 @@ func (s *Server) withNotes(ctx context.Context, p catalogPage) catalogPage {
 // query (the pages' links) or the inputs a preview refused.
 func (s *Server) teamlessForm(w http.ResponseWriter, r *http.Request, status int, op operation, in jobs.Inputs, problem string) {
 	p := s.newCatalogPage(r.Context())
-	if op.Kind == pods.KindEnvCreate || op.Kind == pods.KindEnvAdd {
+	p.Op, p.In, p.Error = op, in, problem
+	if op.Kind.OnEnvironment() {
+		if e, ok := pods.EnvByDomain(p.Envs, in.Domain); ok {
+			p.Env = &e
+		} else {
+			p.Picking = true
+			if in.Domain != "" && p.Error == "" && p.ReadErr == "" {
+				p.Error = "There's no environment " + in.Domain + "; pick one."
+			}
+		}
+	}
+	if (op.Kind == pods.KindEnvCreate || op.Kind == pods.KindEnvAdd) && !p.Picking {
 		p = s.withNotes(r.Context(), p)
 	}
-	p.Op, p.In, p.Error = op, in, problem
 	s.render(w, r, status, "teamless", s.newView(w, r, op.Title, string(op.Kind), p))
 }

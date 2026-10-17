@@ -77,10 +77,59 @@ type Environment struct {
 	Mixed bool // its VMs don't all share one domain
 }
 
+// EnvByDomain is the environment, of envs, whose hosts share domain (the
+// lowest slot if two do). Environments leaves a mixed one's Domain empty.
+func EnvByDomain(envs []Environment, domain string) (Environment, bool) {
+	for _, e := range envs {
+		if domain != "" && e.Domain == domain {
+			return e, true
+		}
+	}
+	return Environment{}, false
+}
+
 func (e Environment) Free() bool { return len(e.Hosts) == 0 && len(e.Users) == 0 }
 
-func (e Environment) HasRouter() bool {
-	return slices.ContainsFunc(e.Hosts, func(h EnvHost) bool { return h.Router })
+func (e Environment) HasRouter() bool { return e.RouterName() != "" }
+
+// RouterName is its router's VM name, or "" if it has none.
+func (e Environment) RouterName() string {
+	for _, h := range e.Hosts {
+		if h.Router {
+			return h.Name
+		}
+	}
+	return ""
+}
+
+// servesDNS is whether the host is one the guest agent configures (Windows
+// or Linux) with an address: one its environment's DNS can point at.
+func (h EnvHost) servesDNS() bool {
+	return h.Notes.IP != "" && (h.Notes.OS == ImageWindows || h.Notes.OS == ImageLinux)
+}
+
+// dnsHost is the host a DNS choice other than DNSRouter names, if it can
+// serve DNS. DNSRouter always means the gateway, even beside a host so named.
+func (e Environment) dnsHost(choice string) (EnvHost, bool) {
+	if choice == DNSRouter || CheckHostname(choice) != nil {
+		return EnvHost{}, false
+	}
+	h, ok := e.Host(choice + "." + e.Domain)
+	return h, ok && h.servesDNS()
+}
+
+// DNSChoices are what its DNS can be set to: DNSRouter, then each host
+// dnsHost accepts, by name.
+func (e Environment) DNSChoices() []string {
+	out := []string{DNSRouter}
+	for _, h := range e.Hosts {
+		if name := strings.TrimSuffix(h.Name, "."+e.Domain); name != h.Name {
+			if _, ok := e.dnsHost(name); ok {
+				out = append(out, name)
+			}
+		}
+	}
+	return out
 }
 
 func (e Environment) Host(name string) (EnvHost, bool) {
