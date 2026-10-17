@@ -79,6 +79,8 @@ type EnvHost struct {
 	// UserNotes are its other notes, such as the logins its base image's
 	// notes carried over.
 	UserNotes string
+	// Addr is its address: the gateway for the router, else its notes'.
+	Addr string
 }
 
 // Environment is what a slot holds.
@@ -89,6 +91,8 @@ type Environment struct {
 	// Users are VMs outside its pool with a NIC on one of its bridges.
 	Users []string
 	Mixed bool // its VMs don't all share one domain
+	// Gateway is its router's address (Gateway).
+	Gateway string
 	// HalfDeleted are VMs, in its pool or else its VMIDs, that a failed
 	// destroy left locked as destroyed, without their names. Only tearing it
 	// down acts on them; they aren't Hosts.
@@ -145,6 +149,19 @@ func (e Environment) dnsHost(choice string) (EnvHost, bool) {
 	}
 	h, ok := e.Host(choice + "." + e.Domain)
 	return h, ok && h.servesDNS()
+}
+
+// DNSAddress is the address its hosts use for DNS choice: the gateway for
+// DNSRouter (or ""), else the address of the host dnsHost accepts.
+func (e Environment) DNSAddress(choice string) (string, error) {
+	if choice == "" || choice == DNSRouter {
+		return e.Gateway, nil
+	}
+	h, ok := e.dnsHost(choice)
+	if !ok {
+		return "", fmt.Errorf("%s isn't a Windows or Linux host of %s with an address; choose router or one of those", choice, e.Domain)
+	}
+	return h.Addr, nil
 }
 
 // DNSChoices are what its DNS can be set to: DNSRouter, then each host
@@ -210,7 +227,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 	bridgeSlot := map[string]int{}
 	envs := make([]Environment, len(slots))
 	for i, s := range slots {
-		envs[i].Slot = s
+		envs[i].Slot, envs[i].Gateway = s, Gateway(p.Cfg.Environments.Subnet)
 		byPool[s.Pool] = i
 		bridgeSlot[s.IntBridge], bridgeSlot[s.ExtBridge] = i, i
 	}
@@ -257,8 +274,12 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 		if si, ok := byPool[vm.Pool]; ok {
 			n, has := ParseNotes(cfg["description"])
 			n = n.Checked(p.Cfg.Environments.Subnet)
-			envs[si].Hosts = append(envs[si].Hosts, EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node,
-				Status: vm.Status, Tags: vm.Tags, Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has, UserNotes: UserNotes(cfg["description"])})
+			h := EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node, Status: vm.Status, Tags: vm.Tags,
+				Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has, UserNotes: UserNotes(cfg["description"]), Addr: n.IP}
+			if h.Router {
+				h.Addr = envs[si].Gateway
+			}
+			envs[si].Hosts = append(envs[si].Hosts, h)
 			continue
 		}
 		if vm.Template {

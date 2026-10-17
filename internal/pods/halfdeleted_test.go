@@ -19,7 +19,14 @@ func halfDeleted(vmid int, pool, tags string) (proxmox.VM, map[string]string) {
 		map[string]string{"lock": "destroyed"}
 }
 
-func envOf(t *testing.T, p Planner, slot int) Environment {
+// fataler is a *testing.T or a *rapid.T.
+type fataler interface {
+	Helper()
+	Fatal(args ...any)
+	Fatalf(format string, args ...any)
+}
+
+func envOf(t fataler, p Planner, slot int) Environment {
 	t.Helper()
 	envs, _, err := p.Environments(context.Background())
 	if err != nil {

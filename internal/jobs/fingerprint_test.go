@@ -37,6 +37,8 @@ var fingerprinted = map[string]map[string]bool{
 		"Team": false, "Host": false, "Node": false, "Baseline": false,
 		// Says why Blocked is set, which Blocked already covers.
 		"Unpermitted": false,
+		// What the review shows as before; Notes is what the job writes.
+		"DNSWas": false,
 	},
 	"Source": {
 		"VMID": true, "Node": true, "Name": true,

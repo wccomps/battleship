@@ -29,21 +29,8 @@ func (p Planner) envPlanIn(kind Kind, slot Slot, domain string) *Plan {
 	return &Plan{Kind: kind, Config: ConfigHash(kind, p.Cfg), Slot: slot.Name, Locks: []string{slotLock(slot.Name), "domain:" + domain}}
 }
 
-func (p Planner) gateway() string {
-	return p.Cfg.Environments.Subnet + "." + strconv.Itoa(GatewayOctet)
-}
-
-// dnsAddress is the address hosts use for choice.
-func (p Planner) dnsAddress(env Environment, choice string) (string, error) {
-	if choice == "" || choice == DNSRouter {
-		return p.gateway(), nil
-	}
-	h, ok := env.dnsHost(choice)
-	if !ok {
-		return "", fmt.Errorf("%s isn't a Windows or Linux host of %s with an address; choose router or one of those", choice, env.Domain)
-	}
-	return h.Notes.IP, nil
-}
+// Gateway is the router's address on subnet, every environment's LAN.
+func Gateway(subnet string) string { return subnet + "." + strconv.Itoa(GatewayOctet) }
 
 // EnvCreate plans a new environment in req.Slot, or else the lowest free
 // slot. A chosen slot must be free, or hold req.Domain already: a create
@@ -90,7 +77,7 @@ func (p Planner) firstOpenSlot(ctx context.Context, envs []Environment, vms []pr
 		}
 		switch st {
 		case slotOpen:
-			return Environment{Slot: e.Slot, Domain: domain}, nil
+			return Environment{Slot: e.Slot, Domain: domain, Gateway: e.Gateway}, nil
 		case slotQueued:
 			queued = append(queued, e.Slot.Name)
 		case slotHidden:
@@ -136,7 +123,7 @@ func (p Planner) chosenSlot(ctx context.Context, envs []Environment, vms []proxm
 	case st == slotHidden:
 		return Environment{}, fmt.Errorf("dev slot %s holds VMs you can't see; choose another", env.Slot.Name)
 	}
-	return Environment{Slot: env.Slot, Domain: req.Domain}, nil
+	return Environment{Slot: env.Slot, Domain: req.Domain, Gateway: env.Gateway}, nil
 }
 
 // slotState says whether a new environment may take a slot: one free
@@ -269,9 +256,9 @@ func (p Planner) findEnv(ctx context.Context, domain string) (Environment, []pro
 func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts []HostSpec, vms []proxmox.VM) (*Plan, error) {
 	images := BaseImages(vms)
 	dnsChoice := env.DNS()
-	dnsAddr, err := p.dnsAddress(env, dnsChoice)
+	dnsAddr, err := env.DNSAddress(dnsChoice)
 	if err != nil {
-		dnsChoice, dnsAddr = DNSRouter, p.gateway() // the chosen host is gone: fall back for new hosts
+		dnsChoice, dnsAddr = DNSRouter, env.Gateway // the chosen host is gone: fall back for new hosts
 	}
 	plan := p.envPlanIn(kind, env.Slot, env.Domain)
 	used := env.UsedOctets()
@@ -397,7 +384,7 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 			}
 			addr := p.Cfg.Environments.Subnet + "." + strconv.Itoa(octet)
 			notes.IP, notes.OS = addr, im.Kind
-			ip.Guest = &Guest{OS: im.Kind, Hostname: h.Host, Domain: env.Domain, IP: addr, Prefix: HostPrefix, Gateway: p.gateway(), DNS: dnsAddr}
+			ip.Guest = &Guest{OS: im.Kind, Hostname: h.Host, Domain: env.Domain, IP: addr, Prefix: HostPrefix, Gateway: env.Gateway, DNS: dnsAddr}
 			if err := ip.Guest.Check(); err != nil {
 				ip.Blocked = err.Error()
 				continue
@@ -433,7 +420,8 @@ func orString(a, b string) string {
 }
 
 // EnvDNS plans pointing every Windows and Linux host of an environment at
-// req.DNS, and recording the choice on every host.
+// req.DNS, and recording the choice on every host. Each item keeps the DNS
+// its host had (DNSWas).
 func (p Planner) EnvDNS(ctx context.Context, req EnvRequest) (*Plan, error) {
 	env, _, err := p.findEnv(ctx, req.Domain)
 	if err != nil {
@@ -443,7 +431,7 @@ func (p Planner) EnvDNS(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if choice == "" {
 		choice = DNSRouter
 	}
-	addr, err := p.dnsAddress(env, choice)
+	addr, err := env.DNSAddress(choice)
 	if err != nil {
 		return nil, err
 	}
@@ -451,10 +439,12 @@ func (p Planner) EnvDNS(ctx context.Context, req EnvRequest) (*Plan, error) {
 	for _, h := range env.Hosts {
 		notes := h.Notes
 		notes.DNS = choice
-		it := Item{Name: h.Name, Host: h.Host, VMID: h.VMID, Node: h.Node, Tags: h.Tags, Notes: &notes, Steps: []Step{StepLabel}}
+		was := &DNSServer{Choice: h.Notes.DNS}
+		was.Addr, _ = env.DNSAddress(was.Choice)
+		it := Item{Name: h.Name, Host: h.Host, VMID: h.VMID, Node: h.Node, Tags: h.Tags, Notes: &notes, DNSWas: was, Steps: []Step{StepLabel}}
 		if h.servesDNS() {
 			it.Guest = &Guest{OS: h.Notes.OS, Hostname: h.Host, Domain: env.Domain, IP: h.Notes.IP, Prefix: HostPrefix,
-				Gateway: p.gateway(), DNS: addr, DNSOnly: true}
+				Gateway: env.Gateway, DNS: addr, DNSOnly: true}
 			if err := it.Guest.Check(); err != nil {
 				it.Blocked = err.Error()
 			}

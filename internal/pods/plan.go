@@ -179,6 +179,16 @@ type Item struct {
 	NICs       map[string]string `json:"nics,omitempty"`
 	Guest      *Guest            `json:"guest,omitempty"`
 	Supersedes *Source           `json:"supersedes,omitempty"`
+	// DNSWas is a Set DNS item's DNS server before the job, for its review.
+	DNSWas *DNSServer `json:"dns_was,omitempty"`
+}
+
+// DNSServer is a DNS choice as a host's notes record it (a host name, or
+// DNSRouter) and its address; Addr is "" when the choice names no host
+// that can serve DNS.
+type DNSServer struct {
+	Choice string `json:"choice"`
+	Addr   string `json:"addr,omitempty"`
 }
 
 // Plan is what an operation will do: the templates a deploy needs and one
