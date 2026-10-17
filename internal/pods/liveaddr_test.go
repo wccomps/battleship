@@ -121,7 +121,7 @@ func TestPropExternalAddr(t *testing.T) {
 var guestIP = rapid.OneOf(
 	rapid.SampledFrom([]string{"10.50.12.133/24", "192.168.100.7/24", "127.0.0.1/8", "169.254.1.1/16", "fe80::1/64",
 		"2001:db8::5/64", "::1/128", "0.0.0.0/0", "::ffff:10.50.12.9/120", "2001:db8::5%eth0/64", "224.0.0.1/4",
-		"<script>alert(1)</script>", "10.50.12.133‮/24", "10.50.12.133​", ""}),
+		"<script>alert(1)</script>", "10.50.12.133\u202e/24", "10.50.12.133\u200b", ""}),
 	rapid.Map(rapid.SliceOfN(rapid.Byte(), 4, 4), func(b []byte) string { return netip.AddrFrom4([4]byte(b)).String() + "/24" }),
 	rapid.Map(rapid.SliceOfN(rapid.Byte(), 16, 16), func(b []byte) string { return netip.AddrFrom16([16]byte(b)).String() + "/64" }),
 	rapid.String(),

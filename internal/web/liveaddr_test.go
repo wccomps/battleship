@@ -49,7 +49,7 @@ func addLiveEnv(h *harness, hang bool) {
 	h.api.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "dev;kilo.alpha;router", Status: "running"},
 		map[string]string{"description": "battleship: base=gw-v1 dns=router", "agent": "1",
 			"net0": "virtio=BC:24:11:00:21:00,bridge=devext01", "net1": "virtio=BC:24:11:00:21:01,bridge=devint01"})
-	// The NICs' names say nothing: pfSense's are vtnet0 and vtnet1, in either order.
+	// The NICs' names say nothing: a FreeBSD router's are vtnet0 and vtnet1, in either order.
 	h.api.SetGuest(2100, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{
 		{Name: "lan", MAC: "bc:24:11:00:21:00", IPs: []string{"fe80::1/64", "10.50.12.133/24"}},
 		{Name: "wan", MAC: "bc:24:11:00:21:01", IPs: []string{"192.168.100.2/24"}},
