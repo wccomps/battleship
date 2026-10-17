@@ -292,6 +292,7 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .pip.done{background:var(--run)}
 .pip.fail{border-radius:0;background:var(--bad);clip-path:polygon(20% 0,50% 30%,80% 0,100% 20%,70% 50%,100% 80%,80% 100%,50% 70%,20% 100%,0 80%,30% 50%,0 20%)}
 .pip.run{background:none;border:2px solid var(--busy);border-right-color:transparent;animation:spin 1s linear infinite}
+.pips .pip.run{animation:none;border:none;background:var(--busy)} /* the tally stays still: the step pip and the job status already spin */
 .pip.wait{background:none;border:1.5px solid var(--ln2)}
 .pip.skip{height:3px;margin-block:3.5px;border-radius:1px;background:var(--ln2)}
 .pip.int{background:var(--stale)}
