@@ -131,7 +131,12 @@ func (s *Server) newEnvForm(ctx context.Context, p catalogPage, form url.Values)
 		}
 		f.Slots = open
 	case p.Env != nil:
-		for _, h := range envBlocks([]pods.Environment{*p.Env}, p.Subnet)[0].Hosts {
+		var here []envHostRow
+		for _, h := range p.Env.Hosts {
+			here = append(here, envHostRow{Name: h.Host, Addr: h.Addr})
+		}
+		slices.SortStableFunc(here, hostOrder)
+		for _, h := range here {
 			c := hereChip{Name: h.Name}
 			if o := pods.LastOctet(h.Addr); o != 0 {
 				c.Addr = "." + strconv.Itoa(o)

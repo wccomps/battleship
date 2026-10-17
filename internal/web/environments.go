@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/wccomps/battleship/internal/pods"
@@ -69,7 +68,7 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		p.ReadErr = "Couldn't read the cluster: " + sentence(proxmox.Describe(err))
 	} else {
-		p.Envs = envBlocks(envs, s.cfg.Environments.Subnet)
+		p.Envs = envBlocks(envs)
 		open, queued, err := planner.OpenSlots(ctx, envs)
 		if err != nil {
 			p.FreeErr = "Couldn't tell which free slots queued jobs will fill: " + sentence(err.Error())
@@ -96,35 +95,30 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, http.StatusOK, "catalog", s.newView(w, r, "Environments", "environments", p))
 }
 
-// envBlocks are the slots in use, in slot order. Every router is at .2 of
-// subnet, every environment's LAN.
-func envBlocks(envs []pods.Environment, subnet string) []envBlock {
+// envBlocks are the slots in use, in slot order.
+func envBlocks(envs []pods.Environment) []envBlock {
 	var out []envBlock
-	first := map[string]string{} // domain -> its first slot
 	for _, e := range envs {
 		if e.Free() {
 			continue
 		}
 		b := envBlock{ID: "slot-" + e.Slot.Name, Domain: e.Domain, Slot: e.Slot.Pool, Users: e.Users, Mixed: e.Mixed}
 		if e.Domain != "" {
-			if slot, ok := first[e.Domain]; ok {
-				b.Twin = slot
+			if first, _ := pods.EnvByDomain(envs, e.Domain); first.Slot.N != e.Slot.N {
+				b.Twin = first.Slot.Pool
 			} else {
-				first[e.Domain], b.ID = e.Slot.Pool, e.Domain
+				b.ID = e.Domain
 			}
 			b.DNS = e.DNS()
 		}
 		for _, h := range e.Hosts {
-			row := envHostRow{Name: h.Name, Router: h.Router, Addr: h.Notes.IP, Running: h.Status == "running",
+			row := envHostRow{Name: h.Name, Router: h.Router, Addr: h.Addr, Running: h.Status == "running",
 				Status: cmp.Or(h.Status, "unknown"), Image: h.Notes.Base, Notes: h.UserNotes}
 			if e.Domain != "" {
 				row.Name = h.Host
 			}
-			if h.Router {
-				row.Addr = subnet + "." + strconv.Itoa(pods.GatewayOctet)
-				if b.Router == "" {
-					b.Router = row.Name
-				}
+			if h.Router && b.Router == "" {
+				b.Router = row.Name
 			}
 			b.Hosts = append(b.Hosts, row)
 		}

@@ -73,20 +73,21 @@ type dnsCard struct {
 
 // dnsForm fills in Set DNS's cards, In.DNS (else the current choice)
 // checked, and the hint naming the hosts whose DNS it sets.
-func (p *catalogPage) dnsForm(gateway string) {
+func (p *catalogPage) dnsForm() {
 	e := p.Env
 	cur := e.DNS()
 	chosen := cmp.Or(p.In.DNS, cur)
 	choices := e.DNSChoices()
 	for _, c := range choices {
 		card := dnsCard{Value: c, Current: c == cur, Checked: c == chosen}
+		card.Addr, _ = e.DNSAddress(c)
 		if c == pods.DNSRouter {
-			card.Router, card.Addr = true, gateway
+			card.Router = true
 			if r, ok := e.Host(e.RouterName()); ok {
 				card.Name, card.Image = r.Host, r.Notes.Base
 			}
 		} else if h, ok := e.Host(c + "." + e.Domain); ok {
-			card.Name, card.Addr, card.Image = c, h.Notes.IP, h.Notes.Base
+			card.Name, card.Image = c, h.Notes.Base
 		}
 		p.DNSCards = append(p.DNSCards, card)
 	}
@@ -143,7 +144,7 @@ func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, prob
 		if ok {
 			p.Env = &e
 			if op.Kind == pods.KindEnvDNS {
-				p.dnsForm(s.gateway())
+				p.dnsForm()
 			}
 		}
 	}

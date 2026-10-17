@@ -448,7 +448,7 @@ func teamlessFacts(in jobs.Inputs, pool string) []fact {
 		}
 	}
 	add("Domain", in.Domain)
-	if n, err := strconv.Atoi(in.Slot); err == nil {
+	if n, ok := pods.ParseSlotName(in.Slot); ok {
 		add("Slot", pods.ExpandSlot(pool, n))
 	}
 	add("Router", in.Router)

@@ -158,6 +158,24 @@ func TestSetDNSReview(t *testing.T) {
 		`<tr><td><span class="vm">teak</span></td><td class="meta"><code>.10</code></td><td><code>.2</code></td></tr>`)
 }
 
+// A host whose DNS named a host that is gone shows that name as its DNS
+// now. The review reads the cluster no more than the form does: what each
+// host's DNS was comes with the plan.
+func TestSetDNSReviewFromAGoneChoice(t *testing.T) {
+	h := newHarness(t)
+	addDNSEnv(h, "dc")
+	sess := h.login(asLead)
+	before, _, _ := h.api.readCounts()
+	h.get(&sess, "/environments/kilo.alpha/dns")
+	form, _, _ := h.api.readCounts()
+	_, _, body := h.preview(&sess, "/environments/kilo.alpha/dns", url.Values{"dns": {"router"}})
+	review, _, _ := h.api.readCounts()
+	contains(t, "the review", body, `<tr><td><span class="vm">teak</span></td><td class="meta"><code>dc</code></td><td><code>.2</code></td></tr>`)
+	if form-before == 0 || review-form != form-before {
+		t.Errorf("the form read %d configs, the review %d; want the same", form-before, review-form)
+	}
+}
+
 // When no host's DNS can change, the review says the choice is only
 // recorded, and the button says so.
 func TestSetDNSReviewWithEveryHostBlocked(t *testing.T) {

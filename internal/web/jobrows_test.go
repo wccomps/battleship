@@ -374,7 +374,7 @@ func TestJobHeadNamesItsSubject(t *testing.T) {
 		want []string
 	}{
 		{jobs.Inputs{Kind: pods.KindPower, Teams: "1-3", Action: "start", Hosts: []string{"dc"}}, []string{`teams <span class="vm">01-03</span> · <span class="vm">dc</span>`}},
-		{jobs.Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.bravo", Slot: "2"}, []string{`Domain <span class="vm">kilo.bravo</span>`, `Slot <span class="vm">` + pods.ExpandSlot(h.cfg.Environments.Pool, 2) + `</span>`}},
+		{jobs.Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.bravo", Slot: "02"}, []string{`Domain <span class="vm">kilo.bravo</span>`, `Slot <span class="vm">` + pods.ExpandSlot(h.cfg.Environments.Pool, 2) + `</span>`}},
 		{jobs.Inputs{Kind: pods.KindImageRegister, Family: "debian-12", VMID: 150}, []string{`Family <span class="vm">debian-12</span>`}},
 		{jobs.Inputs{Kind: pods.KindImageDeprecate, Image: "debian-12-v1"}, []string{`Image <span class="vm">debian-12-v1</span>`}},
 	} {

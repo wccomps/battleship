@@ -441,27 +441,29 @@ func TestPropMachineRows(t *testing.T) {
 	})
 }
 
-// A typed slot reads as its two digits, or as typed for Validate to
-// refuse; Validate takes a slot just when it is a positive number.
+// A typed slot is read as typed, trimmed; Validate takes it just when it
+// is a slot's name (pods.ParseSlotName): "02", not "2".
 func TestPropSlotInput(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		typed := rapid.OneOf(
 			rapid.StringMatching(`[ ]?[0+-]?[0-9]{1,4}[ ]?`),
-			rapid.SampledFrom([]string{"dev-02", "0x2", "٢", "02\n", "", " ", "1e1", "2.0", "99999999999999999999"}),
+			rapid.SampledFrom([]string{"dev-02", "0x2", "٢", "02\n", "", " ", "1e1", "2.0", "99999999999999999999", "2", "002", " 03 "}),
 			rapid.String(),
 		).Draw(t, "slot")
 		in := formInputs(pods.KindEnvCreate, url.Values{"domain": {"kilo.alpha"}, "router": {"gw=gw"}, "slot": {typed}})
 		trimmed := strings.TrimSpace(typed)
-		n, err := strconv.Atoi(trimmed)
-		number := err == nil && n >= 1 && strings.Trim(trimmed, "0123456789") == ""
+		n, name := pods.ParseSlotName(trimmed)
+		if in.Slot != trimmed {
+			t.Fatalf("slot %q reads %q", typed, in.Slot)
+		}
 		switch verr := in.Validate(); {
 		case trimmed == "":
-			if in.Slot != "" || verr != nil {
-				t.Fatalf("no slot: %q, %v", in.Slot, verr)
+			if verr != nil {
+				t.Fatalf("no slot: %v", verr)
 			}
-		case number:
-			if in.Slot != pods.SlotName(n) || verr != nil {
-				t.Fatalf("slot %q reads %q (%v), want %s", typed, in.Slot, verr, pods.SlotName(n))
+		case name:
+			if verr != nil {
+				t.Fatalf("slot %q refused: %v", typed, verr)
 			}
 			if req, _ := in.EnvRequest(); req.Slot != n {
 				t.Fatalf("slot %q plans slot %d", typed, req.Slot)

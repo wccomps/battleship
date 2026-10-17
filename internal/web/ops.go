@@ -131,7 +131,7 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 		in := jobs.Inputs{Kind: kind, Domain: strings.TrimSpace(form.Get(fieldDomain)), Router: strings.TrimSpace(form.Get(fieldRouter)),
 			DNS: strings.TrimSpace(form.Get(fieldDNS)), Family: strings.TrimSpace(form.Get(fieldFamily)),
 			ImageKind: strings.TrimSpace(form.Get(fieldImageKind)), Image: strings.TrimSpace(form.Get(fieldImage)),
-			Slot: slotOf(form.Get(fieldSlot)), VMs: jobs.SplitList(strings.Join(form[fieldVMs], ","))}
+			Slot: strings.TrimSpace(form.Get(fieldSlot)), VMs: jobs.SplitList(strings.Join(form[fieldVMs], ","))}
 		for _, line := range strings.Split(form.Get(fieldEnvHosts), "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				in.EnvHosts = append(in.EnvHosts, line)
@@ -351,17 +351,6 @@ func hostSpec(name, image, octet string) string {
 		spec += ":" + octet
 	}
 	return spec
-}
-
-// slotOf reads a typed slot number as its two digits ("2" is "02"), or
-// leaves it as typed for Validate to refuse.
-func slotOf(s string) string {
-	s = strings.TrimSpace(s)
-	n, err := strconv.Atoi(s)
-	if err != nil || n < 1 || strings.Trim(s, "0123456789") != "" {
-		return s
-	}
-	return pods.SlotName(n)
 }
 
 // at is vs[i], or "" past its end.

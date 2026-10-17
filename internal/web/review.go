@@ -83,11 +83,11 @@ func (s *Server) review(ctx context.Context, op operation, in jobs.Inputs, plan 
 		}
 		return s.registerReview(ctx, op, in, plan.Items[0])
 	case pods.KindEnvCreate, pods.KindEnvAdd:
-		r = s.envReview(op, in, plan)
+		r = envReview(op, in, plan)
 	case pods.KindEnvDNS:
-		r = s.dnsReview(ctx, in, plan)
+		r = dnsReview(in, plan)
 	case pods.KindEnvTeardown:
-		r = s.teardownReview(in, plan)
+		r = teardownReview(in, plan)
 	case pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete:
 		r = imageReview(op, in, plan)
 	default:
@@ -145,7 +145,7 @@ func (s *Server) registerReview(ctx context.Context, op operation, in jobs.Input
 
 // envReview describes a create or add: a row per machine, and what the
 // guest agent sets on the Windows and Linux hosts.
-func (s *Server) envReview(op operation, in jobs.Inputs, plan *pods.Plan) *reviewView {
+func envReview(op operation, in jobs.Inputs, plan *pods.Plan) *reviewView {
 	r := &reviewView{Verb: "Create", Subject: in.Domain, Image: true, Addr: true}
 	if op.Kind == pods.KindEnvAdd {
 		r.Verb = "Add hosts to"
@@ -158,7 +158,7 @@ func (s *Server) envReview(op operation, in jobs.Inputs, plan *pods.Plan) *revie
 		}
 	}
 	var clones, resumes, guests []string
-	dns, windows := "", false
+	dns, windows, atRouter := "", false, false // the guests' DNS server, and whether it is their gateway
 	for _, it := range plan.Items {
 		spec := specs[it.Host]
 		row := reviewRow{Name: it.Name, Router: router.Host != "" && it.Host == router.Host, Image: spec.Family,
@@ -187,6 +187,7 @@ func (s *Server) envReview(op operation, in jobs.Inputs, plan *pods.Plan) *revie
 		if it.Guest != nil {
 			guests = append(guests, it.Host)
 			dns = it.Guest.DNS
+			atRouter = it.Guest.DNS == it.Guest.Gateway
 			windows = windows || it.Guest.OS == pods.ImageWindows
 		}
 	}
@@ -204,27 +205,28 @@ func (s *Server) envReview(op operation, in jobs.Inputs, plan *pods.Plan) *revie
 	}
 	if len(guests) > 0 {
 		at := "the router"
-		if dns != s.gateway() {
+		if !atRouter {
 			at = "." + strconv.Itoa(pods.LastOctet(dns))
 		}
 		say = append(say, "Then "+andList(guests)+byCount(len(guests), " gets its", " get their")+
 			" name, address, gateway ."+strconv.Itoa(pods.GatewayOctet)+" and DNS ("+at+") through the guest agent.")
 	}
 	r.Say = strings.Join(say, " ")
-	if op.Kind == pods.KindEnvCreate && windows && dns == s.gateway() {
+	if op.Kind == pods.KindEnvCreate && windows && atRouter {
 		r.Note = "Once a domain controller is up, use Set DNS on " + in.Domain + " to point the hosts at it."
 	}
 	return r
 }
 
-// teardownReview describes tearing an environment down: a row per VM it
-// deletes, with its image and address from its notes, and the VMs on its
-// networks it leaves alone.
-func (s *Server) teardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
+// teardownReview describes tearing an environment down: a row per item
+// (each VM it deletes or can't, with its image and address from its notes,
+// and the disks it frees), and the VMs on its networks it leaves alone.
+func teardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
 	r := &reviewView{Verb: "Tear down", Subject: in.Domain, Image: true, Addr: true, Deletes: true}
 	pool := poolOf(plan.Items)
-	deletes, blocked := 0, 0
+	deletes := 0
 	var disks []string
+	var left pods.Environment // what the slot holds afterwards
 	for _, it := range plan.Items {
 		row := reviewRow{Name: it.Name, Router: slices.Contains(pods.Tags(it.Tags), pods.ImageRouter),
 			Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}
@@ -240,7 +242,7 @@ func (s *Server) teardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
 		r.Rows = append(r.Rows, row)
 		switch {
 		case it.Blocked != "":
-			blocked++
+			left.Hosts = append(left.Hosts, pods.EnvHost{Name: it.Name})
 		case slices.Contains(it.Steps, pods.StepDelete):
 			deletes++
 		case slices.Contains(it.Steps, pods.StepFreeDisks):
@@ -249,6 +251,7 @@ func (s *Server) teardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
 	}
 	for _, k := range plan.Kept {
 		r.Kept = append(r.Kept, k.Name+" is "+k.Why+".")
+		left.Users = append(left.Users, k.Name)
 	}
 	var say []string
 	if deletes > 0 {
@@ -258,38 +261,29 @@ func (s *Server) teardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
 		say = append(say, "Frees the disks deleted VMs left at VMID "+andList(disks)+".")
 	}
 	switch {
-	case blocked > 0:
-		say = append(say, "The blocked "+byCount(blocked, "VM stays", "VMs stay")+", so the slot isn't free afterwards.")
-	case len(r.Kept) > 0:
-		say = append(say, "VMs outside "+pool+" stay on its networks, so the slot isn't free afterwards.")
-	default:
+	case left.Free():
 		say = append(say, "The slot is free again afterwards.")
+	case len(left.Hosts) > 0:
+		say = append(say, "The blocked "+byCount(len(left.Hosts), "VM stays", "VMs stay")+", so the slot isn't free afterwards.")
+	default:
+		say = append(say, "VMs outside "+pool+" stay on its networks, so the slot isn't free afterwards.")
 	}
 	r.Say = strings.Join(say, " ")
 	return r
 }
 
-// gateway is every environment's router address.
-func (s *Server) gateway() string {
-	return s.cfg.Environments.Subnet + "." + strconv.Itoa(pods.GatewayOctet)
-}
-
 // dnsReview describes a Set DNS: each Windows and Linux host's DNS server
-// now and after. The others only record the choice.
-func (s *Server) dnsReview(ctx context.Context, in jobs.Inputs, plan *pods.Plan) *reviewView {
+// before (Item.DNSWas) and after. The others only record the choice.
+func dnsReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
 	r := &reviewView{Verb: "Set DNS for", Subject: in.Domain}
-	envs, _, err := s.planner(ctx).Environments(ctx)
-	env, _ := pods.EnvByDomain(envs, in.Domain)
-	if err != nil {
-		s.logf("web: reading %s's DNS for a review: %v", in.Domain, err)
-	}
 	var changes []string
-	target := ""
+	target, router := "", false
 	for _, it := range plan.Items {
+		router = router || slices.Contains(pods.Tags(it.Tags), pods.ImageRouter)
 		if it.Guest == nil {
 			continue
 		}
-		row := dnsRow{Host: it.Host, Now: dnsNow(env, it.Name, s.gateway()), After: "." + strconv.Itoa(pods.LastOctet(it.Guest.DNS)),
+		row := dnsRow{Host: it.Host, Now: dnsWas(it.DNSWas), After: "." + strconv.Itoa(pods.LastOctet(it.Guest.DNS)),
 			Itself: it.Guest.DNS == it.Guest.IP, Blocked: it.Blocked}
 		r.DNS = append(r.DNS, row)
 		target = it.Guest.DNS
@@ -309,28 +303,22 @@ func (s *Server) dnsReview(ctx context.Context, in jobs.Inputs, plan *pods.Plan)
 	default:
 		r.Say = "No host here is a Windows or Linux host with an address, so no DNS changes. Confirming records " + at + " as the choice."
 	}
-	if env.HasRouter() {
+	if router {
 		r.Say += " The router keeps its own settings."
 	}
 	return r
 }
 
-// dnsNow is the last octet of the DNS server the host named name uses now,
-// as its notes record it, or the host it names if that has no address.
-func dnsNow(env pods.Environment, name, gateway string) string {
-	h, ok := env.Host(name)
-	if !ok {
+// dnsWas is a host's DNS server before a Set DNS: its address's last
+// octet, or the host it names if that has none.
+func dnsWas(was *pods.DNSServer) string {
+	switch {
+	case was == nil:
 		return ""
+	case was.Addr == "":
+		return was.Choice
 	}
-	addr := gateway
-	if c := h.Notes.DNS; c != "" && c != pods.DNSRouter {
-		d, ok := env.Host(c + "." + env.Domain)
-		if !ok || d.Notes.IP == "" {
-			return c
-		}
-		addr = d.Notes.IP
-	}
-	return "." + strconv.Itoa(pods.LastOctet(addr))
+	return "." + strconv.Itoa(pods.LastOctet(was.Addr))
 }
 
 // imageReview describes opening a base image for editing, deprecating it
