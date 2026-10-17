@@ -27,7 +27,7 @@ var cliFlags = map[string]map[string]string{
 	"edit":      {"family": "Family"},
 	"deprecate": {"image": "Image"},
 	"delete":    {"image": "Image"},
-	"create":    {"domain": "Domain", "router": "Router", "host": "EnvHosts"},
+	"create":    {"domain": "Domain", "slot": "Slot", "router": "Router", "host": "EnvHosts"},
 	"add":       {"domain": "Domain", "router": "Router", "host": "EnvHosts"},
 	"dns":       {"domain": "Domain", "server": "DNS"},
 }
@@ -41,7 +41,7 @@ var cliBools = map[string]map[string]string{
 // bases on numbers, and lines.
 var cliValues = []string{"1", " 1-2 ", "1,2", "dc", " dc , web ", ",", "team01-dc", "*.kilo.alpha", " *.kilo.alpha ", "round2", " round2",
 	"stop", " stop ", "Stop", "a\nb", "kilo.alpha", " kilo.alpha ", "gw=opnsense", " gw = gw ", "dc=debian-12:20", "", " ", "router", " dc ",
-	"7000", " 7000 ", "010", "0x1f4", "+150", "-5", "abc", "1_000", "debian-12", " debian-12", "linux", "debian-12-v1", " debian-12-v1 "}
+	"7000", " 7000 ", "010", "0x1f4", "+150", "-5", "abc", "1_000", "debian-12", " debian-12", "linux", "debian-12-v1", " debian-12-v1 ", "02", " 2 ", "002", "dev-02", "0"}
 
 func parseCLI(sub string, args []string) (command, bool) {
 	var c command

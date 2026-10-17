@@ -330,3 +330,38 @@ func TestPropRetryInputs(t *testing.T) {
 		checkRetry(t, job, orig, plan, items, garbage)
 	})
 }
+
+// A failed create is retried for its unfinished VMs, with its router and
+// hosts as asked and the slot it planned, so the planner resumes it there.
+func TestRetryInputsOfAnEnvironment(t *testing.T) {
+	plan := pods.Plan{Kind: pods.KindEnvCreate, Locks: []string{"slot:02", "domain:kilo.alpha"},
+		Items: []pods.Item{{Name: "gw.kilo.alpha", Host: "gw"}, {Name: "dc.kilo.alpha", Host: "dc"}, {Name: "web.kilo.alpha", Host: "web"}}}
+	orig := Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.alpha", Router: "gw=gw", EnvHosts: []string{"dc=win2022:10", "web=debian-12"}}
+	items := []store.Item{
+		{Name: "gw.kilo.alpha", Status: store.ItemDone},
+		{Name: "web.kilo.alpha", Status: store.ItemInterrupted, Step: "clone"},
+		{Name: "dc.kilo.alpha", Status: store.ItemFailed, Error: "guest: timeout"},
+	}
+	r, err := RetryInputs(finishedJob(t, store.StatusCompletedWithFailures, orig, plan), items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := orig
+	want.Slot, want.VMs = "02", []string{"dc.kilo.alpha", "web.kilo.alpha"}
+	if !reflect.DeepEqual(r, want) || r.Validate() != nil {
+		t.Errorf("inputs = %+v (%v), want %+v", r, r.Validate(), want)
+	}
+	// An add keeps its inputs; it has no slot.
+	orig = Inputs{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"dc=win2022"}}
+	plan.Kind = pods.KindEnvAdd
+	r, err = RetryInputs(finishedJob(t, store.StatusCompletedWithFailures, orig, plan), items)
+	if err != nil || r.Slot != "" || !slices.Equal(r.VMs, want.VMs) || r.Validate() != nil {
+		t.Errorf("add retry = %+v, %v", r, err)
+	}
+	if _, err := RetryInputs(finishedJob(t, store.StatusCompletedWithFailures, orig, plan), items[:1]); !errors.Is(err, ErrNothingToRetry) {
+		t.Errorf("all done: err = %v", err)
+	}
+	if _, err := RetryInputs(finishedJob(t, store.StatusCompletedWithFailures, orig, plan), []store.Item{{Name: "oak.kilo.alpha", Status: store.ItemFailed}}); err == nil {
+		t.Error("a VM the plan lacks was retried")
+	}
+}

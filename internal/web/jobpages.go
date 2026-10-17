@@ -963,6 +963,13 @@ func (s *Server) retryJob(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "working out job "+strconv.FormatInt(id, 10)+"'s retry", err)
 		return
 	}
+	if op.Kind.OnEnvironment() {
+		if pods.CheckDomain(retry.Domain) != nil {
+			s.serverError(w, r, "working out job "+strconv.FormatInt(id, 10)+"'s retry", fmt.Errorf("its domain %q isn't one", retry.Domain))
+			return
+		}
+		op = op.at(retry.Domain)
+	}
 	plan, err := jobs.BuildPlan(ctx, s.planner(r.Context()), retry)
 	if err != nil {
 		s.renderForm(w, r, http.StatusUnprocessableEntity, op, retry, "Couldn't make a plan: "+sentence(proxmox.Describe(err)))

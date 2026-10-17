@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/store"
@@ -21,13 +22,16 @@ var (
 // RetryInputs returns the job's inputs narrowed to its retryable items
 // (store.ItemStatus.Retryable), their teams and hosts. A deploy's Rebuild is
 // cleared: the planner blocks rebuilding a template team VMs still use,
-// which would block every VM of the retry.
+// which would block every VM of the retry. An environment's create or add
+// keeps its hosts, so the plan is the same, and is narrowed to the VMs; a
+// create keeps its slot, where the planner resumes it.
 func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 	if !store.JobStatus(job.Status).CanRetry() {
 		return Inputs{}, fmt.Errorf("job %d is %s: %w", job.ID, job.Status, ErrNotRetryable)
 	}
-	if pods.Kind(job.Kind).Teamless() {
-		return Inputs{}, fmt.Errorf("job %d: run it again from its form; image and environment jobs resume what exists: %w", job.ID, ErrNotRetryable)
+	kind := pods.Kind(job.Kind)
+	if kind.Teamless() && kind != pods.KindEnvCreate && kind != pods.KindEnvAdd {
+		return Inputs{}, fmt.Errorf("job %d: run it again from its form; image jobs and DNS changes resume what exists: %w", job.ID, ErrNotRetryable)
 	}
 	var in Inputs
 	if err := json.Unmarshal(job.Inputs, &in); err != nil {
@@ -40,6 +44,9 @@ func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 	planned := map[string]pods.Item{}
 	for _, it := range plan.Items {
 		planned[it.Name] = it
+	}
+	if kind.Teamless() {
+		return envRetry(job.ID, in, plan, planned, items)
 	}
 	var teams, hosts, names []string
 	wholeTeams := false
@@ -70,6 +77,32 @@ func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 	}
 	in.VMs = sortedUnique(names)
 	in.Rebuild = false
+	return in, nil
+}
+
+// envRetry is RetryInputs for an environment's create or add.
+func envRetry(id int64, in Inputs, plan pods.Plan, planned map[string]pods.Item, items []store.Item) (Inputs, error) {
+	var names []string
+	for _, it := range items {
+		if !store.ItemStatus(it.Status).Retryable() {
+			continue
+		}
+		if _, ok := planned[it.Name]; !ok {
+			return Inputs{}, fmt.Errorf("job %d's plan has no VM named %s", id, it.Name)
+		}
+		names = append(names, it.Name)
+	}
+	if len(names) == 0 {
+		return Inputs{}, ErrNothingToRetry
+	}
+	in.VMs = sortedUnique(names)
+	if in.Kind == pods.KindEnvCreate && in.Slot == "" {
+		for _, k := range plan.Locks {
+			if slot, ok := strings.CutPrefix(k, "slot:"); ok {
+				in.Slot = slot
+			}
+		}
+	}
 	return in, nil
 }
 

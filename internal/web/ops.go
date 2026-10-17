@@ -101,6 +101,7 @@ const (
 	fieldRetryOf     = "retry_of" // confirm: the job a retry preview retries; shown only, never trusted
 	fieldFrom        = "from"     // "grid": the grid's form, which sends ticked VMs and no teams
 	fieldDomain      = "domain"
+	fieldSlot        = "slot"      // env-create: the slot's two digits
 	fieldRouter      = "router"    // name=family
 	fieldEnvHosts    = "env_hosts" // one name=family[:octet] per line
 	fieldDNS         = "dns"
@@ -108,14 +109,14 @@ const (
 	fieldFamily      = "family"
 	fieldImageKind   = "image_kind"
 	fieldImage       = "image"
-	// The environment forms' router and host rows (see envRows), read into
+	// The environment forms' router and host rows (envForm), read into
 	// Router and EnvHosts when present.
 	fieldRouterName  = "router_name"
 	fieldRouterImage = "router_image"
 	fieldHostName    = "host_name"
 	fieldHostImage   = "host_image"
 	fieldHostOctet   = "host_octet"
-	fieldMore        = "more" // asks the form again with one more host row
+	fieldMore        = "more" // asks the form again with more host rows (blankRows)
 	fromGridValue    = "grid"
 	yes              = "yes"
 )
@@ -128,7 +129,8 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 	if kind.Teamless() {
 		in := jobs.Inputs{Kind: kind, Domain: strings.TrimSpace(form.Get(fieldDomain)), Router: strings.TrimSpace(form.Get(fieldRouter)),
 			DNS: strings.TrimSpace(form.Get(fieldDNS)), Family: strings.TrimSpace(form.Get(fieldFamily)),
-			ImageKind: strings.TrimSpace(form.Get(fieldImageKind)), Image: strings.TrimSpace(form.Get(fieldImage))}
+			ImageKind: strings.TrimSpace(form.Get(fieldImageKind)), Image: strings.TrimSpace(form.Get(fieldImage)),
+			Slot: slotOf(form.Get(fieldSlot)), VMs: jobs.SplitList(strings.Join(form[fieldVMs], ","))}
 		for _, line := range strings.Split(form.Get(fieldEnvHosts), "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				in.EnvHosts = append(in.EnvHosts, line)
@@ -191,7 +193,7 @@ type field struct{ Name, Value string }
 func inputFields(in jobs.Inputs) []field {
 	if in.Kind.Teamless() {
 		var fs []field
-		for _, f := range []field{{fieldDomain, in.Domain}, {fieldRouter, in.Router}, {fieldEnvHosts, strings.Join(in.EnvHosts, "\n")},
+		for _, f := range []field{{fieldDomain, in.Domain}, {fieldSlot, in.Slot}, {fieldVMs, strings.Join(in.VMs, ",")}, {fieldRouter, in.Router}, {fieldEnvHosts, strings.Join(in.EnvHosts, "\n")},
 			{fieldDNS, in.DNS}, {fieldFamily, in.Family}, {fieldImageKind, in.ImageKind}, {fieldImage, in.Image}} {
 			if f.Value != "" {
 				fs = append(fs, f)
@@ -336,11 +338,11 @@ func listPage(in jobs.Inputs) string {
 }
 
 // hostSpec is a host row as the name=image[:octet] line jobs store, or ""
-// for a row left empty. A half-filled row still makes a line, which the
-// preview refuses with the reason.
+// for a row left empty. A half-filled row still makes a line, which
+// Validate refuses.
 func hostSpec(name, image, octet string) string {
-	name, image, octet = strings.TrimSpace(name), strings.TrimSpace(image), strings.TrimPrefix(strings.TrimSpace(octet), ".")
-	if name == "" && image == "" {
+	name, image, octet = strings.TrimSpace(name), strings.TrimSpace(image), octetOf(octet)
+	if name == "" && image == "" && octet == "" {
 		return ""
 	}
 	spec := name + "=" + image
@@ -348,6 +350,17 @@ func hostSpec(name, image, octet string) string {
 		spec += ":" + octet
 	}
 	return spec
+}
+
+// slotOf reads a typed slot number as its two digits ("2" is "02"), or
+// leaves it as typed for Validate to refuse.
+func slotOf(s string) string {
+	s = strings.TrimSpace(s)
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 || strings.Trim(s, "0123456789") != "" {
+		return s
+	}
+	return pods.SlotName(n)
 }
 
 // at is vs[i], or "" past its end.

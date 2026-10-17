@@ -115,6 +115,14 @@ func pageData(t *rapid.T, page string) any {
 		return drawHostile[familyView](t, "family")
 	case "teamless":
 		p := drawHostile[catalogPage](t, "teamless")
+		p.envForm = drawHostile[envForm](t, "teamless.envForm") // embedded and unexported: fillHostile skips it
+		bad := rapid.SampledFrom([]string{"", "name", "image", "addr"})
+		for i := range p.Rows {
+			p.Rows[i].Bad = bad.Draw(t, "bad")
+		}
+		if p.Router != nil {
+			p.Router.Bad = bad.Draw(t, "router bad")
+		}
 		p.Op = rapid.SampledFrom(slices.DeleteFunc(slices.Clone(operations), func(o operation) bool { return !o.Kind.Teamless() })).Draw(t, "op")
 		return p
 	}

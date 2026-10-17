@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -170,6 +171,14 @@ func (b *browser) fail(msg string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.errs = append(b.errs, msg)
+}
+
+// expect drops the errors logged so far that contain s, such as a status
+// a step answers with on purpose.
+func (b *browser) expect(s string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.errs = slices.DeleteFunc(b.errs, func(e string) bool { return strings.Contains(e, s) })
 }
 
 // clean fails the test if the page logged script errors or CSP refusals.

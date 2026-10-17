@@ -29,8 +29,11 @@ func (s Slot) LastVMID() int { return s.FirstVMID + 99 }
 
 // ExpandSlot replaces {slot} with n as two digits.
 func ExpandSlot(pattern string, n int) string {
-	return strings.ReplaceAll(pattern, "{slot}", fmt.Sprintf("%02d", n))
+	return strings.ReplaceAll(pattern, "{slot}", SlotName(n))
 }
+
+// SlotName is slot n's name: n as two digits.
+func SlotName(n int) string { return fmt.Sprintf("%02d", n) }
 
 // Slots lists the configured slots; the config is validated, so the range
 // parses.
@@ -38,7 +41,7 @@ func Slots(c config.Environments) []Slot {
 	lo, hi, _ := config.ParseRange(c.Slots)
 	var out []Slot
 	for n := lo; n <= hi; n++ {
-		out = append(out, Slot{N: n, Name: fmt.Sprintf("%02d", n), Pool: ExpandSlot(c.Pool, n),
+		out = append(out, Slot{N: n, Name: SlotName(n), Pool: ExpandSlot(c.Pool, n),
 			IntBridge: ExpandSlot(c.IntBridge, n), ExtBridge: ExpandSlot(c.ExtBridge, n), FirstVMID: c.VMIDBase + n*100})
 	}
 	return out

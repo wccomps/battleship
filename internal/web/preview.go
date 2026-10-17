@@ -205,9 +205,21 @@ func (s *Server) opPreview(op operation) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		form := postedForm(r)
 		in := op.scope(formInputs(op.Kind, form))
-		if op.Kind.Teamless() && form.Get(fieldMore) == yes {
-			s.teamlessForm(w, r, http.StatusOK, op, in, "")
-			return
+		if machineInputs(op.Kind, form) {
+			// Add host without JavaScript, or Review: the form again, with
+			// more rows or what is wrong with the fields.
+			p, ok := s.catalogForm(r, op, in, "")
+			switch {
+			case !ok:
+				s.noEnv(w, r, in.Domain)
+				return
+			case form.Get(fieldMore) == yes:
+				s.renderCatalogForm(w, r, http.StatusOK, p)
+				return
+			case p.checkFields():
+				s.renderCatalogForm(w, r, http.StatusUnprocessableEntity, p)
+				return
+			}
 		}
 		if fromGrid(form) {
 			if len(in.VMs) == 0 {
@@ -473,8 +485,10 @@ func teamlessFacts(in jobs.Inputs) []fact {
 		}
 	}
 	add("Domain", in.Domain)
+	add("Slot", in.Slot)
 	add("Router", in.Router)
 	add("Hosts", strings.Join(in.EnvHosts, ", "))
+	add("Only these VMs", strings.Join(in.VMs, ", "))
 	add("DNS server", in.DNS)
 	if in.VMID != 0 {
 		add("VM", strconv.Itoa(in.VMID))

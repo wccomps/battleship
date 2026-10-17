@@ -5,7 +5,6 @@ import (
 	"context"
 	"net/http"
 	"slices"
-	"strings"
 
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
@@ -27,10 +26,8 @@ type catalogPage struct {
 	ReadErr  string // why the cluster couldn't be read
 	// Env is the environment an env-add or env-dns form works on.
 	Env *pods.Environment
-	// ExtraRows is how many empty host rows to add: one after Add host
-	// without JavaScript.
-	ExtraRows int
-	vms       []proxmox.VM
+	envForm
+	vms []proxmox.VM
 }
 
 // newCatalogPage reads environments and images as the user, without the
@@ -50,19 +47,6 @@ func (s *Server) newCatalogPage(ctx context.Context) catalogPage {
 		p.Others = append(p.Others, pods.Families(p.Images, k)...)
 	}
 	return p
-}
-
-// AsksRouter is whether the form has a router field: a new environment
-// needs one; Add hosts takes one for an environment without a router, or to
-// resume the one a failed create left (see pods.EnvAdd), when one was given.
-func (p catalogPage) AsksRouter() bool {
-	switch p.Op.Kind {
-	case pods.KindEnvCreate:
-		return true
-	case pods.KindEnvAdd:
-		return p.Env != nil && (!p.Env.HasRouter() || p.In.Router != "")
-	}
-	return false
 }
 
 // StaleDNS is the environment's DNS choice if it can no longer be chosen
@@ -89,61 +73,45 @@ func (s *Server) withNotes(ctx context.Context, p catalogPage) catalogPage {
 // query (the pages' links) or the inputs a preview refused. An environment
 // that isn't there (any more) sends the user back to Environments.
 func (s *Server) teamlessForm(w http.ResponseWriter, r *http.Request, status int, op operation, in jobs.Inputs, problem string) {
-	p := s.newCatalogPage(r.Context())
-	p.Op, p.In, p.Error = op, in, problem
-	if r.FormValue(fieldMore) == yes {
-		p.ExtraRows = 1
+	p, ok := s.catalogForm(r, op, in, problem)
+	if !ok {
+		s.noEnv(w, r, in.Domain)
+		return
 	}
+	s.renderCatalogForm(w, r, status, p)
+}
+
+// catalogForm is the data of op's form for in, its machine rows read from
+// the request (machineRows); not ok if op's environment isn't there.
+func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, problem string) (catalogPage, bool) {
+	ctx := r.Context()
+	p := s.newCatalogPage(ctx)
+	p.Op, p.In, p.Error = op, in, problem
 	if op.Kind.OnEnvironment() {
 		e, ok := pods.EnvByDomain(p.Envs, in.Domain)
 		if !ok && p.ReadErr == "" {
-			s.noEnv(w, r, in.Domain)
-			return
+			return p, false
 		}
 		if ok {
 			p.Env = &e
 		}
 	}
 	if op.Kind == pods.KindEnvCreate || op.Kind == pods.KindEnvAdd {
+		form := r.URL.Query()
+		if r.Method == http.MethodPost {
+			form = postedForm(r)
+		}
+		p.envForm = s.newEnvForm(ctx, p, form)
+	}
+	return p, true
+}
+
+func (s *Server) renderCatalogForm(w http.ResponseWriter, r *http.Request, status int, p catalogPage) {
+	if p.Op.Kind == pods.KindEnvCreate || p.Op.Kind == pods.KindEnvAdd {
 		p = s.withNotes(r.Context(), p)
 	}
-	s.render(w, r, status, "teamless", s.newView(w, r, op.Title, string(op.Kind), p))
-}
-
-// hostRow is one row of the environment forms: a host's name, base image
-// family and optional last address octet.
-type hostRow struct{ Name, Image, Octet string }
-
-// rowOf splits a stored name=image[:octet] line into a row.
-func rowOf(spec string) hostRow {
-	name, rest, _ := strings.Cut(spec, "=")
-	image, octet, _ := strings.Cut(rest, ":")
-	return hostRow{strings.TrimSpace(name), strings.TrimSpace(image), strings.TrimSpace(octet)}
-}
-
-// HostRows are the form's host rows: the hosts given, then ExtraRows empty
-// ones, and at least one.
-func (p catalogPage) HostRows() []hostRow {
-	var rows []hostRow
-	for _, spec := range p.In.EnvHosts {
-		rows = append(rows, rowOf(spec))
-	}
-	for range p.ExtraRows {
-		rows = append(rows, hostRow{})
-	}
-	if len(rows) == 0 {
-		rows = append(rows, hostRow{})
-	}
-	return rows
+	s.render(w, r, status, "teamless", s.newView(w, r, p.Op.Title, string(p.Op.Kind), p))
 }
 
 // Back is where the form's close and Cancel go.
 func (p catalogPage) Back() string { return listPage(p.In) }
-
-// RouterRow is the router given, or the usual name, gw, with no image yet.
-func (p catalogPage) RouterRow() hostRow {
-	if p.In.Router == "" {
-		return hostRow{Name: "gw"}
-	}
-	return rowOf(p.In.Router)
-}

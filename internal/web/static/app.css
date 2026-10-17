@@ -349,7 +349,6 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .confirm{display:grid;gap:6px}
 .confirm label{font-size:var(--t2);font-weight:500}
 .inp{height:36px;width:100%;padding:0 10px;border:1px solid var(--ln2);border-radius:var(--r2);background:var(--sf);color:var(--tx);font:var(--t3) var(--fm)}
-textarea.inp{height:auto;padding:8px 10px;resize:vertical}
 
 /* key/value detail */
 .kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 20px;margin:0;font-size:var(--t2)}
@@ -408,13 +407,25 @@ textarea.inp{height:auto;padding:8px 10px;resize:vertical}
 .jhead form{display:contents}
 .back{align-self:flex-start;margin-left:-10px}
 .field{display:grid;gap:8px;min-width:0;margin:0;padding:0;border:0}
-/* environment forms: the router, and a row per host */
-.hrows{display:grid;gap:8px}
-.hrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) 6.5rem 36px;gap:8px;align-items:end}
-.hrow:not([data-row]){grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)}
-.sub{display:grid;gap:4px;font-size:var(--t1);color:var(--tx2)}
-.hadd{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:8px}
-@media (max-width:560px){.hrow[data-row]{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+/* environment forms: domain and slot, then a row per machine */
+.frow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,13rem);gap:16px;align-items:start}
+.ferr{font-size:var(--t1);color:var(--bad)}
+.inp[aria-invalid=true],.addr:has([aria-invalid=true]){border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
+.mgrid{display:grid;gap:8px}
+.mhead,.mrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr) 168px 32px;gap:8px;align-items:center}
+.mhead{font-size:var(--t1);color:var(--tx3);font-weight:500}
+.mrow.router{padding-bottom:10px;border-bottom:1px dashed var(--ln)}
+.mrow .ferr{grid-column:1/-1}
+.addr{display:flex;align-items:center;height:36px;border:1px solid var(--ln2);border-radius:var(--r2);background:var(--sf);overflow:hidden}
+.addr:focus-within{outline:2px solid var(--focus);outline-offset:2px}
+.addr .pre{padding:0 1px 0 10px;font:var(--t2) var(--fm);color:var(--tx3);white-space:nowrap}
+.addr .pre.s{display:none}
+.addr input{flex:1;min-width:0;height:100%;padding:0 8px 0 0;border:0;outline:0;background:none;color:var(--tx);font:var(--t3) var(--fm)}
+.addr.fixed{background:var(--sf2);border-color:var(--ln)}
+.addr.fixed b{padding-right:8px;font:var(--t3) var(--fm)}
+.madd{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.here{display:flex;flex-wrap:wrap;gap:4px}
+.here span{padding:2px 7px;border-radius:4px;background:var(--sf2);color:var(--tx2);font:var(--t1) var(--fm)}
 .field>legend,.lbl{padding:0;margin-bottom:8px;font-size:var(--t2);font-weight:500}
 .field>.lbl{margin-bottom:0}
 .field>legend .muted{font-weight:400}
@@ -467,6 +478,12 @@ textarea.inp{height:auto;padding:8px 10px;resize:vertical}
 
 /* ---------- phone ---------- */
 @container app (max-width:640px){
+  .frow{grid-template-columns:minmax(0,1fr)}
+  .mhead{display:none}
+  .mrow{grid-template-columns:minmax(0,1fr) 108px 32px;grid-template-areas:"n a x" "i i i";padding:10px;border:1px solid var(--ln);border-radius:var(--r2)}
+  .mrow.router{border-bottom-style:solid}
+  .mrow>.n{grid-area:n}.mrow>.a{grid-area:a}.mrow>.x{grid-area:x}.mrow>.im{grid-area:i}
+  .addr .pre.l{display:none}.addr .pre.s{display:inline}
   .top{flex-wrap:wrap;gap:var(--s1) var(--s2);padding:var(--s1) var(--s4) var(--s2)}
   .brand span:last-child,.me .role{display:none}
   .top .legend{order:9;width:100%;gap:2px var(--s3);font-size:var(--t1)}

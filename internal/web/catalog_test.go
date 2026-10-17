@@ -100,9 +100,8 @@ func TestImageFormsPrefill(t *testing.T) {
 }
 
 // The Environments and Images pages, a family's page and sheet, the
-// register review, the environment forms and the new environment preview
-// fit a phone without scrolling sideways; leaving an environment's form
-// lands on its block.
+// register review and the environment forms fit a phone without scrolling
+// sideways; leaving an environment's form lands on its block.
 func TestBrowserCatalogPages(t *testing.T) {
 	h := browserHarness(t)
 	addCatalog(h)
@@ -187,16 +186,6 @@ func TestBrowserCatalogPages(t *testing.T) {
 			b.noSideways("register review page")
 			b.shot("register-page-" + size.name)
 
-			b.open("/environments/new")
-			b.run("filling the form", chromedp.SendKeys("#domain", "kilo.bravo"), chromedp.Evaluate(`
-				document.querySelector('select[name=router_image]').value = "gw";
-				const names = document.querySelectorAll('input[name=host_name]'), images = document.querySelectorAll('select[name=host_image]');
-				names[0].value = "teak"; images[0].value = "debian-12";
-				document.querySelectorAll('input[name=host_octet]')[0].value = "10"`, nil))
-			b.click(`form[action="/environments/new/preview"] .pf button[type=submit]`)
-			b.waitFor("the preview", `location.pathname === "/environments/new/preview" && document.readyState === "complete"`)
-			b.noSideways("env preview")
-			b.shot("env-preview-" + size.name)
 			b.clean()
 		})
 	}
@@ -253,38 +242,6 @@ func addEnv(h *harness, router bool) {
 	}
 	h.api.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "dev;kilo.alpha;linux", Status: "running"},
 		map[string]string{"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1 dns=teak"})
-}
-
-// Add hosts at an environment's path names it rather than asking, and
-// asks for a router only when it has none.
-func TestAddHostsFormKnowsItsEnvironment(t *testing.T) {
-	for _, router := range []bool{true, false} {
-		h := newHarness(t)
-		addImages(h)
-		addEnv(h, router)
-		sess := h.login(asLead)
-		body := h.get(&sess, "/environments/kilo.alpha/add").Body.String()
-		if !strings.Contains(body, `action="/environments/kilo.alpha/add/preview"`) || strings.Contains(body, `name="domain"`) ||
-			!strings.Contains(body, `<dt>Environment</dt><dd><span class="name">kilo.alpha</span>`) {
-			t.Errorf("router %v: the domain isn't fixed:\n%s", router, body)
-		}
-		if hasInput := strings.Contains(body, `name="router_image"`); hasInput == router {
-			t.Errorf("router %v: router input shown = %v", router, hasInput)
-		}
-		if router && !strings.Contains(body, `<dt>Router</dt><dd><span class="name">gw.kilo.alpha</span></dd>`) {
-			t.Errorf("the environment's router isn't shown:\n%s", body)
-		}
-		// A router given (to resume one a failed create left) is kept.
-		body = h.get(&sess, "/environments/kilo.alpha/add?router=gw%3Dgw").Body.String()
-		if !strings.Contains(body, `<option value="gw" selected>gw</option>`) || !strings.Contains(body, `name="router_name" value="gw"`) {
-			t.Errorf("router %v: a given router is dropped:\n%s", router, body)
-		}
-		// A refused preview keeps the environment fixed.
-		body = h.post(&sess, "/environments/kilo.alpha/add/preview", url.Values{"env_hosts": {""}}).Body.String()
-		if !strings.Contains(body, `action="/environments/kilo.alpha/add/preview"`) || !strings.Contains(body, `role="alert"`) {
-			t.Errorf("router %v: a refused preview loses the environment:\n%s", router, body)
-		}
-	}
 }
 
 // Set DNS offers the router and the hosts that can serve DNS, with the

@@ -223,9 +223,22 @@ func TestTeamlessLockKeys(t *testing.T) {
 	}
 }
 
+// Image jobs and DNS changes are started again from their forms; a slot
+// is only a create's, and VMs only a create's or an add's.
 func TestRetryInputsRefusesTeamless(t *testing.T) {
-	job := store.Job{ID: 7, Kind: string(pods.KindEnvCreate), Status: string(store.StatusCompletedWithFailures)}
-	if _, err := RetryInputs(job, nil); !errors.Is(err, ErrNotRetryable) {
-		t.Errorf("err = %v", err)
+	for _, kind := range []pods.Kind{pods.KindEnvDNS, pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete} {
+		job := store.Job{ID: 7, Kind: string(kind), Status: string(store.StatusCompletedWithFailures)}
+		if _, err := RetryInputs(job, nil); !errors.Is(err, ErrNotRetryable) {
+			t.Errorf("%s: err = %v", kind, err)
+		}
+	}
+	for _, in := range []Inputs{
+		{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", Slot: "02", EnvHosts: []string{"dc=debian"}},
+		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router", VMs: []string{"dc.kilo.alpha"}},
+		{Kind: pods.KindImageEdit, Family: "debian-12", VMs: []string{"dc.kilo.alpha"}},
+	} {
+		if err := in.Validate(); err == nil {
+			t.Errorf("%+v is valid", in)
+		}
 	}
 }

@@ -68,7 +68,7 @@ var validInputs = []Inputs{
 	{Kind: pods.KindReset, Teams: "1", Snapshot: "initial"},
 	{Kind: pods.KindSnapshot, Teams: "1", Snapshot: "round2", Description: "before round 2"},
 	{Kind: pods.KindPower, Teams: "1", Action: "stop"},
-	{Kind: pods.KindEnvCreate, Domain: "kilo.alpha", Router: "gw=opnsense", EnvHosts: []string{"dc=windows"}},
+	{Kind: pods.KindEnvCreate, Domain: "kilo.alpha", Slot: "02", Router: "gw=opnsense", EnvHosts: []string{"dc=windows"}},
 	{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"web=debian:20"}},
 	{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "dc"},
 	{Kind: pods.KindImageRegister, VMID: 100, Family: "debian-12", ImageKind: pods.ImageKinds[0]},
@@ -151,6 +151,12 @@ var spoils = map[string][]spoil{
 	"EnvHosts": {{[]string{"dc=debian-12"}, true}, {[]string{"dc=debian-12:20", "web=win2022"}, true}, {[]string{"dc=WIN 2022"}, false},
 		{[]string{"dc"}, false}, {[]string{""}, false}, {[]string{"dc=debian-12:255"}, false}, {[]string{"Dc=x"}, false},
 		{[]string{"dc=debian-12", "x"}, false}},
+	"Slot": {{"02", true}, {"", true}, {"10", true}, {"100", true}, {"2", false}, {"00", false}, {"002", false}, {"dev-02", false},
+		{" 02", false}, {"-1", false}, {"+2", false}, {"0x2", false}, {"\u0662", false}},
+	// An environment's VMs, by full name; the inputs' domain is kilo.alpha.
+	"EnvVMs": {{[]string{"dc.kilo.alpha"}, true}, {[]string{"gw.kilo.alpha", "dc.kilo.alpha"}, true}, {[]string(nil), true},
+		{[]string{"team01-dc"}, false}, {[]string{"dc.kilo.bravo"}, false}, {[]string{"dc"}, false}, {[]string{""}, false},
+		{[]string{"Dc.kilo.alpha"}, false}, {[]string{" dc.kilo.alpha"}, false}, {[]string{"dc.kilo.alpha", "x.y"}, false}},
 	"DNS":  {{"router", true}, {"dc", true}, {"", true}, {" dc ", true}, {"Dc", false}, {"-x", false}, {"a b", false}, {"dc.kilo", false}},
 	"VMID": {{100, true}, {150, true}, {1 << 40, true}, {99, false}, {0, false}, {-1, false}},
 	"Family": {{"debian-12", true}, {"x-v0", true}, {"WIN 2022", false}, {"debian-12-v1", false}, {"", false}, {" debian-12", false},
@@ -166,7 +172,7 @@ var spoils = map[string][]spoil{
 var readsFields = map[pods.Kind][]string{
 	pods.KindDeploy: {"Pattern", "Rebuild", "NoSnapshot"}, pods.KindPower: {"Action"}, pods.KindSnapshot: {"Snapshot", "Description", "VMState"},
 	pods.KindTeardown: {}, pods.KindReset: {},
-	pods.KindEnvCreate: {"Domain", "Router", "EnvHosts"}, pods.KindEnvAdd: {"Domain", "EnvHosts"}, pods.KindEnvDNS: {"Domain", "DNS"},
+	pods.KindEnvCreate: {"Domain", "Slot", "Router", "EnvHosts", "EnvVMs"}, pods.KindEnvAdd: {"Domain", "EnvHosts", "EnvVMs"}, pods.KindEnvDNS: {"Domain", "DNS"},
 	pods.KindImageRegister: {"VMID", "Family", "ImageKind"}, pods.KindImageEdit: {"Family"},
 	pods.KindImageDeprecate: {"Image"}, pods.KindImageDelete: {"Image"},
 }
@@ -212,6 +218,9 @@ func checkGate(t interface{ Fatalf(string, ...any) }, p pods.Planner, in Inputs,
 
 // setField sets in's field to v, cloning slices.
 func setField(in *Inputs, field string, v any) {
+	if field == "EnvVMs" {
+		field = "VMs"
+	}
 	f := reflect.ValueOf(in).Elem().FieldByName(field)
 	if s, ok := v.([]string); ok {
 		v = slices.Clone(s)

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -29,12 +30,13 @@ type Inputs struct {
 	Description string `json:"description,omitempty"` // snapshot
 	VMState     bool   `json:"vmstate,omitempty"`     // snapshot: also save the RAM of running VMs
 	Action      string `json:"action,omitempty"`      // power
-	// VMs, if set, narrows the plan to these team VMs (e.g. a retry's
-	// failures). Each must belong to one of Teams.
+	// VMs, if set, narrows the plan to these VMs (e.g. a retry's failures):
+	// team VMs, each of one of Teams, or an environment's, each of Domain.
 	VMs []string `json:"vms,omitempty"`
 
 	// Environments.
 	Domain   string   `json:"domain,omitempty"`
+	Slot     string   `json:"slot,omitempty"`      // create: two digits, e.g. "02"; empty takes the first free
 	Router   string   `json:"router,omitempty"`    // create: "name=family"
 	EnvHosts []string `json:"env_hosts,omitempty"` // create, add: "name=family[:octet]" each
 	DNS      string   `json:"dns,omitempty"`       // env-dns: "router" or a host name
@@ -104,7 +106,7 @@ func (in Inputs) checkText() error {
 	}{
 		{"teams", []string{in.Teams}}, {"hosts", in.Hosts}, {"vms", in.VMs}, {"pattern", []string{in.Pattern}},
 		{"snapshot", []string{in.Snapshot}}, {"description", []string{in.Description}}, {"action", []string{in.Action}},
-		{"domain", []string{in.Domain}}, {"router", []string{in.Router}}, {"env hosts", in.EnvHosts}, {"dns", []string{in.DNS}},
+		{"domain", []string{in.Domain}}, {"slot", []string{in.Slot}}, {"router", []string{in.Router}}, {"env hosts", in.EnvHosts}, {"dns", []string{in.DNS}},
 		{"family", []string{in.Family}}, {"image kind", []string{in.ImageKind}}, {"image", []string{in.Image}},
 	}
 	var errs []error
@@ -254,6 +256,13 @@ func SplitList(s string) []string {
 func (in Inputs) EnvRequest() (pods.EnvRequest, error) {
 	req := pods.EnvRequest{Domain: strings.TrimSpace(in.Domain), DNS: strings.TrimSpace(in.DNS)}
 	var errs []error
+	if in.Slot != "" {
+		n, err := strconv.Atoi(in.Slot)
+		if err != nil || n < 1 || pods.SlotName(n) != in.Slot {
+			errs = append(errs, fmt.Errorf("slot %q must be a dev slot's number, two digits like 02", in.Slot))
+		}
+		req.Slot = n
+	}
 	if strings.TrimSpace(in.Router) != "" {
 		r, err := pods.ParseHostSpec(in.Router)
 		if err != nil {
@@ -275,8 +284,23 @@ func (in Inputs) EnvRequest() (pods.EnvRequest, error) {
 // validateTeamless checks the inputs of image and environment kinds.
 func (in Inputs) validateTeamless() []error {
 	var errs []error
-	if in.Teams != "" || len(in.Hosts) > 0 || len(in.VMs) > 0 {
-		errs = append(errs, errors.New("teams, hosts and VMs don't apply to images and environments"))
+	if in.Teams != "" || len(in.Hosts) > 0 {
+		errs = append(errs, errors.New("teams and hosts don't apply to images and environments"))
+	}
+	switch {
+	case len(in.VMs) == 0:
+	case in.Kind != pods.KindEnvCreate && in.Kind != pods.KindEnvAdd:
+		errs = append(errs, errors.New("VMs apply only to creating environments and adding hosts"))
+	default:
+		for _, v := range in.VMs {
+			if host, domain, _ := strings.Cut(v, "."); pods.CheckHostname(host) != nil || domain != strings.TrimSpace(in.Domain) {
+				errs = append(errs, fmt.Errorf("vms: %q isn't a VM of %s", v, strings.TrimSpace(in.Domain)))
+				break
+			}
+		}
+	}
+	if in.Slot != "" && in.Kind != pods.KindEnvCreate {
+		errs = append(errs, errors.New("a slot applies only to creating an environment"))
 	}
 	switch in.Kind {
 	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS:

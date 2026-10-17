@@ -16,6 +16,9 @@ import (
 // EnvRequest is an environment job's input.
 type EnvRequest struct {
 	Domain string
+	// Slot is the dev slot a new environment goes in (Slot.N); 0 takes the
+	// first free one.
+	Slot   int
 	Router HostSpec   // create (required); add (only if the environment has none)
 	Hosts  []HostSpec // create, add
 	DNS    string     // set DNS: DNSRouter or one of the environment's host names
@@ -37,7 +40,9 @@ func (p Planner) dnsAddress(env Environment, choice string) (string, error) {
 	return h.Notes.IP, nil
 }
 
-// EnvCreate plans a new environment in the lowest free slot.
+// EnvCreate plans a new environment in req.Slot, or else the lowest free
+// slot. A chosen slot must be free, or hold req.Domain already: a create
+// that stopped partway, which is resumed there.
 func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if err := CheckDomain(req.Domain); err != nil {
 		return nil, err
@@ -48,6 +53,14 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 	envs, vms, err := p.Environments(ctx)
 	if err != nil {
 		return nil, err
+	}
+	hosts := append([]HostSpec{req.Router}, req.Hosts...)
+	if req.Slot != 0 {
+		env, err := p.chosenSlot(ctx, envs, vms, req)
+		if err != nil {
+			return nil, err
+		}
+		return p.envPlan(ctx, KindEnvCreate, env, hosts, vms)
 	}
 	for _, e := range envs {
 		if e.Domain == req.Domain {
@@ -85,8 +98,42 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 		}
 		return nil, errors.New(msg)
 	}
-	env := Environment{Slot: *slot, Domain: req.Domain}
-	return p.envPlan(ctx, KindEnvCreate, env, append([]HostSpec{req.Router}, req.Hosts...), vms)
+	return p.envPlan(ctx, KindEnvCreate, Environment{Slot: *slot, Domain: req.Domain}, hosts, vms)
+}
+
+// chosenSlot is the environment req.Domain is created in when req names
+// its slot: the slot, checked free as EnvCreate's own pick is, or the
+// environment of that domain already there.
+func (p Planner) chosenSlot(ctx context.Context, envs []Environment, vms []proxmox.VM, req EnvRequest) (Environment, error) {
+	i := slices.IndexFunc(envs, func(e Environment) bool { return e.Slot.N == req.Slot })
+	if i < 0 {
+		return Environment{}, fmt.Errorf("there's no dev slot %s", SlotName(req.Slot))
+	}
+	env := envs[i]
+	if e, ok := EnvByDomain(envs, req.Domain); ok && e.Slot.N != req.Slot {
+		return Environment{}, fmt.Errorf("%s is already in dev slot %s; add hosts to it instead", req.Domain, e.Slot.Name)
+	}
+	if env.Domain == req.Domain {
+		return env, nil
+	}
+	if !env.Free() {
+		return Environment{}, fmt.Errorf("dev slot %s is in use; choose a free one", env.Slot.Name)
+	}
+	_, queued, err := p.OpenSlots(ctx, envs)
+	if err != nil {
+		return Environment{}, err
+	}
+	if slices.ContainsFunc(queued, func(s Slot) bool { return s.N == req.Slot }) {
+		return Environment{}, fmt.Errorf("a queued job will fill dev slot %s; choose another", env.Slot.Name)
+	}
+	held, err := p.slotHeld(ctx, env.Slot, vms)
+	if err != nil {
+		return Environment{}, err
+	}
+	if held {
+		return Environment{}, fmt.Errorf("dev slot %s holds VMs you can't see; choose another", env.Slot.Name)
+	}
+	return Environment{Slot: env.Slot, Domain: req.Domain}, nil
 }
 
 // slotHeld is whether any VMID in slot's block is in use, listed or not:
