@@ -17,7 +17,7 @@ func TestJobStatusRules(t *testing.T) {
 		StatusCompletedWithFailures: {final: true, retry: true, tooLate: true},
 		StatusFailed:                {final: true, ranNothing: true, startAgain: true, tooLate: true},
 		StatusCancelled:             {final: true, stopped: true, retry: true, startAgain: true},
-		StatusInterrupted:           {final: true, stopped: true, retry: true},
+		StatusInterrupted:           {final: true, stopped: true, retry: true, startAgain: true},
 		StatusStale:                 {final: true, ranNothing: true, startAgain: true},
 		"bogus":                     {},
 	}
