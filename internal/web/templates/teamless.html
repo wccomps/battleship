@@ -6,7 +6,7 @@
 {{template "csrf" $csrf}}
 {{- $machines := or (eq .Op.Kind "env-create") (eq .Op.Kind "env-add")}}
 {{- if $machines}}<button type="submit" class="sr" tabindex="-1" aria-hidden="true">Review</button>{{end}}
-<div class="ph"><h1 id="form-title">{{opIcon (print .Op.Kind)}}{{.Op.Title}}{{if eq .Op.Kind "env-add"}}{{with .Env}} to <span class="vm">{{.Domain}}</span>{{end}}{{end}}</h1><span class="sp"></span>{{template "close" $back}}</div>
+<div class="ph"><h1 id="form-title">{{opIcon (print .Op.Kind)}}{{.Op.Title}}{{with .Env}}{{if eq $.Data.Op.Kind "env-add"}} to{{else}} for{{end}} <span class="vm">{{.Domain}}</span>{{end}}</h1><span class="sp"></span>{{template "close" $back}}</div>
 <div class="pb form">
 {{- with .Error}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
 {{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
@@ -36,11 +36,6 @@
 {{- end}}
 {{- if eq .Op.Kind "env-add"}}{{with .Env}}
 <div class="sec"><span class="hint">Already here · {{.Slot.Pool}}</span><div class="here">{{range $.Data.Here}}<span>{{.Name}}{{with .Addr}} {{.}}{{end}}</span>{{end}}</div></div>
-{{- end}}{{end}}
-{{- if eq .Op.Kind "env-dns"}}{{with .Env}}
-<dl class="kv">
-<dt>Environment</dt><dd>{{names .Domain}} <span class="muted">· {{.Slot.Pool}}</span></dd>
-</dl>
 {{- end}}{{end}}
 {{- if $machines}}
 <fieldset class="field">
@@ -87,13 +82,17 @@
 </details>
 {{- end}}
 {{- end}}
-{{- if eq .Op.Kind "env-dns"}}{{with .Env}}
-<div class="field">
-<label class="lbl" for="dns">DNS server</label>
-{{- $cur := or $.Data.In.DNS .DNS}}
-<select class="inp" id="dns" name="dns" required aria-describedby="dns-hint">{{range .DNSChoices}}<option value="{{.}}"{{if eq . $cur}} selected{{end}}>{{.}}</option>{{end}}</select>
-<span class="hint" id="dns-hint">the router, or a Windows or Linux host of this environment{{with $.Data.StaleDNS}} · it was {{.}}, which is no longer one{{end}}</span>
+{{- if eq .Op.Kind "env-dns"}}{{with .DNSCards}}
+<fieldset class="field">
+<legend>DNS server for every host</legend>
+<div class="choices">
+{{- range .}}
+<label class="choice"><input type="radio" name="dns" value="{{.Value}}" required{{if .Checked}} checked{{end}}><span class="nm">{{if .Router}}Router{{with .Name}} · {{.}}{{end}}{{else}}{{.Name}}{{end}}</span>{{if .Current}}<span class="chip">current</span>{{end}}<span class="meta">{{.Addr}}{{with .Image}} · {{.}}{{end}}</span></label>
+{{- end}}
 </div>
+{{- with $.Data.StaleDNS}}<span class="hint">It was {{.}}, which is no longer one: choose another.</span>{{end}}
+</fieldset>
+<p class="hint">{{$.Data.DNSHint}}</p>
 {{- end}}{{end}}
 {{- if eq .Op.Kind "image-register"}}
 <div class="field">
@@ -129,7 +128,7 @@
 </div>
 <div class="pf">
 <a class="btn" href="{{$back}}">Cancel</a>
-<button type="submit" class="btn pri">{{if $machines}}Review{{else}}Preview{{end}}</button>
+<button type="submit" class="btn pri">Review</button>
 </div>
 </form>
 {{- end}}

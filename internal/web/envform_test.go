@@ -150,13 +150,15 @@ func TestCreateEnvironmentInAChosenSlot(t *testing.T) {
 	form.Set("domain", "kilo.bravo")
 	form.Set("slot", "04")
 	action, fields, body := h.preview(&sess, "/environments/new", form)
-	contains(t, "the preview", body, "dev-04", "<dt>Slot</dt><dd>04</dd>")
+	contains(t, "the preview", body, "into <span class=\"name\">dev-04</span>", `<td class="r wide meta">2400 · n1</td>`)
 	if fields.Get("slot") != "04" || fields.Get("env_hosts") != "teak=debian-12:10" || fields.Get("router") != "gw=gw" {
 		t.Errorf("confirm fields = %v", fields)
 	}
-	if rec := h.post(&sess, action, fields); rec.Code != http.StatusSeeOther {
+	rec := h.post(&sess, action, fields)
+	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("confirm = %d\n%s", rec.Code, rec.Body)
 	}
+	contains(t, "the job page", h.get(&sess, rec.Header().Get("Location")).Body.String(), ` · Slot <span class="vm">dev-04</span>`)
 	js := h.jobsInStore()
 	items, _ := h.st.Items(context.Background(), js[0].ID)
 	if in := readInputs(js[0]); in.Slot != "04" || len(items) != 2 || items[0].VMID/100 != 24 || items[1].VMID/100 != 24 {
@@ -165,7 +167,7 @@ func TestCreateEnvironmentInAChosenSlot(t *testing.T) {
 
 	// dev-01 holds kilo.alpha.
 	form.Set("slot", "01")
-	rec := h.post(&sess, "/environments/new/preview", form)
+	rec = h.post(&sess, "/environments/new/preview", form)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("a slot in use = %d", rec.Code)
 	}
@@ -417,7 +419,7 @@ func TestPropMachineRows(t *testing.T) {
 			if got := fields.Get("env_hosts"); got != strings.Join(kept, "\n") {
 				t.Fatalf("env_hosts %q, want %q", got, strings.Join(kept, "\n"))
 			}
-			if strings.Contains(body, `class="blk"`) || !strings.Contains(body, strconv.Itoa(len(kept)+1)+" will run") {
+			if strings.Contains(body, `class="blk"`) || !strings.Contains(body, "Create "+countVMs(len(kept)+1)+"</button>") {
 				t.Fatalf("rows %q: the review blocks some\n%s", rows, body)
 			}
 			return
@@ -480,7 +482,7 @@ func TestRetryAFailedCreate(t *testing.T) {
 	h := newHarness(t)
 	addImages(h)
 	addEnv(h, true) // kilo.alpha in dev-01: the create goes in dev-02
-	in := jobs.Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.bravo", Router: "gw=gw", EnvHosts: []string{"teak=debian-12:10", "oak=debian-12"}}
+	in := jobs.Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.bravo", Router: "gw=gw", EnvHosts: []string{"teak=debian-12", "oak=debian-12"}}
 	id := h.submitJob(in, byLead)
 	h.start(id)
 	h.finish(id, store.Outcome{Status: store.StatusCompletedWithFailures, Items: map[string]store.ItemOutcome{
@@ -488,7 +490,8 @@ func TestRetryAFailedCreate(t *testing.T) {
 		"teak.kilo.bravo": {Status: store.ItemFailed, Error: "wait-agent: timeout"},
 		"oak.kilo.bravo":  {Status: store.ItemNotRun},
 	}})
-	// What it left: the router, and teak without its guest settings.
+	// What it left: the router, and teak at the address picked for it,
+	// without its guest settings.
 	h.api.Add(proxmox.VM{VMID: 2200, Name: "gw.kilo.bravo", Node: "n1", Pool: "dev-02", Tags: "dev;kilo.bravo;router", Status: "running"},
 		map[string]string{"description": "battleship: base=gw-v1 dns=router"})
 	h.api.Add(proxmox.VM{VMID: 2201, Name: "teak.kilo.bravo", Node: "n1", Pool: "dev-02", Tags: "dev;kilo.bravo", Status: "running"},
@@ -503,12 +506,14 @@ func TestRetryAFailedCreate(t *testing.T) {
 		t.Fatalf("retry = %d\n%s", rec.Code, rec.Body)
 	}
 	body := rec.Body.String()
-	contains(t, "the retry preview", body, "<dt>Retry of</dt><dd>#"+itoa(id)+"</dd>", "<dt>Slot</dt><dd>02</dd>", "2 will run</span>",
-		`<tr><td><span class="vm">teak.kilo.bravo</span></td>`, `<tr><td><span class="vm">oak.kilo.bravo</span></td>`)
+	contains(t, "the retry preview", body, `<p class="meta">Retry of #`+itoa(id)+": only the VMs that didn't finish.</p>",
+		"<span>Clones oak into <span class=\"name\">dev-02</span> and starts it. Picks up teak where it stopped. Then teak and oak get their name,",
+		`<tr><td><span class="vm">teak.kilo.bravo</span></td><td class="wide"><code>debian-12-v1</code></td><td class="c2"><code>.10</code></td><td class="r wide meta">2201 · n1</td></tr>`,
+		`<tr><td><span class="vm">oak.kilo.bravo</span></td>`, "Create 2 VMs</button>")
 	lacks(t, "the retry preview", body, `<span class="vm">gw.kilo.bravo</span></td>`)
 	action, form := confirmOf(t, body)
 	if action != "/environments/new/confirm" || form.Get("vms") != "oak.kilo.bravo,teak.kilo.bravo" || form.Get("slot") != "02" ||
-		form.Get("router") != "gw=gw" || form.Get("env_hosts") != "teak=debian-12:10\noak=debian-12" {
+		form.Get("router") != "gw=gw" || form.Get("env_hosts") != "teak=debian-12\noak=debian-12" {
 		t.Errorf("retry confirm = %s %v", action, form)
 	}
 	if rec := h.post(&sess, action, form); rec.Code != http.StatusSeeOther {

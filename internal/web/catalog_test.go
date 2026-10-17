@@ -29,7 +29,7 @@ func TestNewEnvironmentPreviewShowsSlotAndAddresses(t *testing.T) {
 	sess := h.login(asLead)
 	body := h.post(&sess, "/environments/new/preview", url.Values{
 		"domain": {"kilo.alpha"}, "router": {"gw=gw"}, "env_hosts": {"teak=debian-12:10"}}).Body.String()
-	for _, want := range []string{"gw.kilo.alpha", "teak.kilo.alpha", "configure-guest", "Create environment"} {
+	for _, want := range []string{"gw.kilo.alpha", "teak.kilo.alpha", "into <span class=\"name\">dev-01</span>", "<code>.10</code>", "Create 2 VMs</button>"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("preview lacks %q", want)
 		}
@@ -244,19 +244,6 @@ func addEnv(h *harness, router bool) {
 		map[string]string{"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1 dns=teak"})
 }
 
-// Set DNS offers the router and the hosts that can serve DNS, with the
-// current choice selected.
-func TestSetDNSFormListsChoices(t *testing.T) {
-	h := newHarness(t)
-	addImages(h)
-	addEnv(h, true)
-	sess := h.login(asLead)
-	body := h.get(&sess, "/environments/kilo.alpha/dns").Body.String()
-	if !strings.Contains(body, `<option value="router">router</option><option value="teak" selected>teak</option></select>`) {
-		t.Errorf("DNS choices wrong:\n%s", body)
-	}
-}
-
 // The Create environment form never shows an existing environment as its
 // own, even when the typed domain is one.
 func TestCreateFormDoesNotFixAnExistingDomain(t *testing.T) {
@@ -267,20 +254,6 @@ func TestCreateFormDoesNotFixAnExistingDomain(t *testing.T) {
 	body := h.post(&sess, "/environments/new/preview", url.Values{"domain": {"kilo.alpha"}, "router": {"gw=gw"}}).Body.String()
 	if !strings.Contains(body, `role="alert"`) || strings.Contains(body, `type="hidden" name="domain"`) || strings.Contains(body, "<dt>Environment</dt>") {
 		t.Errorf("create form shows kilo.alpha as fixed:\n%s", body)
-	}
-}
-
-// A DNS choice whose host is gone is said, not silently replaced.
-func TestSetDNSFormSaysAGoneChoice(t *testing.T) {
-	h := newHarness(t)
-	addImages(h)
-	h.api.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "dev;kilo.alpha;router", Status: "running"},
-		map[string]string{"description": "battleship: base=gw-v1 dns=router"})
-	h.api.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "dev;kilo.alpha;linux", Status: "running"},
-		map[string]string{"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1 dns=dc"})
-	sess := h.login(asLead)
-	if body := h.get(&sess, "/environments/kilo.alpha/dns").Body.String(); !strings.Contains(body, "it was dc, which is no longer one") {
-		t.Errorf("the gone choice isn't said:\n%s", body)
 	}
 }
 

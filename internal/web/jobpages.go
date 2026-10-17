@@ -571,7 +571,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	}
 	v.Asked = askedFacts(in)
 	if in.Kind.Teamless() {
-		v.Teamless, v.Asked = true, teamlessFacts(in)
+		v.Teamless, v.Asked = true, teamlessFacts(in, s.cfg.Environments.Pool)
 	}
 	v.Ran, v.RanAt = minuteTime(now, j.CreatedAt), "made "+clockTime(now, j.CreatedAt)
 	if j.StartedAt != nil {

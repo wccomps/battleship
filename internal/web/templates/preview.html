@@ -104,7 +104,7 @@
 </div>
 <div class="pf">
 {{- if .Review}}
-<a class="btn first" href="{{.CloseHref}}" data-close>Back</a>
+<a class="btn first" href="{{.EditHref}}"{{if eq .EditHref .CloseHref}} data-close{{else}} data-panel-link{{end}}>Back</a>
 {{- else if .FromGrid}}
 {{- with .Reselect}}
 <button type="submit" class="btn first" formaction="{{$.Data.Op.Path}}" formnovalidate>{{.}}</button>

@@ -61,81 +61,9 @@ type previewPage struct {
 	// Reselect, for a reset or snapshot of grid-ticked VMs, labels a button that
 	// posts them back to the operation's form to choose again.
 	Reselect string
-	// Review, if set, replaces the facts, consequence and table: a register's
-	// review.
+	// Review, if set, replaces the facts, consequence and table: an image or
+	// environment operation's review.
 	Review *reviewView
-}
-
-// reviewView is a review that reads as a plan: one sentence saying what
-// will happen, then the facts of what will exist.
-type reviewView struct {
-	Verb, Subject string // the title: "Register teak-build"
-	Say           string // what confirming does, or why it can't
-	Blocked       bool
-	Facts         []reviewFact
-}
-
-// reviewFact is a labelled fact of a review: a name, text and a muted note,
-// a link to change it, or notes in a box.
-type reviewFact struct {
-	Label  string
-	Code   string
-	Text   string
-	Meta   string
-	Change string // the form, filled in, to change it
-	Notes  string
-}
-
-// kindUses says what each base-image kind is offered as.
-var kindUses = map[string]string{
-	pods.ImageRouter:  "offered as the router when creating environments",
-	pods.ImageWindows: "named and addressed through the guest agent",
-	pods.ImageLinux:   "named and addressed through the guest agent",
-	pods.ImageOther:   "cloned as it is; Battleship doesn't set its name or address",
-}
-
-// registerReview describes registering it: the source VM, the image it
-// becomes and how, its kind, where the template lands, and the source's
-// notes, which the copy keeps.
-func (s *Server) registerReview(ctx context.Context, op operation, in jobs.Inputs, it pods.Item) *reviewView {
-	src := pods.Source{Name: "?"}
-	if it.Source != nil {
-		src = *it.Source
-	}
-	var desc string
-	if cfg, err := s.apiFor(ctx).VMConfig(ctx, src.Node, src.VMID); err == nil {
-		desc = cfg["description"]
-	}
-	how := "next version"
-	if _, v, ok := pods.ParseImageName(it.Name); ok && v == 1 {
-		how = "new family"
-	}
-	if n, _ := pods.ParseNotes(desc); n.Base != "" {
-		if _, v, ok := pods.ParseImageName(n.Base); ok {
-			how = "edit copy of v" + strconv.Itoa(v)
-		}
-	}
-	r := &reviewView{Verb: "Register", Subject: src.Name,
-		Say: "Copies " + src.Name + " into a new template, " + it.Name + ". The build VM stays as it is."}
-	if it.Blocked != "" {
-		r.Say, r.Blocked = sentence(it.Blocked), true
-	}
-	r.Facts = append(r.Facts,
-		reviewFact{Label: "From", Code: src.Name, Text: "VMID " + strconv.Itoa(src.VMID) + " · " + src.Node},
-		reviewFact{Label: "Becomes", Code: it.Name, Meta: how, Change: formQuery(op, in)})
-	for _, k := range pods.Tags(it.Tags) {
-		if use, ok := kindUses[k]; ok {
-			r.Facts = append(r.Facts, reviewFact{Label: "Kind", Text: k, Meta: use})
-		}
-	}
-	r.Facts = append(r.Facts, reviewFact{Label: "Template", Text: "VMID " + strconv.Itoa(it.VMID) + " on " + it.Node})
-	if it.Supersedes != nil {
-		r.Facts = append(r.Facts, reviewFact{Label: "Replaces", Code: it.Supersedes.Name, Meta: "deprecated once this is registered"})
-	}
-	if notes := pods.UserNotes(desc); notes != "" {
-		r.Facts = append(r.Facts, reviewFact{Label: "Notes", Notes: notes})
-	}
-	return r
 }
 
 // capacityView is the preview's resource summary: a row per node memory or
@@ -314,17 +242,38 @@ func newNonce() (string, error) {
 }
 
 // confirmLabel is the confirm button's text, e.g. "Force stop 2 VMs", or
-// for a register the image it makes: "Register teak-v2".
+// for an image operation the image it makes or acts on: "Register teak-v2".
 func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
 	n := len(runnable)
-	if op.Kind == pods.KindImageRegister && n == 1 {
-		return "Register " + runnable[0].Name
+	if n == 1 {
+		switch op.Kind {
+		case pods.KindImageRegister:
+			return "Register " + runnable[0].Name
+		case pods.KindImageEdit:
+			return "Copy as " + runnable[0].Name
+		case pods.KindImageDeprecate:
+			return "Deprecate " + runnable[0].Name
+		case pods.KindImageDelete:
+			return "Delete " + runnable[0].Name
+		}
 	}
-	vms := "1 VM"
-	if n != 1 {
-		vms = strconv.Itoa(n) + " VMs"
-	}
+	vms := countVMs(n)
 	switch op.Kind {
+	case pods.KindEnvCreate:
+		return "Create " + vms
+	case pods.KindEnvAdd:
+		return "Add " + strconv.Itoa(n) + byCount(n, " host", " hosts")
+	case pods.KindEnvDNS:
+		set := 0 // the hosts whose DNS changes; the others only record the choice
+		for _, it := range runnable {
+			if it.Guest != nil {
+				set++
+			}
+		}
+		if set == 0 {
+			return "Record the choice"
+		}
+		return "Set DNS on " + strconv.Itoa(set) + byCount(set, " host", " hosts")
 	case pods.KindPower:
 		return powerLabel(in.Action) + " " + vms
 	case pods.KindTeardown:
@@ -446,9 +395,9 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		}
 	}
 	p.Warnings = append(p.Warnings, plan.Notices...) // what was left alone, even when nothing runs
-	if op.Kind == pods.KindImageRegister && len(plan.Items) == 1 {
-		p.Review = s.registerReview(ctx, op, in, plan.Items[0])
+	if p.Review = s.review(ctx, op, in, plan, p.Nothing); p.Review != nil {
 		p.Heading = p.Review.Verb + " " + p.Review.Subject
+		p.EditHref, p.Review.Retry = reviewBack(op, in), opts.retryOf
 	}
 
 	return p
@@ -459,7 +408,7 @@ func previewFacts(in jobs.Inputs, fromGrid bool, retryOf int64) []fact {
 	var fs []fact
 	switch {
 	case in.Kind.Teamless():
-		fs = teamlessFacts(in)
+		return nil // its review says it all
 	case !fromGrid:
 		fs = append(fs, fact{"Teams", teamsText(in.Teams)})
 		if len(in.Hosts) > 0 || in.Kind == pods.KindDeploy || in.Kind == pods.KindTeardown {
@@ -476,8 +425,9 @@ func previewFacts(in jobs.Inputs, fromGrid bool, retryOf int64) []fact {
 	return fs
 }
 
-// teamlessFacts are an image or environment operation's inputs.
-func teamlessFacts(in jobs.Inputs) []fact {
+// teamlessFacts are an image or environment operation's inputs; a slot is
+// named by its pool, from the pattern pool.
+func teamlessFacts(in jobs.Inputs, pool string) []fact {
 	var fs []fact
 	add := func(k, v string) {
 		if v != "" {
@@ -485,7 +435,9 @@ func teamlessFacts(in jobs.Inputs) []fact {
 		}
 	}
 	add("Domain", in.Domain)
-	add("Slot", in.Slot)
+	if n, err := strconv.Atoi(in.Slot); err == nil {
+		add("Slot", pods.ExpandSlot(pool, n))
+	}
 	add("Router", in.Router)
 	add("Hosts", strings.Join(in.EnvHosts, ", "))
 	add("Only these VMs", strings.Join(in.VMs, ", "))
@@ -654,19 +606,6 @@ func consequence(kind pods.Kind, in jobs.Inputs, items []pods.Item) string {
 			msg += pick(" Their RAM is saved too if they are running, which takes longer.", " Its RAM is saved too if it is running, which takes longer.")
 		}
 		return msg
-	case pods.KindEnvCreate, pods.KindEnvAdd:
-		return vms + " will be cloned into " + poolOf(items) + ", wired to its networks, started, and given " +
-			pick("their names and addresses.", "its name and address.")
-	case pods.KindEnvDNS:
-		return vms + " will point at DNS server " + in.DNS + "."
-	case pods.KindImageRegister:
-		return "The VM will be copied in as " + itemNames(items) + " and made a template; the VM itself is left as it is."
-	case pods.KindImageEdit:
-		return itemNames(items) + " will be made from the newest version, for you to patch and register as the next one."
-	case pods.KindImageDeprecate:
-		return itemNames(items) + " will no longer be offered for new hosts. Hosts made from it keep working."
-	case pods.KindImageDelete:
-		return itemNames(items) + " will be deleted. Hosts made from it keep working: they are full copies. This can't be undone."
 	}
 	return ""
 }
