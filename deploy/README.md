@@ -42,9 +42,13 @@ NetworkPolicy and ConfigMap; `k8s/postgres` a CloudNativePG cluster;
    (`topology.example.org/proxmox-host=<node>`) so replicas spread.
 4. `kubectl apply -k deploy/k8s/overlays/<env>`.
 
-Keep `terminationGracePeriodSeconds` (960) above `web.shutdown_timeout`
-(15m), so a stopping replica can finish its jobs' cleanup. Turn ingress
-buffering off for the event streams.
+A stopping replica fails readiness, claims no new jobs (the other replica
+takes the queue) and lets running jobs finish. 14m30s before
+`web.shutdown_timeout` (15m) runs out, the longest a stopped job takes to
+clean up, it stops any still running, and they end interrupted. Raise
+`web.shutdown_timeout` to give jobs longer to finish, and keep
+`terminationGracePeriodSeconds` (960) above it. Turn ingress buffering off
+for the event streams.
 
 ## Notes
 
