@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/proxmox"
 )
 
 // detailsView is an image's details as pages show them (the "details"
@@ -82,12 +83,35 @@ func (s *Server) registerDetails(ctx context.Context, vmid int) pods.ImageDetail
 	return pods.ImageDetails{}
 }
 
-// currentDetails are the details of family's newest version, which Edit
-// details starts from; none if it can't be read.
-func (s *Server) currentDetails(ctx context.Context, images []pods.BaseImage, family string) pods.ImageDetails {
+// notesEdit is what Edit notes starts from: the version it writes, its
+// details and free text (pods.EditableNotes). Unreadable says its details
+// block is: the fields start empty, and Raw shows its notes as they are.
+type notesEdit struct {
+	Image      string
+	Details    pods.ImageDetails
+	Free       string
+	Unreadable bool
+	Raw        string
+	ReadErr    string // why its notes couldn't be read: the form starts empty
+}
+
+// editableNotes is what Edit notes on family starts from, or nil when it
+// has no version that isn't deprecated.
+func (s *Server) editableNotes(ctx context.Context, images []pods.BaseImage, family string) *notesEdit {
 	newest, ok := pods.Newest(images, family)
 	if !ok {
-		return pods.ImageDetails{}
+		return nil
 	}
-	return s.planner(ctx).ReadNotes(ctx, []pods.BaseImage{newest})[0].Details
+	e := &notesEdit{Image: newest.Name}
+	cfg, err := s.planner(ctx).API.VMConfig(ctx, newest.Node, newest.VMID)
+	if err != nil {
+		e.ReadErr = "Couldn't read the notes of " + newest.Name + ": " + sentence(proxmox.Describe(err))
+		return e
+	}
+	var derr error
+	e.Details, e.Free, derr = pods.EditableNotes(cfg["description"])
+	if e.Unreadable = derr != nil; e.Unreadable {
+		e.Raw = pods.UserNotes(cfg["description"])
+	}
+	return e
 }

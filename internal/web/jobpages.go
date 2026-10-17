@@ -302,8 +302,10 @@ type jobView struct {
 	// RanAt is the full time, for a title.
 	Ran, RanAt string
 	Asked      []fact // the inputs beyond teams and hosts, e.g. the snapshot
-	// Details are the details a register or Edit details writes.
+	// Details are the details a register or Edit notes writes, and Notes
+	// the free text an Edit notes writes.
 	Details    *detailsView
+	Notes      string
 	Error      string
 	Headline   string // a succeeded deploy's or teardown's result (fleetHeadline)
 	Summary    *summaryView
@@ -672,6 +674,9 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	var plan pods.Plan
 	if json.Unmarshal(j.Plan, &plan) == nil && len(plan.Items) == 1 && plan.Items[0].Details != nil {
 		v.Details = detailsOf(*plan.Items[0].Details, false)
+		if n := plan.Items[0].FreeNotes; n != nil {
+			v.Notes = *n
+		}
 	}
 	v.Ran, v.RanAt = minuteTime(now, j.CreatedAt), "made "+clockTime(now, j.CreatedAt)
 	if j.StartedAt != nil {

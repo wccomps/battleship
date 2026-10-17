@@ -28,9 +28,14 @@ type catalogPage struct {
 	// DNSCards are Set DNS's choices; DNSHint says whose DNS it changes.
 	DNSCards []dnsCard
 	DNSHint  string
-	// Details fill a register's and an Edit details's fields: those given,
+	// Details fill a register's and an Edit notes's fields: those given,
 	// else those of the VM's notes or the family's newest version.
 	Details pods.ImageDetails
+	// Edit is what Edit notes edits: the family's newest version and its
+	// notes; nil when the family has none.
+	Edit *notesEdit
+	// Notes fills Edit notes's free text: that given, else Edit's.
+	Notes string
 	envForm
 }
 
@@ -151,13 +156,19 @@ func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, prob
 			}
 		}
 	}
+	if op.Kind == pods.KindImageDetails {
+		if p.Edit = s.editableNotes(ctx, p.Images, in.Family); p.Edit != nil {
+			p.Details, p.Notes = p.Edit.Details, p.Edit.Free
+		}
+		if in.Notes != nil {
+			p.Notes = *in.Notes
+		}
+	}
 	switch {
 	case in.Details != nil:
 		p.Details = *in.Details
 	case op.Kind == pods.KindImageRegister && in.VMID != 0:
 		p.Details = s.registerDetails(ctx, in.VMID)
-	case op.Kind == pods.KindImageDetails:
-		p.Details = s.currentDetails(ctx, p.Images, in.Family)
 	}
 	if op.Machines {
 		form := r.URL.Query()
@@ -176,5 +187,11 @@ func (s *Server) renderCatalogForm(w http.ResponseWriter, r *http.Request, statu
 	s.render(w, r, status, "teamless", s.newView(w, r, p.Op.Title, p.Op.nav(), p))
 }
 
-// Back is where the form's close and Cancel go.
-func (p catalogPage) Back() string { return listPage(p.In) }
+// Back is where the form's close and Cancel go: Edit notes goes back to
+// its family, where it opens.
+func (p catalogPage) Back() string {
+	if p.Op.Kind == pods.KindImageDetails && p.Edit != nil {
+		return familyHref(p.In.Family)
+	}
+	return listPage(p.In)
+}

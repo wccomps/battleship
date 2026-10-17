@@ -44,9 +44,12 @@ type Inputs struct {
 	Family    string `json:"family,omitempty"`     // register, edit
 	ImageKind string `json:"image_kind,omitempty"` // register a new family
 	Image     string `json:"image,omitempty"`      // deprecate, delete
-	// Details are what Edit details writes, or a register's in place of
+	// Details are what Edit notes writes, or a register's in place of
 	// those of its source's notes (pods.RegisterDetails).
 	Details *pods.ImageDetails `json:"details,omitempty"`
+	// Notes is the free text Edit notes writes beside the details; nil
+	// (as in jobs stored before it could) keeps the free text there is.
+	Notes *string `json:"notes,omitempty"`
 }
 
 // Typed is what a person types to confirm in (pods.Kind.TypedConfirm): a
@@ -266,7 +269,7 @@ func planFor(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*p
 	case pods.KindImageEdit:
 		return p.ImageEdit(ctx, pods.ImageRequest{Family: in.Family})
 	case pods.KindImageDetails:
-		return p.ImageSetDetails(ctx, pods.ImageRequest{Family: in.Family, Details: in.Details})
+		return p.ImageSetDetails(ctx, pods.ImageRequest{Family: in.Family, Details: in.Details, Notes: in.Notes})
 	case pods.KindImageDeprecate:
 		return p.ImageDeprecate(ctx, pods.ImageRequest{Image: in.Image})
 	case pods.KindImageDelete:
@@ -344,9 +347,18 @@ func (in Inputs) validateTeamless() []error {
 			errs = append(errs, errors.New("name the details to write"))
 		}
 	case in.Kind != pods.KindImageRegister && in.Kind != pods.KindImageDetails:
-		errs = append(errs, errors.New("details apply only to registering a base image and editing its details"))
+		errs = append(errs, errors.New("details apply only to registering a base image and editing its notes"))
 	default:
 		if err := pods.CheckDetails(*in.Details); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	switch {
+	case in.Notes == nil:
+	case in.Kind != pods.KindImageDetails:
+		errs = append(errs, errors.New("notes apply only to editing a base image's notes"))
+	default:
+		if err := pods.CheckFreeNotes(*in.Notes); err != nil {
 			errs = append(errs, err)
 		}
 	}

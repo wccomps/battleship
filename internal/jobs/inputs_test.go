@@ -250,10 +250,11 @@ func TestRetryInputsRefusesTeamless(t *testing.T) {
 	}
 }
 
-// Details are an Edit details's, which needs them, and a register's; no
-// other kind takes them.
+// Details are an Edit notes's, which needs them, and a register's; no
+// other kind takes them. Notes are Edit notes's alone.
 func TestValidateDetails(t *testing.T) {
 	d := &pods.ImageDetails{OS: "Debian 12"}
+	notes := "Patched monthly."
 	for _, c := range []struct {
 		in Inputs
 		ok bool
@@ -265,6 +266,9 @@ func TestValidateDetails(t *testing.T) {
 		{Inputs{Kind: pods.KindImageRegister, VMID: 150, Family: "debian-12"}, true},
 		{Inputs{Kind: pods.KindImageEdit, Family: "debian-12", Details: d}, false},
 		{Inputs{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", Details: d}, false},
+		{Inputs{Kind: pods.KindImageDetails, Family: "debian-12", Details: d, Notes: &notes}, true},
+		{Inputs{Kind: pods.KindImageRegister, VMID: 150, Family: "debian-12", Notes: &notes}, false},
+		{Inputs{Kind: pods.KindImageEdit, Family: "debian-12", Notes: &notes}, false},
 	} {
 		if err := c.in.Validate(); (err == nil) != c.ok {
 			t.Errorf("Validate(%s, details %v) = %v, want ok %v", c.in.Kind, c.in.Details != nil, err, c.ok)

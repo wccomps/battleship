@@ -300,13 +300,104 @@ func shift(bs [][2]int, n int) [][2]int {
 }
 
 // DetailsChanges is the config change that gives a VM whose config is cur
-// details d, if any.
-func DetailsChanges(cur map[string]string, d ImageDetails) (map[string]string, error) {
+// details d and, unless free is nil, the free text *free (WithFreeNotes);
+// nil if there is none.
+func DetailsChanges(cur map[string]string, d ImageDetails, free *string) (map[string]string, error) {
 	desc, err := WithDetails(cur["description"], d)
+	if free != nil {
+		desc, err = WithFreeNotes(cur["description"], d, *free)
+	}
 	if err != nil || desc == cur["description"] {
 		return nil, err
 	}
 	return map[string]string{"description": desc}, nil
+}
+
+const (
+	// MaxFreeNotes is the longest free text Edit notes writes, in
+	// characters: as much as pages show (UserNotes).
+	MaxFreeNotes = maxUserNotes
+	// MaxNotesBytes is the most a VM's notes hold: Proxmox refuses a longer
+	// description.
+	MaxNotesBytes = 8192
+)
+
+// CleanFreeNotes is free text as notes keep it (UserNotes reads it back
+// so): CRLF line ends as LF, no spaces at a line's end, no blank lines or
+// spaces at the start or end. Forms post text through it.
+func CleanFreeNotes(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \t\r")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+// CheckFreeNotes checks free text before it is written beside the details
+// block: printable text in lines (no other control, format or invisible
+// characters, as CheckDetails), clean (CleanFreeNotes), at most
+// MaxFreeNotes characters, and no line that would read as the battleship
+// line or a details block's header, which are Battleship's.
+func CheckFreeNotes(s string) error {
+	switch {
+	case !utf8.ValidString(s) || strings.ContainsFunc(s, func(r rune) bool { return r != '\n' && !unicode.IsPrint(r) }):
+		return errors.New("the notes must be printable text: no tabs, control or invisible characters")
+	case utf8.RuneCountInString(s) > MaxFreeNotes:
+		return fmt.Errorf("the notes are too long: at most %d characters", MaxFreeNotes)
+	case s != CleanFreeNotes(s):
+		return errors.New("the notes must not start or end with blank lines, or end a line with spaces")
+	}
+	for _, line := range strings.Split(s, "\n") {
+		switch {
+		case isHeader(line):
+			return fmt.Errorf("a line of the notes reads %s, which heads the details: use the fields", detailsHeader)
+		case isNotesLine(line):
+			return fmt.Errorf("a line of the notes starts %q, which is Battleship's own line", notesPrefix)
+		}
+	}
+	return nil
+}
+
+// isNotesLine reports whether line is a battleship line as any reader sees
+// it: UserNotes hides it, and ParseNotes reads the first.
+func isNotesLine(line string) bool {
+	return strings.HasPrefix(strings.TrimSpace(dropFormat(line)), notesPrefix)
+}
+
+// EditableNotes is what Edit notes starts from in notes desc: the details
+// and the free text, all of it (UserNotes without its cap) less the
+// details block. When the block is unreadable (ErrDetailsUnreadable) the
+// details are empty and free is the text outside every block, which a
+// page shows beside the notes as they are (UserNotes).
+func EditableNotes(desc string) (d ImageDetails, free string, err error) {
+	lines := strings.Split(desc, "\n")
+	d, _, err = ParseDetails(desc)
+	return d, userText(strings.Join(without(lines, blocks(lines)), "\n")), err
+}
+
+// WithFreeNotes is notes desc rewritten as details d's block, then free
+// text free, then each battleship line of desc exactly as it was, a blank
+// line between each part. People never see those lines, and CheckFreeNotes
+// lets no line of free read as one, or as a block's header. It refuses
+// details CheckDetails refuses and text CheckFreeNotes does, returning
+// desc.
+func WithFreeNotes(desc string, d ImageDetails, free string) (string, error) {
+	if err := errors.Join(CheckDetails(d), CheckFreeNotes(free)); err != nil {
+		return desc, err
+	}
+	var kept []string
+	for _, line := range strings.Split(desc, "\n") {
+		if isNotesLine(line) {
+			kept = append(kept, line)
+		}
+	}
+	var parts []string
+	for _, p := range []string{d.block(), free, strings.Join(kept, "\n")} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return strings.Join(parts, "\n\n"), nil
 }
 
 // Prose patterns RegisterDetails reads: "Login: user / password", "built

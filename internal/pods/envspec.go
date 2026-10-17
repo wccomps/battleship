@@ -140,6 +140,15 @@ const maxUserNotes = 4000
 // characters (bidi overrides, zero widths) are dropped so notes can't
 // disguise what they say.
 func UserNotes(desc string) string {
+	s := userText(desc)
+	if r := []rune(s); len(r) > maxUserNotes {
+		s = string(r[:maxUserNotes]) + "…"
+	}
+	return s
+}
+
+// userText is UserNotes without its cap.
+func userText(desc string) string {
 	desc = dropFormat(desc)
 	var keep []string
 	for _, line := range strings.Split(desc, "\n") {
@@ -147,11 +156,7 @@ func UserNotes(desc string) string {
 			keep = append(keep, strings.TrimRight(line, " \t\r"))
 		}
 	}
-	s := strings.TrimSpace(strings.Join(keep, "\n"))
-	if r := []rune(s); len(r) > maxUserNotes {
-		s = string(r[:maxUserNotes]) + "…"
-	}
-	return s
+	return strings.TrimSpace(strings.Join(keep, "\n"))
 }
 
 // Checked drops the values a guest script can't take. Users can edit notes,
