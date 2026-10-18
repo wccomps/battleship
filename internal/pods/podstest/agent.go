@@ -156,7 +156,11 @@ func (f *Fake) ExecRunning(pid int) bool {
 	return f.ExecRunsFor != nil && f.polls[pid] <= f.ExecRunsFor(pid)
 }
 
-func (f *Fake) AgentExecStatus(ctx context.Context, node string, vmid, pid int) (proxmox.ExecStatus, error) {
+// AgentExecStatus fails without a cap on the answer, as the client does.
+func (f *Fake) AgentExecStatus(ctx context.Context, node string, vmid, pid int, limit int64) (proxmox.ExecStatus, error) {
+	if limit <= 0 {
+		return proxmox.ExecStatus{}, fmt.Errorf("GET agent/exec-status: no cap on the answer")
+	}
 	var st proxmox.ExecStatus
 	err := f.agentCall(ctx, fmt.Sprintf("agent-status:%d", vmid), node, vmid, func(g *Guest) error {
 		if r, ok := f.Restarts[pid]; ok {

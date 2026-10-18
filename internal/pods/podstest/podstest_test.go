@@ -30,7 +30,7 @@ func TestFakeGuestAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := f.AgentExecStatus(ctx, "alder", 2501, pid)
+	st, err := f.AgentExecStatus(ctx, "alder", 2501, pid, 1<<20)
 	if err != nil || !st.Exited || st.Out != "ok" {
 		t.Fatalf("status = %+v, %v", st, err)
 	}
@@ -55,7 +55,7 @@ func TestFakeGuestRestarts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		st, err := f.AgentExecStatus(ctx, "alder", 2501, pid)
+		st, err := f.AgentExecStatus(ctx, "alder", 2501, pid, 1<<20)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -75,7 +75,7 @@ func TestFakeGuestRestarts(t *testing.T) {
 	if err != nil || pid != 3 {
 		t.Fatalf("pid %d, %v", pid, err)
 	}
-	if _, err := f.AgentExecStatus(ctx, "alder", 2501, pid); !proxmox.IsExecGone(err) {
+	if _, err := f.AgentExecStatus(ctx, "alder", 2501, pid, 1<<20); !proxmox.IsExecGone(err) {
 		t.Errorf("status after the restart: %v", err)
 	}
 	for i := range 2 {

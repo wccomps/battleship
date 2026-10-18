@@ -31,12 +31,12 @@ func TestAgentExecSendsCommandListAndInput(t *testing.T) {
 func TestAgentExecStatusReadsNumbersAndBools(t *testing.T) {
 	f, c := newFake(t)
 	f.routes["GET /nodes/cedar/qemu/2501/agent/exec-status"] = jsonData(`{"exited":1,"exitcode":3,"out-data":"o","err-data":"e"}`)
-	st, err := c.AgentExecStatus(context.Background(), "cedar", 2501, 77)
+	st, err := c.AgentExecStatus(context.Background(), "cedar", 2501, 77, execCap)
 	if err != nil || st != (ExecStatus{Exited: true, ExitCode: 3, Out: "o", Err: "e"}) {
 		t.Fatalf("status = %+v, %v", st, err)
 	}
 	f.routes["GET /nodes/cedar/qemu/2501/agent/exec-status"] = jsonData(`{"exited":false}`)
-	if st, _ := c.AgentExecStatus(context.Background(), "cedar", 2501, 77); st.Exited {
+	if st, _ := c.AgentExecStatus(context.Background(), "cedar", 2501, 77, execCap); st.Exited {
 		t.Error("exited:false read as exited")
 	}
 }
@@ -93,6 +93,9 @@ type agentCall struct {
 func (a agentCall) min() int            { return len(a.head) + len(a.tail) }
 func (a agentCall) answer(n int) string { return a.head + strings.Repeat("x", n-a.min()) + a.tail }
 
+// execCap is the cap the tests' callers give AgentExecStatus.
+const execCap = 1 << 20
+
 var agentCalls = []agentCall{
 	{"AgentPing", "POST /nodes/cedar/qemu/2501/agent/ping", maxSmallAnswer, `{"data":{"result":{},"x":"`, `"}}`,
 		func(c *Client) error { return c.AgentPing(context.Background(), "cedar", 2501) }},
@@ -101,12 +104,41 @@ var agentCalls = []agentCall{
 			_, err := c.AgentExec(context.Background(), "cedar", 2501, []string{"true"}, "")
 			return err
 		}},
-	{"AgentExecStatus", "GET /nodes/cedar/qemu/2501/agent/exec-status", maxExecAnswer, `{"data":{"exited":1,"exitcode":0,"out-data":"`, `"}}`,
-		func(c *Client) error { _, err := c.AgentExecStatus(context.Background(), "cedar", 2501, 7); return err }},
+	{"AgentExecStatus", "GET /nodes/cedar/qemu/2501/agent/exec-status", execCap, `{"data":{"exited":1,"exitcode":0,"out-data":"`, `"}}`,
+		func(c *Client) error {
+			_, err := c.AgentExecStatus(context.Background(), "cedar", 2501, 7, execCap)
+			return err
+		}},
 	{"AgentHostname", "GET /nodes/cedar/qemu/2501/agent/get-host-name", maxSmallAnswer, `{"data":{"result":{"host-name":"`, `"}}}`,
 		func(c *Client) error { _, err := c.AgentHostname(context.Background(), "cedar", 2501); return err }},
 	{"AgentInterfaces", "GET /nodes/cedar/qemu/2501/agent/network-get-interfaces", maxNICsAnswer, nicsHead, nicsTail,
 		func(c *Client) error { _, err := c.AgentInterfaces(context.Background(), "cedar", 2501); return err }},
+}
+
+// Every Agent method is in agentCalls, so TestPropAgentAnswersCapped holds
+// it to a cap.
+func TestEveryAgentCallIsCapped(t *testing.T) {
+	typ := reflect.TypeFor[*Client]()
+	for i := range typ.NumMethod() {
+		name := typ.Method(i).Name
+		if strings.HasPrefix(name, "Agent") && !slices.ContainsFunc(agentCalls, func(a agentCall) bool { return a.name == name }) {
+			t.Errorf("%s isn't in agentCalls", name)
+		}
+	}
+}
+
+// A caller that gives no cap gets an error, not a read of any size.
+func TestAgentCallWithoutACapFails(t *testing.T) {
+	f, c := newFake(t)
+	f.routes["GET /nodes/cedar/qemu/2501/agent/exec-status"] = jsonData(`{"exited":1,"exitcode":0}`)
+	for _, limit := range []int64{0, -1} {
+		if _, err := c.AgentExecStatus(context.Background(), "cedar", 2501, 7, limit); err == nil || !strings.Contains(err.Error(), "no cap") {
+			t.Errorf("limit %d: %v", limit, err)
+		}
+	}
+	if len(f.requests) != 0 {
+		t.Errorf("requests sent: %q", f.requests)
+	}
 }
 
 // Every answer to an Agent call, which the guest writes, is read only up to

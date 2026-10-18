@@ -20,9 +20,19 @@ type GuestNIC struct {
 }
 
 // The guest agent writes every answer to an Agent call, so each is capped
-// by what it carries. A small one (a PID, a host name, which DNS limits to
-// 253 bytes, or nothing) fits maxSmallAnswer even with every byte escaped.
+// by what it carries (see agent). A small one (a PID, a host name, which
+// the guest's OS limits to 64 bytes, or nothing) fits maxSmallAnswer even
+// with every byte escaped.
 const maxSmallAnswer = 4 << 10
+
+// agent calls the guest agent's command cmd on vmid, refusing an answer
+// over limit bytes, which every Agent call must give.
+func (c *Client) agent(ctx context.Context, limit int64, method, node string, vmid int, cmd string, params url.Values, out any) error {
+	if limit <= 0 {
+		return fmt.Errorf("%s agent/%s: no cap on the answer", method, cmd)
+	}
+	return c.capped(limit).do(ctx, method, vmPath(node, vmid)+"/agent/"+cmd, params, out)
+}
 
 // ExecStatus is the state of a command the guest agent runs.
 type ExecStatus struct {
@@ -33,7 +43,7 @@ type ExecStatus struct {
 
 // AgentPing fails unless the VM's guest agent answers.
 func (c *Client) AgentPing(ctx context.Context, node string, vmid int) error {
-	return c.capped(maxSmallAnswer).do(ctx, http.MethodPost, vmPath(node, vmid)+"/agent/ping", nil, nil)
+	return c.agent(ctx, maxSmallAnswer, http.MethodPost, node, vmid, "ping", nil, nil)
 }
 
 // AgentExec starts command in the guest with input on its stdin and returns
@@ -49,7 +59,7 @@ func (c *Client) AgentExec(ctx context.Context, node string, vmid int, command [
 	var raw struct {
 		PID json.Number `json:"pid"`
 	}
-	if err := c.capped(maxSmallAnswer).do(ctx, http.MethodPost, vmPath(node, vmid)+"/agent/exec", params, &raw); err != nil {
+	if err := c.agent(ctx, maxSmallAnswer, http.MethodPost, node, vmid, "exec", params, &raw); err != nil {
 		return 0, err
 	}
 	pid, err := raw.PID.Int64()
@@ -59,15 +69,9 @@ func (c *Client) AgentExec(ctx context.Context, node string, vmid int, command [
 	return int(pid), nil
 }
 
-// maxExecAnswer bounds an answer to AgentExecStatus, which carries the
-// command's output. Battleship's guest scripts send their tools' output to
-// /dev/null or Out-Null, so they print a few lines, or one error record;
-// 1 MiB is hundreds of times that.
-const maxExecAnswer = 1 << 20
-
 // AgentExecStatus reads the state of the guest command pid. It refuses an
-// answer over maxExecAnswer.
-func (c *Client) AgentExecStatus(ctx context.Context, node string, vmid, pid int) (ExecStatus, error) {
+// answer, which carries the command's output, over limit bytes.
+func (c *Client) AgentExecStatus(ctx context.Context, node string, vmid, pid int, limit int64) (ExecStatus, error) {
 	var raw struct {
 		Exited   json.RawMessage `json:"exited"`
 		ExitCode json.Number     `json:"exitcode"`
@@ -75,7 +79,7 @@ func (c *Client) AgentExecStatus(ctx context.Context, node string, vmid, pid int
 		Err      string          `json:"err-data"`
 	}
 	params := url.Values{"pid": {strconv.Itoa(pid)}}
-	if err := c.capped(maxExecAnswer).do(ctx, http.MethodGet, vmPath(node, vmid)+"/agent/exec-status", params, &raw); err != nil {
+	if err := c.agent(ctx, limit, http.MethodGet, node, vmid, "exec-status", params, &raw); err != nil {
 		return ExecStatus{}, err
 	}
 	exited := strings.TrimSpace(string(raw.Exited))
@@ -100,7 +104,7 @@ func (c *Client) AgentInterfaces(ctx context.Context, node string, vmid int) ([]
 			} `json:"ip-addresses"`
 		} `json:"result"`
 	}
-	if err := c.capped(maxNICsAnswer).do(ctx, http.MethodGet, vmPath(node, vmid)+"/agent/network-get-interfaces", nil, &raw); err != nil {
+	if err := c.agent(ctx, maxNICsAnswer, http.MethodGet, node, vmid, "network-get-interfaces", nil, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]GuestNIC, 0, len(raw.Result))
@@ -148,6 +152,6 @@ func (c *Client) AgentHostname(ctx context.Context, node string, vmid int) (stri
 			Name string `json:"host-name"`
 		} `json:"result"`
 	}
-	err := c.capped(maxSmallAnswer).do(ctx, http.MethodGet, vmPath(node, vmid)+"/agent/get-host-name", nil, &raw)
+	err := c.agent(ctx, maxSmallAnswer, http.MethodGet, node, vmid, "get-host-name", nil, &raw)
 	return raw.Result.Name, err
 }

@@ -91,7 +91,7 @@ func (e *Executor) setupState(ctx context.Context, it *pods.Item, waited *time.D
 	}
 	for range probePolls {
 		var st proxmox.ExecStatus
-		if err := e.lim.Call(ctx, func() (err error) { st, err = e.api.AgentExecStatus(ctx, it.Node, it.VMID, pid); return }); err != nil {
+		if err := e.lim.Call(ctx, func() (err error) { st, err = e.api.AgentExecStatus(ctx, it.Node, it.VMID, pid, maxExecStatus); return }); err != nil {
 			return "", err
 		}
 		if st.Exited {
@@ -184,6 +184,12 @@ func (e *Executor) restart(ctx context.Context, it *pods.Item) error {
 	return e.taskOnce(ctx, func() (string, error) { return e.api.Power(ctx, it.Node, it.VMID, "start") })
 }
 
+// maxExecStatus bounds an answer to a status read of a guest command, which
+// carries its output. pods' guest commands print a few lines, or one error
+// record (their PowerShell stops at the first), and SetupStateCommand one
+// word; 1 MiB is hundreds of times that.
+const maxExecStatus = 1 << 20
+
 // exec runs a command through the agent and waits for it to exit 0.
 //
 // The agent can't stop a command, so one that outlasts execLimit keeps
@@ -205,7 +211,7 @@ func (e *Executor) exec(ctx context.Context, it *pods.Item, cmd []string, input 
 	}
 	for range int(execLimit / execPoll) {
 		var st proxmox.ExecStatus
-		if err := e.call(ctx, func() (err error) { st, err = e.api.AgentExecStatus(ctx, it.Node, it.VMID, pid); return }); err != nil {
+		if err := e.call(ctx, func() (err error) { st, err = e.api.AgentExecStatus(ctx, it.Node, it.VMID, pid, maxExecStatus); return }); err != nil {
 			if proxmox.IsExecGone(err) {
 				return "", fmt.Errorf("%w (%s)", errRestarted, proxmox.Describe(err))
 			}
