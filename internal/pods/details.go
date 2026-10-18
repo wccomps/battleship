@@ -313,6 +313,9 @@ func shift(bs [][2]int, n int) [][2]int {
 type ImageNotes struct {
 	ImageDetails
 	Free *string `json:"free,omitempty"`
+	// From marks the notes an Edit notes form opened on (NotesEdit.Edit):
+	// changed since, the plan is blocked rather than write over them.
+	From string `json:"from,omitempty"`
 }
 
 // check checks n before it is written: its details (CheckDetails), and its
@@ -389,12 +392,6 @@ func readImageNotes(desc string) NotesRead {
 		r.Unreadable, r.Block = true, userText(strings.Join(in, "\n\n"))
 	}
 	return r
-}
-
-// Edit is what an Edit notes form starts from: r's details and free text.
-func (r NotesRead) Edit() ImageNotes {
-	free := r.Free
-	return ImageNotes{ImageDetails: r.Details, Free: &free}
 }
 
 const (

@@ -109,9 +109,9 @@ func (s *Server) notesForm(ctx context.Context, op operation, in jobs.Inputs, pr
 		p.Edit.Err = "Couldn't read the notes to edit: " + sentence(proxmox.Describe(err))
 		return p
 	}
-	p.Edit.Was, p.Details = at.Read, at.Read.Edit()
+	p.Edit.Was, p.Details = at.Read, at.Edit()
 	if d := in.Details; d != nil {
-		p.Details.ImageDetails = d.ImageDetails
+		p.Details.ImageDetails, p.Details.From = d.ImageDetails, d.From
 		if d.Free != nil {
 			p.Details.Free = d.Free
 		}

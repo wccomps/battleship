@@ -96,6 +96,55 @@ func TestPropEditNotesFormSentBackUnchanged(t *testing.T) {
 	})
 }
 
+// drawNotes draws notes an image may have: a details block or not, free
+// text from notesPieces or anything, and a battleship line or not.
+func drawNotes(rt *rapid.T, label string) string {
+	piece := rapid.OneOf(rapid.SampledFrom(notesPieces), rapid.SampledFrom(notesPieces), rapid.String())
+	free := strings.Join(rapid.SliceOfN(piece, 0, 6).Draw(rt, label+" free pieces"), "")
+	head := rapid.SampledFrom([]string{"", winBlock + "\n\n", "intro\n\n**Details**\n- Colour: blue\n\n"}).Draw(rt, label+" head")
+	return head + free + rapid.SampledFrom([]string{"", "\nbattleship: source=160"}).Draw(rt, label+" line")
+}
+
+// An Edit notes form remembers the notes it opened on: whatever notes A it
+// opened with, and notes B written after it opened, its preview is refused
+// when B isn't A, and offers a confirm that carries the mark through when
+// it is.
+func TestPropEditNotesFormRefusesNotesChangedSince(t *testing.T) {
+	h := newHarness(t)
+	addDetailed(h)
+	sess := h.login(asLead)
+	set := func(desc string) {
+		h.api.Mu.Lock()
+		h.api.VMs[8010].Config["description"] = desc
+		h.api.Mu.Unlock()
+	}
+	rapid.Check(t, func(rt *rapid.T) {
+		a := drawNotes(rt, "A")
+		b := a
+		if rapid.Bool().Draw(rt, "written since") {
+			b = drawNotes(rt, "B")
+		}
+		set(a)
+		action, form := browserForm(rt, h.get(&sess, notesHref("win2022")).Body.String())
+		set(b)
+		form.Set(fieldOS, "Changed OS "+rapid.StringMatching(`[a-z0-9]{1,8}`).Draw(rt, "os"))
+		rec := h.post(&sess, action, form)
+		body := rec.Body.String()
+		if a != b {
+			if rec.Code != http.StatusOK || !strings.Contains(body, "changed since you opened this form") || strings.Contains(body, "/images/details/confirm") {
+				rt.Fatalf("notes %q, then %q: preview = %d\n%s", a, b, rec.Code, body)
+			}
+			return
+		}
+		if rec.Code != http.StatusOK || !strings.Contains(body, "/images/details/confirm") {
+			rt.Fatalf("notes %q, unchanged: preview = %d\n%s", a, rec.Code, body)
+		}
+		if _, fields := confirmOf(h.t, body); form.Get(fieldNotesFrom) == "" || fields.Get(fieldNotesFrom) != form.Get(fieldNotesFrom) {
+			rt.Fatalf("the form's mark %q, the confirm's %q", form.Get(fieldNotesFrom), fields.Get(fieldNotesFrom))
+		}
+	})
+}
+
 // An Edit notes form that couldn't read the notes it would replace, or
 // has no family to read, says why and offers no save: it can't post empty
 // fields over notes it never showed.

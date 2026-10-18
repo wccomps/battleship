@@ -258,7 +258,7 @@ func TestImageSetNotes(t *testing.T) {
 		map[string]string{"description": winBlock + "\n\nPatched.\nbattleship: source=150"})
 	p := NewPlanner(f, envConfig())
 	notes := "Patched.\nRebooted."
-	plan, err := p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{winDetails, &notes}})
+	plan, err := p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{ImageDetails: winDetails, Free: &notes}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestImageSetNotes(t *testing.T) {
 	}
 	same := "Patched."
 	for _, n := range []*string{&same, nil} {
-		plan, _ = p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{winDetails, n}})
+		plan, _ = p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{ImageDetails: winDetails, Free: n}})
 		if !strings.Contains(plan.Items[0].Blocked, "already say this") {
 			t.Errorf("unchanged notes %v: %+v", n, plan.Items[0])
 		}
@@ -283,12 +283,12 @@ func TestImageSetNotes(t *testing.T) {
 		t.Errorf("without notes, writes %q", ch["description"])
 	}
 	big := strings.Repeat("é", MaxFreeNotes) // 8000 bytes
-	plan, _ = p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{winDetails, &big}})
+	plan, _ = p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{ImageDetails: winDetails, Free: &big}})
 	if !strings.Contains(plan.Items[0].Blocked, "Proxmox keeps at most 8192") {
 		t.Errorf("notes too big for Proxmox: %+v", plan.Items[0].Blocked)
 	}
 	bad := "x\nbattleship: ip=10.50.0.1"
-	if _, err := p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{winDetails, &bad}}); err == nil {
+	if _, err := p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{ImageDetails: winDetails, Free: &bad}}); err == nil {
 		t.Error("planned notes with a battleship line")
 	}
 }
@@ -319,7 +319,7 @@ func TestEditKeepsUnchangedNotes(t *testing.T) {
 		f := imageFake()
 		f.Add(proxmox.VM{VMID: 8001, Name: "debian-12-v2", Node: "alder", Template: true, Tags: "base;linux"}, map[string]string{"description": desc})
 		posted := CleanFreeNotes(browserPost(readImageNotes(desc).Free))
-		n := ImageNotes{ImageDetails{OS: "Debian 13"}, &posted}
+		n := ImageNotes{ImageDetails: ImageDetails{OS: "Debian 13"}, Free: &posted}
 		plan, err := NewPlanner(f, envConfig()).ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &n})
 		if err != nil {
 			t.Errorf("%.20q: %v", free, err)
@@ -430,7 +430,7 @@ func TestPropEditKeepsUntouchedLines(t *testing.T) {
 		f := imageFake()
 		f.Add(proxmox.VM{VMID: 8001, Name: "debian-12-v2", Node: "alder", Template: true, Tags: "base;linux"}, map[string]string{"description": desc})
 		posted := CleanFreeNotes(browserPost(strings.Join(form, "\n")))
-		plan, err := NewPlanner(f, envConfig()).ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{d, &posted}})
+		plan, err := NewPlanner(f, envConfig()).ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{ImageDetails: d, Free: &posted}})
 		if forged {
 			if err == nil {
 				t.Fatalf("planned the forged line %q", edited)
@@ -472,7 +472,7 @@ func TestEditWithOddCharactersElsewhere(t *testing.T) {
 		f := imageFake()
 		f.Add(proxmox.VM{VMID: 8001, Name: "debian-12-v2", Node: "alder", Template: true, Tags: "base;linux"}, map[string]string{"description": desc})
 		posted := CleanFreeNotes(browserPost(readImageNotes(desc).Free + "\nRebooted."))
-		plan, err := NewPlanner(f, envConfig()).ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{winDetails, &posted}})
+		plan, err := NewPlanner(f, envConfig()).ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{ImageDetails: winDetails, Free: &posted}})
 		if err != nil {
 			t.Errorf("%q: edit refused: %v", other, err)
 			continue
@@ -497,4 +497,45 @@ func TestPropEditTextIsWritable(t *testing.T) {
 			t.Fatalf("read %q, again %q", r, editText(r))
 		}
 	})
+}
+
+// An Edit notes form changed only the OS, but Bob added a line after it
+// opened: its free text, sent back as the form showed it, would remove
+// his line, so the plan is blocked; from notes that didn't change, it
+// isn't. A version registered since is other notes, too.
+func TestEditNotesRefusesNotesChangedSinceTheForm(t *testing.T) {
+	ctx := context.Background()
+	start := winBlock + "\n\nPatched.\nbattleship: source=1"
+	f := imageFake()
+	f.Add(proxmox.VM{VMID: 8001, Name: "debian-12-v2", Node: "alder", Template: true, Tags: "base;linux"}, map[string]string{"description": start})
+	p := NewPlanner(f, envConfig())
+	at, err := p.NotesToEdit(ctx, "debian-12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := at.Edit()
+	form.OS = "Windows Server 2025"
+	plan := func() Item {
+		t.Helper()
+		posted := CleanFreeNotes(browserPost(*form.Free))
+		n := form
+		n.Free = &posted
+		plan, err := p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &n})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return plan.Items[0]
+	}
+	if it := plan(); it.Blocked != "" {
+		t.Fatalf("unchanged notes: blocked %q", it.Blocked)
+	}
+	f.VMs[8001].Config["description"] = winBlock + "\n\nPatched.\nDO NOT DEPLOY\nbattleship: source=1"
+	if it := plan(); !strings.Contains(it.Blocked, "changed since you opened this form") {
+		t.Errorf("notes changed since the form: blocked %q", it.Blocked)
+	}
+	f.VMs[8001].Config["description"] = start
+	f.Add(proxmox.VM{VMID: 8002, Name: "debian-12-v3", Node: "alder", Template: true, Tags: "base;linux"}, map[string]string{"description": start})
+	if it := plan(); it.Name != "debian-12-v3" || !strings.Contains(it.Blocked, "changed since you opened this form") {
+		t.Errorf("a version registered since the form: %s blocked %q", it.Name, it.Blocked)
+	}
 }

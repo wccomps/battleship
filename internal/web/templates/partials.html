@@ -67,9 +67,11 @@
 
 {{/* details-fields are an ImageNotes's details as form fields (formInputs
      reads them), the login first as on the pages; their "details" field
-     says whether the free text is posted too. */}}
+     says whether the free text is posted too, and "notes_from" marks the
+     notes an Edit notes form opened on. */}}
 {{define "details-fields" -}}
 <input type="hidden" name="details" value="{{if .Free}}with-notes{{else}}yes{{end}}">
+{{- with .From}}<input type="hidden" name="notes_from" value="{{.}}">{{end}}
 <div class="dfields">
 <label class="field"><span class="lbl">Login user</span><input class="inp" type="text" name="detail_user" value="{{.User}}" maxlength="{{maxDetail}}" autocomplete="off" spellcheck="false" placeholder="e.g. Administrator"></label>
 <label class="field"><span class="lbl">Password</span><input class="inp" type="text" name="detail_password" value="{{.Password}}" maxlength="{{maxDetail}}" autocomplete="off" spellcheck="false"></label>

@@ -178,6 +178,7 @@ const (
 	fieldInstalled   = "detail_installed"
 	fieldLicence     = "detail_licence"
 	fieldNotes       = "notes"
+	fieldNotesFrom   = "notes_from" // the notes an Edit notes form opened on (pods.ImageNotes.From)
 	fromGridValue    = "grid"
 	yes              = "yes"
 )
@@ -220,6 +221,7 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 				free := pods.CleanFreeNotes(form.Get(fieldNotes))
 				n.Free = &free
 			}
+			n.From = strings.TrimSpace(form.Get(fieldNotesFrom))
 			in.Details = &n
 		}
 		return in
@@ -330,7 +332,7 @@ func detailsFields(d *pods.ImageNotes) []field {
 	if d.Free != nil {
 		fs = []field{{fieldDetails, withNotes}, {fieldNotes, *d.Free}}
 	}
-	for _, f := range []field{{fieldOS, d.OS}, {fieldUser, d.User}, {fieldPassword, d.Password}, {fieldBuilt, d.Built},
+	for _, f := range []field{{fieldNotesFrom, d.From}, {fieldOS, d.OS}, {fieldUser, d.User}, {fieldPassword, d.Password}, {fieldBuilt, d.Built},
 		{fieldGeneralized, d.Generalized}, {fieldInstalled, d.Installed}, {fieldLicence, d.Licence}} {
 		if f.Value != "" {
 			fs = append(fs, f)

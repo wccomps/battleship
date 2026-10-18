@@ -345,8 +345,8 @@ func (in Inputs) validateTeamless() []error {
 		}
 	case in.Kind != pods.KindImageRegister && in.Kind != pods.KindImageDetails:
 		errs = append(errs, errors.New("details apply only to registering a base image and editing its notes"))
-	case in.Details.Free != nil && in.Kind != pods.KindImageDetails:
-		errs = append(errs, errors.New("free text applies only to editing a base image's notes"))
+	case (in.Details.Free != nil || in.Details.From != "") && in.Kind != pods.KindImageDetails:
+		errs = append(errs, errors.New("free text, and the notes a form opened on, apply only to editing a base image's notes"))
 	}
 	switch in.Kind {
 	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS, pods.KindEnvTeardown:

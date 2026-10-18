@@ -2,6 +2,8 @@ package pods
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -270,6 +272,19 @@ type NotesEdit struct {
 	desc  string
 }
 
+// Edit is what an Edit notes form starts from: the details and free text
+// read, and a mark of the notes they were read from (From).
+func (e NotesEdit) Edit() ImageNotes {
+	free := e.Read.Free
+	return ImageNotes{ImageDetails: e.Read.Details, Free: &free, From: e.from()}
+}
+
+// from marks e's version and its notes exactly as they were read.
+func (e NotesEdit) from() string {
+	sum := sha256.Sum256([]byte(strconv.Itoa(e.Image.VMID) + "\n" + e.desc))
+	return hex.EncodeToString(sum[:])
+}
+
 // NotesToEdit reads what Edit notes on family starts from.
 func (p Planner) NotesToEdit(ctx context.Context, family string) (NotesEdit, error) {
 	vms, err := p.API.ClusterVMs(ctx)
@@ -307,6 +322,8 @@ func (p Planner) ImageSetDetails(ctx context.Context, req ImageRequest) (*Plan, 
 	}
 	it := Item{Name: at.Image.Name, VMID: at.Image.VMID, Node: at.Image.Node, Steps: []Step{StepDetails}, Details: &n, DetailsWas: &at.Read}
 	switch {
+	case n.From != "" && n.From != at.from():
+		it.Blocked = "the notes of " + at.Image.Name + " changed since you opened this form; open Edit notes again to start from them as they are"
 	case same:
 		it.Blocked = "the notes of " + at.Image.Name + " already say this"
 	case err != nil:
