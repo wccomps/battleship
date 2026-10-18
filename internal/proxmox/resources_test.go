@@ -115,3 +115,19 @@ func TestCreateSnapshotSendsNameDescriptionAndVMState(t *testing.T) {
 		}
 	}
 }
+
+func TestCustomCPUModels(t *testing.T) {
+	f, c := newFake(t)
+	f.routes["GET /nodes/cedar/capabilities/qemu/cpu"] = jsonData(`[
+		{"name":"x86-64-v2-AES","custom":0,"vendor":"default"},
+		{"name":"custom-baseline-nested","custom":1,"vendor":"GenuineIntel"},
+		{"name":"custom-baseline","custom":true,"vendor":"GenuineIntel"}]`)
+	models, err := c.CustomCPUModels(context.Background(), "cedar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"baseline", "baseline-nested"}
+	if !reflect.DeepEqual(models, want) {
+		t.Errorf("CustomCPUModels = %v, want %v", models, want)
+	}
+}

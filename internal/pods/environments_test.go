@@ -102,8 +102,8 @@ func TestNICMAC(t *testing.T) {
 
 func TestEnvironmentHostWarnings(t *testing.T) {
 	f := podstest.New("alder")
+	f.CPUModels = []string{"baseline", "baseline-nested"}
 	cfg := envConfig()
-	cfg.Deploy.CPUTypes = []string{"baseline", "baseline-nested"}
 
 	// Clean router and host: no warnings.
 	f.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;router"},

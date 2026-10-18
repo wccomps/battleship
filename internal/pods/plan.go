@@ -487,8 +487,9 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 			}
 		}
 	}
+	cpuModels := p.customCPUModels(ctx, nodes[0])
 	for _, m := range kept {
-		spec, ws, err := p.templateSpec(ctx, m, req.Rebuild, byName, used, vms, slotByPool)
+		spec, ws, err := p.templateSpec(ctx, m, req.Rebuild, byName, used, vms, slotByPool, cpuModels)
 		if err != nil {
 			return nil, err
 		}
@@ -534,12 +535,12 @@ func (p Planner) blockDuplicateHosts(specs []TemplateSpec, team string) {
 
 func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool,
 	byName map[string][]proxmox.VM, used map[int]string, vms []proxmox.VM,
-	slotByPool map[string]Slot) (TemplateSpec, []string, error) {
+	slotByPool map[string]Slot, cpuModels []string) (TemplateSpec, []string, error) {
 	cfg, err := p.API.VMConfig(ctx, m.Node, m.VMID)
 	if err != nil {
 		return TemplateSpec{}, nil, fmt.Errorf("reading master %s: %w", m.Name, err)
 	}
-	ws := p.masterWarnings(m, cfg, slotByPool)
+	ws := p.masterWarnings(m, cfg, slotByPool, cpuModels)
 	host, _ := p.Naming.SplitMaster(m.Name)
 	spec := TemplateSpec{
 		Name:       p.Naming.TemplateName(m.Name),

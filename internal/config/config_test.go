@@ -352,13 +352,6 @@ func TestValidateRanges(t *testing.T) {
 			},
 			wantErr: "deploy.master_tag is required",
 		},
-		{
-			name: "cpu_types blank entry",
-			mutate: func(c *Config) {
-				c.Deploy.CPUTypes = []string{"baseline", "  "}
-			},
-			wantErr: "deploy.cpu_types must not contain blank entries",
-		},
 	}
 
 	for _, tt := range tests {

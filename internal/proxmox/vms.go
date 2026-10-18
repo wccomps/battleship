@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -209,6 +210,29 @@ func (c *Client) OnlineNodes(ctx context.Context) ([]string, error) {
 	}
 	sort.Strings(nodes)
 	return nodes, nil
+}
+
+// CustomCPUModels lists a node's custom QEMU CPU models (from
+// /nodes/{node}/capabilities/qemu/cpu), without the "custom-" prefix, sorted.
+func (c *Client) CustomCPUModels(ctx context.Context, node string) ([]string, error) {
+	var raw []struct {
+		Name   string `json:"name"`
+		Custom any    `json:"custom"`
+	}
+	path := fmt.Sprintf("/nodes/%s/capabilities/qemu/cpu", url.PathEscape(node))
+	if err := c.do(ctx, http.MethodGet, path, nil, &raw); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, m := range raw {
+		if m.Custom == true || fmt.Sprint(m.Custom) == "1" {
+			if name := strings.TrimPrefix(m.Name, "custom-"); name != "" {
+				out = append(out, name)
+			}
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out), nil
 }
 
 // VMConfig returns the VM's current config with every value as a string.

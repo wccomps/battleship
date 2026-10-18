@@ -143,7 +143,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		_, it.Source.Notes, derr = ParseDetails(desc)
 		it.Source.Unreadable = derr != nil
 		it.Blocked = agentBlock(src, cfg, kind)
-		if ws := p.registerWarnings(cfg, kind); len(ws) > 0 {
+		if ws := p.registerWarnings(cfg, kind, p.customCPUModels(ctx, src.Node)); len(ws) > 0 {
 			notices = append(notices, fmt.Sprintf("%s: %s.", src.Name, strings.Join(ws, "; ")))
 		}
 		if d, ok := RegisterDetails(desc); ok && !d.Empty() && req.Details == nil {

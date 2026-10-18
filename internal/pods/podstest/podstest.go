@@ -41,10 +41,11 @@ type VM struct {
 // error. Mu guards every field: a test that reads or changes them while
 // calls may run holds it.
 type Fake struct {
-	Mu    sync.Mutex
-	Nodes []string // OnlineNodes
-	VMs   map[int]*VM
-	fail  map[string][]error
+	Mu        sync.Mutex
+	Nodes     []string // OnlineNodes
+	CPUModels []string // CustomCPUModels
+	VMs       map[int]*VM
+	fail      map[string][]error
 	// Calls are the keys of the calls made, in order (see record).
 	Calls []string
 	// Deleted are the VMIDs DeleteVM took off the cluster, in order.
@@ -321,6 +322,12 @@ func (f *Fake) OnlineNodes(ctx context.Context) ([]string, error) {
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 	return slices.Clone(f.Nodes), nil
+}
+
+func (f *Fake) CustomCPUModels(ctx context.Context, node string) ([]string, error) {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	return slices.Clone(f.CPUModels), nil
 }
 
 func (f *Fake) VMConfig(ctx context.Context, node string, vmid int) (map[string]string, error) {
