@@ -3,6 +3,7 @@ package proxmox
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -32,6 +33,9 @@ type Client struct {
 	anon bool // the call needs no credential (logins and renewals)
 	// refused is called on each 401; see WhenRefused.
 	refused func()
+	// limit, if set, is the most bytes of an answer a call reads (capped);
+	// else maxAnswer.
+	limit int64
 }
 
 // conn is what every view of a client shares.
@@ -61,6 +65,13 @@ func (c *Client) WhenRefused(refused func()) *Client {
 	return &v
 }
 
+// capped is a view whose calls refuse an answer over limit bytes.
+func (c *Client) capped(limit int64) *Client {
+	v := *c
+	v.limit = limit
+	return &v
+}
+
 // anonymous is a view that sends no credential, for logins.
 func (c *Client) anonymous() *Client { return &Client{conn: c.conn, anon: true} }
 
@@ -78,6 +89,9 @@ type Options struct {
 	// which verifies every node.
 	RootCAs *x509.CertPool
 }
+
+// maxAnswer is the most bytes of an answer a call reads, unless capped.
+const maxAnswer = 32 << 20
 
 // requestTimeout bounds each request.
 const requestTimeout = 60 * time.Second
@@ -140,10 +154,13 @@ func (c *Client) doAt(ctx context.Context, cred Credential, base, method, path s
 		return true, err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	limit := cmp.Or(c.limit, maxAnswer)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return true, err
 	}
+	over := int64(len(raw)) > limit
+	raw = raw[:min(int64(len(raw)), limit)]
 	var envelope struct {
 		Data   json.RawMessage   `json:"data"`
 		Errors map[string]string `json:"errors"`
@@ -172,6 +189,9 @@ func (c *Client) doAt(ctx context.Context, cred Credential, base, method, path s
 			}
 		}
 		return false, &APIError{Method: method, Path: path, Status: resp.StatusCode, Message: msg}
+	}
+	if over {
+		return false, fmt.Errorf("%s %s: answer over %d bytes", method, path, limit)
 	}
 	if unmarshalErr != nil && out != nil {
 		return false, fmt.Errorf("%s %s: invalid JSON response: %w", method, path, unmarshalErr)

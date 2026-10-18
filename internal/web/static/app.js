@@ -572,8 +572,8 @@
 
   // -- Live addresses
 
-  // The Environments page loads with assigned addresses; data-fill names
-  // the pieces (sse.go's piece) that swap in the live ones. If they can't
+  // The Environments page loads with assigned addresses; data-fill is the
+  // URL of pieces (sse.go's piece) that swap in the live ones. If they can't
   // be read, the line stays as it was, its link reading them without this.
   function fill(line) {
     var say = line.querySelector("[data-fill-say]"), was = say ? say.textContent : "";

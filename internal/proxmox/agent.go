@@ -68,7 +68,13 @@ func (c *Client) AgentExecStatus(ctx context.Context, node string, vmid, pid int
 	return ExecStatus{Exited: exited == "1" || exited == "true", ExitCode: int(int64Of(raw.ExitCode)), Out: raw.Out, Err: raw.Err}, nil
 }
 
-// AgentInterfaces lists the guest's network interfaces.
+// maxNICsAnswer bounds an answer to AgentInterfaces, which the guest
+// writes: 1 MiB is some 2,000 interfaces with their addresses and
+// statistics, far more than any real guest has.
+const maxNICsAnswer = 1 << 20
+
+// AgentInterfaces lists the guest's network interfaces. It refuses an
+// answer over maxNICsAnswer.
 func (c *Client) AgentInterfaces(ctx context.Context, node string, vmid int) ([]GuestNIC, error) {
 	var raw struct {
 		Result []struct {
@@ -80,7 +86,7 @@ func (c *Client) AgentInterfaces(ctx context.Context, node string, vmid int) ([]
 			} `json:"ip-addresses"`
 		} `json:"result"`
 	}
-	if err := c.do(ctx, http.MethodGet, vmPath(node, vmid)+"/agent/network-get-interfaces", nil, &raw); err != nil {
+	if err := c.capped(maxNICsAnswer).do(ctx, http.MethodGet, vmPath(node, vmid)+"/agent/network-get-interfaces", nil, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]GuestNIC, 0, len(raw.Result))

@@ -102,7 +102,10 @@ Windows and Linux hosts get their name, a static address on the slot's LAN (`.2`
 the QEMU guest agent. **Set DNS** (`env dns -domain kilo.alpha -server dc`) points them at a domain controller once it is promoted.
 **Tear down** (`env teardown -domain kilo.alpha`, confirmed by typing the domain) deletes the VMs in its slot's pool,
 never VMs from outside it on its networks.
-Proxmox privileges decide who may do each step, including `VM.GuestAgent.Unrestricted` for the setup.
+The page shows each host's live address from its guest agent, and its external one, assuming the router image
+maps LAN `.N` one to one to `.N` of its WAN /24 (no external address on any other WAN prefix).
+Proxmox privileges decide who may do each step, including `VM.GuestAgent.Unrestricted` for the setup
+and `VM.GuestAgent.Audit` for live addresses.
 
 ## Configuration
 

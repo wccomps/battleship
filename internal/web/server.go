@@ -126,7 +126,7 @@ type Server struct {
 	firstPoll time.Duration
 
 	// addrTimeout and addrWithin bound the Environments page's guest agent
-	// reads, each and all (pods.GuestNICs); tests shorten them.
+	// reads, each and all (addrReadTimeout, addrReadsWithin); tests set them.
 	addrTimeout, addrWithin time.Duration
 
 	// jitter returns a number in [0, 1) to spread event-stream ends; tests
@@ -186,8 +186,8 @@ func New(d Deps) (*Server, error) {
 		cellSlots:   make(chan struct{}, cellReadSlots),
 		cellTimeout: cellReadTimeout,
 		firstPoll:   firstPollWait,
-		addrTimeout: pods.AddrReadTimeout,
-		addrWithin:  pods.AddrReadsWithin,
+		addrTimeout: addrReadTimeout,
+		addrWithin:  addrReadsWithin,
 		jitter:      rand.Float64,
 	}
 	s.life, s.endLife = context.WithCancel(context.Background())

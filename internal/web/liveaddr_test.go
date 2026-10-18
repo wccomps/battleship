@@ -88,8 +88,8 @@ func checkLiveCells(t *testing.T, body string) {
 
 // The page comes with assigned addresses and reads no agent; the script
 // fills in the live ones from pieces, and without it a link shows the page
-// with them. An agent that doesn't answer delays neither by more than the
-// read timeout.
+// with them. An agent that doesn't answer delays the pieces by no more than
+// the read timeout.
 func TestEnvironmentsLiveAddresses(t *testing.T) {
 	h := newHarness(t)
 	addLiveEnv(h, true)
@@ -161,8 +161,12 @@ func TestEnvironmentsLiveAddressesPrivileges(t *testing.T) {
 		`<code>192.168.100.5</code>`)
 	lacks(t, "as an operator", body, "data-fill", "live=1", `id="env-live"`)
 	lacks(t, "the operator's live page", h.get(&op, "/environments?live=1").Body.String(), "10.50.12", "not live")
-	pieces := h.get(&op, "/environments/addresses").Body.String()
-	contains(t, "the operator's pieces", addrCell(t, pieces, 2101), `<code>192.168.100.10</code> <span class="meta">· not live</span>`)
+	// Asked for the pieces anyway, the server says what the page says.
+	rec := h.get(&op, "/environments/addresses")
+	if rec.Code != http.StatusForbidden || rec.Header().Get(piecesHeader) != "" ||
+		strings.TrimSpace(rec.Body.String()) != "Showing live addresses needs VM.GuestAgent.Audit, which you don't have." {
+		t.Errorf("the operator's pieces: %d %v\n%s", rec.Code, rec.Header(), rec.Body)
+	}
 	if n := h.api.agentReadCount(); n != 0 {
 		t.Errorf("read %d agents for a user without VM.GuestAgent.Audit", n)
 	}
@@ -173,7 +177,7 @@ func TestEnvironmentsLiveAddressesPrivileges(t *testing.T) {
 	}
 	partial := authtest.Login(t, h.st, h.cfg, authtest.User{Subject: "test-partial", Name: "Partial", At: h.clock.Now(), Proxmox: cred})
 	h.openView(cred)
-	pieces = h.get(&partial, "/environments/addresses").Body.String()
+	pieces := h.get(&partial, "/environments/addresses").Body.String()
 	contains(t, "the router", addrCell(t, pieces, 2100), `<code>10.50.12.133</code>`)
 	contains(t, "yew", addrCell(t, pieces, 2102), `<span class="chip differs">differs</span>`)
 	contains(t, "teak", addrCell(t, pieces, 2101), `<code>192.168.100.10</code> <span class="meta">· not live</span>`, `<code>10.50.12.10</code>`)
@@ -281,3 +285,13 @@ func noScriptShot(b *browser, name string) {
 
 // oneLine is markup without its newlines.
 func oneLine(s string) string { return strings.ReplaceAll(s, "\n", "") }
+
+// The script reads the pieces only with the header the server marks them
+// with.
+func TestScriptKnowsPiecesHeader(t *testing.T) {
+	js, err := staticFS.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, "app.js", string(js), `r.headers.get("`+piecesHeader+`") !== "1"`)
+}

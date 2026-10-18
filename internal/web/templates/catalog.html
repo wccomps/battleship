@@ -64,9 +64,9 @@
 {{/* env-live says whether the addresses are live; without them, the
      script fills them in from data-fill, and the link reads them without it. */}}
 {{define "env-live" -}}
-<p class="meta liveaddr" id="env-live"{{if not .LiveRead}} data-fill="/environments/addresses"{{end}}>
-{{- if .LiveRead}}<span>Addresses are live from the guest agents, where they answered.</span> <a href="/environments?live=1">Read again</a>
-{{- else}}<span data-fill-say>Addresses as assigned.</span> <a href="/environments?live=1">Show live addresses</a>{{end}}</p>
+<p class="meta liveaddr" id="env-live"{{if not .LiveRead}} data-fill="{{.FillPath}}"{{end}}>
+{{- if .LiveRead}}<span>Addresses are live from the guest agents, where they answered.</span> <a href="{{.LivePath}}">Read again</a>
+{{- else}}<span data-fill-say>Addresses as assigned.</span> <a href="{{.LivePath}}">Show live addresses</a>{{end}}</p>
 {{- end}}
 
 {{/* env-addr is a host's address cell: its assigned address, or once read
