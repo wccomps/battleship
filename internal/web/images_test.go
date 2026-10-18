@@ -116,17 +116,17 @@ func TestImagesPageCatalogue(t *testing.T) {
 	addCatalog(h)
 	sess := h.login(asLead)
 	body := h.get(&sess, "/images").Body.String()
-	table, rest, ok := strings.Cut(body[strings.Index(body, `<table class="tbl fams">`):], "</table>")
+	table, rest, ok := strings.Cut(body[strings.Index(body, `<table class="tbl fams cards">`):], "</table>")
 	if !ok {
 		t.Fatalf("no catalogue:\n%s", body)
 	}
-	router, linux := strings.Index(table, `<th scope="rowgroup" colspan="4">Router</th>`), strings.Index(table, `<th scope="rowgroup" colspan="4">Linux</th>`)
+	router, linux := strings.Index(table, `<th scope="rowgroup" colspan="5">Router</th>`), strings.Index(table, `<th scope="rowgroup" colspan="5">Linux</th>`)
 	if router < 0 || linux < router || strings.Contains(table, ">Windows</th>") {
 		t.Errorf("groups wrong (router %d, linux %d):\n%s", router, linux, table)
 	}
 	contains(t, "the catalogue", table,
-		`<a class="fam" href="/images/family/gw" data-panel-link>gw</a></td><td class="cur"><code>v1</code> <span class="meta">· 8000</span></td><td class="nl">admin / gwpass</td>`,
-		`<a class="fam" href="/images/family/debian-12" data-panel-link>debian-12</a></td><td class="cur"><code>v2</code> <span class="meta">· 8002</span></td><td class="nl">debian / Changeme1!</td>`)
+		`<a class="fam" href="/images/family/gw" data-panel-link>gw</a></td><td class="cur"><code>v1</code> <span class="meta">· 8000</span></td><td class="nl">admin / gwpass</td><td class="act"><div class="acts"><a class="btn sm" href="/images/details?family=gw" data-panel-link aria-label="Edit notes of gw">`,
+		`<a class="fam" href="/images/family/debian-12" data-panel-link>debian-12</a></td><td class="cur"><code>v2</code> <span class="meta">· 8002</span></td><td class="nl">debian / Changeme1!</td><td class="act"><div class="acts"><a class="btn sm" href="/images/details?family=debian-12" data-panel-link aria-label="Edit notes of debian-12">`)
 	lacks(t, "the catalogue", table, "win10", "WAN dhcp", "old login", "debian-12-v1")
 	if strings.Count(table, `class="fam"`) != 2 {
 		t.Errorf("want 2 families in the catalogue:\n%s", table)

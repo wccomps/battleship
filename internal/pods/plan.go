@@ -197,18 +197,24 @@ type Item struct {
 	Guest      *Guest            `json:"guest,omitempty"`
 	Supersedes *Source           `json:"supersedes,omitempty"`
 	Details    *ImageDetails     `json:"details,omitempty"`
+	// FreeNotes is the free text the details step writes beside them
+	// (WithFreeNotes); nil keeps the free text there is.
+	FreeNotes *string `json:"free_notes,omitempty"`
 	// DNSWas is a Set DNS item's DNS server before the job, for its review.
 	DNSWas *DNSServer `json:"dns_was,omitempty"`
-	// DetailsWas is an image's details before an Edit details, for its
-	// review.
+	// DetailsWas is an image's details and free text before an Edit
+	// notes, for its review.
 	DetailsWas *DetailsWas `json:"details_was,omitempty"`
 }
 
 // DetailsWas is an image's details as its notes held them; Unreadable if
-// its block was (see ParseDetails), which the details step replaces.
+// its block was (see ParseDetails), which the details step replaces. Notes
+// is the free text beside them, all of it (UserNotes without its cap), the
+// unreadable block's lines too.
 type DetailsWas struct {
 	Details    ImageDetails `json:"details"`
 	Unreadable bool         `json:"unreadable,omitempty"`
+	Notes      string       `json:"notes,omitempty"`
 }
 
 // DNSServer is a DNS choice as a host's notes record it (a host name, or

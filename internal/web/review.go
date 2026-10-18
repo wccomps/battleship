@@ -37,8 +37,10 @@ type reviewView struct {
 	Details     *detailsView
 	DetailsSay  string
 	EditDetails string
-	// Changes are an Edit details's details, before and after.
-	Changes []detailChange
+	// Changes are an Edit notes's details, before and after, and
+	// NotesChange its free text.
+	Changes     []detailChange
+	NotesChange *notesChange
 	// Notes are the notes people wrote that the copy keeps, in a box.
 	Notes string
 }
@@ -151,7 +153,7 @@ func registerReview(op operation, in jobs.Inputs, it pods.Item) *reviewView {
 	case src.Unreadable:
 		r.DetailsSay = "The details in the notes of " + src.Name + " are unreadable; the copy keeps them as they are."
 	default:
-		r.DetailsSay = "None: add them here, or later with Edit details on its family's page."
+		r.DetailsSay = "None: add them here, or later with Edit notes on its family's page."
 	}
 	if !r.Blocked {
 		r.EditDetails = op.Path
@@ -160,20 +162,37 @@ func registerReview(op operation, in jobs.Inputs, it pods.Item) *reviewView {
 	return r
 }
 
-// detailsReview describes an Edit details: each detail before and after,
-// and that the rest of the image's notes stay.
+// notesChange is an Edit notes's free text before and after.
+type notesChange struct {
+	Before, After string
+	Changed       bool
+}
+
+// detailsReview describes an Edit notes: each detail before and after,
+// then the free text, which a job stored before Edit notes could write it
+// leaves as it is.
 func detailsReview(it pods.Item) *reviewView {
-	r := &reviewView{Verb: "Edit details of", Subject: it.Name,
-		Say: "Writes these details into the notes of " + it.Name + ", which new hosts copy. The rest of its notes, and older versions, stay as they are."}
+	r := &reviewView{Verb: "Edit notes of", Subject: it.Name,
+		Say: "Writes these details and notes into the notes of " + it.Name + ", which new hosts copy. Older versions keep theirs."}
 	var before, after pods.ImageDetails
 	if it.DetailsWas != nil {
 		before = it.DetailsWas.Details
 		if it.DetailsWas.Unreadable {
-			r.DetailsSay = "Its details block is unreadable: these replace it."
+			r.DetailsSay = "Its details block is unreadable: these replace it, and the notes below replace all of its notes."
 		}
 	}
 	if it.Details != nil {
 		after = *it.Details
+	}
+	if it.FreeNotes == nil {
+		r.Say = "Writes these details into the notes of " + it.Name + ", which new hosts copy. The rest of its notes, and older versions, stay as they are."
+	} else {
+		c := &notesChange{After: *it.FreeNotes}
+		if it.DetailsWas != nil {
+			c.Before = it.DetailsWas.Notes
+		}
+		c.Changed = c.Before != c.After
+		r.NotesChange = c
 	}
 	if it.Blocked != "" {
 		r.Say, r.Blocked = sentence(it.Blocked), true
