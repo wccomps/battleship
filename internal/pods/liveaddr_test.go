@@ -480,3 +480,105 @@ func TestLiveAddrsReadsAtLeastOne(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckSSHOutput(t *testing.T) {
+	ca := podstest.DefaultSSHCAKey
+	const otherKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGb+rvN+ot98qgEN796jTiQfZfG1KaT0PtFDJ/XFSqti"
+	for _, c := range []struct {
+		name, out, key, want string
+	}{
+		{
+			"trusted user CA keys with ops principal",
+			"sshd=running\n===SSHD===\npermitrootlogin yes\npubkeyauthentication yes\ntrustedusercakeys /etc/ssh/vault-ca.pub\nauthorizedprincipalsfile /etc/ssh/auth_principals/%u\n===CA===\n" + ca + " vault\n===PRINCIPALS===\ncore-infrastructure\n===AUTHKEYS===\n",
+			ca, "",
+		},
+		{
+			"authorized_keys cert-authority with ops principal",
+			"sshd=running\n===SSHD===\npermitrootlogin prohibit-password\npubkeyauthentication yes\ntrustedusercakeys none\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\ncert-authority,principals=\"competition-infrastructure,root\" " + ca + "\n",
+			ca, "",
+		},
+		{
+			"authorized_keys unrestricted cert-authority",
+			"sshd=running\n===SSHD===\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\ncert-authority " + ca + " ops-ca\n",
+			ca, "",
+		},
+		{
+			"sshd stopped",
+			"sshd=stopped\n===SSHD===\n",
+			ca, "SSH not running",
+		},
+		{
+			"root login disabled",
+			"sshd=running\n===SSHD===\npermitrootlogin no\n",
+			ca, "SSH root login off",
+		},
+		{
+			"pubkey auth disabled",
+			"sshd=running\n===SSHD===\npermitrootlogin yes\npubkeyauthentication no\n",
+			ca, "SSH pubkey auth off",
+		},
+		{
+			"wrong CA key when ops_ca_key is configured",
+			"sshd=running\n===SSHD===\npermitrootlogin yes\npubkeyauthentication yes\ntrustedusercakeys /etc/ssh/vault-ca.pub\nauthorizedprincipalsfile /etc/ssh/auth_principals/%u\n===CA===\n" + otherKey + "\n===PRINCIPALS===\ncore-infrastructure\n===AUTHKEYS===\n",
+			ca, "missing ops CA key",
+		},
+		{
+			"any valid CA key accepted when ops_ca_key is empty",
+			"sshd=running\n===SSHD===\npermitrootlogin yes\npubkeyauthentication yes\ntrustedusercakeys /etc/ssh/vault-ca.pub\nauthorizedprincipalsfile /etc/ssh/auth_principals/%u\n===CA===\n" + otherKey + "\n===PRINCIPALS===\ncore-infrastructure\n===AUTHKEYS===\n",
+			"", "",
+		},
+		{
+			"missing CA key when ops_ca_key is empty",
+			"sshd=running\n===SSHD===\npermitrootlogin yes\npubkeyauthentication yes\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\n",
+			"", "missing ops CA key",
+		},
+		{
+			"CA key in TrustedUserCAKeys without ops principal",
+			"sshd=running\n===SSHD===\ntrustedusercakeys /etc/ssh/vault-ca.pub\nauthorizedprincipalsfile /etc/ssh/auth_principals/%u\n===CA===\n" + ca + "\n===PRINCIPALS===\nonly-root\n===AUTHKEYS===\n",
+			ca, "missing ops CA principal",
+		},
+		{
+			"CA key in authorized_keys with non-ops principal",
+			"sshd=running\n===SSHD===\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\ncert-authority,principals=\"other-team\" " + ca + "\n",
+			ca, "missing ops CA principal",
+		},
+	} {
+		if got := CheckSSHOutput(c.out, c.key); got != c.want {
+			t.Errorf("%s: CheckSSHOutput = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestLiveAddrsSSHWarnings(t *testing.T) {
+	f := podstest.New("alder")
+	nics := []proxmox.GuestNIC{{MAC: lanMAC, IPs: podstest.IPs("192.168.100.10/24")}}
+	for vmid, sshOut := range map[int]string{
+		2110: "",
+		2111: "sshd=stopped\n===SSHD===\n",
+		2112: "sshd=running\n===SSHD===\npermitrootlogin yes\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\n",
+		2113: "",
+		2114: "",
+	} {
+		f.Add(proxmox.VM{VMID: vmid, Name: fmt.Sprint(vmid), Node: "alder", Status: "running"}, nil)
+		f.SetGuest(vmid, podstest.Guest{Up: true, NICs: nics, SSHOut: sshOut})
+	}
+	f.FailOn("agent-ssh:2113", &proxmox.APIError{Status: 500, Message: "VM 2113 qmp command 'guest-exec' failed - Command guest-exec has been disabled"})
+	f.FailOn("agent-ssh:2114", &proxmox.APIError{Status: 403, Message: "Permission check failed (/vms/2114, VM.GuestAgent.Unrestricted)"})
+
+	var hosts []EnvHost
+	for _, vmid := range []int{2110, 2111, 2112, 2113, 2114} {
+		hosts = append(hosts, EnvHost{VMID: vmid, Node: "alder", Status: "running", Agent: true, LANMAC: lanMAC})
+	}
+	got := NewPlanner(f, envConfig()).LiveAddrs(context.Background(), []Environment{{Hosts: hosts}}, 4, time.Second)
+	for vmid, want := range map[int]string{
+		2110: "",
+		2111: "SSH not running",
+		2112: "missing ops CA key",
+		2113: "guest-exec disabled",
+		2114: "",
+	} {
+		if got[vmid].SSHWarning != want {
+			t.Errorf("%d: SSHWarning = %q, want %q", vmid, got[vmid].SSHWarning, want)
+		}
+	}
+}

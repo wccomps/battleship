@@ -12,6 +12,8 @@ import (
 	"unicode/utf16"
 
 	"pgregory.net/rapid"
+
+	"github.com/wccomps/battleship/internal/pods/podstest"
 )
 
 // scriptTricks are pieces that would break out of a quoted value in sh or
@@ -43,6 +45,8 @@ func nearMisses(field, v string) []string {
 			v + "_x", first + strings.Repeat("a", 64-len(first)) + strings.TrimPrefix(v, first), " " + v, v + "\n"}
 	case "mac":
 		return []string{strings.ReplaceAll(v, ":", "-"), v[:len(v)-1], v + ":00", v[:len(v)-1] + "g", " " + v, v + " ", v + "\n"}
+	case "ops_ca_key":
+		return []string{" " + v, v + " ", v + " comment", v + "\n", strings.Replace(v, " ", "  ", 1), "ssh-ed25519 " + strings.Fields(v)[1], "ssh-rsa not_base64!"}
 	}
 	panic("no near misses for " + field)
 }
@@ -118,6 +122,19 @@ func safeMAC(s string) bool {
 	return true
 }
 
+func safeSSHKey(s string) bool {
+	if s == "" {
+		return true
+	}
+	for i := range len(s) {
+		c := s[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '+' || c == '/' || c == '=' || c == '-' || c == '.' || c == '@' || c == ' ') {
+			return false
+		}
+	}
+	return strings.Count(s, " ") == 1 && CheckSSHKey(s) == nil
+}
+
 // storedGuest is g with its addresses read from text, as a stored plan's
 // are; false if a plan with them can't be read.
 func storedGuest(t interface{ Fatalf(string, ...any) }, g Guest, ip, gateway, dns string) (Guest, bool) {
@@ -147,17 +164,17 @@ func checkGuest(t interface {
 	}
 	ip, gw, dns := AddrText(g.IP), AddrText(g.Gateway), AddrText(g.DNS)
 	if (g.OS != ImageWindows && g.OS != ImageLinux) || !safeLabel(g.Hostname) || !safeDomain(g.Domain) || g.Prefix < 1 || g.Prefix > 32 ||
-		!safeIPv4(ip) || !safeIPv4(gw) || !safeIPv4(dns) || !safeMAC(mac) {
+		!safeIPv4(ip) || !safeIPv4(gw) || !safeIPv4(dns) || !safeMAC(mac) || !safeSSHKey(g.OpsCAKey) {
 		t.Fatalf("accepted %+v with MAC %q", g, mac)
 	}
 	q := func(v string) string { return "'" + v + "'" }
 	winMAC, linMAC := q(strings.ToUpper(strings.ReplaceAll(mac, ":", "-"))), q(strings.ToLower(mac))
 	var want string
 	if g.OS == ImageWindows {
-		want = fmt.Sprintf(windowsScript, winMAC, q(ip), g.Prefix, q(gw), q(dns), q(g.Domain), q(g.Hostname), RebootMarker)
+		want = fmt.Sprintf(windowsScript, winMAC, q(ip), g.Prefix, q(gw), q(dns), q(g.Domain), q(g.Hostname), q(g.OpsCAKey), RebootMarker)
 	} else {
 		want = "MAC=" + linMAC + "\nIP=" + q(ip) + "\nPREFIX=" + strconv.Itoa(g.Prefix) + "\nGW=" + q(gw) +
-			"\nDNS=" + q(dns) + "\nHOST=" + q(g.Hostname) + "\nDOMAIN=" + q(g.Domain) + "\n" + linuxFindIface + linuxScript
+			"\nDNS=" + q(dns) + "\nHOST=" + q(g.Hostname) + "\nDOMAIN=" + q(g.Domain) + "\nCA=" + q(g.OpsCAKey) + "\n" + linuxFindIface + linuxScript
 	}
 	script, err := GuestScript(g, mac)
 	if err != nil || script != want {
@@ -193,10 +210,10 @@ func checkGuest(t interface {
 // come as a stored plan holds them.
 func TestGuestTricks(t *testing.T) {
 	for _, os := range []string{ImageWindows, ImageLinux} {
-		for _, field := range []string{"hostname", "domain", "ip", "gateway", "dns", "mac"} {
-			g := Guest{OS: os, Hostname: "teak", Domain: "kilo.alpha", Prefix: 24}
+		for _, field := range []string{"hostname", "domain", "ip", "gateway", "dns", "mac", "ops_ca_key"} {
+			g := Guest{OS: os, Hostname: "teak", Domain: "kilo.alpha", Prefix: 24, OpsCAKey: podstest.DefaultSSHCAKey}
 			ip, gw, dns, mac := "192.168.100.10", "192.168.100.2", "192.168.100.2", "BC:24:11:00:00:01"
-			v := map[string]*string{"hostname": &g.Hostname, "domain": &g.Domain, "ip": &ip, "gateway": &gw, "dns": &dns, "mac": &mac}[field]
+			v := map[string]*string{"hostname": &g.Hostname, "domain": &g.Domain, "ip": &ip, "gateway": &gw, "dns": &dns, "mac": &mac, "ops_ca_key": &g.OpsCAKey}[field]
 			valid := *v
 			for _, trick := range append(nearMisses(field, valid), scriptTricks...) {
 				half := len(valid) / 2
@@ -211,20 +228,24 @@ func TestGuestTricks(t *testing.T) {
 	}
 }
 
-// A guest script embeds only names and addresses, each in single quotes:
-// whatever the values, either GuestCommand refuses them or the script is the
-// template with safe values quoted in, and the command carries exactly it.
-// Addresses come as a stored plan holds them.
+// A guest script embeds only names, addresses and a canonical SSH key, each in
+// single quotes: whatever the values, either GuestCommand refuses them or the
+// script is the template with safe values quoted in, and the command carries
+// exactly it. Addresses come as a stored plan holds them.
 func TestPropGuestScriptsAreInjectionFree(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		// Most draws spoil exactly one field; the rest must pass.
-		spoilt := rapid.SampledFrom([]string{"none", "os", "hostname", "domain", "ip", "prefix", "gateway", "dns", "mac"}).Draw(t, "spoilt")
+		spoilt := rapid.SampledFrom([]string{"none", "os", "hostname", "domain", "ip", "prefix", "gateway", "dns", "mac", "ops_ca_key"}).Draw(t, "spoilt")
 		bad := func(f string) bool { return f == spoilt }
 		g := Guest{
 			OS:       rapid.SampledFrom([]string{ImageWindows, ImageLinux}).Draw(t, "os"),
 			Hostname: guestValue(t, "hostname", bad("hostname"), "teak", "dc", "web-1", "a", strings.Repeat("z", 63)),
 			Domain:   guestValue(t, "domain", bad("domain"), "kilo.alpha", "a.b", "x-1.y.z"),
 			Prefix:   rapid.IntRange(1, 32).Draw(t, "prefix"),
+			OpsCAKey: guestValue(t, "ops_ca_key", bad("ops_ca_key"), podstest.DefaultSSHCAKey),
+		}
+		if !bad("ops_ca_key") && rapid.Bool().Draw(t, "empty ca") {
+			g.OpsCAKey = ""
 		}
 		g, ok := storedGuest(t, g, guestValue(t, "ip", bad("ip"), "192.168.100.10", "10.0.0.5", "0.0.0.0"),
 			guestValue(t, "gateway", bad("gateway"), "192.168.100.2"), guestValue(t, "dns", bad("dns"), "192.168.100.2", "255.255.255.255"))

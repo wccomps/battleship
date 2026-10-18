@@ -237,6 +237,32 @@ func TestEnvironmentsLiveAddressWithoutAssigned(t *testing.T) {
 	lacks(t, "fir", cell, "differs", "assigned", "none")
 }
 
+// Live address reads also check whether SSH and the ops CA key are ready on
+// each answering host, showing a warning chip in the address cell when not.
+func TestEnvironmentsLiveSSHWarnings(t *testing.T) {
+	h := newHarness(t)
+	addLiveEnv(h, false)
+	h.api.SetGuest(2101, podstest.Guest{
+		Up:     true,
+		NICs:   []proxmox.GuestNIC{{MAC: "bc:24:11:00:21:11", IPs: podstest.IPs("192.168.100.10/24")}},
+		SSHOut: "sshd=running\n===SSHD===\npermitrootlogin yes\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\n",
+	})
+	h.api.SetGuest(2102, podstest.Guest{
+		Up:     true,
+		NICs:   []proxmox.GuestNIC{{MAC: "bc:24:11:00:21:12", IPs: podstest.IPs("192.168.100.5/24")}},
+		SSHOut: "sshd=stopped\n===SSHD===\n",
+	})
+	sess := h.login(asLead)
+	for _, path := range []string{"/environments/addresses", "/environments?live=1"} {
+		h.api.FailOn("agent-ssh:2105", &proxmox.APIError{Status: 500, Message: "Command guest-exec has been disabled"})
+		body := h.get(&sess, path).Body.String()
+		lacks(t, "the router at "+path, addrCell(t, body, 2100), "is-drifted")
+		contains(t, "teak at "+path, addrCell(t, body, 2101), `<span class="al"><span class="chip is-drifted">missing ops CA key</span></span>`)
+		contains(t, "yew at "+path, addrCell(t, body, 2102), `<span class="al"><span class="chip is-drifted">SSH not running</span></span>`)
+		contains(t, "ash at "+path, addrCell(t, body, 2105), `<span class="al"><span class="chip is-drifted">guest-exec disabled</span></span>`)
+	}
+}
+
 // In the browser, the page fills in the live addresses after it loads, as
 // the server renders them, without scrolling sideways on a phone.
 func TestBrowserEnvironmentsLiveAddresses(t *testing.T) {

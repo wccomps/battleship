@@ -15,12 +15,14 @@ import (
 	"testing"
 	"time"
 	"unicode/utf16"
+
+	"github.com/wccomps/battleship/internal/pods/podstest"
 )
 
 var updateGolden = flag.Bool("update-golden", false, "rewrite testdata/guest from the current scripts")
 
 var testGuest = Guest{Hostname: "teak", Domain: "kilo.alpha", IP: netip.MustParseAddr("192.168.100.10"), Prefix: 24,
-	Gateway: netip.MustParseAddr("192.168.100.2"), DNS: netip.MustParseAddr("192.168.100.2")}
+	Gateway: netip.MustParseAddr("192.168.100.2"), DNS: netip.MustParseAddr("192.168.100.2"), OpsCAKey: podstest.DefaultSSHCAKey}
 
 func golden(t *testing.T, name, got string) {
 	t.Helper()
@@ -98,14 +100,16 @@ func TestNeedsReboot(t *testing.T) {
 // single-quoted string at a curly quote.
 func TestGuestCommandRefusesBadValues(t *testing.T) {
 	bad := map[string]func(g *Guest){
-		"IPv6 IP":               func(g *Guest) { g.IP = netip.MustParseAddr("2001:db8::10") },
-		"quote in an IPv6 zone": func(g *Guest) { g.DNS = netip.MustParseAddr("fe80::1%eth0';reboot;'") },
-		"IPv4 as IPv6 gateway":  func(g *Guest) { g.Gateway = netip.MustParseAddr("::ffff:192.168.100.2") },
-		"no DNS":                func(g *Guest) { g.DNS = netip.Addr{} },
-		"hostname":              func(g *Guest) { g.Hostname = "te'ak" },
-		"domain":                func(g *Guest) { g.Domain = "kilo.al\u2018pha" },
-		"prefix":                func(g *Guest) { g.Prefix = 0 },
-		"OS":                    func(g *Guest) { g.OS = "bsd" },
+		"IPv6 IP":                 func(g *Guest) { g.IP = netip.MustParseAddr("2001:db8::10") },
+		"quote in an IPv6 zone":   func(g *Guest) { g.DNS = netip.MustParseAddr("fe80::1%eth0';reboot;'") },
+		"IPv4 as IPv6 gateway":    func(g *Guest) { g.Gateway = netip.MustParseAddr("::ffff:192.168.100.2") },
+		"no DNS":                  func(g *Guest) { g.DNS = netip.Addr{} },
+		"hostname":                func(g *Guest) { g.Hostname = "te'ak" },
+		"domain":                  func(g *Guest) { g.Domain = "kilo.al\u2018pha" },
+		"prefix":                  func(g *Guest) { g.Prefix = 0 },
+		"OS":                      func(g *Guest) { g.OS = "bsd" },
+		"ops CA key":              func(g *Guest) { g.OpsCAKey = "ssh-ed25519 not-base64" },
+		"ops CA key with comment": func(g *Guest) { g.OpsCAKey = podstest.DefaultSSHCAKey + " ops@vault" },
 	}
 	for name, mut := range bad {
 		for _, os := range []string{ImageLinux, ImageWindows} {
@@ -249,5 +253,58 @@ func TestLinuxScriptRunsWithoutTheLockTools(t *testing.T) {
 func TestLinuxLockedIsTheRealLock(t *testing.T) {
 	if linuxLocked != lockedShell("/run/battleship-guest.lock", GuestLockWait) || !strings.Contains(linuxLocked, "timeout 240 flock 9") {
 		t.Errorf("linuxLocked = %q", linuxLocked)
+	}
+}
+
+// The Linux script's CA setup writes vault-ca.pub, auth_principals/root,
+// authorized_keys, and TrustedUserCAKeys/AuthorizedPrincipalsFile before any
+// Match block in sshd_config, producing a setup CheckSSHOutput accepts.
+func TestLinuxGuestScriptConfiguresSSHCA(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	_, caBlock, ok := strings.Cut(linuxScript, "if [ -n \"$CA\" ]; then")
+	if !ok {
+		t.Fatal("linuxScript has no CA block")
+	}
+	for _, initialCfg := range []string{
+		"Port 22\nTrustedUserCAKeys /old\nMatch User bob\n\tX11Forwarding no\n",
+		"Port 22\nPermitRootLogin yes\n",
+	} {
+		root := t.TempDir()
+		sshEtc := filepath.Join(root, "etc", "ssh")
+		if err := os.MkdirAll(sshEtc, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sshEtc, "sshd_config"), []byte(initialCfg), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		script := "set -eu\nCA=" + quote(podstest.DefaultSSHCAKey) + "\nif [ -n \"$CA\" ]; then" + caBlock
+		script = strings.ReplaceAll(script, "/etc/ssh", sshEtc)
+		script = strings.ReplaceAll(script, "/root/.ssh", filepath.Join(root, "root", ".ssh"))
+		c := exec.Command(sh, "-c", script)
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("running CA block: %v\n%s", err, out)
+		}
+		cfgBytes, err := os.ReadFile(filepath.Join(sshEtc, "sshd_config"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfgText := string(cfgBytes)
+		if strings.Contains(cfgText, "/old") {
+			t.Errorf("old TrustedUserCAKeys remained in:\n%s", cfgText)
+		}
+		if m := strings.Index(cfgText, "Match "); m >= 0 && strings.Index(cfgText, "TrustedUserCAKeys ") > m {
+			t.Errorf("TrustedUserCAKeys placed after Match in:\n%s", cfgText)
+		}
+		caBytes, _ := os.ReadFile(filepath.Join(sshEtc, "vault-ca.pub"))
+		prBytes, _ := os.ReadFile(filepath.Join(sshEtc, "auth_principals", "root"))
+		akBytes, _ := os.ReadFile(filepath.Join(root, "root", ".ssh", "authorized_keys"))
+		probeOut := "sshd=running\n===SSHD===\n" + cfgText + "===CA===\n" + string(caBytes) +
+			"===PRINCIPALS===\n" + string(prBytes) + "===AUTHKEYS===\n" + string(akBytes)
+		if warn := CheckSSHOutput(probeOut, podstest.DefaultSSHCAKey); warn != "" {
+			t.Errorf("CheckSSHOutput after script = %q, want empty", warn)
+		}
 	}
 }

@@ -6,12 +6,15 @@ package config
 
 import (
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net/netip"
 	"net/url"
 	"os"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -128,6 +131,39 @@ type Environments struct {
 	VMIDBase     int           `toml:"vmid_base"`
 	Subnet       LAN           `toml:"subnet"`
 	AgentTimeout time.Duration `toml:"agent_timeout"`
+	// OpsCAKey is the OpenSSH CA public key ("<type> <base64>") environment
+	// hosts trust for root/Administrator SSH certificates; empty disables
+	// provisioning it and checks for any CA key on live reads.
+	OpsCAKey string `toml:"ops_ca_key" json:",omitempty"`
+}
+
+var sshKeyTypes = []string{
+	"ssh-ed25519",
+	"ssh-rsa",
+	"ecdsa-sha2-nistp256",
+	"ecdsa-sha2-nistp384",
+	"ecdsa-sha2-nistp521",
+	"sk-ssh-ed25519@openssh.com",
+	"sk-ecdsa-sha2-nistp256@openssh.com",
+}
+
+// ParseSSHPublicKey parses a single-line OpenSSH public key ("<type> <base64>"
+// with an optional comment) and returns its canonical "<type> <base64>" form.
+func ParseSSHPublicKey(raw string) (string, error) {
+	if strings.ContainsAny(raw, "\r\n") {
+		return "", errors.New(`must be a single-line OpenSSH public key ("<type> <base64>")`)
+	}
+	fields := strings.Fields(raw)
+	if len(fields) < 2 || !slices.Contains(sshKeyTypes, fields[0]) {
+		return "", errors.New(`must be an OpenSSH public key ("<type> <base64>")`)
+	}
+	kt, b64 := fields[0], fields[1]
+	b, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil || len(b) < 4+len(kt) || base64.StdEncoding.EncodeToString(b) != b64 ||
+		binary.BigEndian.Uint32(b[:4]) != uint32(len(kt)) || string(b[4:4+len(kt)]) != kt {
+		return "", errors.New(`must be an OpenSSH public key ("<type> <base64>")`)
+	}
+	return kt + " " + b64, nil
 }
 
 // ParseRange reads "lo-hi" with 0 <= lo <= hi.
@@ -608,6 +644,11 @@ func (c Config) validateCatalog() []error {
 	}
 	if c.Environments.AgentTimeout < time.Minute {
 		errs = append(errs, errors.New("environments.agent_timeout must be at least 1m (Windows takes minutes to boot after sysprep)"))
+	}
+	if c.Environments.OpsCAKey != "" {
+		if _, err := ParseSSHPublicKey(c.Environments.OpsCAKey); err != nil {
+			errs = append(errs, fmt.Errorf("environments.ops_ca_key: %w", err))
+		}
 	}
 	if c.Environments.VMIDBase < 100 {
 		errs = append(errs, errors.New("environments.vmid_base must be at least 100"))

@@ -634,6 +634,7 @@ func TestEnvironmentAndImageValidation(t *testing.T) {
 		"environments.sdn_zone":      func(c *Config) { c.Environments.SDNZone = "" },
 		"environments.vmid_base":     func(c *Config) { c.Environments.VMIDBase = 7000 }, // slot 10 reaches 8099, inside images
 		"environments.agent_timeout": func(c *Config) { c.Environments.AgentTimeout = 10 * time.Second },
+		"environments.ops_ca_key":    func(c *Config) { c.Environments.OpsCAKey = "not-an-ssh-key" },
 	}
 	for key, mut := range cases {
 		c := validConfig()
@@ -642,6 +643,11 @@ func TestEnvironmentAndImageValidation(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), key) {
 			t.Errorf("%s: Validate() = %v, want an error naming it", key, err)
 		}
+	}
+	noCA := validConfig()
+	noCA.Environments.OpsCAKey = ""
+	if err := noCA.Validate(); err != nil {
+		t.Errorf("empty ops_ca_key: %v", err)
 	}
 	if err := validConfig().Validate(); err != nil {
 		t.Fatalf("defaults: %v", err)

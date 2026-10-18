@@ -2,8 +2,10 @@ package pods
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -61,9 +63,9 @@ func externalAddr(wan netip.Prefix, octet int) string {
 	return l.Host(octet).String()
 }
 
-// LiveAddrs are a VM's addresses as its guest agent reports them.
+// LiveAddrs are a VM's addresses and SSH state as its guest agent reports them.
 type LiveAddrs struct {
-	// Live: its agent answered; LAN, Differs and WAN are set only then.
+	// Live: its agent answered; LAN, Differs, WAN and SSHWarning are set only then.
 	Live bool
 	LAN  string // on its LAN NIC
 	// Differs says LAN isn't its expected address: the gateway for a
@@ -73,10 +75,16 @@ type LiveAddrs struct {
 	// External is a host's address from outside, through the router's NAT
 	// (externalAddr): by its live LAN octet, else its assigned one.
 	External string
+	// SSHWarning is why SSH or the ops CA key isn't ready on the host, or
+	// "" when it is (or couldn't be checked).
+	SSHWarning string
 }
 
-// agentAddrs are what a host's agent reported on its LAN and WAN NICs.
-type agentAddrs struct{ lan, wan netip.Prefix }
+// agentAddrs are what a host's agent reported on its LAN and WAN NICs and SSH check.
+type agentAddrs struct {
+	lan, wan   netip.Prefix
+	sshWarning string
+}
 
 // addrs are e's hosts' addresses, by VMID, from what their agents reported
 // (readAgents); a host missing from read isn't live.
@@ -101,6 +109,7 @@ func (e Environment) addrs(read map[int]agentAddrs) map[int]LiveAddrs {
 					wan = got.wan
 				}
 			}
+			a.SSHWarning = got.sshWarning
 		}
 		out[h.VMID] = a
 	}
@@ -158,8 +167,9 @@ func (p Planner) readAgents(ctx context.Context, envs []Environment, reads int, 
 				if err != nil {
 					return nil
 				}
+				sshWarn := p.checkHostSSH(cctx, h, nics)
 				mu.Lock()
-				out[h.VMID] = agentAddrs{lan: guestAddr(nics, h.LANMAC), wan: guestAddr(nics, h.WANMAC)}
+				out[h.VMID] = agentAddrs{lan: guestAddr(nics, h.LANMAC), wan: guestAddr(nics, h.WANMAC), sshWarning: sshWarn}
 				mu.Unlock()
 				return nil
 			})
@@ -167,4 +177,222 @@ func (p Planner) readAgents(ctx context.Context, envs []Environment, reads int, 
 	}
 	_ = g.Wait() // no read fails the group
 	return out
+}
+
+const (
+	maxSSHCheckOutput = 64 << 10
+	sshPollInterval   = 50 * time.Millisecond
+)
+
+var posixSSHCheck = []string{"sh", "-c",
+	`if systemctl is-active --quiet sshd 2>/dev/null || systemctl is-active --quiet ssh 2>/dev/null || systemctl is-active --quiet ssh.socket 2>/dev/null || pgrep -x sshd >/dev/null 2>&1 || ps ax 2>/dev/null | grep -v grep | grep -q "/sshd"; then echo sshd=running; else echo sshd=stopped; fi
+echo ===SSHD===
+cfg=$({ sshd -T || /usr/sbin/sshd -T || /usr/local/sbin/sshd -T; } 2>/dev/null || grep -Ehv "^[[:space:]]*(#|$)" /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf /usr/local/etc/ssh/sshd_config 2>/dev/null || true)
+printf "%s\n" "$cfg" | grep -E -i "^[[:space:]]*(permitrootlogin|pubkeyauthentication|trustedusercakeys|authorizedprincipalsfile|authorizedkeysfile)[[:space:]]" || true
+ca_file=$(printf "%s\n" "$cfg" | awk 'tolower($1) == "trustedusercakeys" && tolower($2) != "none" { print $2; exit }')
+pr_file=$(printf "%s\n" "$cfg" | awk 'tolower($1) == "authorizedprincipalsfile" && tolower($2) != "none" { gsub(/%u/, "root", $2); gsub(/%h/, "/root", $2); print $2; exit }')
+echo ===CA===
+[ -n "$ca_file" ] && cat "$ca_file" 2>/dev/null || true
+echo ===PRINCIPALS===
+[ -n "$pr_file" ] && cat "$pr_file" 2>/dev/null || true
+echo ===AUTHKEYS===
+cat /root/.ssh/authorized_keys /root/.ssh/authorized_keys2 2>/dev/null || true`}
+
+var windowsSSHCheck = []string{"cmd.exe", "/c",
+	`sc query sshd | findstr /I "RUNNING" >nul && (echo sshd=running) || (echo sshd=stopped)` +
+		` & echo ===SSHD===` +
+		` & ("%SystemRoot%\System32\OpenSSH\sshd.exe" -T 2>nul || type "%ProgramData%\ssh\sshd_config" 2>nul) | findstr /I /R "^[ \t]*permitrootlogin ^[ \t]*pubkeyauthentication ^[ \t]*trustedusercakeys ^[ \t]*authorizedprincipalsfile ^[ \t]*authorizedkeysfile"` +
+		` & echo ===CA===` +
+		` & type "%ProgramData%\ssh\vault-ca.pub" "%ProgramData%\ssh\ops-ca.pub" 2>nul` +
+		` & echo ===PRINCIPALS===` +
+		` & type "%ProgramData%\ssh\auth_principals\administrators" "%ProgramData%\ssh\auth_principals\administrator" "%ProgramData%\ssh\auth_principals\root" 2>nul` +
+		` & echo ===AUTHKEYS===` +
+		` & type "%ProgramData%\ssh\administrators_authorized_keys" "%USERPROFILE%\.ssh\authorized_keys" 2>nul`}
+
+// SSHCheckCommand returns the read-only guest agent command that inspects
+// sshd and ops CA trust on a Windows or POSIX (Linux/FreeBSD) host.
+func SSHCheckCommand(windows bool) []string {
+	if windows {
+		return slices.Clone(windowsSSHCheck)
+	}
+	return slices.Clone(posixSSHCheck)
+}
+
+func (p Planner) checkHostSSH(ctx context.Context, h EnvHost, nics []proxmox.GuestNIC) string {
+	win := h.Notes.OS == ImageWindows || slices.ContainsFunc(nics, func(n proxmox.GuestNIC) bool {
+		return strings.Contains(n.Name, "Loopback Pseudo-Interface")
+	})
+	pid, err := p.API.AgentExec(ctx, h.Node, h.VMID, SSHCheckCommand(win), "")
+	if err != nil {
+		var apiErr *proxmox.APIError
+		if errors.As(err, &apiErr) && strings.Contains(strings.ToLower(apiErr.Message), "disabled") {
+			return "guest-exec disabled"
+		}
+		return ""
+	}
+	for {
+		st, err := p.API.AgentExecStatus(ctx, h.Node, h.VMID, pid, maxSSHCheckOutput)
+		if err != nil {
+			return ""
+		}
+		if st.Exited {
+			if st.ExitCode != 0 && strings.TrimSpace(st.Out) == "" {
+				return ""
+			}
+			return CheckSSHOutput(st.Out, p.Cfg.Environments.OpsCAKey)
+		}
+		select {
+		case <-ctx.Done():
+			return ""
+		case <-time.After(sshPollInterval):
+		}
+	}
+}
+
+var opsPrincipals = []string{"core-infrastructure", "competition-infrastructure"}
+
+// CheckSSHOutput inspects the output of SSHCheckCommand and returns a short
+// warning when sshd or the ops CA key isn't configured, or "" when healthy.
+func CheckSSHOutput(out, opsCAKey string) string {
+	if strings.TrimSpace(out) == "" {
+		return ""
+	}
+	sections := map[string]string{}
+	cur := "HEADER"
+	for _, line := range strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n") {
+		switch strings.TrimSpace(line) {
+		case "===SSHD===":
+			cur = "SSHD"
+		case "===CA===":
+			cur = "CA"
+		case "===PRINCIPALS===":
+			cur = "PRINCIPALS"
+		case "===AUTHKEYS===":
+			cur = "AUTHKEYS"
+		default:
+			sections[cur] += line + "\n"
+		}
+	}
+	if !strings.Contains(sections["HEADER"], "sshd=running") {
+		return "SSH not running"
+	}
+	var trustedCA, principalsFile string
+	for _, line := range strings.Split(sections["SSHD"], "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 || strings.HasPrefix(f[0], "#") {
+			continue
+		}
+		k, v := strings.ToLower(f[0]), f[1]
+		switch k {
+		case "permitrootlogin":
+			if strings.EqualFold(v, "no") || strings.EqualFold(v, "forced-commands-only") {
+				return "SSH root login off"
+			}
+		case "pubkeyauthentication":
+			if strings.EqualFold(v, "no") {
+				return "SSH pubkey auth off"
+			}
+		case "trustedusercakeys":
+			if trustedCA == "" {
+				trustedCA = v
+			}
+		case "authorizedprincipalsfile":
+			if principalsFile == "" {
+				principalsFile = v
+			}
+		}
+	}
+	var canonCA string
+	if opsCAKey != "" {
+		var err error
+		if canonCA, err = config.ParseSSHPublicKey(opsCAKey); err != nil {
+			return ""
+		}
+	}
+	foundKey := false
+	if trustedCA != "" && !strings.EqualFold(trustedCA, "none") && hasSSHKey(sections["CA"], canonCA) {
+		foundKey = true
+		if principalsFile != "" && !strings.EqualFold(principalsFile, "none") && hasOpsPrincipal(sections["PRINCIPALS"]) {
+			return ""
+		}
+	}
+	if ok, keyOnly := hasCertAuthority(sections["AUTHKEYS"], canonCA); ok {
+		return ""
+	} else if keyOnly {
+		foundKey = true
+	}
+	if foundKey {
+		return "missing ops CA principal"
+	}
+	return "missing ops CA key"
+}
+
+func hasSSHKey(text, canonCA string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if k, err := config.ParseSSHPublicKey(line); err == nil && (canonCA == "" || k == canonCA) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasOpsPrincipal(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		p := strings.TrimSpace(line)
+		if slices.Contains(opsPrincipals, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func splitAuthorizedKeyOptions(line string) (opts, rest string) {
+	inQuote := false
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '"':
+			inQuote = !inQuote
+		case ' ', '\t':
+			if !inQuote {
+				return line[:i], strings.TrimSpace(line[i+1:])
+			}
+		}
+	}
+	return "", ""
+}
+
+func hasCertAuthority(text, canonCA string) (ok, keyOnly bool) {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		opts, rest := splitAuthorizedKeyOptions(line)
+		if !strings.Contains(opts, "cert-authority") {
+			continue
+		}
+		k, err := config.ParseSSHPublicKey(rest)
+		if err != nil || (canonCA != "" && k != canonCA) {
+			continue
+		}
+		keyOnly = true
+		_, after, hasPrincipals := strings.Cut(opts, `principals="`)
+		if !hasPrincipals {
+			return true, true
+		}
+		val, _, closed := strings.Cut(after, `"`)
+		if !closed {
+			continue
+		}
+		for _, p := range strings.Split(val, ",") {
+			if slices.Contains(opsPrincipals, strings.TrimSpace(p)) {
+				return true, true
+			}
+		}
+	}
+	return false, keyOnly
 }

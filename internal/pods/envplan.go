@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -338,8 +339,16 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 				}
 				addr, used[o] = env.LAN.Host(o), true
 			}
+			var caKey string
+			if p.Cfg.Environments.OpsCAKey != "" {
+				var err error
+				if caKey, err = config.ParseSSHPublicKey(p.Cfg.Environments.OpsCAKey); err != nil {
+					ip.Blocked = "ops CA key: " + err.Error()
+					continue
+				}
+			}
 			notes.IP, notes.OS = addr, im.Kind
-			ip.Guest = &Guest{OS: im.Kind, Hostname: h.Host, Domain: env.Domain, IP: addr, Prefix: env.LAN.Bits(), Gateway: env.Gateway(), DNS: dnsAddr}
+			ip.Guest = &Guest{OS: im.Kind, Hostname: h.Host, Domain: env.Domain, IP: addr, Prefix: env.LAN.Bits(), Gateway: env.Gateway(), DNS: dnsAddr, OpsCAKey: caKey}
 			if err := ip.Guest.Check(); err != nil {
 				ip.Blocked = err.Error()
 				continue

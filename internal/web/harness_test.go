@@ -411,6 +411,15 @@ func (p permAPI) AgentInterfaces(ctx context.Context, node string, vmid int) ([]
 	return p.fakeAPI.AgentInterfaces(ctx, node, vmid)
 }
 
+// AgentExec needs VM.GuestAgent.Unrestricted on the VM, as Proxmox's does.
+func (p permAPI) AgentExec(ctx context.Context, node string, vmid int, command []string, input string) (int, error) {
+	path := "/vms/" + strconv.Itoa(vmid)
+	if !p.pve.Allowed(p.cred().User, path, "VM.GuestAgent.Unrestricted") {
+		return 0, &proxmox.APIError{Status: 403, Message: "Permission check failed (" + path + ", VM.GuestAgent.Unrestricted)"}
+	}
+	return p.fakeAPI.AgentExec(ctx, node, vmid, command, input)
+}
+
 func (p permAPI) Permissions(ctx context.Context) (proxmox.Permissions, error) {
 	return p.pve.Client().As(p.cred()).Permissions(ctx)
 }
