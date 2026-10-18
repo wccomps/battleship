@@ -447,9 +447,10 @@ func TestEnvironmentsPageHostWarnings(t *testing.T) {
 	sess := h.login(asLead)
 	body := h.get(&sess, "/environments").Body.String()
 	contains(t, "the environment row", body,
-		`<span class="chip is-drifted">missing tags dev, kilo.alpha</span>`,
-		`<span class="chip is-drifted">net0 on devint02, expected devint01</span>`,
-		`<span class="chip is-drifted">CPU x86-64-v2-AES, expected baseline</span>`,
-		`<span class="chip is-drifted">guest agent off</span>`,
-		`<span class="chip is-drifted">CD-ROM attached</span>`)
+		`<span class="al is-drifted"><i class="g" aria-hidden="true"></i>missing tags dev, kilo.alpha</span>`,
+		`<span class="al is-drifted"><i class="g" aria-hidden="true"></i>net0 on devint02, expected devint01</span>`,
+		`<span class="al is-drifted"><i class="g" aria-hidden="true"></i>CPU x86-64-v2-AES, expected baseline</span>`,
+		`<span class="al is-drifted"><i class="g" aria-hidden="true"></i>guest agent off</span>`,
+		`<span class="al is-drifted"><i class="g" aria-hidden="true"></i>CD-ROM attached</span>`)
+	lacks(t, "the environment row", body, `<span class="chip is-drifted">`)
 }
