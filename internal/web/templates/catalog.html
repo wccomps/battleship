@@ -83,5 +83,6 @@
 {{- end}}
 {{- with .WAN}}<span class="al"><span class="meta">WAN</span> <code>{{.}}</code></span>{{end}}
 {{- with .External}}<span class="al"><span class="meta">external</span> <code>{{.}}</code></span>{{end -}}
+{{- with .SSHWarning}}<span class="al"><span class="chip is-drifted">{{.}}</span></span>{{end -}}
 </td>
 {{- end}}

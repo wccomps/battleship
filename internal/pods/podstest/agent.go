@@ -24,7 +24,18 @@ type Guest struct {
 	// Windows setup's Setup\State key) print an unfinished ImageState
 	// before they print IMAGE_STATE_COMPLETE.
 	SetupPending int
+	// SSHOut is what the live SSH check command prints; "" prints a running
+	// sshd that trusts DefaultSSHCAKey.
+	SSHOut string
 }
+
+// DefaultSSHCAKey is the synthetic OpenSSH CA public key a fake guest
+// reports by default when SSHOut is empty.
+const DefaultSSHCAKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILM+rvN+ot98qgEN796jTiQfZfG1KaT0PtFDJ/XFSqti"
+
+var defaultSSHOut = "sshd=running\n===SSHD===\npermitrootlogin yes\npubkeyauthentication yes\n" +
+	"trustedusercakeys /etc/ssh/vault-ca.pub\nauthorizedprincipalsfile /etc/ssh/auth_principals/%u\n" +
+	"===CA===\n" + DefaultSSHCAKey + "\n===PRINCIPALS===\ncore-infrastructure\ncompetition-infrastructure\n===AUTHKEYS===\n"
 
 // IPs are GuestNIC.IPs as AgentInterfaces reads what an agent writes:
 // "address/prefix", or a bare address for one reported without a prefix.
@@ -122,11 +133,25 @@ func isSetupRead(command []string) bool {
 	return slices.ContainsFunc(command, func(a string) bool { return strings.Contains(a, `Setup\State`) })
 }
 
+// isSSHCheck is whether command is the read-only SSH check from LiveAddrs.
+func isSSHCheck(command []string) bool {
+	return slices.ContainsFunc(command, func(a string) bool { return strings.Contains(a, "===SSHD===") })
+}
+
 func (f *Fake) AgentExec(ctx context.Context, node string, vmid int, command []string, input string) (int, error) {
 	var pid int
-	err := f.agentCall(ctx, fmt.Sprintf("agent-exec:%d", vmid), node, vmid, func(g *Guest) error {
+	key := fmt.Sprintf("agent-exec:%d", vmid)
+	if isSSHCheck(command) {
+		key = fmt.Sprintf("agent-ssh:%d", vmid)
+	}
+	err := f.agentCall(ctx, key, node, vmid, func(g *Guest) error {
 		st := proxmox.ExecStatus{Exited: true}
 		switch {
+		case isSSHCheck(command):
+			st.Out = g.SSHOut
+			if st.Out == "" {
+				st.Out = defaultSSHOut
+			}
 		case isSetupRead(command) && g.SetupPending > 0:
 			g.SetupPending--
 			st.Out = "IMAGE_STATE_SPECIALIZE_RESEAL_TO_OOBE\r\n"

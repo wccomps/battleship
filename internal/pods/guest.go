@@ -10,6 +10,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf16"
+
+	"github.com/wccomps/battleship/internal/config"
 )
 
 // Guest is what configure-guest sets inside an environment host.
@@ -21,6 +23,17 @@ type Guest struct {
 	Prefix   int        `json:"prefix"`
 	Gateway  netip.Addr `json:"gateway"`
 	DNS      netip.Addr `json:"dns"`
+	OpsCAKey string     `json:"ops_ca_key,omitempty"`
+}
+
+// CheckSSHKey reports whether key is a canonical OpenSSH public key
+// ("<type> <base64>", with no comment or extra space).
+func CheckSSHKey(key string) error {
+	canon, err := config.ParseSSHPublicKey(key)
+	if err != nil || canon != key {
+		return fmt.Errorf("ops CA key %q isn't a canonical OpenSSH public key", key)
+	}
+	return nil
 }
 
 // RebootMarker is what a script prints when the change needs a restart
@@ -72,6 +85,11 @@ func (g Guest) Check() error {
 			return fmt.Errorf("%s %q isn't an IPv4 address", a.what, AddrText(a.a))
 		}
 	}
+	if g.OpsCAKey != "" {
+		if err := CheckSSHKey(g.OpsCAKey); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -108,10 +126,10 @@ func GuestScript(g Guest, mac string) (string, error) {
 	}
 	if g.OS == ImageWindows {
 		return fmt.Sprintf(windowsScript, quote(strings.ToUpper(strings.ReplaceAll(mac, ":", "-"))), quote(g.IP.String()), g.Prefix,
-			quote(g.Gateway.String()), quote(g.DNS.String()), quote(g.Domain), quote(g.Hostname), RebootMarker), nil
+			quote(g.Gateway.String()), quote(g.DNS.String()), quote(g.Domain), quote(g.Hostname), quote(g.OpsCAKey), RebootMarker), nil
 	}
-	return fmt.Sprintf("MAC=%s\nIP=%s\nPREFIX=%d\nGW=%s\nDNS=%s\nHOST=%s\nDOMAIN=%s\n",
-		quote(strings.ToLower(mac)), quote(g.IP.String()), g.Prefix, quote(g.Gateway.String()), quote(g.DNS.String()), quote(g.Hostname), quote(g.Domain)) + linuxFindIface + linuxScript, nil
+	return fmt.Sprintf("MAC=%s\nIP=%s\nPREFIX=%d\nGW=%s\nDNS=%s\nHOST=%s\nDOMAIN=%s\nCA=%s\n",
+		quote(strings.ToLower(mac)), quote(g.IP.String()), g.Prefix, quote(g.Gateway.String()), quote(g.DNS.String()), quote(g.Hostname), quote(g.Domain), quote(g.OpsCAKey)) + linuxFindIface + linuxScript, nil
 }
 
 // linuxFindIface sets $iface to the NIC with $MAC.
@@ -157,8 +175,9 @@ if (-not $held) { [Console]::Error.WriteLine('another battleship setup script is
 `
 
 // linuxScript sets a static address on the NIC with $MAC through whichever
-// of netplan, NetworkManager or ifupdown the image uses, then the host name.
-// cloud-init is told to leave both alone from now on.
+// of netplan, NetworkManager or ifupdown the image uses, then the host name,
+// and when $CA is set, trusts the ops SSH CA for root logins.
+// cloud-init is told to leave networking and the host name alone from now on.
 const linuxScript = `if [ -d /etc/cloud/cloud.cfg.d ]; then
 	printf 'network: {config: disabled}\npreserve_hostname: true\n' > /etc/cloud/cloud.cfg.d/99-battleship.cfg
 fi
@@ -219,10 +238,45 @@ fi
 if command -v hostnamectl >/dev/null 2>&1; then hostnamectl set-hostname "$HOST"; else echo "$HOST" > /etc/hostname; hostname "$HOST"; fi
 sed -i '/^127\.0\.1\.1[[:space:]]/d' /etc/hosts
 echo "127.0.1.1 $HOST.$DOMAIN $HOST" >> /etc/hosts
+if [ -n "$CA" ]; then
+	mkdir -p /etc/ssh/auth_principals /root/.ssh
+	chmod 700 /root/.ssh
+	printf '%s\n' "$CA" > /etc/ssh/vault-ca.pub
+	chmod 644 /etc/ssh/vault-ca.pub
+	touch /etc/ssh/auth_principals/root
+	for p in core-infrastructure competition-infrastructure root; do
+		grep -qxF "$p" /etc/ssh/auth_principals/root || printf '%s\n' "$p" >> /etc/ssh/auth_principals/root
+	done
+	chmod 644 /etc/ssh/auth_principals/root
+	ak="cert-authority,principals=\"core-infrastructure,competition-infrastructure,root\" $CA"
+	touch /root/.ssh/authorized_keys
+	grep -qxF "$ak" /root/.ssh/authorized_keys || printf '%s\n' "$ak" >> /root/.ssh/authorized_keys
+	chmod 600 /root/.ssh/authorized_keys
+	if [ -f /etc/ssh/sshd_config ]; then
+		awk '
+			tolower($1) == "trustedusercakeys" || tolower($1) == "authorizedprincipalsfile" { next }
+			tolower($1) == "match" && !done {
+				print "TrustedUserCAKeys /etc/ssh/vault-ca.pub"
+				print "AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u"
+				done = 1
+			}
+			{ print }
+			END {
+				if (!done) {
+					print "TrustedUserCAKeys /etc/ssh/vault-ca.pub"
+					print "AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u"
+				}
+			}' /etc/ssh/sshd_config > /etc/ssh/sshd_config.battleship
+		chmod 600 /etc/ssh/sshd_config.battleship
+		mv /etc/ssh/sshd_config.battleship /etc/ssh/sshd_config
+		systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service sshd reload 2>/dev/null || service ssh reload 2>/dev/null || true
+	fi
+fi
 `
 
 // windowsScript sets a static address on the adapter with the MAC, its DNS
-// and suffix, and renames the computer; a rename prints RebootMarker.
+// and suffix, configures OpenSSH to trust $ca when sshd is installed, and
+// renames the computer; a rename prints RebootMarker.
 var windowsScript = `$ErrorActionPreference = 'Stop'
 ` + windowsLock + `$mac = %s
 $ip = %s
@@ -231,6 +285,7 @@ $gw = %s
 $dns = %s
 $domain = %s
 $hostname = %s
+$ca = %s
 $nic = Get-NetAdapter | Where-Object { $_.MacAddress -eq $mac } | Select-Object -First 1
 if (-not $nic) { [Console]::Error.WriteLine("no network adapter has MAC $mac"); exit 2 }
 $i = $nic.ifIndex
@@ -247,6 +302,44 @@ if (-not (Get-NetRoute -InterfaceIndex $i -DestinationPrefix '0.0.0.0/0' -ErrorA
 }
 Set-DnsClientServerAddress -InterfaceIndex $i -ServerAddresses $dns
 Set-DnsClient -InterfaceIndex $i -ConnectionSpecificSuffix $domain
+if ($ca -and (Get-Service sshd -ErrorAction SilentlyContinue)) {
+	$sshDir = "$env:ProgramData\ssh"
+	$prDir = "$sshDir\auth_principals"
+	New-Item -ItemType Directory -Path $prDir -Force | Out-Null
+	Set-Content -LiteralPath "$sshDir\vault-ca.pub" -Value $ca -Encoding ascii
+	$principals = @('core-infrastructure', 'competition-infrastructure', 'administrator', 'administrators')
+	foreach ($u in 'administrators', 'administrator', 'root') {
+		Set-Content -LiteralPath "$prDir\$u" -Value $principals -Encoding ascii
+	}
+	$akFile = "$sshDir\administrators_authorized_keys"
+	$akLine = 'cert-authority,principals="core-infrastructure,competition-infrastructure,administrator,administrators" ' + $ca
+	$existing = @()
+	if (Test-Path -LiteralPath $akFile) { $existing = @(Get-Content -LiteralPath $akFile) }
+	if ($existing -notcontains $akLine) {
+		Set-Content -LiteralPath $akFile -Value ($existing + $akLine) -Encoding ascii
+	}
+	foreach ($p in "$sshDir\vault-ca.pub", $prDir, "$prDir\administrators", "$prDir\administrator", "$prDir\root", $akFile) {
+		icacls.exe $p /inheritance:r /grant '*S-1-5-18:(F)' /grant '*S-1-5-32-544:(F)' | Out-Null
+	}
+	$cfgFile = "$sshDir\sshd_config"
+	if (Test-Path -LiteralPath $cfgFile) {
+		$caLines = @('TrustedUserCAKeys __PROGRAMDATA__/ssh/vault-ca.pub', 'AuthorizedPrincipalsFile __PROGRAMDATA__/ssh/auth_principals/administrators')
+		$out = New-Object System.Collections.Generic.List[string]
+		$inserted = $false
+		foreach ($line in Get-Content -LiteralPath $cfgFile) {
+			if ($line -match '^\s*(TrustedUserCAKeys|AuthorizedPrincipalsFile)\b') { continue }
+			if (-not $inserted -and $line -match '^\s*Match\b') {
+				$out.AddRange([string[]]$caLines)
+				$inserted = $true
+			}
+			$out.Add($line)
+		}
+		if (-not $inserted) { $out.AddRange([string[]]$caLines) }
+		Set-Content -LiteralPath $cfgFile -Value $out -Encoding ascii
+	}
+	Set-Service -Name sshd -StartupType Automatic
+	Restart-Service -Name sshd -Force
+}
 if ($env:COMPUTERNAME -ne $hostname.ToUpper()) {
 	Rename-Computer -NewName $hostname -Force | Out-Null
 	Write-Output '%s'
