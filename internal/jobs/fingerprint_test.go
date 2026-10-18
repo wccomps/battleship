@@ -32,12 +32,14 @@ var fingerprinted = map[string]map[string]bool{
 		"Name": true, "VMID": true, "Steps": true, "Blocked": true, "Snapshot": true, "Action": true, "Template": true,
 		"Description": true, "VMState": true, // what a snapshot job writes to Proxmox
 		// What base-image and environment steps do.
-		"Source": true, "Pool": true, "Tags": true, "Notes": true, "NICs": true, "Guest": true, "Supersedes": true, "Details": true, "FreeNotes": true,
+		"Source": true, "Pool": true, "Tags": true, "Notes": true, "NICs": true, "Guest": true, "Supersedes": true, "Details": true,
 		// Derived from Name or Snapshot, or where the VM runs.
 		"Team": false, "Host": false, "Node": false, "Baseline": false,
 		// Says why Blocked is set, which Blocked already covers.
 		"Unpermitted": false,
 		// What the review shows as before; Notes is what the job writes.
+		// An Edit notes writing free text fingerprints DetailsWas, all of
+		// which it replaces (TestFingerprintCoversNotesReplaced).
 		"DNSWas": false, "DetailsWas": false,
 	},
 	"Source": {

@@ -38,7 +38,7 @@ var confirmPreviews = map[pods.Kind]url.Values{
 var confirmFields = []string{
 	fieldTeams, fieldHosts, fieldVMs, fieldPattern, fieldRebuild, fieldBaseline, fieldSnapshot, fieldDescription, fieldVMState,
 	fieldAction, fieldNonce, fieldFingerprint, fieldTyped, fieldRetryOf, fieldFrom, fieldDomain, fieldRouter, fieldEnvHosts,
-	fieldDNS, fieldVMID, fieldFamily, fieldImageKind, fieldImage, fieldNotes,
+	fieldDNS, fieldVMID, fieldFamily, fieldImageKind, fieldImage, fieldDetails, fieldNotes,
 }
 
 // operationOf is kind's operation, opened for lab.env if it acts on an
@@ -75,7 +75,7 @@ func confirmFieldsOf(kind pods.Kind) []string {
 		fs = append(fs, fieldTyped)
 	}
 	if kind.Teamless() {
-		return append(fs, fieldDomain, fieldRouter, fieldEnvHosts, fieldDNS, fieldVMID, fieldFamily, fieldImageKind, fieldImage, fieldNotes)
+		return append(fs, fieldDomain, fieldRouter, fieldEnvHosts, fieldDNS, fieldVMID, fieldFamily, fieldImageKind, fieldImage, fieldDetails, fieldNotes)
 	}
 	fs = append(fs, fieldTeams, fieldHosts, fieldVMs)
 	switch kind {

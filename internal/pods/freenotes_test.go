@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -34,13 +35,13 @@ func drawFree(t *rapid.T) string {
 	return s
 }
 
-// freeOK is the rule for free text, written apart from CheckFreeNotes:
+// freeOK is the rule for free text, written apart from checkFreeNotes:
 // valid UTF-8 of letters, marks, numbers, punctuation, symbols, spaces and
-// newlines; at most MaxFreeNotes characters; trimmed as CleanFreeNotes
-// leaves it; and no line that, less its spaces, starts "battleship:" or is
-// the block's header.
+// newlines; at most MaxFreeNotes characters; no space or newline at the
+// start or end, and no space at a line's end; and no line that, less its
+// spaces, starts "battleship:" or is the block's header.
 func freeOK(s string) bool {
-	if !utf8.ValidString(s) || utf8.RuneCountInString(s) > MaxFreeNotes || s != CleanFreeNotes(s) {
+	if !utf8.ValidString(s) || utf8.RuneCountInString(s) > MaxFreeNotes || strings.Trim(s, " \n") != s {
 		return false
 	}
 	for _, r := range s {
@@ -50,11 +51,16 @@ func freeOK(s string) bool {
 	}
 	for _, line := range strings.Split(s, "\n") {
 		t := strings.TrimSpace(line)
-		if strings.HasPrefix(t, "battleship:") || t == "**Details**" {
+		if strings.HasSuffix(line, " ") || strings.HasPrefix(t, "battleship:") || t == "**Details**" {
 			return false
 		}
 	}
 	return true
+}
+
+// writeFree is Apply of details and free text.
+func writeFree(desc string, d ImageDetails, free string) (string, error) {
+	return ImageNotes{ImageDetails: d, Free: &free}.Apply(desc)
 }
 
 // shipLines are desc's battleship lines as people never see them
@@ -86,7 +92,7 @@ func headers(desc string) int {
 	return n
 }
 
-// Whatever free text is asked for, WithFreeNotes refuses it, leaving the
+// Whatever free text is asked for, Apply refuses it, leaving the
 // notes as they were, just when the rule refuses it; and what it writes
 // keeps every battleship line exactly and in order, has exactly the one
 // block the details make, and reads back as exactly those details and that
@@ -104,9 +110,9 @@ func TestPropFreeNotesCannotForgeLines(t *testing.T) {
 		}
 		free := drawFree(t)
 
-		out, err := WithFreeNotes(desc, d, free)
+		out, err := writeFree(desc, d, free)
 		if want := freeOK(free) && CheckDetails(d) == nil; (err == nil) != want {
-			t.Fatalf("WithFreeNotes(%q) err %v; the rule accepts it: %v", free, err, want)
+			t.Fatalf("Apply(%q) err %v; the rule accepts it: %v", free, err, want)
 		}
 		if err != nil {
 			if out != desc {
@@ -127,35 +133,42 @@ func TestPropFreeNotesCannotForgeLines(t *testing.T) {
 		if got, f, err := ParseDetails(out); err != nil || got != d || f != free {
 			t.Fatalf("ParseDetails(%q) = %+v, %q, %v", out, got, f, err)
 		}
-		if got, f, err := EditableNotes(out); err != nil || got != d || f != free {
-			t.Fatalf("EditableNotes(%q) = %+v, %q, %v", out, got, f, err)
+		if w := EditStart(out); w != (DetailsWas{Details: d, Notes: free}) {
+			t.Fatalf("EditStart(%q) = %+v", out, w)
 		}
-		if again, _ := WithFreeNotes(out, d, free); again != out {
+		if again, _ := writeFree(out, d, free); again != out {
 			t.Fatalf("writing again changed %q to %q", out, again)
 		}
 	})
 }
 
-// CleanFreeNotes is what a form posts as the notes keep it, once.
+// CleanFreeNotes is what a form posts as the notes keep it, once: no tab,
+// CR, line or paragraph separator, or space other than U+0020 is
+// left, nor a space ending a line, nor space or newlines at either end.
 func TestPropCleanFreeNotes(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		s := strings.Join(rapid.SliceOfN(rapid.OneOf(rapid.SampledFrom(freePieces), rapid.String()), 0, 6).Draw(t, "pieces"), "")
 		c := CleanFreeNotes(s)
-		if CleanFreeNotes(c) != c || strings.Contains(c, "\r\n") {
+		if CleanFreeNotes(c) != c {
 			t.Fatalf("CleanFreeNotes(%q) = %q, again %q", s, c, CleanFreeNotes(c))
 		}
-		if CheckFreeNotes(c) == nil && userText(c) != c {
+		if strings.ContainsFunc(c, func(r rune) bool {
+			return r == '\t' || r == '\r' || r == '\u2028' || r == '\u2029' || (r != ' ' && unicode.Is(unicode.Zs, r))
+		}) || strings.Contains(c, " \n") || strings.TrimSpace(c) != c {
+			t.Fatalf("CleanFreeNotes(%q) = %q", s, c)
+		}
+		if checkFreeNotes(c) == nil && userText(c) != c {
 			t.Fatalf("UserNotes reads %q back as %q", c, userText(c))
 		}
 	})
 }
 
-// CheckFreeNotes says why it refuses text.
+// checkFreeNotes says why it refuses text.
 func TestCheckFreeNotes(t *testing.T) {
 	for _, ok := range []string{"", "Patched monthly.\n\nRebooted.", "x battleship: y", "Battleship: x", "**details**", "- OS: Debian 12",
 		"<b>x</b> & é", strings.Repeat("é", MaxFreeNotes)} {
-		if err := CheckFreeNotes(ok); err != nil {
-			t.Errorf("CheckFreeNotes(%q) = %v", ok, err)
+		if err := checkFreeNotes(ok); err != nil {
+			t.Errorf("checkFreeNotes(%q) = %v", ok, err)
 		}
 	}
 	for s, why := range map[string]string{
@@ -174,29 +187,42 @@ func TestCheckFreeNotes(t *testing.T) {
 		"\nx":                               "blank lines",
 		"x  \ny":                            "end a line with spaces",
 	} {
-		if err := CheckFreeNotes(s); err == nil || !strings.Contains(err.Error(), why) {
-			t.Errorf("CheckFreeNotes(%.20q) = %v, want %q", s, err, why)
+		if err := checkFreeNotes(s); err == nil || !strings.Contains(err.Error(), why) {
+			t.Errorf("checkFreeNotes(%.20q) = %v, want %q", s, err, why)
 		}
 	}
-	if got := CleanFreeNotes("\r\n  a  \r\n\r\nb\t\r\n\r\n"); got != "a\n\nb" {
-		t.Errorf("CleanFreeNotes = %q", got)
+	for in, want := range map[string]string{
+		"\r\n  a  \r\n\r\nb\t\r\n\r\n": "a\n\nb",
+		"User\tpass":                   "User    pass",
+		"a\u00a0b\u3000c\u2007d":       "a b c d",
+		"a\u2028b\u2029c\rd":           "a\nb\nc\nd",
+		"a\u200bb\u0085":               "a\u200bb",
+	} {
+		if got := CleanFreeNotes(in); got != want {
+			t.Errorf("CleanFreeNotes(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
-// An unreadable block is editable: no details, and the text outside it.
-func TestEditableNotesUnreadable(t *testing.T) {
+// An unreadable block is editable: no details, the text outside it, and
+// the block as it reads, which the details replace.
+func TestEditStartUnreadable(t *testing.T) {
 	desc := "intro\n\n**Details**\n- Colour: blue\nrun on\n\noutro\nbattleship: source=1"
-	d, free, err := EditableNotes(desc)
-	if err != ErrDetailsUnreadable || !d.Empty() || free != "intro\n\noutro" {
-		t.Errorf("EditableNotes = %+v, %q, %v", d, free, err)
+	want := DetailsWas{Unreadable: true, Notes: "intro\n\noutro", Block: "**Details**\n- Colour: blue\nrun on"}
+	if w := EditStart(desc); w != want {
+		t.Errorf("EditStart = %+v", w)
 	}
-	out, err := WithFreeNotes(desc, ImageDetails{OS: "Debian 12"}, free)
+	out, err := writeFree(desc, ImageDetails{OS: "Debian 12"}, want.Notes)
 	if err != nil || out != "**Details**\n- OS: Debian 12\n\nintro\n\noutro\n\nbattleship: source=1" {
-		t.Errorf("WithFreeNotes = %q, %v", out, err)
+		t.Errorf("Apply = %q, %v", out, err)
+	}
+	two := "**Details**\n- OS: a\n\nmid\n\n**Details**\n- OS: b"
+	if w := EditStart(two); !w.Unreadable || w.Notes != "mid" || w.Block != "**Details**\n- OS: a\n\n**Details**\n- OS: b" {
+		t.Errorf("EditStart over two blocks = %+v", w)
 	}
 	long := strings.Repeat("x", maxUserNotes+10)
-	if _, free, _ := EditableNotes(long); free != long {
-		t.Errorf("EditableNotes caps the text at %d characters", len(free))
+	if w := EditStart(long); w.Notes != long {
+		t.Errorf("EditStart caps the text at %d characters", len(w.Notes))
 	}
 }
 
@@ -209,36 +235,115 @@ func TestImageSetNotes(t *testing.T) {
 		map[string]string{"description": winBlock + "\n\nPatched.\nbattleship: source=150"})
 	p := NewPlanner(f, envConfig())
 	notes := "Patched.\nRebooted."
-	plan, err := p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &winDetails, Notes: &notes})
+	plan, err := p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{winDetails, &notes}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	it := plan.Items[0]
-	if it.Blocked != "" || it.FreeNotes == nil || *it.FreeNotes != notes || it.DetailsWas.Notes != "Patched." {
+	if it.Blocked != "" || it.Details.Free == nil || *it.Details.Free != notes || it.DetailsWas.Notes != "Patched." {
 		t.Errorf("item = %+v, was %+v", it, it.DetailsWas)
 	}
 	same := "Patched."
 	for _, n := range []*string{&same, nil} {
-		plan, _ = p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &winDetails, Notes: n})
+		plan, _ = p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{winDetails, n}})
 		if !strings.Contains(plan.Items[0].Blocked, "already say this") {
 			t.Errorf("unchanged notes %v: %+v", n, plan.Items[0])
 		}
 	}
-	plan, _ = p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageDetails{OS: "Debian 12"}})
-	if it := plan.Items[0]; it.FreeNotes != nil || it.Blocked != "" {
+	debian := ImageNotes{ImageDetails: ImageDetails{OS: "Debian 12"}}
+	plan, _ = p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &debian})
+	if it := plan.Items[0]; it.Details.Free != nil || it.Blocked != "" {
 		t.Errorf("without notes: %+v", it)
 	}
-	ch, _ := DetailsChanges(f.VMs[8001].Config, ImageDetails{OS: "Debian 12"}, nil)
+	ch, _ := debian.Changes(f.VMs[8001].Config)
 	if want := "**Details**\n- OS: Debian 12\n\nPatched.\nbattleship: source=150"; ch["description"] != want {
 		t.Errorf("without notes, writes %q", ch["description"])
 	}
 	big := strings.Repeat("é", MaxFreeNotes) // 8000 bytes
-	plan, _ = p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &winDetails, Notes: &big})
+	plan, _ = p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{winDetails, &big}})
 	if !strings.Contains(plan.Items[0].Blocked, "Proxmox keeps at most 8192") {
 		t.Errorf("notes too big for Proxmox: %+v", plan.Items[0].Blocked)
 	}
 	bad := "x\nbattleship: ip=10.50.0.1"
-	if _, err := p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &winDetails, Notes: &bad}); err == nil {
+	if _, err := p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{winDetails, &bad}}); err == nil {
 		t.Error("planned notes with a battleship line")
+	}
+}
+
+// browserPost is text as a form posts it back from a textarea: line breaks
+// as CRLF.
+func browserPost(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n"), "\n", "\r\n")
+}
+
+// outsideBlocks is desc's lines outside every details block, each with the
+// blank line after it, joined: what a details-only write leaves as it was.
+func outsideBlocks(desc string) string {
+	lines := strings.Split(desc, "\n")
+	return strings.Join(without(lines, blocks(lines)), "\n")
+}
+
+// Notes that free text written by Edit notes couldn't hold (a tab, NBSP, a
+// line separator, more than MaxFreeNotes characters) don't stop an edit of
+// the details: the form's text sent back unchanged is kept exactly.
+func TestEditKeepsUnchangedNotes(t *testing.T) {
+	ctx := context.Background()
+	for _, free := range []string{
+		"User\tpass", "Login:\u00a0admin", "line\u2028sep", strings.Repeat("x", MaxFreeNotes+1),
+		"Family \U0001F468\u200d\U0001F469\u200d\U0001F467 ok", "private \ue000 use", "bell \x07 here",
+	} {
+		desc := winBlock + "\n\n" + free + "\nbattleship: source=1"
+		f := imageFake()
+		f.Add(proxmox.VM{VMID: 8001, Name: "debian-12-v2", Node: "alder", Template: true, Tags: "base;linux"}, map[string]string{"description": desc})
+		posted := CleanFreeNotes(browserPost(EditStart(desc).Notes))
+		n := ImageNotes{ImageDetails{OS: "Debian 13"}, &posted}
+		plan, err := NewPlanner(f, envConfig()).ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &n})
+		if err != nil {
+			t.Errorf("%.20q: %v", free, err)
+			continue
+		}
+		it := plan.Items[0]
+		ch, err := it.Details.Changes(f.VMs[8001].Config)
+		if it.Blocked != "" || err != nil || outsideBlocks(ch["description"]) != outsideBlocks(desc) {
+			t.Errorf("%.20q: blocked %q, %v, writes %q", free, it.Blocked, err, ch["description"])
+		}
+	}
+}
+
+// Notes with free text keep the JSON their details alone had, and read
+// back from it with none.
+func TestPropImageNotesJSON(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		val := rapid.OneOf(rapid.Just(""), rapid.String(), rapid.SampledFrom([]string{"Debian 12", "a / b", "\"q\"", "<&>"}))
+		d := ImageDetails{OS: val.Draw(t, "os"), User: val.Draw(t, "user"), Password: val.Draw(t, "password"), Built: val.Draw(t, "built"),
+			Generalized: val.Draw(t, "generalized"), Installed: val.Draw(t, "installed"), Licence: val.Draw(t, "licence")}
+		was, _ := json.Marshal(d)
+		now, _ := json.Marshal(ImageNotes{ImageDetails: d})
+		if string(now) != string(was) {
+			t.Fatalf("ImageNotes JSON %s, details alone %s", now, was)
+		}
+		var back ImageNotes
+		if err := json.Unmarshal(was, &back); err != nil || back.Free != nil {
+			t.Fatalf("read back %+v, %v", back, err)
+		}
+		var dBack ImageDetails
+		_ = json.Unmarshal(was, &dBack)
+		if back.ImageDetails != dBack {
+			t.Fatalf("read back %+v, want %+v", back.ImageDetails, dBack)
+		}
+	})
+}
+
+// Every write of notes is held to what Proxmox keeps, so the details step
+// fails rather than send a description Proxmox refuses, whatever planned
+// it: a register's copy of long notes, too.
+func TestApplyRefusesNotesTooLong(t *testing.T) {
+	desc := strings.Repeat("x", maxNotesBytes-10)
+	n := ImageNotes{ImageDetails: ImageDetails{OS: "Debian 12"}}
+	if ch, err := n.Changes(map[string]string{"description": desc}); err == nil || ch != nil || !strings.Contains(err.Error(), "at most 8192") {
+		t.Errorf("Changes = %v, %v", ch, err)
+	}
+	if out, err := n.Apply(""); err != nil || len(out) > maxNotesBytes {
+		t.Errorf("Apply = %q, %v", out, err)
 	}
 }

@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -20,10 +21,7 @@ type ImageRequest struct {
 	// Details are what Edit notes writes, and what register writes: nil
 	// is those of its source's notes (see RegisterDetails), and empty is
 	// none, the copy keeping its source's notes as they are.
-	Details *ImageDetails
-	// Notes is the free text Edit notes writes beside the details
-	// (WithFreeNotes); nil keeps the free text there is.
-	Notes *string
+	Details *ImageNotes
 }
 
 // agentEnabled reads a VM's agent option ("1", "enabled=1,…", "1,fstrim…").
@@ -83,7 +81,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		return nil, err
 	}
 	if req.Details != nil {
-		if err := CheckDetails(*req.Details); err != nil {
+		if err := req.Details.Check(); err != nil {
 			return nil, err
 		}
 	}
@@ -142,10 +140,10 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		it.Source.Unreadable = derr != nil
 		it.Blocked = agentBlock(src, cfg, kind)
 		if d, ok := RegisterDetails(cfg["description"]); ok && !d.Empty() && req.Details == nil {
-			it.Details = &d
+			it.Details = &ImageNotes{ImageDetails: d}
 		}
 	}
-	if req.Details != nil && !req.Details.Empty() {
+	if req.Details != nil && !req.Details.ImageDetails.Empty() {
 		d := *req.Details
 		it.Details = &d
 	}
@@ -264,54 +262,61 @@ func (p Planner) ImageDelete(ctx context.Context, req ImageRequest) (*Plan, erro
 		Locks: []string{"family:" + im.Family}}, nil
 }
 
+// NotesEdit is what Edit notes on a family works on: the family's newest
+// version, the one new hosts are made from, its notes as they are, and
+// what editing them starts from.
+type NotesEdit struct {
+	Image BaseImage
+	Desc  string
+	Was   DetailsWas
+}
+
+// NotesToEdit reads what Edit notes on family starts from.
+func (p Planner) NotesToEdit(ctx context.Context, family string) (NotesEdit, error) {
+	vms, err := p.API.ClusterVMs(ctx)
+	if err != nil {
+		return NotesEdit{}, err
+	}
+	newest, ok := Newest(BaseImages(vms), family)
+	if !ok {
+		return NotesEdit{}, fmt.Errorf("family %q has no version that isn't deprecated", family)
+	}
+	cfg, err := p.API.VMConfig(ctx, newest.Node, newest.VMID)
+	if err != nil {
+		return NotesEdit{Image: newest}, fmt.Errorf("reading %s: %w", newest.Name, err)
+	}
+	return NotesEdit{Image: newest, Desc: cfg["description"], Was: EditStart(cfg["description"])}, nil
+}
+
 // ImageSetDetails plans Edit notes: writing details, and free text if
-// asked, into the notes of a family's newest version, the one new hosts are
-// made from. Older versions keep theirs: each is its own build, and hosts
-// already made from them.
+// asked, into the notes of a family's newest version (NotesToEdit). Older
+// versions keep theirs: each is its own build, and hosts already made from
+// them. Free text that is, once cleaned, the text editing starts from is
+// kept as it is, so a form sent back unchanged writes nothing there, even
+// text checkFreeNotes would refuse.
 func (p Planner) ImageSetDetails(ctx context.Context, req ImageRequest) (*Plan, error) {
 	if req.Details == nil {
 		return nil, fmt.Errorf("name the details to write")
 	}
-	d := *req.Details
-	if err := CheckDetails(d); err != nil {
-		return nil, err
-	}
-	if req.Notes != nil {
-		if err := CheckFreeNotes(*req.Notes); err != nil {
-			return nil, err
-		}
-	}
-	vms, err := p.API.ClusterVMs(ctx)
+	at, err := p.NotesToEdit(ctx, req.Family)
 	if err != nil {
 		return nil, err
 	}
-	newest, ok := Newest(BaseImages(vms), req.Family)
-	if !ok {
-		return nil, fmt.Errorf("family %q has no version that isn't deprecated", req.Family)
+	n, was := *req.Details, at.Was
+	if n.Free != nil && CleanFreeNotes(*n.Free) == CleanFreeNotes(was.Notes) {
+		n.Free = nil
 	}
-	cfg, err := p.API.VMConfig(ctx, newest.Node, newest.VMID)
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", newest.Name, err)
+	_, err = n.Apply(at.Desc)
+	var long notesTooLong
+	if err != nil && !errors.As(err, &long) {
+		return nil, err
 	}
-	desc := cfg["description"]
-	was, free, err := EditableNotes(desc)
-	unreadable := err != nil
-	if unreadable {
-		free = userText(desc) // all of it is replaced
-	}
-	it := Item{Name: newest.Name, VMID: newest.VMID, Node: newest.Node, Steps: []Step{StepDetails}, Details: &d,
-		DetailsWas: &DetailsWas{Details: was, Unreadable: unreadable, Notes: free}}
-	after := free
-	if req.Notes != nil {
-		n := *req.Notes
-		it.FreeNotes, after = &n, n
-	}
-	ch, _ := DetailsChanges(cfg, d, it.FreeNotes) // checked above
+	it := Item{Name: at.Image.Name, VMID: at.Image.VMID, Node: at.Image.Node, Steps: []Step{StepDetails}, Details: &n, DetailsWas: &was}
 	switch {
-	case !unreadable && was == d && free == after:
-		it.Blocked = "the notes of " + newest.Name + " already say this"
-	case len(ch["description"]) > MaxNotesBytes:
-		it.Blocked = fmt.Sprintf("the notes of %s would be %d bytes; Proxmox keeps at most %d", newest.Name, len(ch["description"]), MaxNotesBytes)
+	case !was.Unreadable && was.Details == n.ImageDetails && (n.Free == nil || *n.Free == was.Notes):
+		it.Blocked = "the notes of " + at.Image.Name + " already say this"
+	case err != nil:
+		it.Blocked = "the notes of " + at.Image.Name + " " + err.Error()
 	}
 	return &Plan{Kind: KindImageDetails, Config: ConfigHash(KindImageDetails, p.Cfg), Items: []Item{it},
 		Locks: []string{"family:" + req.Family}}, nil

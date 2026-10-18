@@ -24,15 +24,17 @@ func Fingerprint(plan *pods.Plan) string {
 		Description string `json:",omitempty"`
 		VMState     bool   `json:",omitempty"`
 
-		Source     *fpSource          `json:",omitempty"`
-		Pool       string             `json:",omitempty"`
-		Tags       string             `json:",omitempty"`
-		Notes      *pods.Notes        `json:",omitempty"`
-		NICs       map[string]string  `json:",omitempty"`
-		Guest      *pods.Guest        `json:",omitempty"`
-		Supersedes *fpSource          `json:",omitempty"`
-		Details    *pods.ImageDetails `json:",omitempty"`
-		FreeNotes  *string            `json:",omitempty"`
+		Source     *fpSource         `json:",omitempty"`
+		Pool       string            `json:",omitempty"`
+		Tags       string            `json:",omitempty"`
+		Notes      *pods.Notes       `json:",omitempty"`
+		NICs       map[string]string `json:",omitempty"`
+		Guest      *pods.Guest       `json:",omitempty"`
+		Supersedes *fpSource         `json:",omitempty"`
+		Details    *pods.ImageNotes  `json:",omitempty"`
+		// Replaces is the notes an Edit notes writing free text replaces:
+		// changed since the preview, the job is stale, not a lost update.
+		Replaces *pods.DetailsWas `json:",omitempty"`
 	}
 	type fpTemplate struct {
 		Name           string
@@ -67,6 +69,10 @@ func Fingerprint(plan *pods.Plan) string {
 		})
 	}
 	for _, it := range plan.Items {
+		var replaces *pods.DetailsWas
+		if it.Details != nil && it.Details.Free != nil {
+			replaces = it.DetailsWas
+		}
 		fp.Items = append(fp.Items, fpItem{
 			Name:     it.Name,
 			VMID:     it.VMID,
@@ -80,7 +86,7 @@ func Fingerprint(plan *pods.Plan) string {
 			VMState:     it.VMState,
 
 			Source: sourceFP(it.Source), Pool: it.Pool, Tags: it.Tags, Notes: it.Notes,
-			NICs: it.NICs, Guest: it.Guest, Supersedes: sourceFP(it.Supersedes), Details: it.Details, FreeNotes: it.FreeNotes,
+			NICs: it.NICs, Guest: it.Guest, Supersedes: sourceFP(it.Supersedes), Details: it.Details, Replaces: replaces,
 		})
 	}
 	b, _ := json.Marshal(fp) // plain structs of strings, ints and bools can't fail

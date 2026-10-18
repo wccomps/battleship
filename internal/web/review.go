@@ -35,9 +35,10 @@ type reviewView struct {
 	Details     *detailsView
 	DetailsSay  string
 	EditDetails string
-	// Changes are an Edit notes's details, before and after, and
-	// NotesChange its free text.
+	// Changes are an Edit notes's details, before and after; Block, the
+	// unreadable block they replace; NotesChange, its free text.
 	Changes     []detailChange
+	Block       string
 	NotesChange *notesChange
 	// Notes are the notes people wrote that the copy keeps, in a box.
 	Notes string
@@ -143,7 +144,7 @@ func registerReview(op operation, in jobs.Inputs, it pods.Item) *reviewView {
 	}
 	switch {
 	case it.Details != nil:
-		r.Details = detailsOf(*it.Details, false)
+		r.Details = detailsOf(it.Details.ImageDetails, false)
 		if in.Details == nil {
 			r.DetailsSay = "Read from the notes of " + src.Name + ": check them."
 		}
@@ -166,35 +167,31 @@ type notesChange struct {
 }
 
 // detailsReview describes an Edit notes: each detail before and after,
-// then the free text, which a job stored before Edit notes could write it
-// leaves as it is.
+// then the free text if the job writes it.
 func detailsReview(it pods.Item) *reviewView {
-	r := &reviewView{Verb: "Edit notes of", Subject: it.Name,
-		Say: "Writes these details and notes into the notes of " + it.Name + ", which new hosts copy. Older versions keep theirs."}
-	var before, after pods.ImageDetails
+	var was pods.DetailsWas
 	if it.DetailsWas != nil {
-		before = it.DetailsWas.Details
-		if it.DetailsWas.Unreadable {
-			r.DetailsSay = "Its details block is unreadable: these replace it, and the notes below replace all of its notes."
-		}
+		was = *it.DetailsWas
 	}
+	var after pods.ImageNotes
 	if it.Details != nil {
 		after = *it.Details
 	}
-	if it.FreeNotes == nil {
-		r.Say = "Writes these details into the notes of " + it.Name + ", which new hosts copy. The rest of its notes, and older versions, stay as they are."
-	} else {
-		c := &notesChange{After: *it.FreeNotes}
-		if it.DetailsWas != nil {
-			c.Before = it.DetailsWas.Notes
-		}
-		c.Changed = c.Before != c.After
-		r.NotesChange = c
-	}
-	if it.Blocked != "" {
+	r := &reviewView{Verb: "Edit notes of", Subject: it.Name, Changes: detailChanges(was.Details, after.ImageDetails)}
+	switch {
+	case it.Blocked != "":
 		r.Say, r.Blocked = sentence(it.Blocked), true
+	case after.Free == nil:
+		r.Say = "Writes these details into the notes of " + it.Name + ", which new hosts copy. The rest of its notes, and older versions, stay as they are."
+	default:
+		r.Say = "Writes these details and notes into the notes of " + it.Name + ", which new hosts copy. Older versions keep theirs."
 	}
-	r.Changes = detailChanges(before, after)
+	if was.Unreadable {
+		r.DetailsSay, r.Block = "Its details block is unreadable: these replace it.", was.Block
+	}
+	if after.Free != nil {
+		r.NotesChange = &notesChange{Before: was.Notes, After: *after.Free, Changed: was.Notes != *after.Free}
+	}
 	return r
 }
 
@@ -408,8 +405,8 @@ func imageReview(op operation, in jobs.Inputs, plan *pods.Plan) *reviewView {
 
 // reviewBack is where a review's Back goes: the form, filled in; the page
 // it was opened from for a register (Images, whose row was the form) and a
-// teardown (Environments); and the family page for an edit, deprecate,
-// delete or Edit details, which start there.
+// teardown (Environments); and the family's page for an edit, deprecate,
+// delete or Edit notes.
 func reviewBack(op operation, in jobs.Inputs) string {
 	switch op.Kind {
 	case pods.KindImageRegister, pods.KindEnvTeardown:

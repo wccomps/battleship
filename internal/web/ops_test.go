@@ -716,7 +716,7 @@ func TestOperationPostsNeedCSRF(t *testing.T) {
 var formValues = []string{
 	"", " ", "a", " a , b ", "a,b", ",", "a,,b", "a\nb", "\r\n x \r\n", "a\r\nb\n\nc", " a \n b ", "\u00a0a\u00a0", "\u0085a\u2028",
 	"+5", "-5", " 12 ", "007", "-0", "0", "100", "7000", "99999999999999999999", "1e3", "0x10",
-	"yes", " yes", "YES", "no", "dc=windows", "gw=opnsense:1", "a=b\nc=d:20", "debian-12-v1", "*.kilo.alpha", "1-3",
+	"yes", " yes", "YES", "no", withNotes, "dc=windows", "gw=opnsense:1", "a=b\nc=d:20", "debian-12-v1", "*.kilo.alpha", "1-3",
 }
 
 // drawFormValues draws url.Values over every field, 0-2 values each, mostly
@@ -765,7 +765,7 @@ func TestInputFieldsRoundTrip(t *testing.T) {
 			}
 			q.Set(fieldDomain, strings.Split(link.Path, "/")[2])
 		}
-		in.Notes = nil // long text stays out of links: the form reads it again
+		in.Details = nil // a password and long text stay out of links: the form reads them again
 		if got := formInputs(kind, q); !reflect.DeepEqual(got, in) {
 			t.Fatalf("%s: formInputs(formQuery(%#v)) = %#v", kind, in, got)
 		}

@@ -65,10 +65,11 @@
 <span class="pw"><details><summary class="disc"><span class="show">Show password</span><span class="hide">Hide password</span></summary><code>{{.}}</code></details><button type="button" class="btn sm" data-copy hidden>{{icon "copy"}}<span aria-live="polite">Copy</span></button></span>
 {{- end}}
 
-{{/* details-fields are the details as form fields (formInputs reads them),
-     the login first as on the pages. */}}
+{{/* details-fields are an ImageNotes's details as form fields (formInputs
+     reads them), the login first as on the pages; their "details" field
+     says whether the free text is posted too. */}}
 {{define "details-fields" -}}
-<input type="hidden" name="details" value="yes">
+<input type="hidden" name="details" value="{{if .Free}}with-notes{{else}}yes{{end}}">
 <div class="dfields">
 <label class="field"><span class="lbl">Login user</span><input class="inp" type="text" name="detail_user" value="{{.User}}" maxlength="{{maxDetail}}" autocomplete="off" spellcheck="false" placeholder="e.g. Administrator"></label>
 <label class="field"><span class="lbl">Password</span><input class="inp" type="text" name="detail_password" value="{{.Password}}" maxlength="{{maxDetail}}" autocomplete="off" spellcheck="false"></label>
@@ -96,6 +97,7 @@
 <h2 class="sub">Details</h2>
 {{- with .Details}}{{template "details" .}}{{end}}
 {{- with .DetailsSay}}<p class="meta">{{names .}}</p>{{end}}
+{{- with .Block}}<div class="notes box">{{.}}</div>{{end}}
 {{- with .EditDetails}}<p><button type="submit" class="btn sm" formaction="{{.}}" formnovalidate>{{icon "edit"}}Edit details</button></p>{{end}}
 </div>
 {{- end}}
