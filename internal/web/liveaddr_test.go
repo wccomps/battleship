@@ -257,9 +257,9 @@ func TestEnvironmentsLiveSSHWarnings(t *testing.T) {
 		h.api.FailOn("agent-ssh:2105", &proxmox.APIError{Status: 500, Message: "Command guest-exec has been disabled"})
 		body := h.get(&sess, path).Body.String()
 		lacks(t, "the router at "+path, addrCell(t, body, 2100), "is-drifted")
-		contains(t, "teak at "+path, addrCell(t, body, 2101), `<span class="al"><span class="chip is-drifted">missing ops CA key</span></span>`)
-		contains(t, "yew at "+path, addrCell(t, body, 2102), `<span class="al"><span class="chip is-drifted">SSH not running</span></span>`)
-		contains(t, "ash at "+path, addrCell(t, body, 2105), `<span class="al"><span class="chip is-drifted">guest-exec disabled</span></span>`)
+		contains(t, "teak at "+path, addrCell(t, body, 2101), `<span class="al is-drifted"><i class="g" aria-hidden="true"></i>missing ops CA key</span>`)
+		contains(t, "yew at "+path, addrCell(t, body, 2102), `<span class="al is-drifted"><i class="g" aria-hidden="true"></i>SSH not running</span>`)
+		contains(t, "ash at "+path, addrCell(t, body, 2105), `<span class="al is-drifted"><i class="g" aria-hidden="true"></i>guest-exec disabled</span>`)
 	}
 }
 
