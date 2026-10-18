@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 
+	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
@@ -36,7 +37,7 @@ func detailsOf(d pods.ImageDetails, unreadable bool) *detailsView {
 	return v
 }
 
-// detailChange is a detail an Edit details review shows before and after;
+// detailChange is a detail an Edit notes review shows before and after;
 // Password shows them behind the password's toggle.
 type detailChange struct {
 	Label, Before, After string
@@ -83,35 +84,41 @@ func (s *Server) registerDetails(ctx context.Context, vmid int) pods.ImageDetail
 	return pods.ImageDetails{}
 }
 
-// notesEdit is what Edit notes starts from: the version it writes, its
-// details and free text (pods.EditableNotes). Unreadable says its details
-// block is: the fields start empty, and Raw shows its notes as they are.
+// notesEdit is what an Edit notes form edits: the version it writes and
+// what editing starts from (pods.NotesToEdit). Err says why there is
+// nothing to edit; the form then offers no save, so it can't post empty
+// fields over notes it never read.
 type notesEdit struct {
-	Image      string
-	Details    pods.ImageDetails
-	Free       string
-	Unreadable bool
-	Raw        string
-	ReadErr    string // why its notes couldn't be read: the form starts empty
+	Image string
+	Was   pods.NotesRead
+	Err   string
 }
 
-// editableNotes is what Edit notes on family starts from, or nil when it
-// has no version that isn't deprecated.
-func (s *Server) editableNotes(ctx context.Context, images []pods.BaseImage, family string) *notesEdit {
-	newest, ok := pods.Newest(images, family)
-	if !ok {
-		return nil
+// notesForm is the data of Edit notes's form for in: the family's newest
+// version's details and free text, or those a refused preview posted. It
+// reads the cluster's VMs and that version's config, nothing more.
+func (s *Server) notesForm(ctx context.Context, op operation, in jobs.Inputs, problem string) catalogPage {
+	p := catalogPage{Op: op, In: in, Error: problem, Edit: &notesEdit{}}
+	if in.Family == "" {
+		p.Edit.Err = "Choose the base image whose notes to edit: each family on Images has Edit."
+		return p
 	}
-	e := &notesEdit{Image: newest.Name}
-	cfg, err := s.planner(ctx).API.VMConfig(ctx, newest.Node, newest.VMID)
+	at, err := s.planner(ctx).NotesToEdit(ctx, in.Family)
+	p.Edit.Image = at.Image.Name
 	if err != nil {
-		e.ReadErr = "Couldn't read the notes of " + newest.Name + ": " + sentence(proxmox.Describe(err))
-		return e
+		p.Edit.Err = "Couldn't read the notes to edit: " + sentence(proxmox.Describe(err))
+		return p
 	}
-	var derr error
-	e.Details, e.Free, derr = pods.EditableNotes(cfg["description"])
-	if e.Unreadable = derr != nil; e.Unreadable {
-		e.Raw = pods.UserNotes(cfg["description"])
+	p.Edit.Was, p.Details = at.Read, at.Edit()
+	if d := in.Details; d != nil {
+		p.Details.ImageDetails, p.Details.From = d.ImageDetails, d.From
+		if d.Free != nil {
+			p.Details.Free = d.Free
+		}
 	}
-	return e
+	return p
 }
+
+// NoSave is whether the form offers no Review: an Edit notes with nothing
+// to edit.
+func (p catalogPage) NoSave() bool { return p.Edit != nil && p.Edit.Err != "" }

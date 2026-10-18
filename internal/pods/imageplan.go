@@ -2,6 +2,8 @@ package pods
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"strconv"
@@ -20,10 +22,7 @@ type ImageRequest struct {
 	// Details are what Edit notes writes, and what register writes: nil
 	// is those of its source's notes (see RegisterDetails), and empty is
 	// none, the copy keeping its source's notes as they are.
-	Details *ImageDetails
-	// Notes is the free text Edit notes writes beside the details
-	// (WithFreeNotes); nil keeps the free text there is.
-	Notes *string
+	Details *ImageNotes
 }
 
 // agentEnabled reads a VM's agent option ("1", "enabled=1,…", "1,fstrim…").
@@ -83,7 +82,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		return nil, err
 	}
 	if req.Details != nil {
-		if err := CheckDetails(*req.Details); err != nil {
+		if err := req.Details.check(); err != nil {
 			return nil, err
 		}
 	}
@@ -131,27 +130,30 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 	case len(vmsNamed(vms, it.Name)) > 0:
 		it.Blocked = "a VM named " + it.Name + " already exists"
 	}
+	var desc string // the source's notes, read unless it is blocked
 	if it.Blocked == "" {
 		cfg, err := p.API.VMConfig(ctx, src.Node, src.VMID)
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", src.Name, err)
 		}
+		desc = cfg["description"]
 		var derr error
 		it.Source.Bridges, it.Source.Base = sourceBridges(cfg), baseNote(cfg)
-		_, it.Source.Notes, derr = ParseDetails(cfg["description"])
+		_, it.Source.Notes, derr = ParseDetails(desc)
 		it.Source.Unreadable = derr != nil
 		it.Blocked = agentBlock(src, cfg, kind)
-		if d, ok := RegisterDetails(cfg["description"]); ok && !d.Empty() && req.Details == nil {
-			it.Details = &d
+		if d, ok := RegisterDetails(desc); ok && !d.Empty() && req.Details == nil {
+			it.Details = &ImageNotes{ImageDetails: d}
 		}
 	}
-	if req.Details != nil && !req.Details.Empty() {
+	if req.Details != nil && !req.Details.ImageDetails.Empty() {
 		d := *req.Details
 		it.Details = &d
 	}
 	if it.Details != nil {
 		it.Steps = slices.Insert(it.Steps, slices.Index(it.Steps, StepLabel)+1, StepDetails)
 	}
+	it.blockLongNotes(desc)
 	return &Plan{Kind: KindImageRegister, Config: ConfigHash(KindImageRegister, p.Cfg), Items: []Item{it},
 		Locks: []string{"family:" + req.Family}}, nil
 }
@@ -213,6 +215,7 @@ func (p Planner) ImageEdit(ctx context.Context, req ImageRequest) (*Plan, error)
 			return nil, fmt.Errorf("reading %s: %w", newest.Name, err)
 		}
 		it.Source.Bridges = sourceBridges(cfg)
+		it.blockLongNotes(cfg["description"])
 		// Every NIC goes on the edit bridge: a router's LAN left on a slot's
 		// bridge would clash with that environment's router.
 		for i := range 32 {
@@ -264,55 +267,68 @@ func (p Planner) ImageDelete(ctx context.Context, req ImageRequest) (*Plan, erro
 		Locks: []string{"family:" + im.Family}}, nil
 }
 
+// NotesEdit is what Edit notes on a family works on: the family's newest
+// version, the one new hosts are made from, and its notes as read.
+type NotesEdit struct {
+	Image BaseImage
+	Read  NotesRead
+	desc  string
+}
+
+// Edit is what an Edit notes form starts from: the details and free text
+// read, and a mark of the notes they were read from (From).
+func (e NotesEdit) Edit() ImageNotes {
+	free := e.Read.Free
+	return ImageNotes{ImageDetails: e.Read.Details, Free: &free, From: e.from()}
+}
+
+// from marks e's version and its notes exactly as they were read.
+func (e NotesEdit) from() string {
+	sum := sha256.Sum256([]byte(strconv.Itoa(e.Image.VMID) + "\n" + e.desc))
+	return hex.EncodeToString(sum[:])
+}
+
+// NotesToEdit reads what Edit notes on family starts from.
+func (p Planner) NotesToEdit(ctx context.Context, family string) (NotesEdit, error) {
+	vms, err := p.API.ClusterVMs(ctx)
+	if err != nil {
+		return NotesEdit{}, err
+	}
+	newest, ok := Newest(BaseImages(vms), family)
+	if !ok {
+		return NotesEdit{}, fmt.Errorf("family %q has no version that isn't deprecated", family)
+	}
+	cfg, err := p.API.VMConfig(ctx, newest.Node, newest.VMID)
+	if err != nil {
+		return NotesEdit{Image: newest}, fmt.Errorf("reading %s: %w", newest.Name, err)
+	}
+	return NotesEdit{Image: newest, Read: readImageNotes(cfg["description"]), desc: cfg["description"]}, nil
+}
+
 // ImageSetDetails plans Edit notes: writing details, and free text if
-// asked, into the notes of a family's newest version, the one new hosts are
-// made from. Older versions keep theirs: each is its own build, and hosts
-// already made from them.
+// asked, into the notes of a family's newest version (NotesToEdit). Older
+// versions keep theirs: each is its own build, and hosts already made from
+// them.
 func (p Planner) ImageSetDetails(ctx context.Context, req ImageRequest) (*Plan, error) {
 	if req.Details == nil {
 		return nil, fmt.Errorf("name the details to write")
 	}
-	d := *req.Details
-	if err := CheckDetails(d); err != nil {
-		return nil, err
-	}
-	if req.Notes != nil {
-		if err := CheckFreeNotes(*req.Notes); err != nil {
-			return nil, err
-		}
-	}
-	vms, err := p.API.ClusterVMs(ctx)
+	at, err := p.NotesToEdit(ctx, req.Family)
 	if err != nil {
 		return nil, err
 	}
-	newest, ok := Newest(BaseImages(vms), req.Family)
-	if !ok {
-		return nil, fmt.Errorf("family %q has no version that isn't deprecated", req.Family)
+	n, same := req.Details.against(at.Read)
+	if err := n.check(); err != nil {
+		return nil, err
 	}
-	cfg, err := p.API.VMConfig(ctx, newest.Node, newest.VMID)
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", newest.Name, err)
-	}
-	desc := cfg["description"]
-	was, free, err := EditableNotes(desc)
-	unreadable := err != nil
-	if unreadable {
-		free = userText(desc) // all of it is replaced
-	}
-	it := Item{Name: newest.Name, VMID: newest.VMID, Node: newest.Node, Steps: []Step{StepDetails}, Details: &d,
-		DetailsWas: &DetailsWas{Details: was, Unreadable: unreadable, Notes: free}}
-	after := free
-	if req.Notes != nil {
-		n := *req.Notes
-		it.FreeNotes, after = &n, n
-	}
-	ch, _ := DetailsChanges(cfg, d, it.FreeNotes) // checked above
+	it := Item{Name: at.Image.Name, VMID: at.Image.VMID, Node: at.Image.Node, Steps: []Step{StepDetails}, Details: &n, DetailsWas: &at.Read}
 	switch {
-	case !unreadable && was == d && free == after:
-		it.Blocked = "the notes of " + newest.Name + " already say this"
-	case len(ch["description"]) > MaxNotesBytes:
-		it.Blocked = fmt.Sprintf("the notes of %s would be %d bytes; Proxmox keeps at most %d", newest.Name, len(ch["description"]), MaxNotesBytes)
+	case req.Details.From != "" && req.Details.From != at.from():
+		it.Blocked = "the notes of " + at.Image.Name + " changed since you opened this form; open Edit notes again to start from them as they are"
+	case same:
+		it.Blocked = "the notes of " + at.Image.Name + " already say this"
 	}
+	it.blockLongNotes(at.desc)
 	return &Plan{Kind: KindImageDetails, Config: ConfigHash(KindImageDetails, p.Cfg), Items: []Item{it},
 		Locks: []string{"family:" + req.Family}}, nil
 }

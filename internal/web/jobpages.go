@@ -439,7 +439,7 @@ var stepDoing = map[pods.Step]string{
 	pods.StepLabel:      "Setting tags and notes",
 	pods.StepConvert:    "Making it a template",
 	pods.StepRetire:     "Deprecating the previous version",
-	pods.StepDetails:    "Writing the details",
+	pods.StepDetails:    "Writing the notes",
 	pods.StepWaitAgent:  "Waiting for the guest agent",
 	pods.StepGuest:      "Setting up the guest",
 	pods.StepVerify:     "Checking the guest",
@@ -673,9 +673,10 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	}
 	var plan pods.Plan
 	if json.Unmarshal(j.Plan, &plan) == nil && len(plan.Items) == 1 && plan.Items[0].Details != nil {
-		v.Details = detailsOf(*plan.Items[0].Details, false)
-		if n := plan.Items[0].FreeNotes; n != nil {
-			v.Notes = *n
+		d := plan.Items[0].Details
+		v.Details = detailsOf(d.ImageDetails, false)
+		if d.Free != nil {
+			v.Notes = *d.Free
 		}
 	}
 	v.Ran, v.RanAt = minuteTime(now, j.CreatedAt), "made "+clockTime(now, j.CreatedAt)

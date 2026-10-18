@@ -152,8 +152,8 @@ func TestTransientErrorsAreRetried(t *testing.T) {
 
 func TestPermanentFailureIsIsolatedAndRetriedOnce(t *testing.T) {
 	f := newCluster()
-	// A permanent error other than a missing privilege (for that, see
-	// TestForbiddenItemIsNotRetried).
+	// A permanent error other than a missing privilege or modified config
+	// (see TestForbiddenItemIsNotRetried and TestConfigWriteRefusedWhenConfigChangedSinceRead).
 	denied := &proxmox.APIError{Method: "PUT", Path: "/x", Status: 400, Message: "Parameter verification failed."}
 	f.FailOn("setconfig:10121", denied, denied)
 	rec := &recorder{}

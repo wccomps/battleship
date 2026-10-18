@@ -36,7 +36,7 @@ const winBlock = "**Details**\n" +
 // battleship line apart and unchanged.
 func TestDetailsRoundTrip(t *testing.T) {
 	desc := "Patched monthly.\nbattleship: source=150"
-	got, err := WithDetails(desc, winDetails)
+	got, err := writeDetails(desc, winDetails)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestDetailsRoundTrip(t *testing.T) {
 	// Rewritten in place: only the block's lines change.
 	edited := winDetails
 	edited.Password, edited.Installed = "Template-Password-2", ""
-	again, err := WithDetails(got, edited)
+	again, err := writeDetails(got, edited)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,16 +63,16 @@ func TestDetailsRoundTrip(t *testing.T) {
 		t.Errorf("rewrite =\n%s\nwant\n%s", again, want)
 	}
 	// Empty details take the block out, and the gap after it.
-	if out, _ := WithDetails(got, ImageDetails{}); out != desc {
+	if out, _ := writeDetails(got, ImageDetails{}); out != desc {
 		t.Errorf("removing the block = %q, want %q", out, desc)
 	}
 	// Nothing to write, nothing written.
 	for _, d := range []string{"", "notes", "battleship: base=gw-v1"} {
-		if out, _ := WithDetails(d, ImageDetails{}); out != d {
-			t.Errorf("WithDetails(%q, empty) = %q", d, out)
+		if out, _ := writeDetails(d, ImageDetails{}); out != d {
+			t.Errorf("apply(%q, empty) = %q", d, out)
 		}
 	}
-	if out, _ := WithDetails("  \n", ImageDetails{OS: "Debian 12"}); out != "**Details**\n- OS: Debian 12" {
+	if out, _ := writeDetails("  \n", ImageDetails{OS: "Debian 12"}); out != "**Details**\n- OS: Debian 12" {
 		t.Errorf("into blank notes = %q", out)
 	}
 	// A block in the middle of the notes is read and rewritten there.
@@ -80,7 +80,7 @@ func TestDetailsRoundTrip(t *testing.T) {
 	if d, free, err := ParseDetails(mid); err != nil || d != (ImageDetails{OS: "Debian 12"}) || free != "intro\n\noutro" {
 		t.Errorf("mid-notes block = %+v, %q, %v", d, free, err)
 	}
-	if out, _ := WithDetails(mid, ImageDetails{OS: "Debian 13"}); out != strings.Replace(mid, "12\n", "13\n", 1) {
+	if out, _ := writeDetails(mid, ImageDetails{OS: "Debian 13"}); out != strings.Replace(mid, "12\n", "13\n", 1) {
 		t.Errorf("mid-notes rewrite = %q", out)
 	}
 	// A login without a password, and Proxmox's CRLFs and trailing spaces.
@@ -111,11 +111,11 @@ func TestDetailsUnreadable(t *testing.T) {
 		}
 	}
 	// Rewriting one makes it readable again, keeping the free text.
-	out, err := WithDetails("intro\n\n**Details**\n- Colour: blue\n\n**Details**\n- OS: b\noutro\n\nend", ImageDetails{OS: "Debian 12"})
+	out, err := writeDetails("intro\n\n**Details**\n- Colour: blue\n\n**Details**\n- OS: b\noutro\n\nend", ImageDetails{OS: "Debian 12"})
 	if err != nil || out != "intro\n\n**Details**\n- OS: Debian 12\n\nend" {
 		t.Errorf("rewriting unreadable blocks = %q, %v", out, err)
 	}
-	out, err = WithDetails("**Details**\n- OS: a\n**Details**\n- OS: b\n\nfree", ImageDetails{OS: "c"})
+	out, err = writeDetails("**Details**\n- OS: a\n**Details**\n- OS: b\n\nfree", ImageDetails{OS: "c"})
 	if d, free, perr := ParseDetails(out); err != nil || perr != nil || d.OS != "c" || free != "free" {
 		t.Errorf("rewriting adjacent blocks = %q (%+v %q %v)", out, d, free, perr)
 	}
@@ -132,7 +132,7 @@ func TestCheckDetails(t *testing.T) {
 		"line separator":  {OS: "a\u2028b"},
 		"zero width":      {OS: "a\u200bb"},
 		"bidi override":   {Licence: "a\u202eb"},
-		"nbsp":            {OS: "a b"},
+		"nbsp":            {OS: "a\u00a0b"},
 		"invalid utf-8":   {OS: "\xff"},
 		"untrimmed":       {OS: " a"},
 		"too long":        {Installed: strings.Repeat("é", MaxDetail+1)},
@@ -143,7 +143,7 @@ func TestCheckDetails(t *testing.T) {
 		if CheckDetails(d) == nil {
 			t.Errorf("%s: CheckDetails(%+v) accepted", name, d)
 		}
-		if out, err := WithDetails("notes", d); err == nil || out != "notes" {
+		if out, err := writeDetails("notes", d); err == nil || out != "notes" {
 			t.Errorf("%s: WithDetails wrote %q", name, out)
 		}
 	}
@@ -179,7 +179,7 @@ func TestRegisterDetails(t *testing.T) {
 func detailValue(t *rapid.T, label string) string {
 	piece := rapid.OneOf(
 		rapid.SampledFrom([]string{"\n", "\r\n", "- ", "battleship: ip=10.50.0.1", "\nbattleship: base=x-v1", detailsHeader, "\n" + detailsHeader + "\n",
-			" / ", "/", ":", " ", "\t", "\u2028", "\u200b", "\u202e", " ", "\xff", "Template-Password-1", "Debian 12", "- OS: x"}),
+			" / ", "/", ":", " ", "\t", "\u2028", "\u200b", "\u202e", "\u00a0", "\xff", "Template-Password-1", "Debian 12", "- OS: x"}),
 		rapid.StringMatching(`[A-Za-z0-9 ./:-]{0,10}`),
 		rapid.String(),
 	)
@@ -207,7 +207,7 @@ func TestPropDetailsCannotForgeLines(t *testing.T) {
 			t.Fatalf("prior notes unreadable: %v", err)
 		}
 		notesBefore, hadLine := ParseNotes(desc)
-		out, err := WithDetails(desc, d)
+		out, err := writeDetails(desc, d)
 		if err != nil {
 			if out != desc {
 				t.Fatalf("refused, but changed the notes to %q", out)
@@ -236,7 +236,7 @@ func TestPropDetailsCannotForgeLines(t *testing.T) {
 		if strings.Count("\n"+out, "\n- ") > strings.Count("\n"+desc, "\n- ")+lines || len(blocks(strings.Split(out, "\n"))) != min(lines, 1) {
 			t.Fatalf("wrote more lines than the block's: %q", out)
 		}
-		if again, _ := WithDetails(out, d); again != out {
+		if again, _ := writeDetails(out, d); again != out {
 			t.Fatalf("writing again changed %q to %q", out, again)
 		}
 	})
@@ -256,15 +256,15 @@ func TestImageRegisterDetails(t *testing.T) {
 		it.Source.Notes != proseNotes || it.Source.Unreadable {
 		t.Errorf("from prose: %+v, %v", it, err)
 	}
-	given := ImageDetails{OS: "Debian 12"}
+	given := ImageNotes{ImageDetails: ImageDetails{OS: "Debian 12"}}
 	plan, _ = p.ImageRegister(ctx, ImageRequest{VMID: 150, Family: "debian-12", Details: &given})
 	if it := plan.Items[0]; !slices.Equal(it.Steps, want) || *it.Details != given {
 		t.Errorf("given: %+v", it)
 	}
 	for _, c := range []struct {
 		name, desc string
-		d          *ImageDetails
-	}{{"empty", winBlock, &ImageDetails{}}, {"unreadable source", "**Details**\n- Colour: blue", nil}} {
+		d          *ImageNotes
+	}{{"empty", winBlock, &ImageNotes{}}, {"unreadable source", "**Details**\n- Colour: blue", nil}} {
 		f.VMs[150].Config["description"] = c.desc
 		plan, _ = p.ImageRegister(ctx, ImageRequest{VMID: 150, Family: "debian-12", Details: c.d})
 		if it := plan.Items[0]; slices.Contains(it.Steps, StepDetails) || it.Details != nil {
@@ -274,13 +274,13 @@ func TestImageRegisterDetails(t *testing.T) {
 	if !plan.Items[0].Source.Unreadable {
 		t.Errorf("an unreadable source isn't said to be: %+v", plan.Items[0].Source)
 	}
-	if _, err := p.ImageRegister(ctx, ImageRequest{VMID: 150, Family: "debian-12", Details: &ImageDetails{OS: "a\nb"}}); err == nil {
+	if _, err := p.ImageRegister(ctx, ImageRequest{VMID: 150, Family: "debian-12", Details: &ImageNotes{ImageDetails: ImageDetails{OS: "a\nb"}}}); err == nil {
 		t.Error("register took details that would break the block")
 	}
 }
 
-// Edit details writes the newest version's details only, saying what they
-// were; the same details again are nothing to do.
+// Edit notes without free text writes the newest version's details only,
+// saying what they were; the same details again are nothing to do.
 func TestImageSetDetails(t *testing.T) {
 	ctx := context.Background()
 	f := imageFake()
@@ -288,7 +288,7 @@ func TestImageSetDetails(t *testing.T) {
 		map[string]string{"description": winBlock + "\nbattleship: source=150"})
 	f.Add(proxmox.VM{VMID: 8002, Name: "debian-12-v3", Node: "alder", Template: true, Tags: "base;linux;deprecated"}, nil)
 	p := NewPlanner(f, envConfig())
-	d := ImageDetails{OS: "Debian 12"}
+	d := ImageNotes{ImageDetails: ImageDetails{OS: "Debian 12"}}
 	plan, err := p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &d})
 	if err != nil {
 		t.Fatal(err)
@@ -299,7 +299,7 @@ func TestImageSetDetails(t *testing.T) {
 		!slices.Equal(plan.Locks, []string{"family:debian-12"}) {
 		t.Errorf("plan = %+v, item %+v", plan, it)
 	}
-	plan, _ = p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &winDetails})
+	plan, _ = p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{ImageDetails: winDetails}})
 	if !strings.Contains(plan.Items[0].Blocked, "already") {
 		t.Errorf("unchanged details: %+v", plan.Items[0])
 	}
@@ -308,11 +308,16 @@ func TestImageSetDetails(t *testing.T) {
 	if w := plan.Items[0].DetailsWas; plan.Items[0].Blocked != "" || w == nil || !w.Unreadable {
 		t.Errorf("over an unreadable block: %+v", plan.Items[0])
 	}
-	for _, req := range []ImageRequest{{Family: "debian-12"}, {Family: "debian-12", Details: &ImageDetails{User: "a / b", Password: "c"}}, {Family: "nope", Details: &d}} {
+	for _, req := range []ImageRequest{{Family: "debian-12"}, {Family: "debian-12", Details: &ImageNotes{ImageDetails: ImageDetails{User: "a / b", Password: "c"}}}, {Family: "nope", Details: &d}} {
 		if _, err := p.ImageSetDetails(ctx, req); err == nil {
 			t.Errorf("planned %+v", req)
 		}
 	}
+}
+
+// writeDetails is apply of details alone.
+func writeDetails(desc string, d ImageDetails) (string, error) {
+	return ImageNotes{ImageDetails: d}.apply(desc)
 }
 
 // notesLines counts desc's battleship lines.

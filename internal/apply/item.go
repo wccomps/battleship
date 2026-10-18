@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/wccomps/battleship/internal/pods"
@@ -135,19 +136,19 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 
 	case pods.StepNetwork:
 		if it.NICs != nil {
-			return e.applyConfig(ctx, it, false, func(cur map[string]string) map[string]string { return pods.NICChanges(cur, it.NICs) })
+			return e.applyConfig(ctx, it, false, always(func(cur map[string]string) map[string]string { return pods.NICChanges(cur, it.NICs) }))
 		}
-		return e.applyConfig(ctx, it, true, func(cur map[string]string) map[string]string {
+		return e.applyConfig(ctx, it, true, always(func(cur map[string]string) map[string]string {
 			return pods.NetworkChanges(e.Cfg.Network, cur, it.Team, tpl.spec.Interfaces)
-		})
+		}))
 	case pods.StepDiskLimits:
-		return e.applyConfig(ctx, it, false, func(cur map[string]string) map[string]string {
+		return e.applyConfig(ctx, it, false, always(func(cur map[string]string) map[string]string {
 			return pods.DiskLimitChanges(cur, e.Cfg.Deploy.DiskMBpsRead, e.Cfg.Deploy.DiskMBpsWrite)
-		})
+		}))
 	case pods.StepCDROM:
-		return e.applyConfig(ctx, it, false, pods.CDROMChanges)
+		return e.applyConfig(ctx, it, false, always(pods.CDROMChanges))
 	case pods.StepNotes:
-		return e.applyConfig(ctx, it, false, pods.NotesChanges)
+		return e.applyConfig(ctx, it, false, always(pods.NotesChanges))
 
 	case pods.StepSnapshot:
 		if kind == pods.KindSnapshot {
@@ -172,25 +173,14 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		return true, e.createSnapshot(ctx, it.Node, it.VMID, proxmox.SnapshotRequest{Name: e.Cfg.Deploy.SnapshotName, Description: "baseline from battleship deploy"})
 
 	case pods.StepLabel:
-		return e.applyConfig(ctx, it, false, func(cur map[string]string) map[string]string {
+		return e.applyConfig(ctx, it, false, always(func(cur map[string]string) map[string]string {
 			return pods.LabelChanges(cur, it.Tags, it.Notes)
-		})
+		}))
 	case pods.StepDetails:
 		if it.Details == nil {
 			return false, nil
 		}
-		if err := pods.CheckDetails(*it.Details); err != nil {
-			return false, err
-		}
-		if it.FreeNotes != nil {
-			if err := pods.CheckFreeNotes(*it.FreeNotes); err != nil {
-				return false, err
-			}
-		}
-		return e.applyConfig(ctx, it, false, func(cur map[string]string) map[string]string {
-			ch, _ := pods.DetailsChanges(cur, *it.Details, it.FreeNotes) // checked: it can't refuse them
-			return ch
-		})
+		return e.applyConfig(ctx, it, false, it.Details.Changes)
 	case pods.StepConvert:
 		cfg, gone, err := e.readVM(ctx, it.Node, it.VMID)
 		if err != nil {
@@ -225,9 +215,9 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 			prev.Node = vm.Node
 		}
 		e.mu.Unlock()
-		changed, err := e.applyConfig(ctx, &prev, false, func(cur map[string]string) map[string]string {
+		changed, err := e.applyConfig(ctx, &prev, false, always(func(cur map[string]string) map[string]string {
 			return pods.LabelChanges(cur, pods.AddTag(cur["tags"], pods.DeprecatedTag), nil)
-		})
+		}))
 		if err != nil {
 			err = fmt.Errorf("%s is registered as a template but the previous version %s (%d) was not marked deprecated: %w", it.Name, prev.Name, prev.VMID, err)
 		}
@@ -386,17 +376,37 @@ func (e *Executor) probeClone(ctx context.Context, node string, vmid int, name s
 // applyConfig applies the VM's config changes and reports whether any were
 // made. With cloudInit, a cloud-init drive is regenerated every time.
 func (e *Executor) applyConfig(ctx context.Context, it *pods.Item, cloudInit bool,
-	changes func(map[string]string) map[string]string) (bool, error) {
+	changes func(map[string]string) (map[string]string, error)) (bool, error) {
 	var cur map[string]string
-	if err := e.call(ctx, func() (err error) { cur, err = e.api.VMConfig(ctx, it.Node, it.VMID); return }); err != nil {
-		return false, err
-	}
-	ch := changes(cur)
-	changed := len(ch) > 0
-	if changed {
-		if err := e.call(ctx, func() error { return e.api.SetVMConfig(ctx, it.Node, it.VMID, ch) }); err != nil {
-			return false, err
+	changed := false
+	err := e.call(ctx, func() (err error) {
+		if cur, err = e.api.VMConfig(ctx, it.Node, it.VMID); err != nil {
+			return err
 		}
+		ch, err := changes(cur)
+		if err != nil {
+			return err
+		}
+		if desc, ok := ch["description"]; ok {
+			if err := pods.CheckDescription(desc); err != nil {
+				return fmt.Errorf("the notes %w", err)
+			}
+		}
+		if len(ch) == 0 {
+			return nil
+		}
+		changed = true
+		if d := cur["digest"]; d != "" { // Proxmox refuses the write if the config changed since cur was read
+			ch = maps.Clone(ch)
+			ch["digest"] = d
+		}
+		return e.api.SetVMConfig(ctx, it.Node, it.VMID, ch)
+	})
+	if err != nil {
+		if proxmox.IsModified(err) {
+			err = fmt.Errorf("its config changed since it was read, so nothing was written; run it again to work from the config as it is: %w", err)
+		}
+		return false, err
 	}
 	// Regenerate even without changes, to repair an earlier failed regeneration.
 	if cloudInit && pods.HasCloudInit(cur) {
@@ -405,6 +415,11 @@ func (e *Executor) applyConfig(ctx context.Context, it *pods.Item, cloudInit boo
 		}
 	}
 	return changed, nil
+}
+
+// always is a config change that can't fail, as applyConfig takes one.
+func always(changes func(map[string]string) map[string]string) func(map[string]string) (map[string]string, error) {
+	return func(cur map[string]string) (map[string]string, error) { return changes(cur), nil }
 }
 
 // power applies action, skipping a VM already in the status it leaves (see

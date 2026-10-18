@@ -231,6 +231,13 @@ func notesHref(family string) string {
 	return op.Path + "?" + url.Values{fieldFamily: {family}}.Encode()
 }
 
+// notesButton is a family's Edit notes button (the "notes-button"
+// template): a link to its form, or disabled when the user may not.
+type notesButton struct {
+	Family string
+	May    bool
+}
+
 // oldFamilyPage sends a family page's old address, /images/{family}, to
 // its page.
 func (s *Server) oldFamilyPage(w http.ResponseWriter, r *http.Request) {

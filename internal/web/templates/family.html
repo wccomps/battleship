@@ -14,8 +14,7 @@
 <div class="sec">
 <div class="sech"><h2 class="sub">Details</h2>
 {{- if .Current}}<span class="sp"></span>
-{{- if .MayNotes}}<a class="btn sm" href="{{notesHref .Family}}" data-panel-link>{{icon "edit"}}Edit</a>
-{{- else}}<button class="btn sm" type="button" disabled>{{icon "edit"}}Edit</button>{{end}}
+{{- template "notes-button" notesButton .Family .MayNotes}}
 {{- end}}</div>
 {{- with .NotesLack}}<p class="lock">{{icon "lock"}}{{.}}</p>{{end}}
 {{- with details .Details .Unreadable}}{{template "details" .}}{{else}}

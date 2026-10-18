@@ -30,12 +30,9 @@ type catalogPage struct {
 	DNSHint  string
 	// Details fill a register's and an Edit notes's fields: those given,
 	// else those of the VM's notes or the family's newest version.
-	Details pods.ImageDetails
-	// Edit is what Edit notes edits: the family's newest version and its
-	// notes; nil when the family has none.
+	Details pods.ImageNotes
+	// Edit is what an Edit notes form edits (notesForm).
 	Edit *notesEdit
-	// Notes fills Edit notes's free text: that given, else Edit's.
-	Notes string
 	envForm
 }
 
@@ -142,6 +139,9 @@ func (s *Server) teamlessForm(w http.ResponseWriter, r *http.Request, status int
 // the request (newEnvForm); not ok if op's environment isn't there.
 func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, problem string) (catalogPage, bool) {
 	ctx := r.Context()
+	if op.Kind == pods.KindImageDetails {
+		return s.notesForm(ctx, op, in, problem), true
+	}
 	p := s.newCatalogPage(ctx)
 	p.Op, p.In, p.Error = op, in, problem
 	if op.Kind.OnEnvironment() {
@@ -156,19 +156,11 @@ func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, prob
 			}
 		}
 	}
-	if op.Kind == pods.KindImageDetails {
-		if p.Edit = s.editableNotes(ctx, p.Images, in.Family); p.Edit != nil {
-			p.Details, p.Notes = p.Edit.Details, p.Edit.Free
-		}
-		if in.Notes != nil {
-			p.Notes = *in.Notes
-		}
-	}
 	switch {
 	case in.Details != nil:
 		p.Details = *in.Details
 	case op.Kind == pods.KindImageRegister && in.VMID != 0:
-		p.Details = s.registerDetails(ctx, in.VMID)
+		p.Details = pods.ImageNotes{ImageDetails: s.registerDetails(ctx, in.VMID)}
 	}
 	if op.Machines {
 		form := r.URL.Query()
@@ -187,10 +179,10 @@ func (s *Server) renderCatalogForm(w http.ResponseWriter, r *http.Request, statu
 	s.render(w, r, status, "teamless", s.newView(w, r, p.Op.Title, p.Op.nav(), p))
 }
 
-// Back is where the form's close and Cancel go: Edit notes goes back to
-// its family, where it opens.
+// Back is where the form's close and Cancel go: an Edit notes on a
+// version goes to its family's page.
 func (p catalogPage) Back() string {
-	if p.Op.Kind == pods.KindImageDetails && p.Edit != nil {
+	if p.Edit != nil && p.Edit.Image != "" {
 		return familyHref(p.In.Family)
 	}
 	return listPage(p.In)
