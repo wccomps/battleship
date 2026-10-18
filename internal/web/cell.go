@@ -56,7 +56,11 @@ type cellPage struct {
 	Baseline    string
 	HasBaseline bool
 	Network     []configRow
-	LastJob     *lastJobView
+	// Set is c.Sets.Label(): the VM's set when SetKnown (c.Sets.Of()), else
+	// "not recorded" (no set tag) or pods.UnknownSet (Drift says why).
+	Set      string
+	SetKnown bool
+	LastJob  *lastJobView
 	// What the buttons offer; the operations check again on submit.
 	CanReset, CanPower, CanSnapshot bool
 	PowerActions                    []powerChoice // for the VM's power state
@@ -104,6 +108,8 @@ func (s *Server) cellPage(w http.ResponseWriter, r *http.Request) {
 	for _, dr := range c.Drift {
 		p.Drift = append(p.Drift, driftView{Reason: strings.TrimRight(dr.Reason, ". "), JobID: dr.JobID})
 	}
+	_, p.SetKnown = c.Sets.Of()
+	p.Set = c.Sets.Label()
 	for _, name := range d.Snapshots {
 		p.Snapshots = append(p.Snapshots, snapshotView{Name: name, Baseline: name == d.Baseline})
 	}

@@ -84,6 +84,8 @@ func opLabelOf(kind string, in jobs.Inputs) opLabel {
 		if set, ok := pods.SetOfPattern(in.Pattern); ok {
 			l.Detail = string(set)
 		}
+	case op.Kind == pods.KindTeardown:
+		l.Detail = string(in.Set)
 	case op.Kind == pods.KindEnvDNS:
 		l.Detail = in.Domain + " → " + in.DNS
 	case op.Section == sectionEnvironments:

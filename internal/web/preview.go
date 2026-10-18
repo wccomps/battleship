@@ -63,8 +63,8 @@ type previewPage struct {
 	// Reselect, for a reset or snapshot of grid-ticked VMs, labels a button that
 	// posts them back to the operation's form to choose again.
 	Reselect string
-	// Review, if set, replaces the facts, consequence and table: an image or
-	// environment operation's review.
+	// Review, if set, replaces the facts, consequence and table: an image,
+	// environment or pods teardown operation's review.
 	Review *reviewView
 }
 
@@ -407,6 +407,9 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		if op.Kind == pods.KindDeploy {
 			p.Nothing = "No masters match this template set and these hosts."
 		}
+		if op.Kind == pods.KindTeardown && in.Set != "" {
+			p.Nothing = "No VMs of " + string(in.Set) + " are in these pods and hosts."
+		}
 	case p.Runnable == 0:
 		p.Nothing = "Every VM is blocked: nothing can run."
 	}
@@ -629,9 +632,11 @@ func consequence(kind pods.Kind, in jobs.Inputs, items []pods.Item) string {
 		if len(nodes) > 0 {
 			on = " on " + strings.Join(nodes, ", ")
 		}
-		return vms + " will be created or repaired from " + strings.TrimPrefix(in.Pattern, "*.") + on + "."
-	case pods.KindTeardown:
-		return vms + pick(" will be stopped and deleted with their disks. This can't be undone.", " will be stopped and deleted with its disks. This can't be undone.")
+		from := in.Pattern
+		if set, ok := pods.SetOfPattern(in.Pattern); ok {
+			from = string(set)
+		}
+		return vms + " will be created or repaired from " + from + on + "."
 	case pods.KindSnapshot:
 		msg := vms + pick(" get a new snapshot, ", " gets a new snapshot, ") + in.Snapshot + "."
 		if in.VMState {

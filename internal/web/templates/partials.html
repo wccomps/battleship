@@ -121,10 +121,11 @@
 {{- with .Rows}}
 <div class="tscroll">
 <table class="tbl rvw">
-<thead><tr><th scope="col">VM</th>{{if $r.Image}}<th scope="col">Image</th>{{end}}{{if $r.Addr}}<th scope="col">Address</th>{{end}}<th scope="col" class="r">VMID · node</th></tr></thead>
+<thead><tr><th scope="col">VM</th>{{if $r.Set}}<th scope="col">Set</th>{{end}}{{if $r.Image}}<th scope="col">Image</th>{{end}}{{if $r.Addr}}<th scope="col">Address</th>{{end}}<th scope="col" class="r">VMID · node</th></tr></thead>
 <tbody>
 {{- range .}}
 <tr{{if .Blocked}} class="blk"{{end}}><td><span class="vm">{{.Name}}</span>{{if .Router}} <span class="chip">router</span>{{end}}</td>
+{{- if $r.Set}}<td class="c2">{{with .Set}}<code>{{.}}</code>{{else}}—{{end}}</td>{{end}}
 {{- if $r.Image}}<td class="wide">{{with .Image}}<code>{{.}}</code>{{else}}—{{end}}</td>{{end}}
 {{- if $r.Addr}}<td class="c2">{{with .Addr}}<code>{{.}}</code>{{else}}—{{end}}{{if .Picked}} <span class="meta">picked</span>{{end}}</td>{{end}}
 {{- if .Blocked}}<td class="r wide"><span class="st s-cancel">{{icon "blocked"}}<span>{{names .Blocked}}</span></span></td>{{else}}<td class="r wide meta">{{.Where}}</td>{{end}}</tr>

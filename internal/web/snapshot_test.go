@@ -190,5 +190,5 @@ func TestNewSnapshotShowsOnVMPageAndResetPicker(t *testing.T) {
 	contains(t, "cell page", h.get(&op, "/vm/01/dc").Body.String(),
 		`<tr><td><span class="vm">round2</span></td><td class="muted"></td></tr>`)
 	contains(t, "reset picker", h.post(&op, "/reset", selection([]string{"team01-dc"})).Body.String(),
-		`<input type="radio" name="snapshot" value="round2"><span>round2</span>`)
+		`<input type="radio" name="snapshot" value="round2" required><span>round2</span>`)
 }

@@ -9,8 +9,8 @@ import (
 	"github.com/wccomps/battleship/internal/pods"
 )
 
-// reviewView is the review of an image or environment operation: what
-// will happen, then the facts of what will exist (a
+// reviewView is the review of an image or environment operation, or of a
+// pods teardown: what will happen, then the facts of what will exist (a
 // register) or a row per VM it acts on.
 type reviewView struct {
 	Verb, Subject string // the title: "Register teak-build"
@@ -22,6 +22,7 @@ type reviewView struct {
 	// table has those columns.
 	Rows        []reviewRow
 	Image, Addr bool
+	Set         bool // a teardown of everything: each VM's set
 	// DNS are a Set DNS's hosts, their DNS server now and after.
 	DNS  []dnsRow
 	Note string // a line after the rows
@@ -57,6 +58,7 @@ type reviewFact struct {
 type reviewRow struct {
 	Name    string
 	Router  bool
+	Set     string
 	Image   string
 	Addr    string
 	Picked  bool
@@ -81,7 +83,8 @@ var kindUses = map[string]string{
 }
 
 // review describes plan as an image or environment operation's review, or
-// is nil for a team operation. nothing, if set, is why nothing can run.
+// a pods teardown, or nil for another pod operation. nothing, if set, is
+// why nothing can run.
 func review(op operation, in jobs.Inputs, plan *pods.Plan, nothing string) *reviewView {
 	var r *reviewView
 	switch {
@@ -96,6 +99,8 @@ func review(op operation, in jobs.Inputs, plan *pods.Plan, nothing string) *revi
 		r = dnsReview(in, plan)
 	case op.Kind == pods.KindEnvTeardown:
 		r = teardownReview(in, plan)
+	case op.Kind == pods.KindTeardown:
+		r = podTeardownReview(in, plan)
 	case op.Kind == pods.KindImageDetails:
 		if len(plan.Items) != 1 {
 			return nil
@@ -286,9 +291,9 @@ func teardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
 		}
 	}
 	for _, k := range plan.Kept {
-		r.Kept = append(r.Kept, k.Name+" is "+k.Why+".")
 		left.Users = append(left.Users, k.Name)
 	}
+	r.Kept = pods.KeptLines(plan.Kept)
 	var say []string
 	if deletes > 0 {
 		say = append(say, "Deletes "+countVMs(deletes)+" in "+pool+".")
@@ -305,6 +310,52 @@ func teardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
 		say = append(say, "VMs outside "+pool+" stay on its networks, so the slot isn't free afterwards.")
 	}
 	r.Say = strings.Join(say, " ")
+	return r
+}
+
+// podTeardownReview describes tearing down pods: what it takes from which
+// pods, a row per item (each VM it deletes or can't, and the disks it
+// frees), and the VMs it leaves, with why.
+func podTeardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
+	where := podsText(plan.Teams)
+	set := in.Set
+	r := &reviewView{Verb: "Tear down", Subject: string(set), Deletes: true, Set: set == ""}
+	what := string(set)
+	if set == "" {
+		r.Subject, what = where, "everything"
+		if len(in.Hosts) > 0 || len(in.VMs) > 0 {
+			what = "every matching VM"
+		}
+	}
+	for _, f := range previewFacts(in, false, 0) {
+		r.Facts = append(r.Facts, reviewFact{Label: f.Label, Text: f.Value})
+	}
+	deletes := 0
+	var disks []string
+	for _, it := range plan.Items {
+		row := reviewRow{Name: it.Name, Set: it.Sets.Label(), Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}
+		if it.Host == "" {
+			row.Set = "" // a gone VM's disks, or a half-deleted VM
+		}
+		r.Rows = append(r.Rows, row)
+		switch {
+		case it.Blocked != "":
+		case slices.Contains(it.Steps, pods.StepDelete):
+			deletes++
+		case slices.Contains(it.Steps, pods.StepFreeDisks):
+			disks = append(disks, strconv.Itoa(it.VMID))
+		}
+	}
+	var say []string
+	if deletes > 0 {
+		say = append(say, "Tears down "+what+" in "+where+": "+countVMs(deletes)+".",
+			byCount(deletes, "It is", "Each is")+" stopped and deleted with its disks. This can't be undone.")
+	}
+	if len(disks) > 0 {
+		say = append(say, "Frees the disks deleted VMs left at VMID "+andList(disks)+".")
+	}
+	r.Say = strings.Join(say, " ")
+	r.Kept = pods.KeptLines(plan.Kept)
 	return r
 }
 

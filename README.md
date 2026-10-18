@@ -45,10 +45,10 @@ if its settings for what a job does to VMs differ, the job ends stale.
 makes the command exit 1.
 
 A deploy tags each VM with its template set (`set-kilo.alpha`). A teardown
-takes every matching VM in its teams' pods, or with `-set` only the VMs
-whose one set tag is that set's. A VM with no set tag or several, such as
-one deployed before sets were tagged, is of an unknown set: only a teardown
-that names no set removes it.
+takes every matching VM in its teams' pods, or with `-set` (a choice on the
+web form) only the VMs whose one set tag is that set's. A VM with no set tag
+or several, such as one deployed before sets were tagged, is of an unknown
+set: only a teardown that names no set removes it.
 
 ```sh
 battleship jobs list | show <id> | cancel <id>

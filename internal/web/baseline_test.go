@@ -22,8 +22,8 @@ func TestOldToolBaselines(t *testing.T) {
 
 	body = h.get(&op, "/reset?teams=1").Body.String()
 	contains(t, "reset picker", body,
-		`<input type="radio" name="snapshot" value="" checked><span>baseline (fresh_clone_20261002034615)</span>`,
-		`<input type="radio" name="snapshot" value="fresh_clone_20261001000000"><span>fresh_clone_20261001000000</span>`)
+		`<input type="radio" name="snapshot" value="" required checked><span>baseline (fresh_clone_20261002034615)</span>`,
+		`<input type="radio" name="snapshot" value="fresh_clone_20261001000000" required><span>fresh_clone_20261001000000</span>`)
 	lacks(t, "reset picker", body, "has no initial snapshot", `value="fresh_clone_20261002034615"`)
 
 	_, form, body := h.preview(&op, "/reset", url.Values{"teams": {"1"}})
@@ -55,7 +55,7 @@ func TestUnfinishedSnapshotNotOffered(t *testing.T) {
 
 	body := h.get(&op, "/reset?teams=1&hosts=dc").Body.String()
 	contains(t, "reset picker", body,
-		`<input type="radio" name="snapshot" value="" checked><span>baseline (fresh_clone_20261002034615)</span>`)
+		`<input type="radio" name="snapshot" value="" required checked><span>baseline (fresh_clone_20261002034615)</span>`)
 	lacks(t, "reset picker", body, `value="initial"`, `value="before-scoring"`)
 
 	body = h.post(&op, "/reset/preview", url.Values{"teams": {"1"}, "hosts": {"dc"}, "snapshot": {"before-scoring"}}).Body.String()

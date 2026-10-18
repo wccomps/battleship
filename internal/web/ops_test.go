@@ -110,9 +110,10 @@ func TestOperationForms(t *testing.T) {
 			`<button type="submit" class="btn">Next</button>`,
 		}},
 		{"/teardown", []string{
-			`<form class="sheet" method="post" action="/teardown/preview" aria-labelledby="form-title">`,
+			`<form method="get" action="/teardown" class="stack" id="teardown-which">`,
+			`<label class="lbl" for="teams">Teams</label>`,
 			`<legend>Hosts <span class="muted">· none = all</span></legend>`,
-			`<button type="submit" class="btn pri bad">`, `Preview teardown</button>`,
+			`<button type="submit" class="btn">Next</button>`,
 		}},
 		{"/deploy", []string{
 			`<form class="sheet" method="post" action="/deploy/preview" aria-labelledby="form-title" data-deploy>`,
@@ -169,9 +170,9 @@ func TestResetFormPicksSnapshots(t *testing.T) {
 		`<form method="post" action="/reset/preview" class="stack" id="reset-pick">`,
 		`<input type="hidden" name="teams" value="2">`,
 		`<input type="hidden" name="hosts" value="web">`,
-		`<input type="radio" name="snapshot" value="" checked><span>baseline (initial)</span>`,
+		`<input type="radio" name="snapshot" value="" required checked><span>baseline (initial)</span>`,
 		`<span class="hint">baseline: initial, else the newest fresh_clone_*</span>`,
-		`<input type="radio" name="snapshot" value="before-scoring"><span>before-scoring</span>`,
+		`<input type="radio" name="snapshot" value="before-scoring" required><span>before-scoring</span>`,
 		`<button type="submit" class="btn pri" form="reset-pick">Preview</button>`,
 	)
 	// The baseline is initial here, so initial isn't offered twice.
@@ -181,8 +182,8 @@ func TestResetFormPicksSnapshots(t *testing.T) {
 	h.api.setSnapshots(10101, "golden")
 	body = h.get(&op, "/reset?teams=1").Body.String()
 	contains(t, "reset of a VM without the baseline", body,
-		`<input type="radio" name="snapshot" value="" checked><span>baseline</span>`,
-		`<input type="radio" name="snapshot" value="golden"><span>golden</span>`,
+		`<input type="radio" name="snapshot" value="" required checked><span>baseline</span>`,
+		`<input type="radio" name="snapshot" value="golden" required><span>golden</span>`,
 		"<span class=\"name\">team01-dc</span> has no baseline snapshot.")
 
 	// No VM matches: only the baseline.

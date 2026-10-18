@@ -38,6 +38,9 @@ type operation struct {
 	// Machines is whether its form has machine rows (envForm); Formless,
 	// whether it has no form, and opens on its review.
 	Machines, Formless bool
+	// Pick is the field a two-step form's second step (stepTwo) chooses,
+	// once pods and hosts are chosen: a reset's snapshot, a teardown's set.
+	Pick string
 	// domain is the environment an operation on one (its Path has {domain})
 	// was opened for: see at.
 	domain string
@@ -52,10 +55,10 @@ const (
 // this order.
 var operations = []operation{
 	{Kind: pods.KindPower, Path: "/power", Title: "Power", Icon: "shutdown", Noun: "power action"},
-	{Kind: pods.KindReset, Path: "/reset", Title: "Reset", Label: "Reset to snapshot", Icon: "reset", Noun: "reset"},
+	{Kind: pods.KindReset, Path: "/reset", Title: "Reset", Label: "Reset to snapshot", Icon: "reset", Noun: "reset", Pick: fieldSnapshot},
 	{Kind: pods.KindSnapshot, Path: "/snapshot", Title: "Take snapshot", Icon: "snapshot", Noun: "snapshot"},
 	{Kind: pods.KindDeploy, Path: "/deploy", Title: "Deploy", Icon: "deploy", Noun: "deploy", Lead: "Deploy teams", Done: "Ready"},
-	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Icon: "teardown", Noun: "teardown", Lead: "Tear down teams", Done: "Deleted"},
+	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Icon: "teardown", Noun: "teardown", Lead: "Tear down teams", Done: "Deleted", Pick: fieldSet},
 	{Kind: pods.KindEnvCreate, Path: "/environments/new", Title: "Create environment", Icon: "deploy", Noun: "environment",
 		Section: sectionEnvironments, Doing: "Creating an environment", Done: "Ready", Machines: true},
 	{Kind: pods.KindEnvAdd, Path: "/environments/{domain}/add", Title: "Add hosts", Icon: "deploy", Noun: "new hosts",
