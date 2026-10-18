@@ -130,20 +130,19 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 	case len(vmsNamed(vms, it.Name)) > 0:
 		it.Blocked = "a VM named " + it.Name + " already exists"
 	}
-	var desc *string // the source's notes, read unless it is blocked
+	var desc string // the source's notes, read unless it is blocked
 	if it.Blocked == "" {
 		cfg, err := p.API.VMConfig(ctx, src.Node, src.VMID)
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", src.Name, err)
 		}
-		d := cfg["description"]
-		desc = &d
+		desc = cfg["description"]
 		var derr error
 		it.Source.Bridges, it.Source.Base = sourceBridges(cfg), baseNote(cfg)
-		_, it.Source.Notes, derr = ParseDetails(cfg["description"])
+		_, it.Source.Notes, derr = ParseDetails(desc)
 		it.Source.Unreadable = derr != nil
 		it.Blocked = agentBlock(src, cfg, kind)
-		if d, ok := RegisterDetails(cfg["description"]); ok && !d.Empty() && req.Details == nil {
+		if d, ok := RegisterDetails(desc); ok && !d.Empty() && req.Details == nil {
 			it.Details = &ImageNotes{ImageDetails: d}
 		}
 	}
@@ -154,11 +153,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 	if it.Details != nil {
 		it.Steps = slices.Insert(it.Steps, slices.Index(it.Steps, StepLabel)+1, StepDetails)
 	}
-	if desc != nil {
-		if err := it.blockLongNotes(*desc); err != nil {
-			return nil, err
-		}
-	}
+	it.blockLongNotes(desc)
 	return &Plan{Kind: KindImageRegister, Config: ConfigHash(KindImageRegister, p.Cfg), Items: []Item{it},
 		Locks: []string{"family:" + req.Family}}, nil
 }
@@ -220,9 +215,7 @@ func (p Planner) ImageEdit(ctx context.Context, req ImageRequest) (*Plan, error)
 			return nil, fmt.Errorf("reading %s: %w", newest.Name, err)
 		}
 		it.Source.Bridges = sourceBridges(cfg)
-		if err := it.blockLongNotes(cfg["description"]); err != nil {
-			return nil, err
-		}
+		it.blockLongNotes(cfg["description"])
 		// Every NIC goes on the edit bridge: a router's LAN left on a slot's
 		// bridge would clash with that environment's router.
 		for i := range 32 {
@@ -325,16 +318,17 @@ func (p Planner) ImageSetDetails(ctx context.Context, req ImageRequest) (*Plan, 
 		return nil, err
 	}
 	n, same := req.Details.against(at.Read)
+	if err := n.check(); err != nil {
+		return nil, err
+	}
 	it := Item{Name: at.Image.Name, VMID: at.Image.VMID, Node: at.Image.Node, Steps: []Step{StepDetails}, Details: &n, DetailsWas: &at.Read}
 	switch {
-	case n.From != "" && n.From != at.from():
+	case req.Details.From != "" && req.Details.From != at.from():
 		it.Blocked = "the notes of " + at.Image.Name + " changed since you opened this form; open Edit notes again to start from them as they are"
 	case same:
 		it.Blocked = "the notes of " + at.Image.Name + " already say this"
 	}
-	if err := it.blockLongNotes(at.desc); err != nil {
-		return nil, err
-	}
+	it.blockLongNotes(at.desc)
 	return &Plan{Kind: KindImageDetails, Config: ConfigHash(KindImageDetails, p.Cfg), Items: []Item{it},
 		Locks: []string{"family:" + req.Family}}, nil
 }

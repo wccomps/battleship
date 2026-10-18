@@ -109,8 +109,9 @@ const (
 	// "lld"), older ones "Invalid parameter 'pid'".
 	ExecGone
 	// Modified: a config write carried the digest of a read, and the config
-	// changed since. Never retried: the change was worked out from what is
-	// no longer there.
+	// changed since (QEMU's "checksum mismatch (file change by other user?)"
+	// or PVE::Tools's "detected modified configuration"). Never retried: the
+	// change was worked out from what is no longer there.
 	Modified
 )
 
@@ -150,7 +151,7 @@ func (c Classifier) Classify(err error) Meaning {
 		return ExecGone
 	case isAPI && apiErr.Status == 400:
 		return Permanent
-	case isAPI && strings.Contains(msg, "detected modified configuration"):
+	case isAPI && (strings.Contains(msg, "checksum mismatch") || strings.Contains(msg, "detected modified configuration")):
 		return Modified
 	case isAPI && strings.Contains(msg, "does not exist"):
 		return NotFound
@@ -219,9 +220,6 @@ func Describe(err error) string {
 	}
 	if IsLapsed(err) {
 		return "authorization lapsed: Proxmox no longer accepts this login (" + err.Error() + ")"
-	}
-	if IsModified(err) {
-		return "the VM's config changed while Battleship was changing it, so this change wasn't written (" + err.Error() + ")"
 	}
 	return err.Error()
 }

@@ -378,32 +378,35 @@ func (e *Executor) probeClone(ctx context.Context, node string, vmid int, name s
 func (e *Executor) applyConfig(ctx context.Context, it *pods.Item, cloudInit bool,
 	changes func(map[string]string) (map[string]string, error)) (bool, error) {
 	var cur map[string]string
-	if err := e.call(ctx, func() (err error) { cur, err = e.api.VMConfig(ctx, it.Node, it.VMID); return }); err != nil {
-		return false, err
-	}
-	ch, err := changes(cur)
-	if err != nil {
-		return false, err
-	}
-	if desc, ok := ch["description"]; ok {
-		if err := pods.CheckDescription(desc); err != nil {
-			return false, fmt.Errorf("the notes %w", err)
+	changed := false
+	err := e.call(ctx, func() (err error) {
+		if cur, err = e.api.VMConfig(ctx, it.Node, it.VMID); err != nil {
+			return err
 		}
-	}
-	changed := len(ch) > 0
-	if changed {
-		// The digest of the read the change was worked out from: Proxmox
-		// refuses the write if the config changed since.
-		if d := cur["digest"]; d != "" {
+		ch, err := changes(cur)
+		if err != nil {
+			return err
+		}
+		if desc, ok := ch["description"]; ok {
+			if err := pods.CheckDescription(desc); err != nil {
+				return fmt.Errorf("the notes %w", err)
+			}
+		}
+		if len(ch) == 0 {
+			return nil
+		}
+		changed = true
+		if d := cur["digest"]; d != "" { // Proxmox refuses the write if the config changed since cur was read
 			ch = maps.Clone(ch)
 			ch["digest"] = d
 		}
-		if err := e.call(ctx, func() error { return e.api.SetVMConfig(ctx, it.Node, it.VMID, ch) }); err != nil {
-			if proxmox.IsModified(err) {
-				err = fmt.Errorf("its config changed since it was read, so nothing was written; run it again to work from the config as it is: %w", err)
-			}
-			return false, err
+		return e.api.SetVMConfig(ctx, it.Node, it.VMID, ch)
+	})
+	if err != nil {
+		if proxmox.IsModified(err) {
+			err = fmt.Errorf("its config changed since it was read, so nothing was written; run it again to work from the config as it is: %w", err)
 		}
+		return false, err
 	}
 	// Regenerate even without changes, to repair an earlier failed regeneration.
 	if cloudInit && pods.HasCloudInit(cur) {

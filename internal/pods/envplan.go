@@ -357,9 +357,7 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		if resumed {
 			desc = existing.desc
 		}
-		if err := ip.blockLongNotes(desc); err != nil {
-			return nil, err
-		}
+		ip.blockLongNotes(desc)
 	}
 	return plan, nil
 }
@@ -421,9 +419,7 @@ func (p Planner) EnvDNS(ctx context.Context, req EnvRequest) (*Plan, error) {
 				it.Blocked = h.Name + " is " + h.Status + "; start it first so its DNS can be set"
 			}
 		}
-		if err := it.blockLongNotes(h.desc); err != nil {
-			return nil, err
-		}
+		it.blockLongNotes(h.desc)
 		plan.Items = append(plan.Items, it)
 	}
 	return plan, nil

@@ -210,10 +210,45 @@ func TestConfigWriteRefusedWhenConfigChangedSinceRead(t *testing.T) {
 		Steps: []pods.Step{pods.StepDetails}, Details: &pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: "Debian 13"}}}}}
 	res := e.Run(context.Background(), plan)
 	err := res.Failed["deb-v1"]
-	if len(res.Failed) != 1 || !proxmox.IsModified(err) || !strings.Contains(err.Error(), "changed since it was read, so nothing was written") {
-		t.Errorf("result %+v", res)
+	if len(res.Failed) != 1 || !proxmox.IsModified(err) || !strings.Contains(err.Error(), "changed since it was read, so nothing was written") || proxmox.Describe(err) != err.Error() {
+		t.Errorf("result %+v, describe %q", res, proxmox.Describe(err))
 	}
 	if got := f.VMs[8000].Config["description"]; got != bob || writes != 1 {
 		t.Errorf("notes = %q after %d writes, want the change made in between, after 1", got, writes)
+	}
+}
+
+// When a SetVMConfig write takes effect on Proxmox before its HTTP response
+// is lost, the retry re-reads VMConfig rather than resending the pre-write
+// digest and failing with Modified.
+func TestConfigWriteRetryRereadsAfterLostResponse(t *testing.T) {
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 8001, Name: "deb-v1", Node: "alder", Template: true}, map[string]string{
+		"tags": "base;linux", "net0": "virtio=BC:24:11:00:80:01,bridge=vmbr0",
+	})
+	setCalls := 0
+	f.Gate = func(ctx context.Context, key string) (func(), error) {
+		if key == "setconfig:2101" {
+			if setCalls++; setCalls == 1 {
+				f.Mu.Lock()
+				f.VMs[2101].Config["tags"] = "dev;kilo.alpha"
+				f.VMs[2101].Config["description"] = "battleship: ip=192.168.100.10 os=linux base=deb-v1 dns=router"
+				f.Mu.Unlock()
+				return nil, &proxmox.APIError{Status: 502, Message: "Bad Gateway"}
+			}
+		}
+		return nil, nil
+	}
+	e := catalogExec(f)
+	e.Cfg.Retry.Attempts = 3
+	plan := &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{{
+		Name: "teak.kilo.alpha", Host: "teak", VMID: 2101, Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha",
+		Notes:  &pods.Notes{IP: "192.168.100.10", OS: "linux", Base: "deb-v1", DNS: "router"},
+		Source: &pods.Source{VMID: 8001, Node: "alder", Name: "deb-v1"}, NICs: map[string]string{"net0": "devint01"},
+		Steps: []pods.Step{pods.StepClone, pods.StepLabel, pods.StepNetwork, pods.StepStart},
+	}}}
+	res := e.Run(context.Background(), plan)
+	if len(res.Succeeded) != 1 || f.VMs[2101] == nil {
+		t.Errorf("result %+v, vm %+v", res, f.VMs[2101])
 	}
 }

@@ -363,7 +363,7 @@ func TestPropImageNotesJSON(t *testing.T) {
 	})
 }
 
-// A description is held to what Proxmox keeps, counted in characters as
+// A UTF-8 description is held to what Proxmox keeps, counted in characters as
 // Proxmox counts them, not bytes.
 func TestCheckDescriptionCountsCharacters(t *testing.T) {
 	for desc, ok := range map[string]bool{
@@ -398,7 +398,7 @@ func keptLine(t *rapid.T, label string) string {
 	return strings.Join(rapid.SliceOfN(word, 1, 4).Draw(t, label), " ")
 }
 
-// Whatever notes an image has, an Edit notes changing one line of the free
+// For notes of keptLine lines, an Edit notes changing one line of the free
 // text writes that line and leaves every other line byte for byte as it
 // was; a changed line that forges a battleship line or a details header,
 // hidden behind format characters, is refused, the notes left alone.

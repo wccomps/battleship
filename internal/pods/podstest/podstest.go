@@ -385,7 +385,7 @@ func (f *Fake) SetVMConfig(ctx context.Context, node string, vmid int, changes m
 	}
 	if d, ok := changes["digest"]; ok && d != configDigest(vm) {
 		return &proxmox.APIError{Method: http.MethodPut, Path: fmt.Sprintf("/nodes/%s/qemu/%d/config", node, vmid), Status: 500,
-			Message: "detected modified configuration - file changed by other user? Try again."}
+			Message: "checksum mismatch (file change by other user?)"}
 	}
 	for k, v := range changes {
 		switch k {

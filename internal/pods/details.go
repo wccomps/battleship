@@ -340,9 +340,7 @@ func (n ImageNotes) apply(desc string) (string, error) {
 	return withDetails(desc, n.ImageDetails), nil
 }
 
-// Changes is the config change that gives a VM whose config is cur notes
-// n; nil if there is none. Like every description written, it must pass
-// CheckDescription, which the executor checks.
+// Changes is the config change that gives cur notes n; nil if there is none.
 func (n ImageNotes) Changes(cur map[string]string) (map[string]string, error) {
 	desc, err := n.apply(cur["description"])
 	if err != nil || desc == cur["description"] {
@@ -351,11 +349,12 @@ func (n ImageNotes) Changes(cur map[string]string) (map[string]string, error) {
 	return map[string]string{"description": desc}, nil
 }
 
-// against is n as Edit notes writes it over notes read as r: free text
-// that is r's once cleaned is kept as it is (Free nil), so a form sent
-// back unchanged writes nothing there, even text checkFreeNotes would
-// refuse. same says n writes nothing r doesn't already say.
+// against is n as Edit notes writes it over notes read as r: From is
+// cleared, and free text that is r's once cleaned is kept as it is (Free
+// nil), so a form sent back unchanged writes nothing there, even text
+// checkFreeNotes would refuse. same says n changes nothing in r.
 func (n ImageNotes) against(r NotesRead) (_ ImageNotes, same bool) {
+	n.From = ""
 	if n.Free != nil && CleanFreeNotes(*n.Free) == r.Free {
 		n.Free = nil
 	}
@@ -393,59 +392,36 @@ const (
 	// MaxFreeNotes is the longest free text Edit notes writes, in
 	// characters: as much as pages show (UserNotes).
 	MaxFreeNotes = maxUserNotes
-	// maxDescription is the longest description Proxmox keeps:
-	// qemu-server's maxLength 1024 * 8, which its schema check counts in
-	// characters (Perl's length() of the decoded text).
+	// maxDescription is qemu-server's 8192-character description limit
+	// (Perl length() on decoded UTF-8).
 	maxDescription = 8 * 1024
 )
-
-// notesTooLong is CheckDescription's refusal of notes of this many
-// characters.
-type notesTooLong int
-
-func (n notesTooLong) Error() string {
-	return fmt.Sprintf("would be %d characters; Proxmox keeps at most %d", int(n), maxDescription)
-}
 
 // CheckDescription checks a VM description before it is written: at most
 // maxDescription characters, counted as Proxmox counts them.
 func CheckDescription(desc string) error {
 	if n := utf8.RuneCountInString(desc); n > maxDescription {
-		return notesTooLong(n)
+		return fmt.Errorf("would be %d characters; Proxmox keeps at most %d", n, maxDescription)
 	}
 	return nil
 }
 
-// notesAfter is notes desc as its steps write them: its notes line
-// (StepLabel), then its details (StepDetails); an error if its details
-// can't be written.
-func (it Item) notesAfter(desc string) (string, error) {
-	for _, s := range it.Steps {
-		switch {
-		case s == StepLabel && it.Notes != nil:
-			desc = WithNotes(desc, *it.Notes)
-		case s == StepDetails && it.Details != nil:
-			var err error
-			if desc, err = it.Details.apply(desc); err != nil {
-				return "", err
-			}
+// blockLongNotes blocks it, unless it is already, when a step on it would
+// write notes over desc that are more than Proxmox keeps (CheckDescription).
+func (it *Item) blockLongNotes(desc string) {
+	check := func(after string) {
+		if err := CheckDescription(after); err != nil && after != desc && it.Blocked == "" {
+			it.Blocked = "the notes of " + it.Name + " " + err.Error()
 		}
+		desc = after
 	}
-	return desc, nil
-}
-
-// blockLongNotes blocks it, unless it is already, when its steps would
-// write notes over desc that are more than Proxmox keeps
-// (CheckDescription); the error is notesAfter's.
-func (it *Item) blockLongNotes(desc string) error {
-	out, err := it.notesAfter(desc)
-	if err != nil {
-		return err
+	if it.Notes != nil {
+		check(WithNotes(desc, *it.Notes))
 	}
-	if err := CheckDescription(out); err != nil && out != desc && it.Blocked == "" {
-		it.Blocked = "the notes of " + it.Name + " " + err.Error()
+	if it.Details != nil {
+		after, _ := it.Details.apply(desc)
+		check(after)
 	}
-	return nil
 }
 
 // freeSpaces are what CleanFreeNotes turns into plain text: line breaks
@@ -518,9 +494,9 @@ func isNotesLine(line string) bool {
 }
 
 // editText is text s as Edit notes edits it: cleaned (CleanFreeNotes),
-// less what checkFreeNotes refuses: characters that hide, and lines that
-// read as Battleship's own. Every other character, format characters
-// included, is kept, so a line no one edits is written back as it was.
+// without characters that hide (hides) or lines that read as Battleship's
+// own. Format characters (Cf) are kept, so editing another line does not
+// strip them.
 func editText(s string) string {
 	s = strings.Map(func(r rune) rune {
 		if hides(r) {

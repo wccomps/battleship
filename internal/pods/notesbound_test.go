@@ -93,7 +93,18 @@ func TestEveryNotesWriteIsBoundAtPlan(t *testing.T) {
 		}
 	}
 	it := Item{Name: "teak.kilo.alpha", Notes: &Notes{IP: "192.168.100.77"}, Steps: []Step{StepLabel}}
-	if err := it.blockLongNotes(long + "\nbattleship: ip=192.168.100.77"); err != nil || it.Blocked != "" {
-		t.Errorf("notes left as they are: %v, blocked %q", err, it.Blocked)
+	if it.blockLongNotes(long + "\nbattleship: ip=192.168.100.77"); it.Blocked != "" {
+		t.Errorf("notes left as they are: blocked %q", it.Blocked)
+	}
+	// Register runs StepLabel before StepDetails, so a source whose notes
+	// exceed 8192 characters at StepLabel is blocked at plan even when
+	// StepDetails would replace a long block with a shorter one.
+	oldBlock := "**Details**\n- OS: " + strings.Repeat("a", 150) + "\n- Login: " + strings.Repeat("b", 150) + "\n- Built: " + strings.Repeat("c", 150)
+	f := imageFake()
+	f.VMs[150].Config["description"] = oldBlock + "\n\n" + strings.Repeat("x", maxDescription-7-len(oldBlock)-2)
+	reg, err := NewPlanner(f, envConfig()).ImageRegister(ctx, ImageRequest{VMID: 150, Family: "debian-12",
+		Details: &ImageNotes{ImageDetails: ImageDetails{OS: "Debian 12"}}})
+	if err != nil || !strings.Contains(reg.Items[0].Blocked, "characters; Proxmox keeps at most 8192") {
+		t.Errorf("register exceeding 8192 at StepLabel: %v, blocked %q", err, reg.Items[0].Blocked)
 	}
 }
