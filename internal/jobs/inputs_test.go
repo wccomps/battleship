@@ -17,6 +17,29 @@ import (
 
 var bg = context.Background()
 
+func TestEveryKindHasRequest(t *testing.T) {
+	for _, k := range pods.Kinds {
+		r, ok := requests[k]
+		if !ok {
+			t.Errorf("%s has no request row", k)
+		}
+		if r.takes == 0 || r.plan == nil {
+			t.Errorf("%s request row is incomplete: takes=%v plan=%v", k, r.takes, r.plan != nil)
+		}
+		if (r.takes&inTeams == 0) != k.Teamless() {
+			t.Errorf("%s: takes teams = %t, Teamless = %t", k, r.takes&inTeams != 0, k.Teamless())
+		}
+		if (r.typed != nil) != k.TypedConfirm() {
+			t.Errorf("%s: typed = %t, TypedConfirm = %t", k, r.typed != nil, k.TypedConfirm())
+		}
+	}
+	for k := range requests {
+		if !slices.Contains(pods.Kinds, k) {
+			t.Errorf("requests lists %s, which is not in pods.Kinds", k)
+		}
+	}
+}
+
 func TestValidate(t *testing.T) {
 	cases := []struct {
 		in   Inputs

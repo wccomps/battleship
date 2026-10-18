@@ -178,37 +178,18 @@ func PoolPath(pool string) string { return "/pool/" + pool }
 // (LiveAddrs) needs.
 const LiveAddrsPrivilege = "VM.GuestAgent.Audit"
 
-// offerPrivileges are, per operation, the privileges any of which makes it
-// worth offering: what its steps need (itemNeeds), or for deploy and
-// teardown, anywhere. Previews check exactly.
-var offerPrivileges = map[Kind][]string{
-	KindPower:    {"VM.PowerMgmt"},
-	KindReset:    {"VM.Snapshot", "VM.Snapshot.Rollback"},
-	KindSnapshot: {"VM.Snapshot"},
-	KindDeploy:   {"VM.Clone"},
-	KindTeardown: {"VM.Allocate"},
+// OfferPrivileges are the privileges any of which makes k worth offering:
+// what its steps need (itemNeeds), or for deploy and teardown, anywhere.
+// Previews check exactly.
+func OfferPrivileges(k Kind) []string { return slices.Clone(specs[k].offer) }
 
-	KindImageRegister:  {"VM.Clone"},
-	KindImageEdit:      {"VM.Clone"},
-	KindImageDeprecate: {"VM.Config.Options"},
-	KindImageDelete:    {"VM.Allocate"},
-	KindImageDetails:   {"VM.Config.Options"},
-	KindEnvCreate:      {"VM.Clone"},
-	KindEnvAdd:         {"VM.Clone"},
-	KindEnvDNS:         {"VM.GuestAgent.Unrestricted"},
-	KindEnvTeardown:    {"VM.Allocate"},
-}
-
-// OfferPrivileges is offerPrivileges[k].
-func OfferPrivileges(k Kind) []string { return slices.Clone(offerPrivileges[k]) }
-
-// HoldsOffered reports whether acc grants any of k's offerPrivileges on VM
+// HoldsOffered reports whether acc grants any of k's OfferPrivileges on VM
 // vmid or on pool (for a VM a deploy will create; see on). Unreadable paths
 // grant nothing.
 func HoldsOffered(ctx context.Context, acc Access, k Kind, vmid int, pool string) bool {
 	for _, path := range []string{VMPath(vmid), PoolPath(pool)} {
 		held, err := acc.Privileges(ctx, path)
-		if err == nil && slices.ContainsFunc(offerPrivileges[k], func(p string) bool { _, ok := held[p]; return ok }) {
+		if err == nil && slices.ContainsFunc(specs[k].offer, func(p string) bool { _, ok := held[p]; return ok }) {
 			return true
 		}
 	}

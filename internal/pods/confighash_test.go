@@ -63,14 +63,30 @@ func TestEveryRunConfigFieldIsClassified(t *testing.T) {
 	}
 }
 
+func TestEveryKindHasSpec(t *testing.T) {
+	for _, k := range Kinds {
+		s, ok := specs[k]
+		if !ok {
+			t.Errorf("%s has no spec row", k)
+		}
+		if len(s.offer) == 0 {
+			t.Errorf("%s has no offer privileges", k)
+		}
+	}
+	for k := range specs {
+		if !slices.Contains(Kinds, k) {
+			t.Errorf("specs lists %s, which is not in Kinds", k)
+		}
+	}
+}
+
 func TestConfigHashFollowsClassification(t *testing.T) {
-	kinds := append([]Kind{KindDeploy, KindTeardown, KindReset, KindPower, KindSnapshot, KindEnvTeardown}, append(slices.Clone(imageKinds), envKinds...)...)
 	for section, fields := range hashedFor {
 		for name, hashed := range fields {
 			c := config.Default()
 			f := reflect.ValueOf(&c).Elem().FieldByName(section).FieldByName(name)
 			f.Set(changedValue(t, f))
-			for _, kind := range kinds {
+			for _, kind := range Kinds {
 				got := ConfigHash(kind, c) != ConfigHash(kind, config.Default())
 				if want := slices.Contains(hashed, kind); got != want {
 					t.Errorf("%s: changing %s.%s changed the hash: %t, want %t", kind, section, name, got, want)

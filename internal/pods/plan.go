@@ -43,25 +43,72 @@ const (
 	KindEnvTeardown    Kind = "env-teardown"
 )
 
+// Kinds are all known job kinds.
+var Kinds = []Kind{
+	KindDeploy, KindTeardown, KindReset, KindPower, KindSnapshot,
+	KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete, KindImageDetails,
+	KindEnvCreate, KindEnvAdd, KindEnvDNS, KindEnvTeardown,
+}
+
+type subject uint8
+
+const (
+	subjectTeams subject = iota
+	subjectImage
+	subjectNewEnvironment
+	subjectEnvironment
+)
+
+type retryMode uint8
+
+const (
+	retryNone retryMode = iota
+	retryNarrowed
+	retryWhole
+)
+
+// spec records a Kind's model facts: what it acts on, which privileges make
+// it worth offering, which config settings ConfigHash covers, whether it
+// tears VMs down, and how RetryInputs retries it.
+type spec struct {
+	subject   subject
+	offer     []string
+	config    func(config.Config) any
+	tearsDown bool
+	retry     retryMode
+}
+
+var specs = map[Kind]spec{
+	KindDeploy:   {subject: subjectTeams, offer: []string{"VM.Clone"}, config: deployConfigHash, retry: retryNarrowed},
+	KindTeardown: {subject: subjectTeams, offer: []string{"VM.Allocate"}, config: teardownConfigHash, tearsDown: true, retry: retryNarrowed},
+	KindReset:    {subject: subjectTeams, offer: []string{"VM.Snapshot", "VM.Snapshot.Rollback"}, retry: retryNarrowed},
+	KindPower:    {subject: subjectTeams, offer: []string{"VM.PowerMgmt"}, retry: retryNarrowed},
+	KindSnapshot: {subject: subjectTeams, offer: []string{"VM.Snapshot"}, retry: retryNarrowed},
+
+	KindImageRegister:  {subject: subjectImage, offer: []string{"VM.Clone"}, config: imageConfigHash},
+	KindImageEdit:      {subject: subjectImage, offer: []string{"VM.Clone"}, config: imageConfigHash},
+	KindImageDeprecate: {subject: subjectImage, offer: []string{"VM.Config.Options"}, config: imageConfigHash},
+	KindImageDelete:    {subject: subjectImage, offer: []string{"VM.Allocate"}, config: imageConfigHash},
+	KindImageDetails:   {subject: subjectImage, offer: []string{"VM.Config.Options"}},
+
+	KindEnvCreate:   {subject: subjectNewEnvironment, offer: []string{"VM.Clone"}, config: envConfigHash, retry: retryNarrowed},
+	KindEnvAdd:      {subject: subjectEnvironment, offer: []string{"VM.Clone"}, config: envConfigHash, retry: retryNarrowed},
+	KindEnvDNS:      {subject: subjectEnvironment, offer: []string{"VM.GuestAgent.Unrestricted"}, config: envConfigHash},
+	KindEnvTeardown: {subject: subjectEnvironment, offer: []string{"VM.Allocate"}, config: teardownConfigHash, tearsDown: true, retry: retryWhole},
+}
+
 // Teamless reports whether kind acts on base images or environments rather
 // than team VMs.
-func (k Kind) Teamless() bool {
-	switch k {
-	case KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete, KindImageDetails,
-		KindEnvCreate, KindEnvAdd, KindEnvDNS, KindEnvTeardown:
-		return true
-	}
-	return false
-}
+func (k Kind) Teamless() bool { return specs[k].subject != subjectTeams }
 
 // OnEnvironment is whether the kind works on an existing environment, named
 // by its domain.
-func (k Kind) OnEnvironment() bool { return k == KindEnvAdd || k == KindEnvDNS || k == KindEnvTeardown }
+func (k Kind) OnEnvironment() bool { return specs[k].subject == subjectEnvironment }
 
 // TearsDown is whether the kind deletes VMs with stop and delete steps: its
 // stop is a clean shutdown, and a VM already gone at its delete has only its
 // leftover disks freed.
-func (k Kind) TearsDown() bool { return k == KindTeardown || k == KindEnvTeardown }
+func (k Kind) TearsDown() bool { return specs[k].tearsDown }
 
 type Step string
 
@@ -94,12 +141,16 @@ const (
 
 // TypedConfirm reports whether kind k needs what it deletes typed to confirm
 // (CLI and web): a teardown's team range, an environment's domain.
-func (k Kind) TypedConfirm() bool { return k.TearsDown() }
+func (k Kind) TypedConfirm() bool { return specs[k].tearsDown }
+
+// Retryable reports whether a job of kind k can be retried with RetryInputs
+// rather than started again from its form.
+func (k Kind) Retryable() bool { return specs[k].retry != retryNone }
 
 // RetriedWhole reports whether a retry of a job of kind k plans it again
 // whole, not narrowed to the VMs that didn't finish: an environment's
 // teardown, in its slot, where what a failed delete left has new names.
-func (k Kind) RetriedWhole() bool { return k == KindEnvTeardown }
+func (k Kind) RetriedWhole() bool { return specs[k].retry == retryWhole }
 
 // ChangesConfig reports whether the step can change the VM's config (its
 // disks, NICs, pool or snapshots); the power and guest steps can't.
@@ -293,39 +344,44 @@ func (plan *Plan) LockKeys() (writes, reads []string) {
 // that claims it, so a plan made under other settings must not pass. It is
 // "" for kinds no setting affects (see confighash_test.go).
 func ConfigHash(kind Kind, c config.Config) string {
-	var v any
-	switch kind {
-	case KindDeploy:
-		v = struct {
-			Network          config.Network
-			Storage          string
-			Linked           bool
-			DiskRead, Write  int
-			Snapshot         string
-			BaselinePatterns []string
-			Pool             string
-			TemplatePool     string
-		}{c.Network, c.Deploy.Storage, c.Deploy.Linked, c.Deploy.DiskMBpsRead, c.Deploy.DiskMBpsWrite,
-			c.Deploy.SnapshotName, c.Deploy.BaselinePatterns, c.Naming.Pool, c.Images.Pool}
-	case KindTeardown, KindEnvTeardown:
-		v = c.Teardown.ShutdownTimeout
-	case KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete:
-		v = struct {
-			Images  config.Images
-			Storage string
-		}{c.Images, c.Deploy.Storage}
-	case KindEnvCreate, KindEnvAdd, KindEnvDNS:
-		v = struct {
-			Environments config.Environments
-			Storage      string
-			MasterTag    string
-		}{c.Environments, c.Deploy.Storage, c.Deploy.MasterTag}
-	default:
+	fn := specs[kind].config
+	if fn == nil {
 		return ""
 	}
-	b, _ := json.Marshal(v) // strings, ints, bools, a duration and a LAN's text can't fail
+	b, _ := json.Marshal(fn(c)) // strings, ints, bools, a duration and a LAN's text can't fail
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
+}
+
+func deployConfigHash(c config.Config) any {
+	return struct {
+		Network          config.Network
+		Storage          string
+		Linked           bool
+		DiskRead, Write  int
+		Snapshot         string
+		BaselinePatterns []string
+		Pool             string
+		TemplatePool     string
+	}{c.Network, c.Deploy.Storage, c.Deploy.Linked, c.Deploy.DiskMBpsRead, c.Deploy.DiskMBpsWrite,
+		c.Deploy.SnapshotName, c.Deploy.BaselinePatterns, c.Naming.Pool, c.Images.Pool}
+}
+
+func teardownConfigHash(c config.Config) any { return c.Teardown.ShutdownTimeout }
+
+func imageConfigHash(c config.Config) any {
+	return struct {
+		Images  config.Images
+		Storage string
+	}{c.Images, c.Deploy.Storage}
+}
+
+func envConfigHash(c config.Config) any {
+	return struct {
+		Environments config.Environments
+		Storage      string
+		MasterTag    string
+	}{c.Environments, c.Deploy.Storage, c.Deploy.MasterTag}
 }
 
 // Runnable returns items that are not blocked.

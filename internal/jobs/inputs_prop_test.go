@@ -312,7 +312,7 @@ func checkGate(t interface{ Fatalf(string, ...any) }, p pods.Planner, in Inputs,
 	if uerr := json.Unmarshal(data, &back); merr != nil || uerr != nil || !reflect.DeepEqual(back, in) || back.Validate() != nil {
 		t.Fatalf("%#v reads back from its job as %#v (%v, %v)", in, back, merr, uerr)
 	}
-	if in.Kind == pods.KindEnvCreate || in.Kind == pods.KindEnvAdd || in.Kind == pods.KindEnvDNS || in.Kind == pods.KindEnvTeardown {
+	if requests[in.Kind].takes&inDomain != 0 {
 		if _, err := in.EnvRequest(); err != nil {
 			t.Fatalf("EnvRequest(%#v): %v", in, err)
 		}

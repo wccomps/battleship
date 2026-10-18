@@ -240,7 +240,7 @@ func TestOfferPrivilegesAreItemNeeds(t *testing.T) {
 			return p.Snapshot(ctx, SnapshotRequest{Teams: []string{"01"}, Name: "before-scoring"})
 		},
 	}
-	for kind := range offerPrivileges {
+	for kind := range specs {
 		if plans[kind] == nil && !kind.Teamless() {
 			t.Fatalf("no plan built for %s", kind)
 		}
