@@ -13,7 +13,6 @@ import (
 
 	"pgregory.net/rapid"
 
-	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -440,9 +439,8 @@ func TestPropSlotRuns(t *testing.T) {
 }
 
 func TestEnvironmentsPageHostWarnings(t *testing.T) {
-	h := newHarness(t, func(c *config.Config) {
-		c.Deploy.CPUTypes = []string{"baseline"}
-	})
+	h := newHarness(t)
+	h.api.CPUModels = []string{"baseline"}
 	h.api.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "", Status: "running"},
 		map[string]string{
 			"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v2",

@@ -139,8 +139,8 @@ func TestImageEditMovesEveryNIC(t *testing.T) {
 
 func TestImageRegisterWarnings(t *testing.T) {
 	f := imageFake()
+	f.CPUModels = []string{"baseline"}
 	cfg := envConfig()
-	cfg.Deploy.CPUTypes = []string{"baseline"}
 	f.Add(proxmox.VM{VMID: 160, Name: "gw-build", Node: "birch"}, map[string]string{
 		"net0":  "virtio=BC:24:11:00:01:60,bridge=vmbr0,tag=5",
 		"cpu":   "x86-64-v2-AES",

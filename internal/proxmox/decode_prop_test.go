@@ -96,7 +96,7 @@ func TestPropInt64Of(t *testing.T) {
 var jsonKeys = []string{"data", "result", "vmid", "name", "node", "status", "tags", "template", "lock", "pool", "maxmem", "maxdisk", "mem", "type", "id",
 	"storage", "shared", "online", "snaptime", "snapstate", "vmstate", "parent", "upid", "starttime", "endtime", "exitstatus", "pid", "exitcode", "exited",
 	"out-data", "err-data", "hardware-address", "ip-addresses", "ip-address", "prefix", "host-name", "volid", "ticket", "username", "CSRFPreventionToken",
-	"user-tag-access", "user-allow", "allowed-tags", "registered-tags", "ip", "level", "x", ""}
+	"user-tag-access", "user-allow", "allowed-tags", "registered-tags", "custom", "ip", "level", "x", ""}
 
 // drawJSON draws JSON text of any shape, mostly objects and lists of the
 // keys above holding values of the wrong type, plus the occasional broken
@@ -149,6 +149,7 @@ func TestPropClientSurvivesAnyAnswer(t *testing.T) {
 		"ClusterVMs":       func(ctx context.Context) { c.ClusterVMs(ctx) },
 		"ClusterNodes":     func(ctx context.Context) { c.ClusterNodes(ctx) },
 		"OnlineNodes":      func(ctx context.Context) { c.OnlineNodes(ctx) },
+		"CustomCPUModels":  func(ctx context.Context) { c.CustomCPUModels(ctx, "n1") },
 		"VMConfig":         func(ctx context.Context) { c.VMConfig(ctx, "n1", 101) },
 		"Snapshots":        func(ctx context.Context) { c.Snapshots(ctx, "n1", 101) },
 		"CurrentStatus":    func(ctx context.Context) { c.CurrentStatus(ctx, "n1", 101) },

@@ -85,9 +85,6 @@ type Deploy struct {
 	// baseline when a VM lacks SnapshotName; a reset uses the newest match.
 	BaselinePatterns []string `toml:"baseline_patterns"`
 	GPUVGA           string   `toml:"gpu_vga"` // templates with this vga value are pinned to their node
-	// CPUTypes are the CPU models VMs are expected to use (matching a
-	// Proxmox custom-<name> model too); empty disables the check.
-	CPUTypes []string `toml:"cpu_types"`
 }
 
 // Concurrency limits Proxmox work. Workers is per job; ConfigCalls and
@@ -498,11 +495,6 @@ func (c Config) Validate() error {
 			errs = append(errs, errors.New("deploy.baseline_patterns must not contain blank entries"))
 		} else if _, err := path.Match(p, ""); err != nil {
 			errs = append(errs, fmt.Errorf("deploy.baseline_patterns: %q is not a valid glob: %w", p, err))
-		}
-	}
-	for _, cpu := range c.Deploy.CPUTypes {
-		if strings.TrimSpace(cpu) == "" {
-			errs = append(errs, errors.New("deploy.cpu_types must not contain blank entries"))
 		}
 	}
 

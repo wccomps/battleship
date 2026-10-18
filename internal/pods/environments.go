@@ -295,12 +295,17 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 	if err := g.Wait(); err != nil {
 		return nil, nil, err
 	}
+	var cpuModels []string
+	cpuRead := false
 	for i, vm := range read {
 		cfg := cfgs[i]
 		if cfg == nil {
 			continue
 		}
 		if si, ok := byPool[vm.Pool]; ok {
+			if !cpuRead {
+				cpuModels, cpuRead = p.customCPUModels(ctx, vm.Node), true
+			}
 			n, has := ParseNotes(cfg["description"])
 			n = n.Checked(p.Cfg.Environments.Subnet)
 			h := EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node, Status: vm.Status, Tags: vm.Tags,
@@ -313,7 +318,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 				h.WANMAC, h.LANMAC = routerMACs(cfg, envs[si].Slot)
 			}
 			h.Agent = agentEnabled(cfg["agent"])
-			h.Warnings = p.hostWarnings(vm, cfg, envs[si].Slot, h.Router)
+			h.Warnings = p.hostWarnings(vm, cfg, envs[si].Slot, h.Router, cpuModels)
 			envs[si].Hosts = append(envs[si].Hosts, h)
 			continue
 		}
@@ -468,8 +473,26 @@ func slotNICWarnings(cfg map[string]string, s Slot, router bool) []string {
 	return append(out, vlanWarnings(cfg)...)
 }
 
+// CPUModelReader is the optional part of an API that lists a node's custom
+// QEMU CPU models.
+type CPUModelReader interface {
+	CustomCPUModels(ctx context.Context, node string) ([]string, error)
+}
+
+func (p Planner) customCPUModels(ctx context.Context, node string) []string {
+	r, ok := p.API.(CPUModelReader)
+	if !ok || node == "" {
+		return nil
+	}
+	models, err := r.CustomCPUModels(ctx, node)
+	if err != nil {
+		return nil
+	}
+	return models
+}
+
 // hostWarnings checks a slot VM's tags and config for discrepancies.
-func (p Planner) hostWarnings(vm proxmox.VM, cfg map[string]string, s Slot, router bool) []string {
+func (p Planner) hostWarnings(vm proxmox.VM, cfg map[string]string, s Slot, router bool, cpuModels []string) []string {
 	var out []string
 	tags := Tags(vm.Tags)
 	var missing []string
@@ -485,7 +508,7 @@ func (p Planner) hostWarnings(vm proxmox.VM, cfg map[string]string, s Slot, rout
 		out = append(out, "missing tags "+strings.Join(missing, ", "))
 	}
 	out = append(out, slotNICWarnings(cfg, s, router)...)
-	if w := cpuWarning(cfg["cpu"], p.Cfg.Deploy.CPUTypes); w != "" {
+	if w := cpuWarning(cfg["cpu"], cpuModels); w != "" {
 		out = append(out, w)
 	}
 	if !agentEnabled(cfg["agent"]) && (cfg["agent"] != "" || len(DiskVolumes(cfg)) > 0) {
@@ -498,7 +521,7 @@ func (p Planner) hostWarnings(vm proxmox.VM, cfg map[string]string, s Slot, rout
 }
 
 // masterWarnings checks a deploy master VM's config for discrepancies.
-func (p Planner) masterWarnings(vm proxmox.VM, cfg map[string]string, slotByPool map[string]Slot) []string {
+func (p Planner) masterWarnings(vm proxmox.VM, cfg map[string]string, slotByPool map[string]Slot, cpuModels []string) []string {
 	var out []string
 	slot, inSlot := slotByPool[vm.Pool]
 	if inSlot {
@@ -507,7 +530,7 @@ func (p Planner) masterWarnings(vm proxmox.VM, cfg map[string]string, slotByPool
 	} else {
 		out = append(out, vlanWarnings(cfg)...)
 	}
-	if w := cpuWarning(cfg["cpu"], p.Cfg.Deploy.CPUTypes); w != "" {
+	if w := cpuWarning(cfg["cpu"], cpuModels); w != "" {
 		out = append(out, w)
 	}
 	if !agentEnabled(cfg["agent"]) && (cfg["agent"] != "" || (inSlot && len(DiskVolumes(cfg)) > 0)) {
@@ -521,7 +544,7 @@ func (p Planner) masterWarnings(vm proxmox.VM, cfg map[string]string, slotByPool
 
 // registerWarnings checks a register source VM's config for discrepancies
 // that don't block registration.
-func (p Planner) registerWarnings(cfg map[string]string, kind string) []string {
+func (p Planner) registerWarnings(cfg map[string]string, kind string, cpuModels []string) []string {
 	var out []string
 	n := CountInterfaces(cfg)
 	hasHW := n > 0 || len(DiskVolumes(cfg)) > 0
@@ -541,7 +564,7 @@ func (p Planner) registerWarnings(cfg map[string]string, kind string) []string {
 		}
 	}
 	out = append(out, vlanWarnings(cfg)...)
-	if w := cpuWarning(cfg["cpu"], p.Cfg.Deploy.CPUTypes); w != "" {
+	if w := cpuWarning(cfg["cpu"], cpuModels); w != "" {
 		out = append(out, w)
 	}
 	if (kind == ImageRouter || kind == ImageOther) && !agentEnabled(cfg["agent"]) && (cfg["agent"] != "" || len(DiskVolumes(cfg)) > 0) {

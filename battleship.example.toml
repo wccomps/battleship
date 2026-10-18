@@ -43,7 +43,6 @@ url = "https://192.0.2.123:8006"
 # naming no snapshot uses snapshot_name, else the newest match. [] for none.
 # baseline_patterns = ["fresh_clone_*"]
 # gpu_vga = "virtio-gl"
-# cpu_types = []                 # expected VM CPU models (matches custom-<name> too), e.g. ["x86-64-v2-AES"]
 
 # config_calls and template_builds are per process; workers is per job. With a
 # database, clones and deletes are shared by all processes: keep them the same everywhere.

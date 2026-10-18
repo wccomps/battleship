@@ -28,7 +28,6 @@ var hashedFor = map[string]map[string][]Kind{
 		"SnapshotName": {KindDeploy}, "BaselinePatterns": {KindDeploy},
 		"MasterTag": envKinds, // environment VMs are tagged with it
 		"GPUVGA":    nil,
-		"CPUTypes":  nil,
 	},
 	"Images": {
 		"Pool":      append(slices.Clone(imageKinds), KindDeploy), // built templates join it

@@ -472,6 +472,7 @@ func TestWillStopMasterOnlyWhenBuildingFromRunningMaster(t *testing.T) {
 
 func TestDeployMasterAndUntaggedWarnings(t *testing.T) {
 	f := podstest.New("cedar")
+	f.CPUModels = []string{"baseline"}
 	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "cedar", Pool: "dev-01", Tags: "dev;kilo.alpha"},
 		map[string]string{"net0": "virtio=BC:24:11:00:00:01,bridge=devint02", "net1": "virtio=BC:24:11:00:00:02,bridge=devext01",
 			"cpu": "x86-64-v2-AES", "agent": "0", "ide2": "local:iso/debian.iso,media=cdrom"})
@@ -479,7 +480,6 @@ func TestDeployMasterAndUntaggedWarnings(t *testing.T) {
 		map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint01"})
 
 	cfg := config.Default()
-	cfg.Deploy.CPUTypes = []string{"baseline"}
 	plan, err := NewPlanner(f, cfg).Deploy(context.Background(), DeployRequest{Pattern: "*.kilo.alpha", Teams: []string{"01"}})
 	if err != nil {
 		t.Fatal(err)
