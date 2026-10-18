@@ -77,7 +77,7 @@ func TestPropTeamVMsAreNamedAndNumbered(t *testing.T) {
 					t.Fatalf("%s plan has %s (VMID %d, pool %q, template %v): %v, want %v", plan.Kind, vm.Name, vm.VMID, vm.Pool, vm.Template, in, isTeam)
 				}
 				noticed := slices.ContainsFunc(plan.Notices, func(n string) bool {
-					return strings.HasPrefix(n, fmt.Sprintf("Left alone: %s has a team ", vm.Name)) && strings.Contains(n, fmt.Sprintf(" is VMID %d, ", vm.VMID))
+					return strings.HasPrefix(n, fmt.Sprintf("Left alone: %s has pod ", vm.Name)) && strings.Contains(n, fmt.Sprintf(" is VMID %d, ", vm.VMID))
 				})
 				if want := named && !isTeam; noticed != want {
 					t.Fatalf("%s plan notices %s (VMID %d): %v, want %v (%q)", plan.Kind, vm.Name, vm.VMID, noticed, want, plan.Notices)
@@ -107,15 +107,15 @@ func TestDeployBlocksNameTakenOutsideTeamBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "has a team 01 name but is VMID 8005, outside the team's VMIDs, so it isn't a team VM; rename or remove it in Proxmox"; len(plan.Items) != 1 || plan.Items[0].Blocked != want {
+	if want := "has pod 01's name but is VMID 8005, outside the pod's VMIDs, so it isn't a pod VM; rename or remove it in Proxmox"; len(plan.Items) != 1 || plan.Items[0].Blocked != want {
 		t.Fatalf("items = %+v", plan.Items)
 	}
 	td, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(td.Items) != 0 || len(td.Notices) != 1 || !strings.HasPrefix(td.Notices[0], "Left alone: team01-teak has a team 01 name but is VMID 8005") {
-		t.Fatalf("teardown of team 01 = %+v, notices %q; want nothing to do, and a notice about team01-teak", td.Items, td.Notices)
+	if len(td.Items) != 0 || len(td.Notices) != 1 || !strings.HasPrefix(td.Notices[0], "Left alone: team01-teak has pod 01's name but is VMID 8005") {
+		t.Fatalf("teardown of pod 01 = %+v, notices %q; want nothing to do, and a notice about team01-teak", td.Items, td.Notices)
 	}
 }
 
@@ -128,7 +128,7 @@ func TestDeployBlocksTeamVMInAnotherPool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "is in pool dev-05, not pool-01; move it back to the team pool in Proxmox first"; len(plan.Items) != 1 || plan.Items[0].Blocked != want {
+	if want := "is in pool dev-05, not pool-01; move it back to the pod's pool in Proxmox first"; len(plan.Items) != 1 || plan.Items[0].Blocked != want {
 		t.Fatalf("items = %+v", plan.Items)
 	}
 }

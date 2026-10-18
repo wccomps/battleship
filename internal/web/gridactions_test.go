@@ -138,7 +138,7 @@ func TestGridSelectionPreviewsExactVMs(t *testing.T) {
 	contains(t, "grid preview", body,
 		"<tr><td><span class=\"vm\">team01-dc</span></td>", "<tr><td><span class=\"vm\">team02-web</span></td>",
 		`<a class="btn" href="/" data-close>Cancel</a>`)
-	lacks(t, "grid preview", body, "<span class=\"vm\">team01-web</span>", "<span class=\"vm\">team02-dc</span>", "<dt>Teams</dt>")
+	lacks(t, "grid preview", body, "<span class=\"vm\">team01-web</span>", "<span class=\"vm\">team02-dc</span>", "<dt>Pods</dt>")
 	if form.Get("teams") != "1-2" || form.Get("vms") != "team01-dc,team02-web" {
 		t.Errorf("confirm fields = %v", form)
 	}
@@ -196,7 +196,7 @@ func TestGridSelectionPrivilegeGating(t *testing.T) {
 	lacks(t, "operator's grid", body, `lead-ops`, `href="/deploy"`, `href="/teardown"`, `data-lacks`, `data-lead-all`)
 
 	body = h.get(&lead, "/").Body.String()
-	contains(t, "lead's grid", body, `<nav class="lead-ops" aria-label="Team operations">`, `<a class="btn" href="/deploy">`, `<a class="btn bad" href="/teardown">`)
+	contains(t, "lead's grid", body, `<nav class="lead-ops" aria-label="Pod operations">`, `<a class="btn" href="/deploy">`, `<a class="btn bad" href="/teardown">`)
 
 	// Someone who may only power team 01's dc: every other box says so.
 	cred := h.ticketWith("test-powerer", []string{"VM.Audit"})
@@ -218,7 +218,7 @@ func TestGridSelectionPrivilegeGating(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Errorf("operator's all-teams power (panel %v) = %d, want 200", panel, rec.Code)
 		}
-		contains(t, "operator's all-teams power", rec.Body.String(), "This covers every team (01-03).")
+		contains(t, "operator's all-teams power", rec.Body.String(), "This covers every pod (01-03).")
 	}
 	h.noJobs("after previews")
 }
@@ -239,9 +239,9 @@ func TestGridSelectionTamper(t *testing.T) {
 			f := selection([]string{"team01-dc", "team02-dc"}, "action", "start")
 			f.Set("teams", "1")
 			return f
-		}(), "team02-dc is not in teams 1"},
-		{"a VM of a team with no VMs", selection([]string{"team01-dc", "team09-dc"}, "action", "start"), "team09-dc is not in teams 1"},
-		{"not a team VM", selection([]string{"team01-dc", "dc.kilo.alpha"}, "action", "start"), "is not a team VM name"},
+		}(), "team02-dc is not in pods 1"},
+		{"a VM of a team with no VMs", selection([]string{"team01-dc", "team09-dc"}, "action", "start"), "team09-dc is not in pods 1"},
+		{"not a team VM", selection([]string{"team01-dc", "dc.kilo.alpha"}, "action", "start"), "is not a pod VM name"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := h.post(&op, "/power/preview", tc.form)

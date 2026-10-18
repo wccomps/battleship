@@ -17,17 +17,17 @@ func leftovers() []proxmox.VM {
 		vm(501, "dc.kilo.alpha")}
 }
 
-// -teams all is every team with VMs, resolved at planning; a teardown of all leaves no team VM.
+// -pods all is every team with VMs, resolved at planning; a teardown of all leaves no team VM.
 func TestTeardownAllTeams(t *testing.T) {
 	e := newEnv(t, false, "", leftovers()...)
 	if code := e.run("teardown", "-teams", "all", "-yes"); code != 0 {
 		t.Fatalf("code = %d\n%s%s", code, e.stdout, e.stderr)
 	}
 	out := e.stdout.String()
-	if !strings.Contains(out, "-teams all is 0-1,32,40: the teams with VMs.\n") {
+	if !strings.Contains(out, "-pods all is 0-1,32,40: the pods with VMs.\n") {
 		t.Errorf("the resolved teams aren't shown:\n%s", out)
 	}
-	if !strings.Contains(out, "Plan: teardown, teams 00,01,32,40\n") {
+	if !strings.Contains(out, "Plan: teardown, pods 00,01,32,40\n") {
 		t.Errorf("plan line:\n%s", out)
 	}
 	deleted := slices.Sorted(slices.Values(e.api.Deleted))
@@ -43,7 +43,7 @@ func TestInteractiveTeardownAllTeamsNeedsTheResolvedRange(t *testing.T) {
 	if code := e.run("teardown", "-teams", "all"); code != 1 || len(e.api.Deleted) != 0 {
 		t.Fatalf("typing all: code = %d, deleted %v\n%s", code, e.api.Deleted, e.stdout)
 	}
-	if !strings.Contains(e.stdout.String(), "Type the team range (0-1,32,40) to delete these VMs: ") {
+	if !strings.Contains(e.stdout.String(), "Type the pod range (0-1,32,40) to delete these VMs: ") {
 		t.Errorf("prompt:\n%s", e.stdout)
 	}
 	e = newEnv(t, true, "0-1,32,40\n", leftovers()...)
@@ -58,7 +58,7 @@ func TestOtherOperationsTakeAllTeams(t *testing.T) {
 	if code := e.run("power", "-teams", "all", "-action", "start"); code != 0 {
 		t.Fatalf("power: code = %d\n%s%s", code, e.stdout, e.stderr)
 	}
-	if out := e.stdout.String(); !strings.Contains(out, "-teams all is 1-2: the teams with VMs.\n") || !strings.Contains(out, "team02-dc") {
+	if out := e.stdout.String(); !strings.Contains(out, "-pods all is 1-2: the pods with VMs.\n") || !strings.Contains(out, "team02-dc") {
 		t.Errorf("power -teams all:\n%s", out)
 	}
 
@@ -80,13 +80,13 @@ func TestOtherOperationsTakeAllTeams(t *testing.T) {
 	}
 }
 
-// With no team VMs, -teams all is no teams: an error, not an empty plan.
+// With no team VMs, -pods all is no teams: an error, not an empty plan.
 func TestAllTeamsWithNoTeamVMs(t *testing.T) {
 	e := newEnv(t, false, "", vm(501, "dc.kilo.alpha"), proxmox.VM{VMID: 10101, Name: "team01-dc", Node: "n1", Template: true})
 	if code := e.run("power", "-teams", "all", "-action", "start"); code != 1 {
 		t.Fatalf("code = %d, want 1\n%s%s", code, e.stdout, e.stderr)
 	}
-	if got := e.stderr.String(); got != "-teams all: no team has VMs, so there are no teams to act on\n" {
+	if got := e.stderr.String(); got != "-pods all: no pod has VMs, so there are no pods to act on\n" {
 		t.Errorf("stderr = %q", got)
 	}
 }
@@ -97,7 +97,7 @@ func TestDeployRefusesAllTeams(t *testing.T) {
 	if code := e.run("deploy", "-teams", "all", "-templates", "*.kilo.alpha"); code != 2 {
 		t.Fatalf("code = %d, want 2", code)
 	}
-	if !strings.Contains(e.stderr.String(), "-teams all is for teardown, power, reset and snapshot") {
+	if !strings.Contains(e.stderr.String(), "-pods all is for teardown, power, reset and snapshot") {
 		t.Errorf("stderr = %q", e.stderr.String())
 	}
 }

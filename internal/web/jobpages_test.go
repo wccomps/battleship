@@ -171,7 +171,7 @@ func TestJobPage(t *testing.T) {
 		`<div class="page wide" id="job-live" `+h.dataNow()+` data-events="/events/jobs/`+itoa(id)+`?after=0">`,
 		`<span class="st b s-wait">`, "queued</span>",
 		`<span title="olive@example.org">olive</span> · olive@auth.example.org`,
-		`teams <span class="vm">01</span>`,
+		`pods <span class="vm">01</span>`,
 		`<tr><td><span class="vm">team01-dc</span></td><td class="muted c-vmid">10101</td><td class="wide"><span class="steps" role="img" aria-label="stop: waiting, rollback: waiting, start: waiting"><span class="pip wait" title="stop: waiting"></span><span class="pip wait" title="rollback: waiting"></span><span class="pip wait" title="start: waiting"></span></span><span class="st s-wait">`,
 		`<ol class="log" id="job-log" aria-live="polite">`,
 	)
@@ -404,7 +404,7 @@ func TestRetryFailed(t *testing.T) {
 		"<title>Reset to snapshot · battleship</title>",
 		"<dt>Retry of</dt><dd>#"+itoa(id)+"</dd>",
 		"2 will run</span>", `Reset to snapshot <span class="vm">initial</span></h1>`,
-		`<dt>Teams</dt><dd><span class="vm">01-02</span></dd>`, "<dt>Hosts</dt><dd>dc, web</dd>",
+		`<dt>Pods</dt><dd><span class="vm">01-02</span></dd>`, "<dt>Hosts</dt><dd>dc, web</dd>",
 		"<dt>Only these VMs</dt><dd><span class=\"name\">team01-dc</span>, <span class=\"name\">team02-web</span></dd>",
 		"<tr><td><span class=\"vm\">team01-dc</span></td>", "<tr><td><span class=\"vm\">team02-web</span></td>",
 	)
@@ -464,9 +464,9 @@ func TestPreviewOfNamedVMs(t *testing.T) {
 	op := h.login(asOperator)
 	_, form, body := h.preview(&op, "/power", url.Values{"teams": {"1-2"}, "action": {"start"}, "vms": {"team02-dc, team01-ftp"}})
 	contains(t, "preview of named VMs", body,
-		"1 will run</span>", `<dt>Teams</dt><dd><span class="vm">01-02</span></dd>`,
+		"1 will run</span>", `<dt>Pods</dt><dd><span class="vm">01-02</span></dd>`,
 		"<dt>Only these VMs</dt><dd><span class=\"name\">team02-dc</span>, <span class=\"name\">team01-ftp</span></dd>",
-		"1 of the 2 VMs asked for by name no longer exist or match the teams and hosts, so they are left out: <span class=\"name\">team01-ftp</span>.")
+		"1 of the 2 VMs asked for by name no longer exist or match the pods and hosts, so they are left out: <span class=\"name\">team01-ftp</span>.")
 	if form.Get("vms") != "team02-dc,team01-ftp" {
 		t.Errorf("confirm vms = %q", form.Get("vms"))
 	}
@@ -475,7 +475,7 @@ func TestPreviewOfNamedVMs(t *testing.T) {
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("VM outside the teams = %d, want 422", rec.Code)
 	}
-	contains(t, "VM outside the teams", rec.Body.String(), "team02-dc is not in teams 1", `name="vms" value="team02-dc"`)
+	contains(t, "VM outside the teams", rec.Body.String(), "team02-dc is not in pods 1", `name="vms" value="team02-dc"`)
 }
 
 // Retry is offered to whoever could run the operation: an operator gets a

@@ -32,7 +32,7 @@
 {{- else}}
 {{- with .Asked}}
 <dl class="kv">
-{{- range .}}<dt>{{.Label}}</dt><dd>{{if eq .Label "Teams"}}<span class="vm">{{.Value}}</span>{{else}}{{names .Value}}{{end}}</dd>{{end}}
+{{- range .}}<dt>{{.Label}}</dt><dd>{{if eq .Label "Pods"}}<span class="vm">{{.Value}}</span>{{else}}{{names .Value}}{{end}}</dd>{{end}}
 </dl>
 {{- end}}
 {{- if .Nothing}}

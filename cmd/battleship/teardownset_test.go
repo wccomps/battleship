@@ -26,7 +26,7 @@ func twoSetPods() []proxmox.VM {
 // teardown -set deletes only that set's VMs, says so, and names the rest.
 func TestTeardownSetFlag(t *testing.T) {
 	e := newEnv(t, false, "", twoSetPods()...)
-	if code := e.run("teardown", "-teams", "1-2", "-set", "Kilo.Alpha", "-yes"); code != 0 {
+	if code := e.run("teardown", "-pods", "1-2", "-set", "Kilo.Alpha", "-yes"); code != 0 {
 		t.Fatalf("code = %d\n%s%s", code, e.stdout, e.stderr)
 	}
 	if got := slices.Sorted(slices.Values(e.api.Deleted)); !slices.Equal(got, []int{10101, 10201}) {
@@ -34,7 +34,7 @@ func TestTeardownSetFlag(t *testing.T) {
 	}
 	out := e.stdout.String()
 	for _, want := range []string{
-		"Plan: teardown, teams 01,02\n",
+		"Plan: teardown, pods 01,02\n",
 		"Note: Not touched: team01-web and team02-web are of tango.delta.\n",
 		"Note: Not touched: team01-old is of an unknown set, with no single set tag, which only a teardown that names no set removes.\n",
 		"Tearing down set kilo.alpha only, keeping every VM whose one set tag isn't kilo.alpha's.\n",
@@ -49,17 +49,17 @@ func TestTeardownSetFlag(t *testing.T) {
 	if code := e.run("teardown", "-teams", "1", "-hosts", "web", "-yes"); code != 0 {
 		t.Fatalf("code = %d\n%s%s", code, e.stdout, e.stderr)
 	}
-	if !strings.Contains(e.stdout.String(), "Tearing down every matching VM in the teams.\n") {
+	if !strings.Contains(e.stdout.String(), "Tearing down every matching VM in the pods.\n") {
 		t.Errorf("output:\n%s", e.stdout)
 	}
 	e = newEnv(t, false, "", twoSetPods()...)
-	if code := e.run("teardown", "-teams", "1", "-yes"); code != 0 {
+	if code := e.run("teardown", "-pods", "1", "-yes"); code != 0 {
 		t.Fatalf("code = %d\n%s%s", code, e.stdout, e.stderr)
 	}
 	if got := slices.Sorted(slices.Values(e.api.Deleted)); !slices.Equal(got, []int{10101, 10102, 10103}) {
 		t.Errorf("deleted %v, want all of pod 01", got)
 	}
-	if !strings.Contains(e.stdout.String(), "Tearing down everything in the teams.\n") {
+	if !strings.Contains(e.stdout.String(), "Tearing down everything in the pods.\n") {
 		t.Errorf("output:\n%s", e.stdout)
 	}
 }
@@ -69,15 +69,15 @@ func TestTeardownSetFlagRefusals(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"teardown", "-teams", "1", "-set", ""}, "-set is empty"},
-		{[]string{"teardown", "-teams", "1", "-set", " "}, "-set is empty"},
-		{[]string{"teardown", "-teams", "1", "-set", "*.kilo.alpha"}, `-set: set "*.kilo.alpha" is a pattern; give one set's name, e.g. kilo.alpha`},
-		{[]string{"teardown", "-teams", "1", "-set", "*"}, "is a pattern"},
-		{[]string{"teardown", "-teams", "all", "-set", "kilo.*"}, "is a pattern"},
-		{[]string{"teardown", "-teams", "1", "-set", "kilo alpha"}, `-set: set "kilo alpha" isn't a set's name`},
-		{[]string{"teardown", "-teams", "1", "-set", "\xff"}, "isn't a set's name"},
-		{[]string{"teardown", "-teams", "1", "-templates", "*.kilo.alpha"}, "flag provided but not defined: -templates"},
-		{[]string{"reset", "-teams", "1", "-set", "kilo.alpha"}, "flag provided but not defined: -set"},
+		{[]string{"teardown", "-pods", "1", "-set", ""}, "-set is empty"},
+		{[]string{"teardown", "-pods", "1", "-set", " "}, "-set is empty"},
+		{[]string{"teardown", "-pods", "1", "-set", "*.kilo.alpha"}, `-set: set "*.kilo.alpha" is a pattern; give one set's name, e.g. kilo.alpha`},
+		{[]string{"teardown", "-pods", "1", "-set", "*"}, "is a pattern"},
+		{[]string{"teardown", "-pods", "all", "-set", "kilo.*"}, "is a pattern"},
+		{[]string{"teardown", "-pods", "1", "-set", "kilo alpha"}, `-set: set "kilo alpha" isn't a set's name`},
+		{[]string{"teardown", "-pods", "1", "-set", "\xff"}, "isn't a set's name"},
+		{[]string{"teardown", "-pods", "1", "-templates", "*.kilo.alpha"}, "flag provided but not defined: -templates"},
+		{[]string{"reset", "-pods", "1", "-set", "kilo.alpha"}, "flag provided but not defined: -set"},
 	} {
 		e := newEnv(t, false, "", twoSetPods()...)
 		if code := e.run(tc.args...); code != 2 || !strings.Contains(e.stderr.String(), tc.want) || len(e.api.Deleted) != 0 {

@@ -265,7 +265,7 @@ func (s *Server) snapshotStep(ctx context.Context, in jobs.Inputs, teams []strin
 			}
 		}
 	} else {
-		step.Note = "The grid shows no VM for those teams and hosts, so only the baseline is offered."
+		step.Note = "The grid shows no VM for those pods and hosts, so only the baseline is offered."
 	}
 	names := append([]string{""}, slices.DeleteFunc(slices.Clone(snaps), func(n string) bool {
 		return n == baseline && n != in.Snapshot

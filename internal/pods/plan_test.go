@@ -421,7 +421,7 @@ func TestDuplicateHostAcrossMastersBlocksBothTemplates(t *testing.T) {
 		t.Fatalf("templates = %+v", plan.Templates)
 	}
 	for _, tpl := range plan.Templates {
-		if !strings.Contains(tpl.Blocked, "both map to team VM names like team01-teak") ||
+		if !strings.Contains(tpl.Blocked, "both map to pod VM names like team01-teak") ||
 			!strings.Contains(tpl.Blocked, "teak.tango.delta") || !strings.Contains(tpl.Blocked, "teak.kilo.delta") {
 			t.Errorf("%s Blocked = %q", tpl.Name, tpl.Blocked)
 		}
@@ -440,7 +440,7 @@ func TestDeployBlocksExistingTemplateNamedAsTeamVM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := plan.Items[0].Blocked; !strings.Contains(got, "is a template, not a team VM") {
+	if got := plan.Items[0].Blocked; !strings.Contains(got, "is a template, not a pod VM") {
 		t.Errorf("Blocked = %q", got)
 	}
 }

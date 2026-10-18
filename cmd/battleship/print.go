@@ -71,7 +71,7 @@ func printPlan(w io.Writer, naming pods.Naming, plan *pods.Plan) {
 	if plan.Kind.Teamless() {
 		fmt.Fprintf(w, "Plan: %s\n", plan.Kind)
 	} else {
-		fmt.Fprintf(w, "Plan: %s, teams %s\n", plan.Kind, cleanJoin(plan.Teams, ","))
+		fmt.Fprintf(w, "Plan: %s, pods %s\n", plan.Kind, cleanJoin(plan.Teams, ","))
 	}
 	if len(plan.Templates) > 0 {
 		fmt.Fprintln(w, "\nTemplates:")

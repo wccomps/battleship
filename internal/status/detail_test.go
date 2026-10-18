@@ -31,7 +31,7 @@ func TestDetailReadsLive(t *testing.T) {
 	if !reflect.DeepEqual(d.Snapshots, []string{"initial", "pre-inject"}) || d.Baseline != "initial" {
 		t.Errorf("snapshots %v baseline %q, want [initial pre-inject] and initial", d.Snapshots, d.Baseline)
 	}
-	want := []Drift{{Kind: DriftNetwork, Reason: "network differs from team 01's: net0 should be virtio=BC:24:11:00:00:01,bridge=ext01"}}
+	want := []Drift{{Kind: DriftNetwork, Reason: "network differs from pod 01's: net0 should be virtio=BC:24:11:00:00:01,bridge=ext01"}}
 	if d.Cell.State != StateDrifted || !reflect.DeepEqual(d.Cell.Drift, want) || d.Cell.VMID != 10101 {
 		t.Errorf("cell = %+v, want drifted with %+v", d.Cell, want)
 	}

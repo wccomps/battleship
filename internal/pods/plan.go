@@ -383,7 +383,7 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		return nil, err
 	}
 	if len(teams) == 0 {
-		return nil, errors.New("no teams given")
+		return nil, errors.New("no pods given")
 	}
 	req.Teams = teams
 	vms, err := p.API.ClusterVMs(ctx)
@@ -455,7 +455,7 @@ func (p Planner) blockDuplicateHosts(specs []TemplateSpec, team string) {
 			first[specs[i].Host] = i
 			continue
 		}
-		msg := fmt.Sprintf("hosts of %s and %s both map to team VM names like %s; narrow the template pattern",
+		msg := fmt.Sprintf("hosts of %s and %s both map to pod VM names like %s; narrow the template pattern",
 			specs[j].MasterName, specs[i].MasterName, p.Naming.VMName(team, specs[i].Host))
 		for _, k := range []int{j, i} {
 			if specs[k].Blocked == "" {
@@ -512,7 +512,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool,
 		// clone still uses.
 		for _, vm := range vms {
 			if _, host, ok := p.Naming.TeamVM(vm); ok && host == spec.Host {
-				spec.Blocked = fmt.Sprintf("team VMs such as %s still use this template; tear them down first", vm.Name)
+				spec.Blocked = fmt.Sprintf("pod VMs such as %s still use this template; tear them down first", vm.Name)
 				break
 			}
 		}
@@ -562,7 +562,7 @@ func normalizeTeams(teams []string) ([]string, error) {
 	seen := map[int]bool{}
 	for _, t := range teams {
 		if len(t) < 1 || len(t) > 2 || !isAllDigits(t) {
-			return nil, fmt.Errorf("invalid team %q", t)
+			return nil, fmt.Errorf("invalid pod %q", t)
 		}
 		n, _ := strconv.Atoi(t)
 		seen[n] = true
@@ -600,7 +600,7 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snap
 		if len(named) > 1 {
 			it.Blocked = fmt.Sprintf("several VMs are named %s (VMIDs %s)", it.Name, vmidList(named))
 		} else if kind, _, _ := p.Naming.Classify(vm); kind == TeamTemplate {
-			it.Blocked = "is a template, not a team VM"
+			it.Blocked = "is a template, not a pod VM"
 		} else if kind == OutsideBlock {
 			it.Blocked = outsideBlock(vm, team)
 		} else if want, wrong := p.Naming.WrongPool(vm, team); wrong {
@@ -890,12 +890,12 @@ func (p Planner) Power(ctx context.Context, teams, hosts []string, action string
 
 // outsideBlock is why a VM named like one of team's isn't treated as one.
 func outsideBlock(vm proxmox.VM, team string) string {
-	return fmt.Sprintf("has a team %s name but is VMID %d, outside the team's VMIDs, so it isn't a team VM; rename or remove it in Proxmox", team, vm.VMID)
+	return fmt.Sprintf("has pod %s's name but is VMID %d, outside the pod's VMIDs, so it isn't a pod VM; rename or remove it in Proxmox", team, vm.VMID)
 }
 
 // wrongPool is why a team VM in another pool is left alone.
 func wrongPool(vm proxmox.VM, want string) string {
-	return fmt.Sprintf("is in pool %s, not %s; move it back to the team pool in Proxmox first", vm.Pool, want)
+	return fmt.Sprintf("is in pool %s, not %s; move it back to the pod's pool in Proxmox first", vm.Pool, want)
 }
 
 func (p Planner) simple(ctx context.Context, kind Kind, teams, hosts []string, fill func(*Item)) (*Plan, []proxmox.VM, error) {
@@ -904,7 +904,7 @@ func (p Planner) simple(ctx context.Context, kind Kind, teams, hosts []string, f
 		return nil, nil, err
 	}
 	if len(teams) == 0 {
-		return nil, nil, errors.New("no teams given")
+		return nil, nil, errors.New("no pods given")
 	}
 	vms, err := p.API.ClusterVMs(ctx)
 	if err != nil {

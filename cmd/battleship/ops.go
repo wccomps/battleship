@@ -34,7 +34,7 @@ func runOp(ctx context.Context, cmd string, args []string, d deps) int {
 type command struct {
 	in              jobs.Inputs
 	cfgPath         string
-	all, yes, queue bool // all: -teams all, resolved once the cluster is read
+	all, yes, queue bool // all: -pods all, resolved once the cluster is read
 }
 
 // parseOp reads a team operation's flags into the inputs the web form would
@@ -43,7 +43,8 @@ func parseOp(cmd string, args []string, stderr io.Writer) (c command, code int, 
 	fs := flag.NewFlagSet("battleship "+cmd, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	cfgPath := fs.String("config", "battleship.toml", "config file")
-	teamSpec := fs.String("teams", "", "teams, e.g. 7, 1-32 or 1,3,5, or all: every team with VMs (required)")
+	podSpec := fs.String("pods", "", "pods, e.g. 7, 1-32 or 1,3,5, or all: every pod with VMs (required)")
+	teamsAlias := fs.String("teams", "", "the same as -pods")
 	hostSpec := fs.String("hosts", "", "comma-separated host filter, e.g. dc,web")
 	vmSpec := fs.String("vms", "", "comma-separated exact VM names to act on, e.g. team01-dc,team02-web (to retry just those)")
 	yes := fs.Bool("yes", false, "apply the plan without asking")
@@ -55,7 +56,7 @@ func parseOp(cmd string, args []string, stderr io.Writer) (c command, code int, 
 		fs.BoolVar(&in.Rebuild, "rebuild", false, "recreate templates from masters")
 		fs.BoolVar(&in.NoSnapshot, "no-snapshot", false, "skip the baseline snapshot")
 	case "teardown":
-		fs.StringVar((*string)(&in.Set), "set", "", "the one template set to tear down, by name, e.g. kilo.alpha (default: every matching VM in the teams)")
+		fs.StringVar((*string)(&in.Set), "set", "", "the one template set to tear down, by name, e.g. kilo.alpha (default: every matching VM in the pods)")
 	case "reset":
 		fs.StringVar(&in.Snapshot, "snapshot", "", "snapshot to roll back to (default: each VM's baseline: deploy.snapshot_name, else the newest deploy.baseline_patterns match)")
 	case "power":
@@ -77,16 +78,24 @@ func parseOp(cmd string, args []string, stderr io.Writer) (c command, code int, 
 	}
 	given := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
-	all := isAllTeams(*teamSpec)
+	teamSpec := *podSpec
+	if given["teams"] {
+		if given["pods"] && *teamsAlias != *podSpec {
+			fmt.Fprintln(stderr, "-pods and -teams (the same as -pods) differ; give one")
+			return c, 2, false
+		}
+		teamSpec = *teamsAlias
+	}
+	all := isAllTeams(teamSpec)
 	if all && cmd == "deploy" {
-		fmt.Fprintln(stderr, "-teams all is for teardown, power, reset and snapshot; name the teams to deploy, e.g. 1-32")
+		fmt.Fprintln(stderr, "-pods all is for teardown, power, reset and snapshot; name the pods to deploy, e.g. 1-32")
 		return c, 2, false
 	}
-	if _, err := pods.ParseTeams(*teamSpec); !all && (*teamSpec == "" || err != nil) {
-		fmt.Fprintf(stderr, "-teams: %v\n", orRequired(err))
+	if _, err := pods.ParseTeams(teamSpec); !all && (teamSpec == "" || err != nil) {
+		fmt.Fprintf(stderr, "-pods: %v\n", orRequired(err))
 		return c, 2, false
 	}
-	in.Teams = *teamSpec
+	in.Teams = teamSpec
 	in.Hosts = jobs.SplitList(*hostSpec)
 	in.VMs = jobs.SplitList(*vmSpec)
 	in = web.Normalize(in)
@@ -111,7 +120,7 @@ func parseOp(cmd string, args []string, stderr io.Writer) (c command, code int, 
 			fmt.Fprintf(stderr, "-set: %v\n", err)
 			return c, 2, false
 		case given["set"] && in.Set == "":
-			fmt.Fprintln(stderr, "-set is empty; leave it out to tear down every matching VM in the teams")
+			fmt.Fprintln(stderr, "-set is empty; leave it out to tear down every matching VM in the pods")
 			return c, 2, false
 		}
 	case "power":
@@ -161,7 +170,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	if all {
 		spec, says, err := resolveAllTeams(ctx, api, cfg)
 		if err != nil {
-			fmt.Fprintln(stderr, "-teams all:", cleanLines(proxmox.Describe(err), "  "))
+			fmt.Fprintln(stderr, "-pods all:", cleanLines(proxmox.Describe(err), "  "))
 			return 1
 		}
 		fmt.Fprintln(stdout, says)
@@ -188,9 +197,9 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 
 	printPlan(stdout, pods.NewNaming(cfg.Naming), plan)
 	if cmd == "teardown" {
-		what := "everything in the teams"
+		what := "everything in the pods"
 		if len(in.Hosts) > 0 || len(in.VMs) > 0 {
-			what = "every matching VM in the teams"
+			what = "every matching VM in the pods"
 		}
 		if in.Set != "" {
 			what = "set " + clean(string(in.Set)) + " only, keeping every VM whose one set tag isn't " + clean(string(in.Set)) + "'s"
@@ -206,7 +215,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 		}
 	}
 	if missing := jobs.MissingVMs(in, plan); len(missing) > 0 {
-		fmt.Fprintf(stdout, "\n%d of the %d -vms no longer exist or match -teams/-hosts, so they are left out: %s\n",
+		fmt.Fprintf(stdout, "\n%d of the %d -vms no longer exist or match -pods/-hosts, so they are left out: %s\n",
 			len(missing), len(in.VMs), cleanJoin(missing, ", "))
 	}
 	blocked := len(plan.Items) - len(plan.Runnable())
@@ -215,7 +224,7 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	}
 	if len(plan.Items) == 0 {
 		if len(in.Hosts) > 0 && cmd != "deploy" {
-			fmt.Fprintf(stdout, "\nNo VMs matched -hosts %s for teams %s; check the host names.\n",
+			fmt.Fprintf(stdout, "\nNo VMs matched -hosts %s for pods %s; check the host names.\n",
 				cleanJoin(in.Hosts, ","), clean(in.Teams))
 			return 1
 		}
@@ -284,7 +293,7 @@ func submitJob(ctx context.Context, d deps, cfg config.Config, in jobs.Inputs, p
 }
 
 // confirm asks the volunteer to approve the plan just printed. Teardown
-// requires typing the -teams value as given, or, for -teams all, the teams
+// requires typing the -pods value as given, or, for -pods all, the pods
 // it stands for; an environment's teardown its -domain (jobs.Inputs.Typed);
 // everything else takes "yes".
 func confirm(d deps, in jobs.Inputs) bool {
@@ -303,7 +312,7 @@ func confirm(d deps, in jobs.Inputs) bool {
 // isAllTeams reports whether a -teams value is "all".
 func isAllTeams(spec string) bool { return strings.EqualFold(strings.TrimSpace(spec), "all") }
 
-// resolveAllTeams resolves -teams all to every team with VMs on the cluster,
+// resolveAllTeams resolves -pods all to every pod with VMs on the cluster,
 // as the grid shows them, returning a team range and a line saying so.
 func resolveAllTeams(ctx context.Context, api pods.API, cfg config.Config) (spec, says string, err error) {
 	vms, err := api.ClusterVMs(ctx)
@@ -312,10 +321,10 @@ func resolveAllTeams(ctx context.Context, api pods.API, cfg config.Config) (spec
 	}
 	all := pods.TeamsWithVMs(vms, pods.NewNaming(cfg.Naming))
 	if len(all) == 0 {
-		return "", "", errors.New("no team has VMs, so there are no teams to act on")
+		return "", "", errors.New("no pod has VMs, so there are no pods to act on")
 	}
 	spec = pods.FormatTeams(all)
-	return spec, fmt.Sprintf("-teams all is %s: the teams with VMs.", spec), nil
+	return spec, fmt.Sprintf("-pods all is %s: the pods with VMs.", spec), nil
 }
 
 func orRequired(err error) error {

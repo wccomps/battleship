@@ -1,6 +1,6 @@
 # battleship
 
-Deploys, resets, powers, snapshots and tears down per-team VM pods on Proxmox.
+Deploys, resets, powers, snapshots and tears down VM pods on Proxmox.
 A web app for volunteers (`battleship serve`) and a CLI for admins share one
 engine and one Postgres job queue.
 
@@ -9,7 +9,7 @@ engine and one Postgres job queue.
 - **Every operation is a job.** You preview a plan, confirm it, and a worker
   runs it (a CLI run with no database runs itself). The worker plans again
   first and refuses to run if the cluster changed. Jobs that change the same
-  teams, templates or VMs run one at a time.
+  pods, templates or VMs run one at a time.
 - **Battleship holds no Proxmox credential.** Every call is made as the person
   who asked (their Proxmox ticket in the web app, their API token in the
   CLI), so Proxmox's ACLs decide what each person may do.
@@ -27,28 +27,28 @@ the code uses.
 cp battleship.example.toml battleship.toml   # set proxmox.urls and the site settings
 export BATTLESHIP_PROXMOX_TOKEN_ID='jdoe@auth.example.org!cli' BATTLESHIP_PROXMOX_TOKEN_SECRET=...
 
-battleship deploy   -templates '*.kilo.alpha' -teams 1-32
-battleship reset    -teams 7 -hosts dc
-battleship power    -teams 1-32 -action start
-battleship snapshot -teams 7 -hosts dc -name before-scoring
-battleship teardown -teams 1-32 -set kilo.alpha
-battleship teardown -teams all
+battleship deploy   -templates '*.kilo.alpha' -pods 1-32
+battleship reset    -pods 7 -hosts dc
+battleship power    -pods 1-32 -action start
+battleship snapshot -pods 7 -hosts dc -name before-scoring
+battleship teardown -pods 1-32 -set kilo.alpha
+battleship teardown -pods all
 battleship nodes                              # prints a urls = [...] line
 ```
 
 Every command prints its plan and asks you to confirm (`yes`; a teardown
-asks for the team range). `-yes` skips the prompt. With a database, the job
+asks for the pod range). `-yes` skips the prompt. With a database, the job
 runs on a `battleship serve` worker and the command follows it; `-queue`
 exits once it is queued. Keep your `battleship.toml` in step with serve's:
 if its settings for what a job does to VMs differ, the job ends stale.
 `-hosts` matches substrings; `-vms` names exact VMs. A blocked or failed VM
-makes the command exit 1.
+makes the command exit 1. (`-teams` is the same as `-pods`.)
 
 A deploy tags each VM with its template set (`set-kilo.alpha`). A teardown
-takes every matching VM in its teams' pods, or with `-set` (a choice on the
-web form) only the VMs whose one set tag is that set's. A VM with no set tag
-or several, such as one deployed before sets were tagged, is of an unknown
-set: only a teardown that names no set removes it.
+takes every matching VM in its pods, or with `-set` (a choice on the web form)
+only the VMs whose one set tag is that set's. A VM with no set tag or several,
+such as one deployed before sets were tagged, is of an unknown set: only a
+teardown that names no set removes it.
 
 ```sh
 battleship jobs list | show <id> | cancel <id>
@@ -83,7 +83,7 @@ naming the missing privilege.
 
 | Step | Privilege | Path |
 |---|---|---|
-| Clone | `VM.Clone`; `VM.Allocate`; `Datastore.AllocateSpace` | template; team pool; `/storage/<deploy.storage>` |
+| Clone | `VM.Clone`; `VM.Allocate`; `Datastore.AllocateSpace` | template; pod's pool; `/storage/<deploy.storage>` |
 | Build template | `VM.Clone`; `VM.Allocate`; `Datastore.AllocateSpace` | master; `<images.pool>` (rebuild: also the old template); `/storage/<deploy.storage>` |
 | Network | `VM.Config.Network`, `VM.Config.Cloudinit`; `SDN.Use` | VM; `/sdn/zones/<proxmox.sdn_zone>/<bridge>` |
 | Disk limits / CD-ROM | `VM.Config.Disk` / `VM.Config.CDROM` | VM |

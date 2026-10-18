@@ -111,7 +111,7 @@ func TestOperationForms(t *testing.T) {
 		}},
 		{"/teardown", []string{
 			`<form method="get" action="/teardown" class="stack" id="teardown-which">`,
-			`<label class="lbl" for="teams">Teams</label>`,
+			`<label class="lbl" for="teams">Pods</label>`,
 			`<legend>Hosts <span class="muted">· none = all</span></legend>`,
 			`<button type="submit" class="btn">Next</button>`,
 		}},
@@ -208,7 +208,7 @@ func TestPreviewShowsThePlan(t *testing.T) {
 	contains(t, "reset preview", body,
 		"<title>Reset to snapshot · battleship</title>",
 		`<span class="chip is-running">`, "1 will run</span>", "1 blocked</span>",
-		`<dt>Teams</dt><dd><span class="vm">01</span></dd>`, "<dt>Snapshot</dt><dd>baseline</dd>",
+		`<dt>Pods</dt><dd><span class="vm">01</span></dd>`, "<dt>Snapshot</dt><dd>baseline</dd>",
 		"<tr><td><span class=\"vm\">team01-dc</span></td><td><span class=\"vm\">n1</span></td><td>stop · rollback to baseline (initial) · start</td><td></td></tr>",
 		`<tr class="blk"><td><span class="vm">team01-web</span></td>`,
 		`no &#34;initial&#34; or fresh_clone_* baseline snapshot (has: other)`,
@@ -260,8 +260,8 @@ func TestPreviewRefusesBadInputs(t *testing.T) {
 		form url.Values
 		want string
 	}{
-		{"/reset", url.Values{"teams": {"3-1"}}, "Teams: range &#34;3-1&#34; is backwards"},
-		{"/reset", url.Values{}, "Teams: no teams given"},
+		{"/reset", url.Values{"teams": {"3-1"}}, "Pods: range &#34;3-1&#34; is backwards"},
+		{"/reset", url.Values{}, "Pods: no pods given"},
 		{"/power", url.Values{"teams": {"1"}}, "Power action must be start, shutdown, stop or reboot"},
 		{"/power", url.Values{"teams": {"1"}, "action": {"explode"}}, "not &#34;explode&#34;"},
 	} {
@@ -291,8 +291,8 @@ func TestPreviewNoticesTeamNamedVMsOutsideTheBlock(t *testing.T) {
 	h.poll()
 	op := h.login(asOperator)
 	body := h.post(&op, "/teardown/preview", url.Values{"teams": {"1"}, "hosts": {"scratch"}}).Body.String()
-	contains(t, "teardown preview", body, "No team VMs match these teams and hosts.",
-		`Left alone: <span class="name">team01-scratch</span> has a team 01 name but is VMID 8005, outside the team&#39;s VMIDs, so it isn&#39;t a team VM; rename or remove it in Proxmox.`)
+	contains(t, "teardown preview", body, "No VMs in these pods match these hosts.",
+		`Left alone: <span class="name">team01-scratch</span> has pod 01&#39;s name but is VMID 8005, outside the pod&#39;s VMIDs, so it isn&#39;t a pod VM; rename or remove it in Proxmox.`)
 	lacks(t, "teardown preview", body, `name="nonce"`)
 }
 
@@ -306,7 +306,7 @@ func TestPreviewWithNothingToRun(t *testing.T) {
 		t.Fatalf("empty preview = %d", rec.Code)
 	}
 	body := rec.Body.String()
-	contains(t, "empty preview", body, "No team VMs match these teams and hosts.")
+	contains(t, "empty preview", body, "No VMs in these pods match these hosts.")
 	lacks(t, "empty preview", body, `name="nonce"`, "Something went wrong", `class="say caution"`)
 
 	h.api.setSnapshots(10101)
@@ -594,7 +594,7 @@ func TestOperatorCannotRunWhatTheyLackPrivilegesFor(t *testing.T) {
 	}
 	// Power on every team is the operator's to do.
 	_, _, body := h.preview(&op, "/power", url.Values{"teams": {"1-3"}, "action": {"start"}})
-	contains(t, "operator's all-teams power", body, "This covers every team (01-03).", `action="/power/confirm"`)
+	contains(t, "operator's all-teams power", body, "This covers every pod (01-03).", `action="/power/confirm"`)
 	h.noJobs("after the operator's attempts")
 
 	// A lead may do all of it.
@@ -652,7 +652,7 @@ func TestTypedConfirmation(t *testing.T) {
 				if rec.Code != http.StatusUnprocessableEntity {
 					t.Errorf("typed %q: confirm = %d, want 422", wrong, rec.Code)
 				}
-				contains(t, "wrongly typed", rec.Body.String(), "Type the team range to confirm", "exactly as shown: "+tc.typed)
+				contains(t, "wrongly typed", rec.Body.String(), "Type the pod range to confirm", "exactly as shown: "+tc.typed)
 				// The page can be confirmed again: same preview.
 				if _, again := confirmOf(t, rec.Body.String()); again.Get("nonce") != form.Get("nonce") {
 					t.Errorf("typed %q: the page has another preview", wrong)

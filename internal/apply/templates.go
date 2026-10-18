@@ -93,7 +93,7 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 		}
 		if found {
 			if vm, ok := e.teamVMUsing(spec.Host); ok {
-				return fmt.Errorf("team VMs such as %s still use this template; tear them down first", vm.Name)
+				return fmt.Errorf("pod VMs such as %s still use this template; tear them down first", vm.Name)
 			}
 			node := cur.Node
 			if node == "" {

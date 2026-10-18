@@ -190,15 +190,15 @@ func (s *Server) serverError(w http.ResponseWriter, r *http.Request, what string
 		"Battleship had a problem "+what+". Nothing more was done. Try again in a moment, and tell a lead if it keeps happening.", "/", "Back to the grid")
 }
 
-// summaryOf describes a submitted job briefly, e.g. "reset of team 01 to
+// summaryOf describes a submitted job briefly, e.g. "reset of pod 01 to
 // initial (2 VMs)".
 func summaryOf(op operation, in jobs.Inputs, plan *pods.Plan) string {
 	if op.Kind.Teamless() {
 		return op.Noun + " " + strings.TrimSpace(in.Domain+" "+in.Family+" "+in.Image) + " (" + countVMs(len(plan.Runnable())) + ")"
 	}
-	teams := "team " + strings.Join(plan.Teams, ", ")
+	teams := "pod " + strings.Join(plan.Teams, ", ")
 	if len(plan.Teams) != 1 {
-		teams = "teams " + strings.Join(plan.Teams, ", ")
+		teams = "pods " + strings.Join(plan.Teams, ", ")
 	}
 	what := op.Noun + " of " + teams
 	switch op.Kind {

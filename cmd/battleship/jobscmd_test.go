@@ -72,14 +72,14 @@ func TestJobsListShowCancel(t *testing.T) {
 	}
 
 	e.reset()
-	if code := e.run("jobs", "list"); code != 0 || !strings.Contains(e.stdout.String(), "teams 7") {
+	if code := e.run("jobs", "list"); code != 0 || !strings.Contains(e.stdout.String(), "pods 7") {
 		t.Errorf("list: exit %d, stdout:\n%s", code, e.stdout.String())
 	}
 	e.reset()
 	if code := e.run("jobs", "show", "1"); code != 0 {
 		t.Fatalf("show: exit %d, stderr: %s", code, e.stderr.String())
 	}
-	for _, want := range []string{"Job 1: teardown teams 7 (pending)", "team07-dc", "Created by cli:tester"} {
+	for _, want := range []string{"Job 1: teardown pods 7 (pending)", "team07-dc", "Created by cli:tester"} {
 		if !strings.Contains(e.stdout.String(), want) {
 			t.Errorf("show missing %q:\n%s", want, e.stdout.String())
 		}

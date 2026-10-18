@@ -86,7 +86,7 @@ type capacityRow struct {
 	Text  string // "60 GiB used of 64 GiB, needs 12 GiB, 4 GiB free", as the CLI says it
 }
 
-// fact is a labelled value, e.g. "Teams: 1-3".
+// fact is a labelled value, e.g. "Pods: 1-3".
 type fact struct{ Label, Value string }
 
 // templateRow is a template a deploy uses.
@@ -395,12 +395,12 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		p.Warnings = append(p.Warnings, s.everyTeamNote(ctx))
 	}
 	if missing := jobs.MissingVMs(in, plan); len(missing) > 0 {
-		p.Warnings = append(p.Warnings, fmt.Sprintf("%d of the %d VMs asked for by name no longer exist or match the teams and hosts, so they are left out: %s.",
+		p.Warnings = append(p.Warnings, fmt.Sprintf("%d of the %d VMs asked for by name no longer exist or match the pods and hosts, so they are left out: %s.",
 			len(missing), len(in.VMs), strings.Join(missing, ", ")))
 	}
 	switch {
 	case len(plan.Items) == 0:
-		p.Nothing = "No team VMs match these teams and hosts."
+		p.Nothing = "No VMs in these pods match these hosts."
 		if op.Kind.Teamless() {
 			p.Nothing = "Nothing to do."
 		}
@@ -445,7 +445,7 @@ func previewFacts(in jobs.Inputs, fromGrid bool, retryOf int64) []fact {
 	case in.Kind.Teamless():
 		return nil // its review says it all
 	case !fromGrid:
-		fs = append(fs, fact{"Teams", teamsText(in.Teams)})
+		fs = append(fs, fact{"Pods", teamsText(in.Teams)})
 		if len(in.Hosts) > 0 || in.Kind == pods.KindDeploy || in.Kind == pods.KindTeardown {
 			fs = append(fs, fact{"Hosts", hostsText(in.Hosts)})
 		}
@@ -716,9 +716,9 @@ func stepsText(it pods.Item) string {
 func (s *Server) everyTeamNote(ctx context.Context) string {
 	all := s.view(ctx).Teams()
 	if len(all) == 0 {
-		return "No team has VMs on the grid, so this counts as every team."
+		return "No pod has VMs on the grid, so this counts as every pod."
 	}
-	return fmt.Sprintf("This covers every team (%s).", teamsText(pods.FormatTeams(all)))
+	return fmt.Sprintf("This covers every pod (%s).", teamsText(pods.FormatTeams(all)))
 }
 
 // teamsText shows a team range with two-digit teams: "1-3,7" reads "01-03, 07".

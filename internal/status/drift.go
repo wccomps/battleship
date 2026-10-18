@@ -199,7 +199,7 @@ func (r rules) configDrift(team string, cfg map[string]string, snaps []proxmox.S
 			parts = append(parts, k+" should be "+net[k])
 		}
 		out = append(out, Drift{Kind: DriftNetwork,
-			Reason: fmt.Sprintf("network differs from team %s's: %s", team, strings.Join(parts, "; "))})
+			Reason: fmt.Sprintf("network differs from pod %s's: %s", team, strings.Join(parts, "; "))})
 	}
 	rd, wr := r.cfg.Deploy.DiskMBpsRead, r.cfg.Deploy.DiskMBpsWrite
 	if disk := pods.DiskLimitChanges(cfg, rd, wr); len(disk) > 0 {

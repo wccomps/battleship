@@ -142,7 +142,7 @@ func TestTLSVerifiedByDefault(t *testing.T) {
 func TestLoadRefusesWebTeams(t *testing.T) {
 	path := writeFile(t, "[proxmox]\nurl = \"https://pve.example:8006\"\n\n[web]\nteams = \"1-32\"\n")
 	_, err := Load(path)
-	if err == nil || !strings.Contains(err.Error(), "these settings were removed: web.teams. Battleship shows the teams that have VMs; delete the line") {
+	if err == nil || !strings.Contains(err.Error(), "these settings were removed: web.teams. Battleship shows the pods that have VMs; delete the line") {
 		t.Fatalf("Load with web.teams = %v", err)
 	}
 	if strings.Contains(err.Error(), "unknown keys") || strings.Contains(err.Error(), "Proxmox token") {

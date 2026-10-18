@@ -19,7 +19,7 @@ func FormatTeam(n int) string { return fmt.Sprintf("%02d", n) }
 func ParseTeams(spec string) ([]string, error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
-		return nil, fmt.Errorf("no teams given (e.g. 7, 1-32 or 1,3,5)")
+		return nil, fmt.Errorf("no pods given (e.g. 7, 1-32 or 1,3,5)")
 	}
 
 	seen := map[int]bool{}
@@ -104,14 +104,14 @@ func FormatTeams(teams []string) string {
 func parseTeamNumber(part, s string) (int, error) {
 	if !isAllDigits(s) {
 		if s == part {
-			return 0, fmt.Errorf("invalid team %q (use numbers like 7 or 1-32)", s)
+			return 0, fmt.Errorf("invalid pod %q (use numbers like 7 or 1-32)", s)
 		}
-		return 0, fmt.Errorf("invalid team %q in %q (use numbers like 7 or 1-32)", s, part)
+		return 0, fmt.Errorf("invalid pod %q in %q (use numbers like 7 or 1-32)", s, part)
 	}
 
 	n, err := strconv.Atoi(s) // all digits, so only overflow fails
 	if err != nil || n > 99 {
-		return 0, fmt.Errorf("team %s is out of range (0-99)", s)
+		return 0, fmt.Errorf("pod %s is out of range (0-99)", s)
 	}
 
 	return n, nil

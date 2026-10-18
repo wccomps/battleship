@@ -143,7 +143,7 @@ func TestSnapshotOfAllTeamsSaysSo(t *testing.T) {
 	every := selection([]string{"team01-dc", "team02-dc", "team03-web"})
 	every.Set("snapshot", "round2")
 	_, _, body := h.preview(&op, "/snapshot", every)
-	contains(t, "operator's all-teams snapshot", body, "This covers every team (01-03).", `action="/snapshot/confirm"`)
+	contains(t, "operator's all-teams snapshot", body, "This covers every pod (01-03).", `action="/snapshot/confirm"`)
 	lacks(t, "operator's all-teams snapshot", body, `name="typed"`) // only a teardown is typed
 	_, _, body = h.preview(&op, "/snapshot", url.Values{"teams": {"1-2"}, "snapshot": {"round2"}})
 	lacks(t, "operator's two-team snapshot", body, `name="typed"`)

@@ -778,7 +778,7 @@ func TestServeStartupFailsClearly(t *testing.T) {
 		want     string
 	}{
 		{"no OIDC secret", "", true, "", "oidc.client_secret (or BATTLESHIP_OIDC_CLIENT_SECRET) is required"},
-		{"a leftover web.teams", "1-32", true, "oidc-client-secret", "these settings were removed: web.teams. Battleship shows the teams that have VMs; delete the line"},
+		{"a leftover web.teams", "1-32", true, "oidc-client-secret", "these settings were removed: web.teams. Battleship shows the pods that have VMs; delete the line"},
 		{"no database", "", false, "oidc-client-secret", "database.url (or BATTLESHIP_DATABASE_URL) is required"},
 		{"a leftover service token", "", true, "oidc-client-secret", "BATTLESHIP_PROXMOX_TOKEN_SECRET is set, but battleship serve holds no Proxmox token"},
 		{"Proxmox's certificate unchecked", "", true, "oidc-client-secret", "proxmox.ca_file is required"},

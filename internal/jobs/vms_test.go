@@ -65,9 +65,9 @@ func TestBuildPlanChecksVMNames(t *testing.T) {
 		vms  []string
 		want string
 	}{
-		{[]string{"team03-dc"}, "team03-dc is not in teams 1-2"},
-		{[]string{"dc.kilo.alpha"}, `"dc.kilo.alpha" is not a team VM name`},
-		{[]string{"team1-dc"}, `"team1-dc" is not a team VM name`},
+		{[]string{"team03-dc"}, "team03-dc is not in pods 1-2"},
+		{[]string{"dc.kilo.alpha"}, `"dc.kilo.alpha" is not a pod VM name`},
+		{[]string{"team1-dc"}, `"team1-dc" is not a pod VM name`},
 	} {
 		_, err := BuildPlan(bg, p, Inputs{Kind: pods.KindReset, Teams: "1-2", VMs: tc.vms})
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

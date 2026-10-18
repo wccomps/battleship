@@ -161,7 +161,7 @@ func (p Planner) sourceBlock(src proxmox.VM) string {
 	case src.Template:
 		return src.Name + " is a template; register the VM it was made from, or open the family for editing"
 	case srcKind == TeamVMKind:
-		return src.Name + " is a team VM"
+		return src.Name + " is a pod VM"
 	case srcKind == OutsideBlock:
 		return src.Name + " " + outsideBlock(src, srcTeam)
 	case src.Status != "stopped":

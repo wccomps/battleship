@@ -1,7 +1,7 @@
-// Command battleship deploys, resets, powers and tears down team pods on Proxmox.
+// Command battleship deploys, resets, powers and tears down pods on Proxmox.
 //
 // Every operation prints its plan, asks for confirmation (a teardown wants
-// the team range typed, an environment's its domain), and applies exactly
+// the pod range typed, an environment's its domain), and applies exactly
 // that plan. -yes skips the prompt;
 // without -yes and without a terminal, nothing changes. Any character device
 // on stdin (even /dev/null) counts as a terminal, so automation should pass
@@ -17,11 +17,11 @@
 // to run out) and exits within web.shutdown_timeout; a second signal exits
 // at once.
 //
-//	battleship deploy   -config battleship.toml -templates '*.kilo.alpha' -teams 1-32
-//	battleship teardown -config battleship.toml -teams 1-32 -set kilo.alpha -yes
-//	battleship teardown -config battleship.toml -teams all -yes
-//	battleship reset    -config battleship.toml -teams 7 -hosts dc -yes
-//	battleship power    -config battleship.toml -teams 1-32 -action start -yes -queue
+//	battleship deploy   -config battleship.toml -templates '*.kilo.alpha' -pods 1-32
+//	battleship teardown -config battleship.toml -pods 1-32 -set kilo.alpha -yes
+//	battleship teardown -config battleship.toml -pods all -yes
+//	battleship reset    -config battleship.toml -pods 7 -hosts dc -yes
+//	battleship power    -config battleship.toml -pods 1-32 -action start -yes -queue
 //	battleship jobs list|show ID|cancel ID -config battleship.toml
 //	battleship serve    -config battleship.toml -log-format json
 //	battleship nodes    -config battleship.toml
@@ -112,21 +112,21 @@ const usage = `usage: battleship <deploy|teardown|reset|power|snapshot> [flags]
 
 Every operation prints its plan first, then asks you to confirm it (-yes
 skips the question and applies the plan; with a database it runs as a job
-on a worker, and -queue exits without following it). -teams is required;
-for teardown, power, reset and snapshot, -teams all means every team that
-has VMs (e.g. 0-32 with a test team 00), worked out from the cluster and
-printed with the plan. A teardown takes everything in its teams, or with
--set one template set's VMs. Put flags before any other words. Run
-"battleship <command> -h" for flags. battleship serve runs the web app
-and job workers. battleship nodes lists the cluster's nodes and prints a
-proxmox.urls line.
+on a worker, and -queue exits without following it). -pods is required
+(-teams is the same); for teardown, power, reset and snapshot, -pods all
+means every pod that has VMs (e.g. 0-32 with a test pod 00), worked out
+from the cluster and printed with the plan. A teardown takes everything in
+its pods, or with -set one template set's VMs. Put flags before any other
+words. Run "battleship <command> -h" for flags. battleship serve runs the
+web app and job workers. battleship nodes lists the cluster's nodes and
+prints a proxmox.urls line.
 
-  battleship deploy   -config battleship.toml -templates '*.kilo.alpha' -teams 1-32
-  battleship teardown -config battleship.toml -teams 1-32 -set kilo.alpha -yes
-  battleship teardown -config battleship.toml -teams all -yes
-  battleship reset    -config battleship.toml -teams 7 -hosts dc -yes
-  battleship power    -config battleship.toml -teams 1-32 -action start -yes -queue
-  battleship snapshot -config battleship.toml -teams 7 -hosts dc -name before-scoring -yes
+  battleship deploy   -config battleship.toml -templates '*.kilo.alpha' -pods 1-32
+  battleship teardown -config battleship.toml -pods 1-32 -set kilo.alpha -yes
+  battleship teardown -config battleship.toml -pods all -yes
+  battleship reset    -config battleship.toml -pods 7 -hosts dc -yes
+  battleship power    -config battleship.toml -pods 1-32 -action start -yes -queue
+  battleship snapshot -config battleship.toml -pods 7 -hosts dc -name before-scoring -yes
   battleship image register -config battleship.toml -vm 101 -family win11 -kind windows
   battleship env create -config battleship.toml -domain kilo.alpha -router gw=opnsense -host dc=win2022:10
   battleship env teardown -config battleship.toml -domain kilo.alpha

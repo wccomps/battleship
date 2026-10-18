@@ -20,7 +20,7 @@ func TestSnapshotCommand(t *testing.T) {
 	}
 	out := e.stdout.String()
 	for _, want := range []string{
-		"Plan: snapshot, teams 07",
+		"Plan: snapshot, pods 07",
 		"team07-dc   10701  n1  snapshot round2 with RAM",
 		`team07-web  10702  n1  BLOCKED: already has a snapshot named "round2"; choose another name`,
 		"1 VMs blocked",
@@ -69,7 +69,7 @@ func TestSnapshotCommandChecksTheName(t *testing.T) {
 
 func TestDescribeSnapshotJob(t *testing.T) {
 	got := describeInputs([]byte(`{"kind":"snapshot","teams":"7","hosts":["dc"],"snapshot":"round2"}`))
-	if got != "round2 teams 7 hosts dc" {
+	if got != "round2 pods 7 hosts dc" {
 		t.Errorf("describeInputs = %q", got)
 	}
 }

@@ -92,7 +92,7 @@ func (s *Server) cellPage(w http.ResponseWriter, r *http.Request) {
 	d, err := s.detail(r.Context(), team, host)
 	if errors.Is(err, status.ErrUnknownCell) {
 		s.errorPage(w, r, http.StatusNotFound, "No such VM",
-			"The grid has no team "+team+" VM for host "+host+".", "/", "Back to the grid")
+			"The grid has no pod "+team+" VM for host "+host+".", "/", "Back to the grid")
 		return
 	}
 	c := d.Cell
@@ -208,7 +208,7 @@ func (s *Server) detail(ctx context.Context, team, host string) (status.Detail, 
 	if err != nil && d.Cell.Name == "" && !errors.Is(err, status.ErrUnknownCell) {
 		c, ok := view.Grid().Cell(team, host)
 		if !ok {
-			return status.Detail{}, fmt.Errorf("team %q host %q: %w", team, host, status.ErrUnknownCell)
+			return status.Detail{}, fmt.Errorf("pod %q host %q: %w", team, host, status.ErrUnknownCell)
 		}
 		d = status.Detail{Cell: c}
 	}

@@ -8,7 +8,7 @@ import (
 
 // Exactly the kinds with a typed confirm name what is typed.
 func TestTypedWhat(t *testing.T) {
-	want := map[pods.Kind]string{pods.KindTeardown: "the team range", pods.KindEnvTeardown: "the domain"}
+	want := map[pods.Kind]string{pods.KindTeardown: "the pod range", pods.KindEnvTeardown: "the domain"}
 	for _, k := range []pods.Kind{pods.KindDeploy, pods.KindTeardown, pods.KindReset, pods.KindSnapshot, pods.KindPower,
 		pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete,
 		pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS, pods.KindEnvTeardown, "unknown"} {

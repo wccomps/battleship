@@ -329,7 +329,7 @@ var removedKeys = map[string]string{
 	"proxmox.token_secret":        removedToken,
 	"roles.operators":             removedToken,
 	"roles.leads":                 removedToken,
-	"web.teams":                   "Battleship shows the teams that have VMs; delete the line",
+	"web.teams":                   "Battleship shows the pods that have VMs; delete the line",
 	"concurrency.clones_per_node": "Clones are now capped across the cluster when there is a database; use concurrency.clones",
 	"oidc.groups_claim":           "Battleship doesn't use groups; delete the line",
 }
@@ -434,7 +434,7 @@ func (c Config) Validate() error {
 	}
 
 	if strings.TrimSpace(c.Proxmox.SDNZone) == "" {
-		errs = append(errs, errors.New("proxmox.sdn_zone is required (the SDN zone of the team bridges, e.g. teams)"))
+		errs = append(errs, errors.New("proxmox.sdn_zone is required (the SDN zone of the pod bridges, e.g. teams)"))
 	}
 	if strings.TrimSpace(c.Proxmox.Realm) == "" {
 		errs = append(errs, errors.New("proxmox.realm is required (the Proxmox OpenID realm, e.g. auth.example.org)"))
@@ -619,12 +619,12 @@ func (c Config) validateCatalog() []error {
 		envLo, envHi := c.Environments.VMIDBase+slotLo*100, c.Environments.VMIDBase+slotHi*100+99
 		tplLo, tplHi := c.Naming.TemplateVMIDBase, c.Naming.TemplateVMIDBase+99
 		if overlapsRange(envLo, envHi, imgLo, imgHi) || overlapsRange(envLo, envHi, tplLo, tplHi) || envHi >= c.Naming.CloneVMIDBase {
-			errs = append(errs, fmt.Errorf("environments.vmid_base gives slots VMIDs %d-%d, which overlap images.vmid_range, the templates (%d-%d) or team clones (from %d)",
+			errs = append(errs, fmt.Errorf("environments.vmid_base gives slots VMIDs %d-%d, which overlap images.vmid_range, the templates (%d-%d) or pod clones (from %d)",
 				envLo, envHi, tplLo, tplHi, c.Naming.CloneVMIDBase))
 		}
 	}
 	if err == nil && (overlapsRange(imgLo, imgHi, c.Naming.TemplateVMIDBase, c.Naming.TemplateVMIDBase+99) || imgHi >= c.Naming.CloneVMIDBase) {
-		errs = append(errs, fmt.Errorf("images.vmid_range %s overlaps the templates (%d-%d) or team clones (from %d)",
+		errs = append(errs, fmt.Errorf("images.vmid_range %s overlaps the templates (%d-%d) or pod clones (from %d)",
 			c.Images.VMIDRange, c.Naming.TemplateVMIDBase, c.Naming.TemplateVMIDBase+99, c.Naming.CloneVMIDBase))
 	}
 	return errs

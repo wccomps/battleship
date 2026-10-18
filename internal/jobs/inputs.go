@@ -54,7 +54,7 @@ type Inputs struct {
 }
 
 // Typed is what a person types to confirm in (pods.Kind.TypedConfirm): a
-// teardown's team range or an environment's domain, as given.
+// teardown's pod range or an environment's domain, as given.
 func (in Inputs) Typed() string {
 	switch in.Kind {
 	case pods.KindTeardown:
@@ -65,12 +65,12 @@ func (in Inputs) Typed() string {
 	return ""
 }
 
-// TypedWhat names what Typed is, for asking for it: "the team range" or
+// TypedWhat names what Typed is, for asking for it: "the pod range" or
 // "the domain"; "" when nothing is typed.
 func (in Inputs) TypedWhat() string {
 	switch in.Kind {
 	case pods.KindTeardown:
-		return "the team range"
+		return "the pod range"
 	case pods.KindEnvTeardown:
 		return "the domain"
 	}
@@ -114,7 +114,7 @@ func (in Inputs) Validate() error {
 		errs = append(errs, fmt.Errorf("unknown job kind %q", in.Kind))
 	}
 	if _, err := pods.ParseTeams(in.Teams); err != nil {
-		errs = append(errs, fmt.Errorf("teams: %w", err))
+		errs = append(errs, fmt.Errorf("pods: %w", err))
 	}
 	for _, h := range in.Hosts {
 		if strings.TrimSpace(h) == "" {
@@ -138,7 +138,7 @@ func (in Inputs) checkText() error {
 		name   string
 		values []string
 	}{
-		{"teams", []string{in.Teams}}, {"hosts", in.Hosts}, {"vms", in.VMs}, {"pattern", []string{in.Pattern}}, {"set", []string{string(in.Set)}},
+		{"pods", []string{in.Teams}}, {"hosts", in.Hosts}, {"vms", in.VMs}, {"pattern", []string{in.Pattern}}, {"set", []string{string(in.Set)}},
 		{"snapshot", []string{in.Snapshot}}, {"description", []string{in.Description}}, {"action", []string{in.Action}},
 		{"domain", []string{in.Domain}}, {"slot", []string{in.Slot}}, {"router", []string{in.Router}}, {"env hosts", in.EnvHosts}, {"dns", []string{in.DNS}},
 		{"family", []string{in.Family}}, {"image kind", []string{in.ImageKind}}, {"image", []string{in.Image}},
@@ -197,9 +197,9 @@ func checkVMs(in Inputs, teams []string, naming pods.Naming) error {
 		team, _, ok := naming.ParseVMName(name)
 		switch {
 		case !ok:
-			errs = append(errs, fmt.Errorf("vms: %q is not a team VM name", name))
+			errs = append(errs, fmt.Errorf("vms: %q is not a pod VM name", name))
 		case !slices.Contains(teams, team):
-			errs = append(errs, fmt.Errorf("vms: %s is not in teams %s", name, in.Teams))
+			errs = append(errs, fmt.Errorf("vms: %s is not in pods %s", name, in.Teams))
 		}
 	}
 	return errors.Join(errs...)
@@ -330,7 +330,7 @@ func (in Inputs) EnvRequest() (pods.EnvRequest, error) {
 func (in Inputs) validateTeamless() []error {
 	var errs []error
 	if in.Teams != "" || len(in.Hosts) > 0 {
-		errs = append(errs, errors.New("teams and hosts don't apply to images and environments"))
+		errs = append(errs, errors.New("pods and hosts don't apply to images and environments"))
 	}
 	switch {
 	case len(in.VMs) == 0:

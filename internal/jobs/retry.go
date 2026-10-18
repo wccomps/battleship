@@ -61,7 +61,7 @@ func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 			// teardown plans those.
 			wholeTeams = true
 		case !ok || p.Host == "" || it.Team == "":
-			return Inputs{}, fmt.Errorf("job %d's plan has no team VM named %s", job.ID, it.Name)
+			return Inputs{}, fmt.Errorf("job %d's plan has no pod VM named %s", job.ID, it.Name)
 		}
 		teams = append(teams, it.Team)
 		hosts = append(hosts, p.Host)

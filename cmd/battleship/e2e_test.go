@@ -196,7 +196,7 @@ func TestEndToEndPowerJob(t *testing.T) {
 		}
 	}
 
-	// Preview a start of team 01's dc.
+	// Preview a start of pod 01's dc.
 	form := b.get("/power?teams=1&hosts=dc&action=start")
 	if form.status != http.StatusOK {
 		t.Fatalf("power form = %d", form.status)
