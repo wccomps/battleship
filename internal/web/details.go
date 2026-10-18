@@ -119,14 +119,6 @@ func (s *Server) notesForm(ctx context.Context, op operation, in jobs.Inputs, pr
 	return p
 }
 
-// Notes is the free text the form's notes field holds.
-func (p catalogPage) Notes() string {
-	if p.Details.Free == nil {
-		return ""
-	}
-	return *p.Details.Free
-}
-
 // NoSave is whether the form offers no Review: an Edit notes with nothing
 // to edit.
 func (p catalogPage) NoSave() bool { return p.Edit != nil && p.Edit.Err != "" }

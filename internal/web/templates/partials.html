@@ -65,6 +65,12 @@
 <span class="pw"><details><summary class="disc"><span class="show">Show password</span><span class="hide">Hide password</span></summary><code>{{.}}</code></details><button type="button" class="btn sm" data-copy hidden>{{icon "copy"}}<span aria-live="polite">Copy</span></button></span>
 {{- end}}
 
+{{/* notes-button is a family's Edit notes button (notesButton). */}}
+{{define "notes-button" -}}
+{{if .May}}<a class="btn sm" href="{{notesHref .Family}}" data-panel-link aria-label="Edit notes of {{.Family}}">{{icon "edit"}}Edit</a>
+{{- else}}<button class="btn sm" type="button" disabled aria-label="Edit notes of {{.Family}}">{{icon "edit"}}Edit</button>{{end}}
+{{- end}}
+
 {{/* details-fields are an ImageNotes's details as form fields (formInputs
      reads them), the login first as on the pages; their "details" field
      says whether the free text is posted too, and "notes_from" marks the

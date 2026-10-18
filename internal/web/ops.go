@@ -164,12 +164,11 @@ const (
 	fieldHostImage   = "host_image"
 	fieldHostOctet   = "host_octet"
 	fieldMore        = "more" // asks the form again with more host rows (blankRows)
-	// The details fields (detailsFields). fieldDetails says they were
-	// posted: yes, or withNotes when fieldNotes, the free text, comes too. A
-	// server from before Edit notes reads no details from withNotes, so it
-	// refuses the form rather than write the details without the text.
+	// The details fields (detailsFields). fieldDetails is yes, or
+	// detailsWithNotes when the free text comes too, which a server from
+	// before Edit notes refuses rather than drop the text.
 	fieldDetails     = "details"
-	withNotes        = "with-notes"
+	detailsWithNotes = "with-notes"
 	fieldOS          = "detail_os"
 	fieldUser        = "detail_user"
 	fieldPassword    = "detail_password"
@@ -213,11 +212,11 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 			}
 		}
 		in.VMID, _ = strconv.Atoi(strings.TrimSpace(form.Get(fieldVMID)))
-		if posted := form.Get(fieldDetails); posted == yes || posted == withNotes {
+		if posted := form.Get(fieldDetails); posted == yes || posted == detailsWithNotes {
 			n := pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: form.Get(fieldOS), User: form.Get(fieldUser), Password: form.Get(fieldPassword),
 				Built: form.Get(fieldBuilt), Generalized: form.Get(fieldGeneralized), Installed: form.Get(fieldInstalled),
 				Licence: form.Get(fieldLicence)}.Trimmed()}
-			if posted == withNotes {
+			if posted == detailsWithNotes {
 				free := pods.CleanFreeNotes(form.Get(fieldNotes))
 				n.Free = &free
 			}
@@ -330,7 +329,7 @@ func detailsFields(d *pods.ImageNotes) []field {
 	}
 	fs := []field{{fieldDetails, yes}}
 	if d.Free != nil {
-		fs = []field{{fieldDetails, withNotes}, {fieldNotes, *d.Free}}
+		fs = []field{{fieldDetails, detailsWithNotes}, {fieldNotes, *d.Free}}
 	}
 	for _, f := range []field{{fieldNotesFrom, d.From}, {fieldOS, d.OS}, {fieldUser, d.User}, {fieldPassword, d.Password}, {fieldBuilt, d.Built},
 		{fieldGeneralized, d.Generalized}, {fieldInstalled, d.Installed}, {fieldLicence, d.Licence}} {

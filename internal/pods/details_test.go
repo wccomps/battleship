@@ -69,7 +69,7 @@ func TestDetailsRoundTrip(t *testing.T) {
 	// Nothing to write, nothing written.
 	for _, d := range []string{"", "notes", "battleship: base=gw-v1"} {
 		if out, _ := writeDetails(d, ImageDetails{}); out != d {
-			t.Errorf("Apply(%q, empty) = %q", d, out)
+			t.Errorf("apply(%q, empty) = %q", d, out)
 		}
 	}
 	if out, _ := writeDetails("  \n", ImageDetails{OS: "Debian 12"}); out != "**Details**\n- OS: Debian 12" {
@@ -315,7 +315,7 @@ func TestImageSetDetails(t *testing.T) {
 	}
 }
 
-// writeDetails is Apply of details alone.
+// writeDetails is apply of details alone.
 func writeDetails(desc string, d ImageDetails) (string, error) {
 	return ImageNotes{ImageDetails: d}.apply(desc)
 }

@@ -122,7 +122,7 @@
 <input type="hidden" name="family" value="{{$.Data.In.Family}}">
 <p class="hint">Written into the notes of <code>{{.Image}}</code>, which new hosts copy. Older versions keep theirs.</p>
 {{- if .Was.Unreadable}}
-<div class="say caution">{{icon "warn"}}<div><div>Its details block is unreadable, so the fields start empty. Saving writes a new block in its place.</div><div class="meta">The block as it is:</div><div class="notes box">{{.Was.Block}}</div></div></div>
+<div class="say caution">{{icon "warn"}}<div><div>Its details block is unreadable, so the fields start empty. Saving replaces it with the details below, or removes it if they are left empty.</div><div class="meta">The block as it is:</div><div class="notes box">{{.Was.Block}}</div></div></div>
 {{- end}}
 <fieldset class="field">
 <legend>Details</legend>
@@ -130,7 +130,7 @@
 </fieldset>
 <div class="field">
 <label class="lbl" for="notes">Notes</label>
-<textarea class="inp" id="notes" name="notes" rows="8" maxlength="{{maxNotes}}" spellcheck="true" aria-describedby="notes-hint">{{$.Data.Notes}}</textarea>
+<textarea class="inp" id="notes" name="notes" rows="8" maxlength="{{maxNotes}}" spellcheck="true" aria-describedby="notes-hint">{{with $.Data.Details.Free}}{{.}}{{end}}</textarea>
 <span class="hint" id="notes-hint">Shown under the details, e.g. what was patched and when. At most {{maxNotes}} characters.</span>
 </div>
 {{- end}}

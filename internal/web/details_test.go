@@ -144,13 +144,13 @@ func TestDetailsShowAsValues(t *testing.T) {
 	// Edit notes; the form isn't folded into the page.
 	fam := h.get(&sess, "/images/family/win2022").Body.String()
 	inOrder(t, "the family page", fam, append(append([]string{`<div class="sech"><h2 class="sub">Details</h2><span class="sp"></span>` +
-		`<a class="btn sm" href="/images/details?family=win2022" data-panel-link>` + string(icon("edit")) + `Edit</a></div>`}, fields...),
+		`<a class="btn sm" href="/images/details?family=win2022" data-panel-link aria-label="Edit notes of win2022">` + string(icon("edit")) + `Edit</a></div>`}, fields...),
 		`<h2 class="sub">Notes</h2><div class="notes box">Patched monthly.</div>`)...)
 	lacks(t, "the family page", fam, "Details unreadable", "- OS:", "battleship:", "<details class=\"dedit\">", "detail_user", "disabled", "Editing notes needs")
 
 	odd := h.get(&sess, "/images/family/odd").Body.String()
 	contains(t, "an unreadable block", odd, `<p class="meta dunread">Details unreadable: the notes are shown as they are.</p>`,
-		`<div class="notes box">**Details**`+"\n- OS: Debian 12\n- Colour: blue\n\nfree words</div>", `<a class="btn sm" href="/images/details?family=odd" data-panel-link>`)
+		`<div class="notes box">**Details**`+"\n- OS: Debian 12\n- Colour: blue\n\nfree words</div>", `<a class="btn sm" href="/images/details?family=odd" data-panel-link aria-label="Edit notes of odd">`)
 	lacks(t, "an unreadable block", odd, "<dt>OS</dt>")
 
 	hx := h.get(&sess, "/images/family/hx").Body.String()
@@ -202,7 +202,7 @@ func (h *harness) runPlan(j store.Job) apply.Result {
 // the free text with CRLF line ends.
 func notesForm(family string, d pods.ImageDetails, notes string) url.Values {
 	f := detailsForm(family, d)
-	f.Set(fieldDetails, withNotes)
+	f.Set(fieldDetails, detailsWithNotes)
 	f.Set(fieldNotes, strings.ReplaceAll(notes, "\n", "\r\n"))
 	return f
 }
@@ -305,7 +305,7 @@ func TestEditNotesJob(t *testing.T) {
 		`<div class="meta">After</div><div class="notes box">Patched monthly.`+"\n"+`Rebooted after &lt;KB5034439&gt; &amp; checked.</div>`,
 		`<a class="btn first" href="/images/family/win2022" data-panel-link>Back</a>`, "Save notes of win2022-v1</button>")
 	lacks(t, "the review", body, "battleship:", "<KB5034439>")
-	if action != "/images/details/confirm" || fields.Get(fieldPassword) != "Template-Password-2" || fields.Get(fieldDetails) != withNotes ||
+	if action != "/images/details/confirm" || fields.Get(fieldPassword) != "Template-Password-2" || fields.Get(fieldDetails) != detailsWithNotes ||
 		fields.Has(fieldInstalled) || fields.Get(fieldNotes) != notes {
 		t.Fatalf("confirm %s with %v", action, fields)
 	}
@@ -390,7 +390,7 @@ func TestEditNotesOverUnreadableBlock(t *testing.T) {
 	sess := h.login(asLead)
 
 	fam := h.get(&sess, "/images/family/odd").Body.String()
-	contains(t, "the family page", fam, "Details unreadable", `<a class="btn sm" href="/images/details?family=odd" data-panel-link>`)
+	contains(t, "the family page", fam, "Details unreadable", `<a class="btn sm" href="/images/details?family=odd" data-panel-link aria-label="Edit notes of odd">`)
 	form := h.get(&sess, notesHref("odd")).Body.String()
 	contains(t, "the form", form, "Its details block is unreadable, so the fields start empty.",
 		`<div class="meta">The block as it is:</div><div class="notes box">**Details**`+"\n- OS: Debian 12\n- Colour: blue</div>")
@@ -419,6 +419,22 @@ func TestEditNotesOverUnreadableBlock(t *testing.T) {
 			t.Errorf("read back %+v, %v", d, err)
 		}
 	}
+	contains(t, "the form", form, "Saving replaces it with the details below, or removes it if they are left empty.")
+	// Left empty, the fields write no block: the review says the block goes.
+	h.api.Mu.Lock()
+	h.api.VMs[8011].Config["description"] = odd
+	h.api.Mu.Unlock()
+	action, fields, body := h.preview(&sess, "/images/details", notesForm("odd", pods.ImageDetails{}, "intro\n\nfree words"))
+	contains(t, "the review", body, "Its details block is unreadable: it is removed, and no details are written.")
+	lacks(t, "the review", body, "these replace it")
+	if rec := h.post(&sess, action, fields); rec.Code != http.StatusSeeOther {
+		t.Fatalf("confirm = %d\n%s", rec.Code, rec.Body)
+	}
+	js := h.jobsInStore()
+	h.runPlan(slices.MaxFunc(js, func(a, b store.Job) int { return int(a.ID - b.ID) }))
+	if got, want := h.notesOf(8011), "intro\n\nfree words\nbattleship: source=99"; got != want {
+		t.Errorf("notes after an empty write =\n%s\nwant\n%s", got, want)
+	}
 }
 
 // Edit notes takes VM.Config.Options on the newest version: without it the
@@ -430,7 +446,7 @@ func TestEditNotesNeedsConfigOptions(t *testing.T) {
 	viewer := h.loginWith("details-viewer", []int{8010})
 	why := "Editing notes needs VM.Config.Options on win2022-v1, which you don&#39;t have."
 	fam := h.get(&viewer, "/images/family/win2022").Body.String()
-	contains(t, "the family page", fam, `<h2 class="sub">Details</h2><span class="sp"></span><button class="btn sm" type="button" disabled>`,
+	contains(t, "the family page", fam, `<h2 class="sub">Details</h2><span class="sp"></span><button class="btn sm" type="button" disabled aria-label="Edit notes of win2022">`,
 		`<p class="lock">`+string(icon("lock"))+why+`</p>`)
 	lacks(t, "the family page", fam, `href="/images/details`)
 	images := h.get(&viewer, "/images").Body.String()
@@ -444,7 +460,7 @@ func TestEditNotesNeedsConfigOptions(t *testing.T) {
 	// With it on win2022-v1 alone, only its Edit is on.
 	editor := h.loginWith("details-editor", []int{8010}, "VM.Config.Options")
 	fam = h.get(&editor, "/images/family/win2022").Body.String()
-	contains(t, "the family page with the privilege", fam, `<a class="btn sm" href="/images/details?family=win2022" data-panel-link>`)
+	contains(t, "the family page with the privilege", fam, `<a class="btn sm" href="/images/details?family=win2022" data-panel-link aria-label="Edit notes of win2022">`)
 	lacks(t, "the family page with the privilege", fam, `<button class="btn sm" type="button" disabled>`, "Editing notes needs")
 	images = h.get(&editor, "/images").Body.String()
 	contains(t, "the Images page with the privilege", images,

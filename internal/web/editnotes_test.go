@@ -172,7 +172,7 @@ func TestEditNotesFormWithoutNotesOffersNoSave(t *testing.T) {
 }
 
 // The Edit notes form, and its review's confirm, mark that they post free
-// text (fieldDetails is withNotes), so a server that reads only "yes"
+// text (fieldDetails is detailsWithNotes), so a server that reads only "yes"
 // reads no details and refuses them rather than run details alone; and a
 // confirm whose free text its preview didn't have is refused.
 func TestEditNotesMarksFreeText(t *testing.T) {
@@ -180,17 +180,17 @@ func TestEditNotesMarksFreeText(t *testing.T) {
 	addDetailed(h)
 	sess := h.login(asLead)
 	_, form := browserForm(t, h.get(&sess, notesHref("win2022")).Body.String())
-	if form.Get(fieldDetails) != withNotes {
+	if form.Get(fieldDetails) != detailsWithNotes {
 		t.Errorf("the form posts details=%q", form.Get(fieldDetails))
 	}
 	form.Set(fieldNotes, "Patched monthly.\r\nRebooted.")
 	_, fields, _ := h.preview(&sess, "/images/details", form)
-	if fields.Get(fieldDetails) != withNotes || fields.Get(fieldNotes) != "Patched monthly.\nRebooted." {
+	if fields.Get(fieldDetails) != detailsWithNotes || fields.Get(fieldNotes) != "Patched monthly.\nRebooted." {
 		t.Errorf("the confirm posts %v", fields)
 	}
 
 	_, fields, _ = h.preview(&sess, "/images/details", detailsForm("win2022", pods.ImageDetails{OS: "Debian 12"}))
-	fields.Set(fieldDetails, withNotes)
+	fields.Set(fieldDetails, detailsWithNotes)
 	fields.Set(fieldNotes, "Typed after the review.")
 	if rec := h.post(&sess, "/images/details/confirm", fields); rec.Code != http.StatusBadRequest {
 		t.Errorf("a confirm with free text its preview lacked = %d", rec.Code)

@@ -77,7 +77,7 @@ func noFormat(s string) string {
 	}, s)
 }
 
-// writeFree is Apply of details and free text.
+// writeFree is apply of details and free text.
 func writeFree(desc string, d ImageDetails, free string) (string, error) {
 	return ImageNotes{ImageDetails: d, Free: &free}.apply(desc)
 }
@@ -106,7 +106,7 @@ func headers(desc string) int {
 	return n
 }
 
-// Whatever free text is asked for, Apply refuses it, leaving the
+// Whatever free text is asked for, apply refuses it, leaving the
 // notes as they were, just when the rule refuses it; and what it writes
 // keeps every battleship line exactly and in order, has exactly the one
 // block the details make, and reads back as exactly those details and that
@@ -126,7 +126,7 @@ func TestPropFreeNotesCannotForgeLines(t *testing.T) {
 
 		out, err := writeFree(desc, d, free)
 		if want := freeOK(free) && CheckDetails(d) == nil; (err == nil) != want {
-			t.Fatalf("Apply(%q) err %v; the rule accepts it: %v", free, err, want)
+			t.Fatalf("apply(%q) err %v; the rule accepts it: %v", free, err, want)
 		}
 		if err != nil {
 			if out != desc {
@@ -238,7 +238,7 @@ func TestReadNotesUnreadable(t *testing.T) {
 	}
 	out, err := writeFree(desc, ImageDetails{OS: "Debian 12"}, want.Free)
 	if err != nil || out != "**Details**\n- OS: Debian 12\n\nintro\n\noutro\n\nbattleship: source=1" {
-		t.Errorf("Apply = %q, %v", out, err)
+		t.Errorf("apply = %q, %v", out, err)
 	}
 	two := "**Details**\n- OS: a\n\nmid\n\n**Details**\n- OS: b"
 	if w := readImageNotes(two); !w.Unreadable || w.Free != "mid" || w.Block != "**Details**\n- OS: a\n\n**Details**\n- OS: b" {

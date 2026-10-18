@@ -183,7 +183,10 @@ func detailsReview(it pods.Item) *reviewView {
 	default:
 		r.Say = "Writes these details and notes into the notes of " + it.Name + ", which new hosts copy. Older versions keep theirs."
 	}
-	if was.Unreadable {
+	switch {
+	case was.Unreadable && after.ImageDetails.Empty():
+		r.DetailsSay, r.Block = "Its details block is unreadable: it is removed, and no details are written.", was.Block
+	case was.Unreadable:
 		r.DetailsSay, r.Block = "Its details block is unreadable: these replace it.", was.Block
 	}
 	if after.Free != nil {
