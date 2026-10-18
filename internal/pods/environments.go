@@ -100,6 +100,10 @@ type EnvHost struct {
 	Unreadable bool
 	// Addr is its address: the gateway for the router, else its notes'.
 	Addr string
+	// LANMAC and WANMAC are its NICs' MACs: a host's LAN NIC is net0; the
+	// router's WAN NIC is net0 and its LAN NIC net1.
+	LANMAC, WANMAC string
+	Agent          bool // its config enables the guest agent
 }
 
 // Environment is what a slot holds.
@@ -296,9 +300,13 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			var derr error
 			h.Details, h.UserNotes, derr = ParseDetails(cfg["description"])
 			h.Unreadable = derr != nil
+			h.LANMAC, _ = NICMAC(cfg["net0"])
 			if h.Router {
 				h.Addr = envs[si].Gateway
+				h.WANMAC = h.LANMAC
+				h.LANMAC, _ = NICMAC(cfg["net1"])
 			}
+			h.Agent = agentEnabled(cfg["agent"])
 			envs[si].Hosts = append(envs[si].Hosts, h)
 			continue
 		}

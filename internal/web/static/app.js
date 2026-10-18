@@ -570,6 +570,31 @@
     });
   });
 
+  // -- Live addresses
+
+  // The Environments page loads with assigned addresses; data-fill names
+  // the pieces (sse.go's piece) that swap in the live ones. If they can't
+  // be read, the line stays as it was, its link reading them without this.
+  function fill(line) {
+    var say = line.querySelector("[data-fill-say]"), was = say ? say.textContent : "";
+    if (say) say.textContent = "Reading live addresses…";
+    line.setAttribute("aria-busy", "true");
+    var undo = function () {
+      if (say) say.textContent = was;
+      line.removeAttribute("aria-busy");
+    };
+    fetch(line.getAttribute("data-fill"), { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      if (!r.ok || r.headers.get("X-Battleship-Pieces") !== "1") throw new Error("no addresses");
+      return r.text();
+    }).then(function (html) {
+      Array.prototype.slice.call(parse(html).children).forEach(function (el) {
+        var cur = el.id && $(el.id);
+        if (cur) cur.replaceWith(el);
+      });
+    }).catch(undo);
+  }
+  each(document.querySelectorAll("main [data-fill]"), fill);
+
   // -- Start
 
   var live = document.querySelector("main [data-events]");
