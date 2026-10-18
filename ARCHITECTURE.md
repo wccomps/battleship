@@ -67,15 +67,16 @@ once, and pushes changes to open pages.
 
 | Word | Meaning |
 |---|---|
-| **pod** | A team's set of VMs, cloned from templates |
+| **pod** | A team's VMs, cloned from templates |
+| **set** | Masters sharing what follows the host, lower-cased: `dc.kilo.alpha` and `web.Kilo.Alpha` are set `kilo.alpha` (`pods.Set`). A deploy tags each pod VM with its set's tag, `set-kilo.alpha`; from a master with nothing after the host it removes any set tag. A VM whose one set tag is a set's is of that set; with none, several, or a bare `set-`, its set is unknown (`pods.SetRecord`). A teardown of a set takes that set's VMs, and frees disks only at its templates' clone VMIDs, since disks have no tag; a VM of an unknown set goes only with a teardown that names no set |
 | **master / template** | A tagged source VM / its `.tpl` copy that teams clone from |
 | **plan, item, step** | What a job will do: one item per VM, each with ordered steps (clone, network, …, start) |
 | **blocked** | An item that can't run (missing privilege, missing snapshot); shown in the preview |
 | **fingerprint** | A hash of a plan, to tell whether the cluster changed since the preview |
 | **round** | One pass over a job's items; failed items get a retry round, except failures for a missing privilege |
 | **baseline** | The `initial` snapshot taken at deploy; a reset rolls back to it |
-| **drift** | A team VM whose config no longer matches the rules a deploy sets: NICs, disk limits, empty notes, pool, baseline |
+| **drift** | A team VM whose config no longer matches the rules a deploy sets: NICs, disk limits, empty notes, pool, baseline, at most one non-empty set tag. No set tag isn't drift: every VM deployed before sets has none |
 | **leftover / orphaned disks** | Disks a deleted VM left on the storage |
 | **view** | One user's live grid, read with their own ticket |
 | **base image, family** | A template tagged `base` and a kind, named `<family>-v<N>`; the versions of one OS build make its family |
-| **environment, dev slot** | A dev slot is a numbered pool with its own bridges and VMID block; the environment is the domain-named set of VMs in it |
+| **environment, dev slot** | A dev slot is a numbered pool with its own bridges and VMID block; the environment is the domain-named VMs in it |

@@ -385,6 +385,10 @@ func (p permAPI) PermissionsAt(ctx context.Context, path string) (map[string]boo
 	return p.pve.Client().As(p.cred()).PermissionsAt(ctx, path)
 }
 
+func (p permAPI) TagAccess(ctx context.Context) (proxmox.TagAccess, error) {
+	return p.pve.Client().As(p.cred()).TagAccess(ctx)
+}
+
 // allViews is every view the test's sessions opened. Later views catch up,
 // so a test can poll before anyone logs in.
 type allViews struct{ h *harness }

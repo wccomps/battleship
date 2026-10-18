@@ -304,9 +304,6 @@ func (v setView) HostsText() string { return strings.Join(v.Hosts, " ") }
 func (v setView) RunDots() []struct{}  { return make([]struct{}, max(v.Running, 0)) }
 func (v setView) StopDots() []struct{} { return make([]struct{}, max(v.Masters-v.Running, 0)) }
 
-// setPattern is the master pattern of a template set, e.g. "*.kilo.alpha".
-func setPattern(name string) string { return "*." + name }
-
 // deployHref opens the deploy form filled in for pattern. Teams are left blank:
 // no team has VMs yet.
 func (s *Server) deployHref(pattern string) string {
@@ -318,7 +315,7 @@ func (s *Server) deployHref(pattern string) string {
 func (s *Server) startOf(g status.Grid, canDeploy bool) startView {
 	v := startView{MasterTag: s.cfg.Deploy.MasterTag, Others: g.OtherMasters}
 	for _, set := range g.Sets {
-		sv := setView{Name: set.Name, Pattern: setPattern(set.Name), Hosts: set.Hosts, Masters: set.Masters, Running: set.Running}
+		sv := setView{Name: string(set.Name), Pattern: set.Name.Pattern(), Hosts: set.Hosts, Masters: set.Masters, Running: set.Running}
 		if canDeploy {
 			sv.Deploy = s.deployHref(sv.Pattern)
 		}

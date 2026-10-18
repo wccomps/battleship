@@ -136,6 +136,7 @@ const (
 	fieldHosts       = "hosts"       // comma-separated
 	fieldVMs         = "vms"         // comma-separated exact VM names, e.g. a retry's
 	fieldPattern     = "pattern"     // deploy
+	fieldSet         = "set"         // teardown: its set, "" for everything
 	fieldRebuild     = "rebuild"     // deploy: "yes" rebuilds templates
 	fieldBaseline    = "baseline"    // deploy: "yes" takes the baseline snapshot
 	fieldSnapshot    = "snapshot"    // reset: the one to roll back to; snapshot: the new one's name
@@ -226,6 +227,8 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 		in.Pattern = strings.TrimSpace(form.Get(fieldPattern))
 		in.Rebuild = form.Get(fieldRebuild) == yes
 		in.NoSnapshot = form.Get(fieldBaseline) != yes
+	case pods.KindTeardown:
+		in.Set = pods.Set(strings.ToLower(strings.TrimSpace(form.Get(fieldSet))))
 	case pods.KindReset:
 		in.Snapshot = strings.TrimSpace(form.Get(fieldSnapshot))
 	case pods.KindSnapshot:
@@ -281,6 +284,9 @@ func inputFields(in jobs.Inputs) []field {
 		if !in.NoSnapshot {
 			fs = append(fs, field{fieldBaseline, yes})
 		}
+	case pods.KindTeardown:
+		// Always, "" too: a "Change" link then has everything chosen.
+		fs = append(fs, field{fieldSet, string(in.Set)})
 	case pods.KindReset:
 		if in.Snapshot != "" {
 			fs = append(fs, field{fieldSnapshot, in.Snapshot})

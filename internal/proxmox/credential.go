@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -193,4 +195,43 @@ func (c *Client) PermissionsAt(ctx context.Context, path string) (map[string]boo
 		return nil, err
 	}
 	return perms[path], nil
+}
+
+// TagAccess is what the cluster's datacenter options (/cluster/options) say a
+// user without Sys.Modify on / may set as a guest tag. The zero value is
+// Proxmox's default ("free": any tag not in Registered).
+type TagAccess struct {
+	// Mode is user-tag-access's user-allow setting: "" or "free" (the
+	// default), "existing", "list" or "none".
+	Mode       string
+	Allowed    []string
+	Registered []string
+}
+
+// Allows reports whether a user without Sys.Modify on / may set tag.
+func (t TagAccess) Allows(tag string) bool {
+	if slices.ContainsFunc(t.Registered, func(r string) bool { return strings.EqualFold(r, tag) }) {
+		return false
+	}
+	return t.Mode == "" || t.Mode == "free" ||
+		slices.ContainsFunc(t.Allowed, func(a string) bool { return strings.EqualFold(a, tag) })
+}
+
+// TagAccess reads the cluster's tag policy for the caller from /cluster/options.
+func (c *Client) TagAccess(ctx context.Context) (TagAccess, error) {
+	var raw struct {
+		UserTagAccess *struct {
+			UserAllow string `json:"user-allow"`
+		} `json:"user-tag-access"`
+		Allowed    []string `json:"allowed-tags"`
+		Registered []string `json:"registered-tags"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/cluster/options", nil, &raw); err != nil {
+		return TagAccess{}, err
+	}
+	var mode string
+	if raw.UserTagAccess != nil {
+		mode = raw.UserTagAccess.UserAllow
+	}
+	return TagAccess{Mode: mode, Allowed: raw.Allowed, Registered: raw.Registered}, nil
 }

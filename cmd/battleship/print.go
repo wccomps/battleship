@@ -127,8 +127,8 @@ func printPlan(w io.Writer, naming pods.Naming, plan *pods.Plan) {
 	for _, n := range plan.Notices {
 		fmt.Fprintln(w, "Note: "+clean(n))
 	}
-	for _, k := range plan.Kept {
-		fmt.Fprintln(w, "Note: "+clean(k.String()))
+	for _, line := range pods.KeptLines(plan.Kept) {
+		fmt.Fprintln(w, "Note: Not touched: "+clean(line))
 	}
 }
 

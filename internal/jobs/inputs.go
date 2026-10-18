@@ -23,6 +23,10 @@ type Inputs struct {
 	Pattern    string    `json:"pattern,omitempty"`     // deploy
 	Rebuild    bool      `json:"rebuild,omitempty"`     // deploy
 	NoSnapshot bool      `json:"no_snapshot,omitempty"` // deploy
+	// Set is the one template set a teardown takes (pods.ParseSet). A
+	// teardown without one, as every one stored before sets, takes
+	// everything in its pods (among Hosts).
+	Set pods.Set `json:"set,omitempty"`
 	// Snapshot is a reset's target (empty: baseline) or a snapshot job's
 	// new snapshot.
 	Snapshot    string `json:"snapshot,omitempty"`
@@ -101,7 +105,11 @@ func (in Inputs) Validate() error {
 		if n := utf8.RuneCountInString(in.Description); n > MaxSnapshotDescription {
 			errs = append(errs, fmt.Errorf("the snapshot description is too long: %d characters, at most %d", n, MaxSnapshotDescription))
 		}
-	case pods.KindTeardown, pods.KindReset:
+	case pods.KindTeardown:
+		if _, err := pods.ParseSet(string(in.Set)); err != nil {
+			errs = append(errs, err)
+		}
+	case pods.KindReset:
 	default:
 		errs = append(errs, fmt.Errorf("unknown job kind %q", in.Kind))
 	}
@@ -130,7 +138,7 @@ func (in Inputs) checkText() error {
 		name   string
 		values []string
 	}{
-		{"teams", []string{in.Teams}}, {"hosts", in.Hosts}, {"vms", in.VMs}, {"pattern", []string{in.Pattern}},
+		{"teams", []string{in.Teams}}, {"hosts", in.Hosts}, {"vms", in.VMs}, {"pattern", []string{in.Pattern}}, {"set", []string{string(in.Set)}},
 		{"snapshot", []string{in.Snapshot}}, {"description", []string{in.Description}}, {"action", []string{in.Action}},
 		{"domain", []string{in.Domain}}, {"slot", []string{in.Slot}}, {"router", []string{in.Router}}, {"env hosts", in.EnvHosts}, {"dns", []string{in.DNS}},
 		{"family", []string{in.Family}}, {"image kind", []string{in.ImageKind}}, {"image", []string{in.Image}},
@@ -240,7 +248,8 @@ func planFor(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*p
 			Pattern: in.Pattern, Teams: teams, Hosts: in.Hosts, Rebuild: in.Rebuild, Snapshot: !in.NoSnapshot,
 		})
 	case pods.KindTeardown:
-		return p.Teardown(ctx, teams, in.Hosts)
+		set, _ := pods.ParseSet(string(in.Set))
+		return p.Teardown(ctx, teams, in.Hosts, set)
 	case pods.KindReset:
 		return p.Reset(ctx, teams, in.Hosts, in.Snapshot)
 	case pods.KindSnapshot:

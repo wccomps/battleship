@@ -31,6 +31,7 @@ battleship deploy   -templates '*.kilo.alpha' -teams 1-32
 battleship reset    -teams 7 -hosts dc
 battleship power    -teams 1-32 -action start
 battleship snapshot -teams 7 -hosts dc -name before-scoring
+battleship teardown -teams 1-32 -set kilo.alpha
 battleship teardown -teams all
 battleship nodes                              # prints a urls = [...] line
 ```
@@ -42,6 +43,12 @@ exits once it is queued. Keep your `battleship.toml` in step with serve's:
 if its settings for what a job does to VMs differ, the job ends stale.
 `-hosts` matches substrings; `-vms` names exact VMs. A blocked or failed VM
 makes the command exit 1.
+
+A deploy tags each VM with its template set (`set-kilo.alpha`). A teardown
+takes every matching VM in its teams' pods, or with `-set` only the VMs
+whose one set tag is that set's. A VM with no set tag or several, such as
+one deployed before sets were tagged, is of an unknown set: only a teardown
+that names no set removes it.
 
 ```sh
 battleship jobs list | show <id> | cancel <id>
@@ -80,7 +87,7 @@ naming the missing privilege.
 | Build template | `VM.Clone`; `VM.Allocate`; `Datastore.AllocateSpace` | master; `<images.pool>` (rebuild: also the old template); `/storage/<deploy.storage>` |
 | Network | `VM.Config.Network`, `VM.Config.Cloudinit`; `SDN.Use` | VM; `/sdn/zones/<proxmox.sdn_zone>/<bridge>` |
 | Disk limits / CD-ROM | `VM.Config.Disk` / `VM.Config.CDROM` | VM |
-| Clear notes (a clone copies its master's, which can hold a login) | `VM.Config.Options` | VM |
+| Clear notes (a clone copies its master's, which can hold a login), tag the set | `VM.Config.Options` (tagging needs Proxmox's default `user-tag-access` of `free`; otherwise a new tag needs `Sys.Modify` on `/`) | VM |
 | Snapshot / roll back | `VM.Snapshot` (or `VM.Snapshot.Rollback`) | VM |
 | Power | `VM.PowerMgmt` | VM |
 | Delete | `VM.Allocate` | VM |

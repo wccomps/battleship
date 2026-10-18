@@ -939,7 +939,7 @@ func TestDeployAndTeardownOpenAsPages(t *testing.T) {
 	h.start(failed)
 	h.finish(failed, store.Outcome{Status: store.StatusFailed, Error: "planning failed"})
 	body = h.get(&lead, "/logs/"+itoa(failed)).Body.String()
-	contains(t, "failed teardown", body, `<a class="btn pri" href="/teardown?teams=1">`, "Preview again</a>")
+	contains(t, "failed teardown", body, `<a class="btn pri" href="/teardown?set=&amp;teams=1">`, "Preview again</a>")
 }
 
 // A started item shows its first step running, before any step finished,

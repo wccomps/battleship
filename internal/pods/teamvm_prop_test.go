@@ -49,7 +49,7 @@ func TestPropTeamVMsAreNamedAndNumbered(t *testing.T) {
 		}
 		asked := rapid.SliceOfNDistinct(rapid.SampledFrom(teams), 1, 3, rapid.ID).Draw(t, "asked")
 		p := NewPlanner(f, cfg)
-		td, err := p.Teardown(context.Background(), asked, nil)
+		td, err := p.Teardown(context.Background(), asked, nil, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -110,7 +110,7 @@ func TestDeployBlocksNameTakenOutsideTeamBlock(t *testing.T) {
 	if want := "has a team 01 name but is VMID 8005, outside the team's VMIDs, so it isn't a team VM; rename or remove it in Proxmox"; len(plan.Items) != 1 || plan.Items[0].Blocked != want {
 		t.Fatalf("items = %+v", plan.Items)
 	}
-	td, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
+	td, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

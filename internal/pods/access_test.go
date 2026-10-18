@@ -233,7 +233,7 @@ func TestOfferPrivilegesAreItemNeeds(t *testing.T) {
 		KindDeploy: func() (*Plan, error) {
 			return p.Deploy(ctx, DeployRequest{Pattern: "*.tango.delta", Teams: []string{"02"}, Snapshot: true})
 		},
-		KindTeardown: func() (*Plan, error) { return p.Teardown(ctx, []string{"01"}, nil) },
+		KindTeardown: func() (*Plan, error) { return p.Teardown(ctx, []string{"01"}, nil, "") },
 		KindReset:    func() (*Plan, error) { return p.Reset(ctx, []string{"01"}, nil, "initial") },
 		KindPower:    func() (*Plan, error) { return p.Power(ctx, []string{"01"}, nil, "stop") },
 		KindSnapshot: func() (*Plan, error) {
@@ -256,7 +256,7 @@ func TestOfferPrivilegesAreItemNeeds(t *testing.T) {
 		}
 		needed := map[string]bool{}
 		for _, it := range plan.Items {
-			for _, n := range itemNeeds(it, templates[it.Template], p.Cfg) {
+			for _, n := range itemNeeds(it, templates[it.Template], p.Cfg, proxmox.TagAccess{}) {
 				for _, g := range n {
 					needed[g.priv] = true
 				}
@@ -292,6 +292,7 @@ type fakePerms struct {
 	err    error // Permissions fails with it
 	listed proxmox.Permissions
 	at     map[string]map[string]bool
+	tags   proxmox.TagAccess
 	calls  []string
 }
 
@@ -303,6 +304,49 @@ func (f *fakePerms) Permissions(context.Context) (proxmox.Permissions, error) {
 func (f *fakePerms) PermissionsAt(_ context.Context, path string) (map[string]bool, error) {
 	f.calls = append(f.calls, path)
 	return f.at[path], nil
+}
+
+func (f *fakePerms) TagAccess(context.Context) (proxmox.TagAccess, error) {
+	f.calls = append(f.calls, "tags")
+	return f.tags, nil
+}
+
+// When datacenter user-tag-access restricts tags (or registers set-<name>),
+// Proxmox refuses StepSetTag unless the tag is in allowed-tags or the user
+// holds Sys.Modify on /.
+func TestDeploySetTagRespectsUserTagAccess(t *testing.T) {
+	cfg := config.Default()
+	for _, tc := range []struct {
+		name      string
+		set       Set
+		tags      proxmox.TagAccess
+		sysModify bool
+		want      string
+	}{
+		{"free mode", "kilo.alpha", proxmox.TagAccess{Mode: "free"}, false, ""},
+		{"unset mode", "kilo.alpha", proxmox.TagAccess{}, false, ""},
+		{"list mode, tag allowed", "kilo.alpha", proxmox.TagAccess{Mode: "list", Allowed: []string{"set-kilo.alpha"}}, false, ""},
+		{"list mode, tag not allowed", "kilo.alpha", proxmox.TagAccess{Mode: "list", Allowed: []string{"dev"}}, false, "you don't have Sys.Modify on /"},
+		{"existing mode, tag not in allowed-tags", "kilo.alpha", proxmox.TagAccess{Mode: "existing", Allowed: []string{"dev"}}, false, "you don't have Sys.Modify on /"},
+		{"existing mode, with Sys.Modify on /", "kilo.alpha", proxmox.TagAccess{Mode: "existing", Allowed: []string{"dev"}}, true, ""},
+		{"none mode, without Sys.Modify", "kilo.alpha", proxmox.TagAccess{Mode: "none"}, false, "you don't have Sys.Modify on /"},
+		{"registered tag in free mode", "kilo.alpha", proxmox.TagAccess{Mode: "free", Registered: []string{"set-kilo.alpha"}}, false, "you don't have Sys.Modify on /"},
+		{"registered tag with Sys.Modify", "kilo.alpha", proxmox.TagAccess{Mode: "free", Registered: []string{"set-kilo.alpha"}}, true, ""},
+		{"single-label master (no set tag written)", "", proxmox.TagAccess{Mode: "none"}, false, ""},
+	} {
+		listed := proxmox.Permissions{"/vms/10121": {"VM.Config.Options": false}}
+		if tc.sysModify {
+			listed["/"] = map[string]bool{"Sys.Modify": false}
+		}
+		acc := NewAccess(&fakePerms{listed: listed, tags: tc.tags})
+		plan := &Plan{Kind: KindDeploy, Items: []Item{{Team: "01", Name: "team01-teak", VMID: 10121, Set: tc.set, Steps: []Step{StepSetTag}}}}
+		if err := BlockUnpermitted(context.Background(), plan, acc, cfg); err != nil {
+			t.Fatal(err)
+		}
+		if got := plan.Items[0].Blocked; got != tc.want {
+			t.Errorf("%s: blocked = %q, want %q", tc.name, got, tc.want)
+		}
+	}
 }
 
 // Listed paths come from one read; others are asked once each, not guessed

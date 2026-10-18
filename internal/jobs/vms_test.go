@@ -209,7 +209,11 @@ func TestPropVMsNarrowWithinTeams(t *testing.T) {
 	p := narrowCluster()
 	kinds := []pods.Kind{pods.KindReset, pods.KindPower, pods.KindTeardown, pods.KindSnapshot, pods.KindDeploy}
 	inputs := func(kind pods.Kind, teams string, vms []string) Inputs {
-		return Inputs{Kind: kind, Teams: teams, VMs: vms, Action: "stop", Snapshot: "round2", Pattern: "dc.kilo.alpha"}
+		in := Inputs{Kind: kind, Teams: teams, VMs: vms, Action: "stop", Snapshot: "round2"}
+		if kind == pods.KindDeploy {
+			in.Pattern = "dc.kilo.alpha"
+		}
+		return in
 	}
 	for _, kind := range kinds {
 		for _, name := range narrowNames {

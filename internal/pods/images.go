@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"unicode"
 
 	"golang.org/x/sync/errgroup"
 
@@ -84,7 +83,7 @@ func ParseImageName(name string) (family string, version int, ok bool) {
 // Tags splits a Proxmox tag list, lower-cased.
 func Tags(s string) []string {
 	var out []string
-	for _, t := range strings.FieldsFunc(s, func(r rune) bool { return r == ';' || r == ',' || unicode.IsSpace(r) }) {
+	for _, t := range strings.FieldsFunc(s, isTagSeparator) {
 		out = append(out, strings.ToLower(t))
 	}
 	return out

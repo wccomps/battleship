@@ -34,6 +34,12 @@ type PermissionReader interface {
 	PermissionsAt(ctx context.Context, path string) (map[string]bool, error)
 }
 
+// tagAccessReader reads datacenter tag-access options; *proxmox.Client and
+// *UserAccess implement it.
+type tagAccessReader interface {
+	TagAccess(ctx context.Context) (proxmox.TagAccess, error)
+}
+
 // UserAccess is an Access read from Proxmox: one /access/permissions for all
 // listed paths, and /access/permissions?path= once for any other. Unlisted
 // paths are never guessed from parents, since a deeper ACL replaces the
@@ -44,11 +50,38 @@ type UserAccess struct {
 	listed  proxmox.Permissions // nil until read
 	listErr error               // the listing failed: kept, and not asked again
 	at      map[string]map[string]bool
+	tagsSet bool
+	tags    proxmox.TagAccess
+	tagsErr error
 }
 
 // NewAccess reads privileges through r.
 func NewAccess(r PermissionReader) *UserAccess {
 	return &UserAccess{r: r, at: map[string]map[string]bool{}}
+}
+
+// TagAccess returns the datacenter's user-tag-access rules from Proxmox, or
+// unrestricted TagAccess when the reader doesn't provide them.
+func (a *UserAccess) TagAccess(ctx context.Context) (proxmox.TagAccess, error) {
+	tr, ok := a.r.(tagAccessReader)
+	if !ok {
+		return proxmox.TagAccess{}, nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.tagsSet || a.tagsErr != nil {
+		return a.tags, a.tagsErr
+	}
+	t, err := tr.TagAccess(ctx)
+	if err != nil {
+		err = fmt.Errorf("reading Proxmox tag access: %w", err)
+		if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			a.tagsErr = err
+		}
+		return proxmox.TagAccess{}, err
+	}
+	a.tags, a.tagsSet = t, true
+	return t, nil
 }
 
 func (a *UserAccess) list(ctx context.Context) (proxmox.Permissions, error) {
@@ -219,8 +252,9 @@ func templateNeeds(t TemplateSpec, cfg config.Config) []need {
 	return ns
 }
 
-// itemNeeds is what running its steps needs. tpl is its template (deploy).
-func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config) []need {
+// itemNeeds is what running its steps needs. tpl is its template (deploy);
+// tags is the datacenter's user-tag-access rule for StepSetTag.
+func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAccess) []need {
 	pool := ""
 	if slices.Contains(it.Steps, StepClone) {
 		pool = NewNaming(cfg.Naming).Pool(it.Team)
@@ -308,6 +342,14 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config) []need {
 			ns = append(ns, one("/storage/"+cfg.Deploy.Storage, "Datastore.Allocate"))
 		case StepLabel, StepDetails, StepNotes:
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Options"))
+		case StepSetTag:
+			// Proxmox checks VM.Config.Options to edit tags, and when
+			// user-tag-access restricts tags (or registers set-<name>), only
+			// Sys.Modify on / bypasses the tag check.
+			ns = append(ns, on(it.VMID, pool, "VM.Config.Options"))
+			if it.Set != "" && !tags.Allows(it.Set.Tag()) {
+				ns = append(ns, one("/", "Sys.Modify"))
+			}
 		case StepConvert:
 			ns = append(ns, one(VMPath(it.VMID), "VM.Allocate"))
 		case StepRetire:
@@ -388,6 +430,19 @@ func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Co
 		}
 		t.Blocked, unpermitted[t.Name] = why, why != ""
 	}
+	var tags proxmox.TagAccess
+	if tr, ok := acc.(tagAccessReader); ok {
+		for _, it := range plan.Items {
+			if it.Blocked == "" && it.Set != "" && slices.Contains(it.Steps, StepSetTag) {
+				var err error
+				tags, err = tr.TagAccess(ctx)
+				if err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
 	for i := range plan.Items {
 		it := &plan.Items[i]
 		if it.Blocked != "" {
@@ -401,7 +456,7 @@ func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Co
 		if tpl == nil && it.Source == nil && slices.Contains(it.Steps, StepClone) {
 			continue // the planner blocks a clone without a template
 		}
-		why, err := missing(ctx, acc, itemNeeds(*it, tpl, cfg))
+		why, err := missing(ctx, acc, itemNeeds(*it, tpl, cfg, tags))
 		if err != nil {
 			return err
 		}

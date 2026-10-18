@@ -35,6 +35,7 @@ const (
 	DriftDiskLimits DriftKind = "disk-limits" // the scan found disks without the configured limits
 	DriftSnapshot   DriftKind = "snapshot"    // the scan found no baseline snapshot
 	DriftNotes      DriftKind = "notes"       // the scan found Proxmox notes, which a deploy clears
+	DriftSets       DriftKind = "sets"        // invalid or several set tags, so its set is unknown (pods.SetOf)
 )
 
 // Drift is one reason a VM is drifted.
@@ -54,6 +55,10 @@ type Cell struct {
 	VMID  int    // 0 when missing; the lowest VMID when several share the name
 	Node  string
 	Pool  string
+	// Sets are the sets its set tags name (pods.SetTags): one non-empty set
+	// when its set is recorded. None is no drift, as every VM deployed
+	// before sets has none; Several is.
+	Sets  pods.SetRecord
 	Drift []Drift // nil unless drifted
 }
 
@@ -110,6 +115,7 @@ func (g Grid) clone() Grid {
 	for i, row := range g.Rows {
 		cells := make([]Cell, len(row.Cells))
 		for j, c := range row.Cells {
+			c.Sets = slices.Clone(c.Sets)
 			c.Drift = slices.Clone(c.Drift)
 			cells[j] = c
 		}
@@ -141,16 +147,17 @@ func sameContent(a, b Grid) bool {
 
 func sameCell(a, b Cell) bool {
 	return a.Team == b.Team && a.Host == b.Host && a.Name == b.Name && a.State == b.State && a.Power == b.Power &&
-		a.VMID == b.VMID && a.Node == b.Node && a.Pool == b.Pool && slices.Equal(a.Drift, b.Drift)
+		a.VMID == b.VMID && a.Node == b.Node && a.Pool == b.Pool && slices.Equal(a.Sets, b.Sets) && slices.Equal(a.Drift, b.Drift)
 }
 
 func sameSet(a, b pods.MasterSet) bool {
 	return a.Name == b.Name && a.Masters == b.Masters && a.Running == b.Running && slices.Equal(a.Hosts, b.Hosts)
 }
 
-// cellCopy is Cell with a Drift slice of its own.
+// cellCopy is Cell with Sets and Drift slices of its own.
 func (g Grid) cellCopy(team, host string) (Cell, bool) {
 	c, ok := g.Cell(team, host)
+	c.Sets = slices.Clone(c.Sets)
 	c.Drift = slices.Clone(c.Drift)
 	return c, ok
 }

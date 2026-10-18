@@ -67,7 +67,7 @@ func TestDeployPlanFromScratch(t *testing.T) {
 	if t1.VMID != 10121 || t1.Blocked != "" {
 		t.Errorf("team01-teak = %+v", t1)
 	}
-	wantSteps := []Step{StepClone, StepNetwork, StepDiskLimits, StepCDROM, StepNotes, StepSnapshot, StepStart}
+	wantSteps := []Step{StepClone, StepNetwork, StepDiskLimits, StepCDROM, StepNotes, StepSetTag, StepSnapshot, StepStart}
 	if !reflect.DeepEqual(t1.Steps, wantSteps) {
 		t.Errorf("steps = %v, want %v", t1.Steps, wantSteps)
 	}
@@ -147,7 +147,7 @@ func TestTeardownAndResetPlans(t *testing.T) {
 	f.Add(proxmox.VM{VMID: 10221, Name: "team02-teak", Node: "cedar"}, nil, "initial")
 	p := testPlanner(f)
 
-	td, err := p.Teardown(context.Background(), []string{"01"}, nil)
+	td, err := p.Teardown(context.Background(), []string{"01"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestNormalizeTeams(t *testing.T) {
 		if _, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: bad}); err == nil {
 			t.Errorf("Deploy(%q) should fail", bad)
 		}
-		if _, err := testPlanner(f).Teardown(context.Background(), bad, nil); err == nil {
+		if _, err := testPlanner(f).Teardown(context.Background(), bad, nil, ""); err == nil {
 			t.Errorf("Teardown(%q) should fail", bad)
 		}
 	}
@@ -389,7 +389,7 @@ func TestDeployPlanBlockedTemplateReasonWins(t *testing.T) {
 func TestSimplePlansRejectEmptyTeams(t *testing.T) {
 	p := testPlanner(newCluster())
 	ctx := context.Background()
-	if _, err := p.Teardown(ctx, nil, nil); err == nil {
+	if _, err := p.Teardown(ctx, nil, nil, ""); err == nil {
 		t.Error("Teardown")
 	}
 	if _, err := p.Reset(ctx, []string{}, nil, "initial"); err == nil {

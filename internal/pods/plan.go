@@ -70,6 +70,7 @@ const (
 	StepDiskLimits Step = "disk-limits"
 	StepCDROM      Step = "cdrom"
 	StepNotes      Step = "clear-notes" // empty a team VM's Proxmox notes (NotesChanges)
+	StepSetTag     Step = "tag-set"     // record a team VM's template set in its tags (SetTagChanges)
 	StepSnapshot   Step = "snapshot"
 	StepStart      Step = "start"
 	StepStop       Step = "stop"
@@ -165,8 +166,13 @@ type Item struct {
 	VMID     int    `json:"vmid"`
 	Node     string `json:"node"`
 	Template string `json:"template"` // deploy: TemplateSpec.Name
-	Steps    []Step `json:"steps"`
-	Snapshot string `json:"snapshot"` // reset: snapshot to roll back to; snapshot: the one to take
+	// Set is a team VM's template set: the one a deploy's tag-set step
+	// records, or the one a teardown found (SetOf), for its review. Sets are
+	// all the set tags a teardown found on it (SetTags).
+	Set      Set       `json:"set,omitempty"`
+	Sets     SetRecord `json:"sets,omitempty"`
+	Steps    []Step    `json:"steps"`
+	Snapshot string    `json:"snapshot"` // reset: snapshot to roll back to; snapshot: the one to take
 	// Baseline: the reset named no snapshot, so Snapshot is this VM's own
 	// baseline (see BaselineSnapshot).
 	Baseline bool   `json:"baseline,omitempty"`
@@ -238,7 +244,8 @@ type Plan struct {
 	// Slot is an environment plan's dev slot (SlotName); Locks holds it.
 	// Plans stored before it have it only in Locks: read it with DevSlot.
 	Slot string `json:"slot,omitempty"`
-	// Kept are the VMs an environment's teardown leaves alone, and why.
+	// Kept are the VMs a teardown leaves alone, and why: an environment's,
+	// those outside its pool on its networks; a set's, the pods' other VMs.
 	Kept []KeptVM `json:"kept,omitempty"`
 }
 
@@ -247,9 +254,6 @@ type KeptVM struct {
 	Name string `json:"name"`
 	Why  string `json:"why"`
 }
-
-// String is the notice the CLI prints for it.
-func (k KeptVM) String() string { return "Not touched: " + k.Name + " is " + k.Why + "." }
 
 // LockKeys are what a plan changes and, apart, what it only reads (its
 // items' Sources), as lock keys (see the store's blocksSQL). Besides its own
@@ -399,7 +403,7 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 	}
 	var kept []proxmox.VM
 	for _, m := range masters {
-		if MatchesHost(Hostname(m.Name), req.Hosts) {
+		if host, _ := p.Naming.SplitMaster(m.Name); MatchesHost(host, req.Hosts) {
 			kept = append(kept, m)
 		}
 	}
@@ -470,9 +474,10 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool,
 	if err != nil {
 		return TemplateSpec{}, fmt.Errorf("reading master %s: %w", m.Name, err)
 	}
+	host, _ := p.Naming.SplitMaster(m.Name)
 	spec := TemplateSpec{
 		Name:       p.Naming.TemplateName(m.Name),
-		Host:       Hostname(m.Name),
+		Host:       host,
 		MasterName: m.Name,
 		MasterVMID: m.VMID,
 		MasterNode: m.Node,
@@ -574,6 +579,7 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snap
 		Template: tpl.Name,
 		Node:     assigned,
 	}
+	_, it.Set = p.Naming.SplitMaster(tpl.MasterName)
 	if tpl.Blocked != "" {
 		// The template's problem comes first: its VMID is meaningless, so the
 		// checks below would give wrong advice.
@@ -612,7 +618,7 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snap
 		}
 		it.Steps = append(it.Steps, StepClone)
 	}
-	it.Steps = append(it.Steps, StepNetwork, StepDiskLimits, StepCDROM, StepNotes)
+	it.Steps = append(it.Steps, StepNetwork, StepDiskLimits, StepCDROM, StepNotes, StepSetTag)
 	if snapshot {
 		it.Steps = append(it.Steps, StepSnapshot)
 	}
@@ -620,17 +626,40 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snap
 	return it
 }
 
-// Teardown stops and deletes team VMs. A whole-team teardown also reports
-// half-deleted VMs and frees disks gone VMs left.
-func (p Planner) Teardown(ctx context.Context, teams, hosts []string) (*Plan, error) {
+// Teardown stops and deletes pod VMs among hosts: with set "", every one
+// in teams' pods; with a set, only those SetOf says are of it, keeping the
+// rest (Kept). Without hosts it also reports half-deleted VMs (each lost
+// its tags with its config) and frees the disks gone VMs left at the clone
+// VMIDs of the templates, only the set's with one: such disks have no VM or
+// tag to go by.
+func (p Planner) Teardown(ctx context.Context, teams, hosts []string, set Set) (*Plan, error) {
 	plan, vms, err := p.simple(ctx, KindTeardown, teams, hosts, func(it *Item) {
 		it.Steps = []Step{StepStop, StepDelete}
 	})
-	if err != nil || len(hosts) > 0 {
-		return plan, err
+	if err != nil {
+		return nil, err
+	}
+	byVMID := map[int]proxmox.VM{}
+	for _, vm := range vms {
+		byVMID[vm.VMID] = vm
+	}
+	var items []Item
+	for _, it := range plan.Items {
+		vm := byVMID[it.VMID]
+		it.Sets = SetTags(vm.Tags)
+		it.Set, _ = it.Sets.Of()
+		if set != "" && it.Set != set {
+			plan.Kept = append(plan.Kept, KeptVM{Name: it.Name, Why: keptBySet(it.Sets)})
+			continue
+		}
+		items = append(items, it)
+	}
+	plan.Items = items
+	if len(hosts) > 0 {
+		return plan, nil
 	}
 	p.halfDeleted(plan, vms)
-	err = p.orphanedDisks(ctx, plan, vms, p.orphanCandidates(plan.Teams, vms), func(vmid int, node string) Item {
+	err = p.orphanedDisks(ctx, plan, vms, p.orphanCandidates(plan.Teams, vms, set), func(vmid int, node string) Item {
 		team, _ := p.Naming.TeamOfCloneVMID(vmid) // a candidate is a team's clone VMID
 		return Item{Team: team, Name: p.Naming.VMName(team, "disks-"+strconv.Itoa(vmid)), VMID: vmid, Node: node,
 			Steps: []Step{StepFreeDisks}}
@@ -641,9 +670,10 @@ func (p Planner) Teardown(ctx context.Context, teams, hosts []string) (*Plan, er
 	return plan, nil
 }
 
-// halfDeleted adds a blocked delete item for each clone VMID a failed
-// delete left locked as destroyed. Such a VM has lost its name, so
-// planning by name misses it, and only root can finish it (--skiplock).
+// halfDeleted adds a blocked delete item for each clone VMID in plan's pods
+// that a failed delete left locked as destroyed. Such a VM has lost its
+// name and tags, so planning by name or set misses it, and only root can
+// finish it (--skiplock).
 func (p Planner) halfDeleted(plan *Plan, vms []proxmox.VM) {
 	want := map[string]bool{}
 	for _, t := range plan.Teams {
@@ -744,16 +774,25 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 // orphanListings is how many storage listings run at once.
 const orphanListings = 8
 
-// orphanCandidates are the VMIDs teams' VMs get when cloned from current
-// templates (CloneVMID), where a gone VM's disks would be. Disks of VMs
-// whose template is gone aren't looked for.
-func (p Planner) orphanCandidates(teams []string, vms []proxmox.VM) []int {
+// orphanCandidates are the VMIDs teams' VMs get when cloned from templates
+// in template_vmid_base..template_vmid_base+99 (CloneVMID), only set's when
+// set is non-empty, where a gone VM's disks would be. Disks of VMs whose
+// template is gone or outside the template VMID range aren't looked for.
+func (p Planner) orphanCandidates(teams []string, vms []proxmox.VM, set Set) []int {
+	base := p.Cfg.Naming.TemplateVMIDBase
+	var templates []proxmox.VM
+	for _, vm := range vms {
+		if !vm.Template || !p.Naming.IsTemplateName(vm.Name) || vm.VMID < base || vm.VMID >= base+100 {
+			continue
+		}
+		if _, of := p.Naming.SplitMaster(vm.Name); set != "" && of != set {
+			continue
+		}
+		templates = append(templates, vm)
+	}
 	var out []int
 	for _, t := range teams {
-		for _, vm := range vms {
-			if !vm.Template || !p.Naming.IsTemplateName(vm.Name) {
-				continue
-			}
+		for _, vm := range templates {
 			if id := p.Naming.CloneVMID(t, vm.VMID); !slices.Contains(out, id) {
 				out = append(out, id)
 			}

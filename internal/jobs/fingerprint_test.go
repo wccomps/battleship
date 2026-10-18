@@ -17,7 +17,7 @@ var fingerprinted = map[string]map[string]bool{
 	"Plan": {
 		"Kind": true, "Teams": true, "Templates": true, "Items": true, "Config": true, "Locks": true,
 		"Notices": false, // what the plan leaves alone; a new one changes nothing it does
-		"Kept":    false, // the same, an environment teardown's
+		"Kept":    false, // the same, an environment's or a set's teardown
 		"Slot":    false, // in Locks
 	},
 	"TemplateSpec": {
@@ -35,6 +35,9 @@ var fingerprinted = map[string]map[string]bool{
 		"Source": true, "Pool": true, "Tags": true, "Notes": true, "NICs": true, "Guest": true, "Supersedes": true, "Details": true,
 		// Derived from Name or Snapshot, or where the VM runs.
 		"Team": false, "Host": false, "Node": false, "Baseline": false,
+		// A deploy's is its Template's set; a teardown's is for its review,
+		// and which VMs the set takes, Name and VMID already say.
+		"Set": false, "Sets": false,
 		// Says why Blocked is set, which Blocked already covers.
 		"Unpermitted": false,
 		// What the review shows as before; Notes is what the job writes.

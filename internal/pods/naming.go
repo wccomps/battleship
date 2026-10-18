@@ -15,8 +15,8 @@ func Expand(pattern, team, host string) string {
 	return strings.NewReplacer("{team}", team, "{host}", host).Replace(pattern)
 }
 
-// Hostname is the part of a master or template name before the first dot:
-// "teak.tango.delta.tpl" -> "teak".
+// Hostname is the part of an environment VM's name before the first dot:
+// "teak.kilo.alpha" -> "teak". A master's is SplitMaster's.
 func Hostname(name string) string {
 	host, _, _ := strings.Cut(name, ".")
 	return host

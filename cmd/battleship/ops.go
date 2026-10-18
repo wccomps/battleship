@@ -54,6 +54,8 @@ func parseOp(cmd string, args []string, stderr io.Writer) (c command, code int, 
 		fs.StringVar(&in.Pattern, "templates", "", "master VM name pattern, e.g. '*.kilo.alpha' (required)")
 		fs.BoolVar(&in.Rebuild, "rebuild", false, "recreate templates from masters")
 		fs.BoolVar(&in.NoSnapshot, "no-snapshot", false, "skip the baseline snapshot")
+	case "teardown":
+		fs.StringVar((*string)(&in.Set), "set", "", "the one template set to tear down, by name, e.g. kilo.alpha (default: every matching VM in the teams)")
 	case "reset":
 		fs.StringVar(&in.Snapshot, "snapshot", "", "snapshot to roll back to (default: each VM's baseline: deploy.snapshot_name, else the newest deploy.baseline_patterns match)")
 	case "power":
@@ -73,6 +75,8 @@ func parseOp(cmd string, args []string, stderr io.Writer) (c command, code int, 
 		fmt.Fprintf(stderr, "unexpected argument %q (put flags before any other words)\n", fs.Arg(0))
 		return c, 2, false
 	}
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
 	all := isAllTeams(*teamSpec)
 	if all && cmd == "deploy" {
 		fmt.Fprintln(stderr, "-teams all is for teardown, power, reset and snapshot; name the teams to deploy, e.g. 1-32")
@@ -86,16 +90,11 @@ func parseOp(cmd string, args []string, stderr io.Writer) (c command, code int, 
 	in.Hosts = jobs.SplitList(*hostSpec)
 	in.VMs = jobs.SplitList(*vmSpec)
 	in = web.Normalize(in)
-	hostsSet, vmsSet := false, false
-	fs.Visit(func(f *flag.Flag) {
-		hostsSet = hostsSet || f.Name == "hosts"
-		vmsSet = vmsSet || f.Name == "vms"
-	})
-	if hostsSet && len(in.Hosts) == 0 {
+	if given["hosts"] && len(in.Hosts) == 0 {
 		fmt.Fprintln(stderr, "-hosts is empty")
 		return c, 2, false
 	}
-	if vmsSet && len(in.VMs) == 0 {
+	if given["vms"] && len(in.VMs) == 0 {
 		fmt.Fprintln(stderr, "-vms is empty")
 		return c, 2, false
 	}
@@ -103,6 +102,16 @@ func parseOp(cmd string, args []string, stderr io.Writer) (c command, code int, 
 	case "deploy":
 		if in.Pattern == "" {
 			fmt.Fprintln(stderr, "-templates is required")
+			return c, 2, false
+		}
+	case "teardown":
+		_, err := pods.ParseSet(string(in.Set))
+		switch {
+		case err != nil:
+			fmt.Fprintf(stderr, "-set: %v\n", err)
+			return c, 2, false
+		case given["set"] && in.Set == "":
+			fmt.Fprintln(stderr, "-set is empty; leave it out to tear down every matching VM in the teams")
 			return c, 2, false
 		}
 	case "power":
@@ -178,6 +187,16 @@ func runPlanned(ctx context.Context, d deps, cmd, cfgPath string, in jobs.Inputs
 	}
 
 	printPlan(stdout, pods.NewNaming(cfg.Naming), plan)
+	if cmd == "teardown" {
+		what := "everything in the teams"
+		if len(in.Hosts) > 0 || len(in.VMs) > 0 {
+			what = "every matching VM in the teams"
+		}
+		if in.Set != "" {
+			what = "set " + clean(string(in.Set)) + " only, keeping every VM whose one set tag isn't " + clean(string(in.Set)) + "'s"
+		}
+		fmt.Fprintf(stdout, "\nTearing down %s.\n", what)
+	}
 	if pods.NeedsCapacity(plan) {
 		// Advice only: overcommit may be deliberate, so it never stops the plan.
 		if c, err := pods.ReadCapacity(ctx, api, plan, cfg); err != nil {

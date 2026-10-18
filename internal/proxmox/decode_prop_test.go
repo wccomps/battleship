@@ -96,7 +96,7 @@ func TestPropInt64Of(t *testing.T) {
 var jsonKeys = []string{"data", "result", "vmid", "name", "node", "status", "tags", "template", "lock", "pool", "maxmem", "maxdisk", "mem", "type", "id",
 	"storage", "shared", "online", "snaptime", "snapstate", "vmstate", "parent", "upid", "starttime", "endtime", "exitstatus", "pid", "exitcode", "exited",
 	"out-data", "err-data", "hardware-address", "ip-addresses", "ip-address", "prefix", "host-name", "volid", "ticket", "username", "CSRFPreventionToken",
-	"ip", "level", "x", ""}
+	"user-tag-access", "user-allow", "allowed-tags", "registered-tags", "ip", "level", "x", ""}
 
 // drawJSON draws JSON text of any shape, mostly objects and lists of the
 // keys above holding values of the wrong type, plus the occasional broken
@@ -156,6 +156,7 @@ func TestPropClientSurvivesAnyAnswer(t *testing.T) {
 		"VMIDHeld":         func(ctx context.Context) { c.VMIDHeld(ctx, 101) },
 		"Permissions":      func(ctx context.Context) { c.Permissions(ctx) },
 		"PermissionsAt":    func(ctx context.Context) { c.PermissionsAt(ctx, "/vms/101") },
+		"TagAccess":        func(ctx context.Context) { c.TagAccess(ctx) },
 		"NodeTasks":        func(ctx context.Context) { c.NodeTasks(ctx, "n1", time.Unix(0, 0)) },
 		"AgentInterfaces":  func(ctx context.Context) { c.AgentInterfaces(ctx, "n1", 101) },
 		"AgentHostname":    func(ctx context.Context) { c.AgentHostname(ctx, "n1", 101) },

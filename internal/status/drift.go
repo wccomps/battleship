@@ -78,7 +78,8 @@ func (r rules) grid(in inputs) (teams, hosts []string, rows []Row) {
 	if pattern := strings.TrimSpace(r.cfg.Web.Templates); pattern != "" {
 		masters, _, _ := pods.FindMasters(in.vms, r.naming, pattern, r.cfg.Deploy.MasterTag) // config.Validate checks the pattern
 		for _, m := range masters {
-			seen[pods.Hostname(m.Name)] = true
+			host, _ := r.naming.SplitMaster(m.Name)
+			seen[host] = true
 		}
 	}
 	for h := range seen {
@@ -105,6 +106,17 @@ func (r rules) cell(team, host string, vms []pods.NamedVM, in inputs) Cell {
 	}
 	vm := shownVMs(vms)[0]
 	c.Power, c.VMID, c.Node, c.Pool = vm.Status, vm.VMID, vm.Node, vm.Pool
+	if c.Sets = pods.SetTags(vm.Tags); c.Sets.Several() {
+		tags := make([]string, len(c.Sets))
+		for i, set := range c.Sets {
+			tags[i] = set.Tag()
+		}
+		reason := "has several set tags (" + strings.Join(tags, ", ") + "), so no teardown of one set takes it; remove all but its own in Proxmox"
+		if len(c.Sets) == 1 {
+			reason = "has an empty set tag (set-), so no teardown of one set takes it; remove it in Proxmox"
+		}
+		c.Drift = append(c.Drift, Drift{Kind: DriftSets, Reason: reason})
+	}
 
 	if want, wrong := vm.WrongPool(r.naming); wrong {
 		c.Drift = append(c.Drift, Drift{Kind: DriftPool, Reason: fmt.Sprintf("in pool %q, expected %q", vm.Pool, want)})

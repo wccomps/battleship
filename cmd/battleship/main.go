@@ -18,7 +18,7 @@
 // at once.
 //
 //	battleship deploy   -config battleship.toml -templates '*.kilo.alpha' -teams 1-32
-//	battleship teardown -config battleship.toml -teams 1-32 -yes
+//	battleship teardown -config battleship.toml -teams 1-32 -set kilo.alpha -yes
 //	battleship teardown -config battleship.toml -teams all -yes
 //	battleship reset    -config battleship.toml -teams 7 -hosts dc -yes
 //	battleship power    -config battleship.toml -teams 1-32 -action start -yes -queue
@@ -115,13 +115,14 @@ skips the question and applies the plan; with a database it runs as a job
 on a worker, and -queue exits without following it). -teams is required;
 for teardown, power, reset and snapshot, -teams all means every team that
 has VMs (e.g. 0-32 with a test team 00), worked out from the cluster and
-printed with the plan. Put flags before any other words. Run "battleship
-<command> -h" for flags. battleship serve runs the web app and job
-workers. battleship nodes lists the cluster's nodes and prints a
+printed with the plan. A teardown takes everything in its teams, or with
+-set one template set's VMs. Put flags before any other words. Run
+"battleship <command> -h" for flags. battleship serve runs the web app
+and job workers. battleship nodes lists the cluster's nodes and prints a
 proxmox.urls line.
 
   battleship deploy   -config battleship.toml -templates '*.kilo.alpha' -teams 1-32
-  battleship teardown -config battleship.toml -teams 1-32 -yes
+  battleship teardown -config battleship.toml -teams 1-32 -set kilo.alpha -yes
   battleship teardown -config battleship.toml -teams all -yes
   battleship reset    -config battleship.toml -teams 7 -hosts dc -yes
   battleship power    -config battleship.toml -teams 1-32 -action start -yes -queue

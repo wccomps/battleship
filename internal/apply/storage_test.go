@@ -441,7 +441,7 @@ func TestTeamVMDeletesAreNotSerialized(t *testing.T) {
 		f.Add(proxmox.VM{VMID: 10021 + 100*atoi(team), Name: "team" + team + "-teak", Node: "cedar"},
 			map[string]string{"name": "team" + team + "-teak"})
 	}
-	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01", "02"}, nil)
+	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01", "02"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,7 +646,7 @@ func TestTeardownPlansOrphanedDisks(t *testing.T) {
 	f.Vols["competitions:10221/vm-10221-disk-0.qcow2"] = 10221 // team 02's: not asked
 	f.Mu.Unlock()
 
-	again, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
+	again, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -654,7 +654,7 @@ func TestTeardownPlansOrphanedDisks(t *testing.T) {
 		!slices.Equal(again.Items[0].Steps, []pods.Step{pods.StepFreeDisks}) {
 		t.Fatalf("items = %+v, want one free-disks for VMID 10121's disks", again.Items)
 	}
-	if filtered, _ := testPlanner(f).Teardown(context.Background(), []string{"01"}, []string{"teak"}); len(filtered.Items) != 0 {
+	if filtered, _ := testPlanner(f).Teardown(context.Background(), []string{"01"}, []string{"teak"}, ""); len(filtered.Items) != 0 {
 		t.Errorf("host-filtered teardown planned %+v", filtered.Items)
 	}
 	res := testExecutor(f, &recorder{}).Run(context.Background(), again)
@@ -685,12 +685,12 @@ func orphanedSetup(t *testing.T) *podstest.Fake {
 func TestOrphanedDisksListingErrors(t *testing.T) {
 	f := orphanedSetup(t)
 	f.FailOn("content:competitions:10121", &proxmox.APIError{Status: 403, Message: "Permission check failed"})
-	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
+	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil, "")
 	if err != nil || len(plan.Items) != 1 {
 		t.Fatalf("after a 403 on one node: plan %+v, err %v; want the item from another node", plan, err)
 	}
 	f.FailOn("content:competitions:10121", &proxmox.APIError{Status: 500, Message: "storage timeout"})
-	if _, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil); err == nil {
+	if _, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil, ""); err == nil {
 		t.Error("a 500 listing the storage planned anyway")
 	}
 }
@@ -699,7 +699,7 @@ func TestOrphanedDisksListingErrors(t *testing.T) {
 // nor, when it appears after planning, the executor frees its disks.
 func TestOrphanedDisksOfAnUnseenVMAreKept(t *testing.T) {
 	f := orphanedSetup(t)
-	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
+	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil, "")
 	if err != nil || len(plan.Items) != 1 {
 		t.Fatalf("plan %+v, err %v", plan, err)
 	}
@@ -707,7 +707,7 @@ func TestOrphanedDisksOfAnUnseenVMAreKept(t *testing.T) {
 	f.Mu.Lock()
 	f.Unseen = map[int]bool{10121: true}
 	f.Mu.Unlock()
-	if again, _ := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil); len(again.Items) != 0 {
+	if again, _ := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil, ""); len(again.Items) != 0 {
 		t.Errorf("planned %+v for a held VMID", again.Items)
 	}
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
@@ -736,7 +736,7 @@ func TestOrphanedDisksListSharedStorageOnce(t *testing.T) {
 			res.Storage = append(res.Storage, proxmox.StorageResource{Storage: "competitions", Node: n, Shared: c.shared})
 		}
 		before := f.Called("content:competitions:10121")
-		plan, err := pods.NewPlanner(&resourceAPI{Fake: f, res: res}, config.Default()).Teardown(context.Background(), []string{"01"}, nil)
+		plan, err := pods.NewPlanner(&resourceAPI{Fake: f, res: res}, config.Default()).Teardown(context.Background(), []string{"01"}, nil, "")
 		if err != nil || len(plan.Items) != 1 {
 			t.Fatalf("shared %v: plan %+v, err %v", c.shared, plan, err)
 		}
@@ -751,7 +751,7 @@ func TestOrphanedDisksListSharedStorageOnce(t *testing.T) {
 func TestOrphanedDisksAskEachVMID(t *testing.T) {
 	f := orphanedSetup(t)
 	few := f.Called("content:competitions:")
-	if _, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil); err != nil {
+	if _, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if n := f.Called("content:competitions:0"); n != 0 {
@@ -765,7 +765,7 @@ func TestOrphanedDisksAskEachVMID(t *testing.T) {
 	for i := 1; i <= 50; i++ {
 		teams = append(teams, fmt.Sprintf("%02d", i))
 	}
-	plan, err := testPlanner(f).Teardown(context.Background(), teams, nil)
+	plan, err := testPlanner(f).Teardown(context.Background(), teams, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
