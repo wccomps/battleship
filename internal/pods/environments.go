@@ -193,20 +193,6 @@ func (e Environment) DNSAddress(choice string) (netip.Addr, error) {
 	return h.Addr, nil
 }
 
-// DNSChoices are what its DNS can be set to: DNSRouter, then each host
-// dnsHost accepts, by name.
-func (e Environment) DNSChoices() []string {
-	out := []string{DNSRouter}
-	for _, h := range e.Hosts {
-		if name := strings.TrimSuffix(h.Name, "."+e.Domain); name != h.Name {
-			if _, ok := e.dnsHost(name); ok {
-				out = append(out, name)
-			}
-		}
-	}
-	return out
-}
-
 func (e Environment) Host(name string) (EnvHost, bool) {
 	for _, h := range e.Hosts {
 		if h.Name == name {

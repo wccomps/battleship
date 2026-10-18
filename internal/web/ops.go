@@ -76,8 +76,6 @@ var operations = []operation{
 		Section: sectionEnvironments, Doing: "Creating an environment", Done: "Ready", Machines: true, review: envReview, home: envHome},
 	{Kind: pods.KindEnvAdd, Path: "/environments/{domain}/add", Title: "Add hosts", Verb: "Add hosts to", Icon: "deploy", Noun: "new hosts",
 		Section: sectionEnvironments, Doing: "Adding hosts", Done: "Ready", Machines: true, review: envReview, home: envHome},
-	{Kind: pods.KindEnvDNS, Path: "/environments/{domain}/dns", Title: "Set DNS", Verb: "Set DNS for", Icon: "reset", Noun: "DNS change",
-		Section: sectionEnvironments, Doing: "Setting DNS", review: dnsReview, home: envHome, prefill: dnsPrefill},
 	{Kind: pods.KindEnvTeardown, Path: "/environments/{domain}/teardown", Title: "Tear down", Verb: "Tear down", Icon: "teardown", Noun: "teardown",
 		Section: sectionEnvironments, Doing: "Tearing down an environment", Done: "Deleted", Formless: true,
 		review: teardownReview, home: envHome, back: (operation).listPage},
@@ -174,7 +172,6 @@ const (
 	fieldSlot        = "slot"      // env-create, env-teardown: the slot's two digits
 	fieldRouter      = "router"    // name=family
 	fieldEnvHosts    = "env_hosts" // one name=family[:octet] per line
-	fieldDNS         = "dns"
 	fieldVMID        = "vmid"
 	fieldFamily      = "family"
 	fieldImageKind   = "image_kind"
@@ -212,7 +209,6 @@ const (
 func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 	if kind.Teamless() {
 		in := jobs.Inputs{Kind: kind, Domain: strings.TrimSpace(form.Get(fieldDomain)), Router: strings.TrimSpace(form.Get(fieldRouter)),
-			DNS: strings.TrimSpace(form.Get(fieldDNS)),
 			ImageRequest: pods.ImageRequest{
 				Family:    strings.TrimSpace(form.Get(fieldFamily)),
 				ImageKind: strings.TrimSpace(form.Get(fieldImageKind)),
@@ -294,7 +290,7 @@ func inputFields(in jobs.Inputs) []field {
 	if in.Kind.Teamless() {
 		var fs []field
 		for _, f := range []field{{fieldDomain, in.Domain}, {fieldSlot, in.Slot}, {fieldVMs, strings.Join(in.VMs, ",")}, {fieldRouter, in.Router}, {fieldEnvHosts, strings.Join(in.EnvHosts, "\n")},
-			{fieldDNS, in.DNS}, {fieldFamily, in.Family}, {fieldImageKind, in.ImageKind}, {fieldImage, in.Image}} {
+			{fieldFamily, in.Family}, {fieldImageKind, in.ImageKind}, {fieldImage, in.Image}} {
 			if f.Value != "" {
 				fs = append(fs, f)
 			}

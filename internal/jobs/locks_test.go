@@ -37,8 +37,8 @@ func clash(a, b *pods.Plan) bool {
 }
 
 // Jobs that touch the same VM serialize, whatever their kinds: a deploy
-// copying an environment host waits for Set DNS on it, and an environment
-// built from an image waits for that image's delete.
+// copying an environment host waits for tearing down that environment, and an
+// environment built from an image waits for that image's delete.
 func TestJobsTouchingOneVMShareALock(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
@@ -47,12 +47,12 @@ func TestJobsTouchingOneVMShareALock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dns, err := p.EnvDNS(ctx, pods.EnvRequest{Domain: "kilo.alpha", DNS: "teak"})
+	teardown, err := p.EnvTeardown(ctx, pods.EnvRequest{Domain: "kilo.alpha"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !clash(deploy, dns) {
-		t.Errorf("deploy of teak %v and Set DNS %v share no lock", writeKeys(deploy), writeKeys(dns))
+	if !clash(deploy, teardown) {
+		t.Errorf("deploy of teak %v and teardown %v share no lock", writeKeys(deploy), writeKeys(teardown))
 	}
 	del, err := p.ImageDelete(ctx, pods.ImageRequest{Image: "debian-12-v1"})
 	if err != nil {

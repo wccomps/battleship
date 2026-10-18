@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/netip"
 	"slices"
 	"sort"
 	"strconv"
@@ -39,7 +38,6 @@ const (
 	KindImageDetails   Kind = "image-details"
 	KindEnvCreate      Kind = "env-create"
 	KindEnvAdd         Kind = "env-add"
-	KindEnvDNS         Kind = "env-dns"
 	KindEnvTeardown    Kind = "env-teardown"
 )
 
@@ -47,7 +45,7 @@ const (
 var Kinds = []Kind{
 	KindDeploy, KindTeardown, KindReset, KindPower, KindSnapshot,
 	KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete, KindImageDetails,
-	KindEnvCreate, KindEnvAdd, KindEnvDNS, KindEnvTeardown,
+	KindEnvCreate, KindEnvAdd, KindEnvTeardown,
 }
 
 type subject uint8
@@ -93,7 +91,6 @@ var specs = map[Kind]spec{
 
 	KindEnvCreate:   {subject: subjectNewEnvironment, offer: []string{"VM.Clone"}, config: envConfigHash, retry: retryNarrowed},
 	KindEnvAdd:      {subject: subjectEnvironment, offer: []string{"VM.Clone"}, config: envConfigHash, retry: retryNarrowed},
-	KindEnvDNS:      {subject: subjectEnvironment, offer: []string{"VM.GuestAgent.Unrestricted"}, config: envConfigHash},
 	KindEnvTeardown: {subject: subjectEnvironment, offer: []string{"VM.Allocate"}, config: teardownConfigHash, tearsDown: true, retry: retryWhole},
 }
 
@@ -254,19 +251,9 @@ type Item struct {
 	Guest      *Guest            `json:"guest,omitempty"`
 	Supersedes *Source           `json:"supersedes,omitempty"`
 	Details    *ImageNotes       `json:"details,omitempty"`
-	// DNSWas is a Set DNS item's DNS server before the job, for its review.
-	DNSWas *DNSServer `json:"dns_was,omitempty"`
 	// DetailsWas is an Edit notes's notes as it read them, for its review
 	// and fingerprint.
 	DetailsWas *NotesRead `json:"details_was,omitempty"`
-}
-
-// DNSServer is a DNS choice as a host's notes record it (a host name, or
-// DNSRouter) and its address; Addr is the zero Addr when the choice names
-// no host that can serve DNS.
-type DNSServer struct {
-	Choice string     `json:"choice"`
-	Addr   netip.Addr `json:"addr,omitzero"`
 }
 
 // Plan is what an operation will do: the templates a deploy needs and one

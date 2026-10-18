@@ -111,10 +111,10 @@ func TestEnvTeardownRefusals(t *testing.T) {
 		lacks(t, path, rec.Body.String(), "/confirm")
 	}
 	if rec := h.get(&sess, "/environments/Not%20A%20Domain/teardown"); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/environments" ||
-		flashOf(rec) != "Add hosts, Set DNS and Tear down start from an environment: pick one below." {
+		flashOf(rec) != "Add hosts and Tear down start from an environment: pick one below." {
 		t.Errorf("a path naming no domain = %d %s %q", rec.Code, rec.Header().Get("Location"), flashOf(rec))
 	}
-	// Add hosts and Set DNS once named the domain in a field; a teardown
+	// Add hosts once named the domain in a field; a teardown
 	// never did, so no such address leads to one.
 	if rec := h.get(&sess, "/environments/teardown?domain=kilo.alpha"); rec.Code != http.StatusNotFound {
 		t.Errorf("GET /environments/teardown?domain= = %d, want 404", rec.Code)

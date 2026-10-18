@@ -176,20 +176,18 @@ func TestEnvironmentsPageLacksPrivileges(t *testing.T) {
 	lacks(t, "as a lead", h.get(&lead, "/environments").Body.String(), "disabled", "which you don&#39;t have")
 }
 
-// Add hosts and Set DNS live at their environment's path, which fixes the
-// domain whatever the form posts; no or an unknown environment goes back
-// to Environments, saying why, and a path that can't name one does so
+// Add hosts lives at its environment's path, which fixes the domain
+// whatever the form posts; no or an unknown environment goes back to
+// Environments, saying why, and a path that can't name one does so
 // without reading the cluster.
 func TestEnvironmentRoutes(t *testing.T) {
 	h := newHarness(t)
 	addImages(h)
 	addEnv(h, true)
 	sess := h.login(asLead)
-	for _, sub := range []string{"add", "dns"} {
-		if rec := h.get(&sess, "/environments/kilo.alpha/"+sub); rec.Code != http.StatusOK ||
-			!strings.Contains(rec.Body.String(), `action="/environments/kilo.alpha/`+sub+`/preview"`) {
-			t.Errorf("GET %s = %d", sub, rec.Code)
-		}
+	if rec := h.get(&sess, "/environments/kilo.alpha/add"); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `action="/environments/kilo.alpha/add/preview"`) {
+		t.Errorf("GET add = %d", rec.Code)
 	}
 	goesBack := func(rec *httptest.ResponseRecorder, what, flash string) {
 		t.Helper()
@@ -198,12 +196,12 @@ func TestEnvironmentRoutes(t *testing.T) {
 		}
 	}
 	gone := "There's no environment kilo.bravo. It may have been torn down or renamed; pick one below."
-	pick := "Add hosts, Set DNS and Tear down start from an environment: pick one below."
+	pick := "Add hosts and Tear down start from an environment: pick one below."
 	goesBack(h.get(&sess, "/environments/kilo.bravo/add"), "an unknown environment", gone)
-	goesBack(h.post(&sess, "/environments/kilo.bravo/dns/preview", url.Values{"dns": {"router"}}), "an unknown environment's preview", gone)
+	goesBack(h.post(&sess, "/environments/kilo.bravo/add/preview", url.Values{"env_hosts": {"oak=debian-12"}}), "an unknown environment's preview", gone)
 	before, _, _ := h.api.readCounts()
 	goesBack(h.get(&sess, "/environments/Kilo.Alpha/add"), "a path that isn't a domain", pick)
-	goesBack(h.post(&sess, "/environments/x/dns/preview", nil), "a preview at a path that isn't a domain", pick)
+	goesBack(h.post(&sess, "/environments/x/add/preview", nil), "a preview at a path that isn't a domain", pick)
 	if after, _, _ := h.api.readCounts(); after != before {
 		t.Errorf("the cluster was read for paths that aren't domains")
 	}
@@ -231,10 +229,9 @@ func TestOldEnvironmentAddresses(t *testing.T) {
 	for from, to := range map[string]string{
 		"/environments/add?domain=kilo.alpha":                    "/environments/kilo.alpha/add",
 		"/environments/add?domain=kilo.alpha&router=gw%3Dgw":     "/environments/kilo.alpha/add?router=gw%3Dgw",
-		"/environments/dns?domain=kilo.alpha&dns=teak":           "/environments/kilo.alpha/dns?dns=teak",
-		"/environments/dns?domain=kilo.bravo":                    "/environments/kilo.bravo/dns",
+		"/environments/add?domain=kilo.bravo":                    "/environments/kilo.bravo/add",
 		"/environments/add":                                      "/environments",
-		"/environments/dns?domain=%3Cscript%3E":                  "/environments",
+		"/environments/add?domain=%3Cscript%3E":                  "/environments",
 		"/environments/add?domain=kilo.alpha%2F..%2F..%2Fdeploy": "/environments",
 	} {
 		rec := h.get(&sess, from)
@@ -247,16 +244,16 @@ func TestOldEnvironmentAddresses(t *testing.T) {
 		if rec.Code != http.StatusTemporaryRedirect || rec.Header().Get("Location") != "/environments/kilo.alpha/add/"+step {
 			t.Errorf("POST %s = %d to %q", step, rec.Code, rec.Header().Get("Location"))
 		}
-		if rec := h.post(&sess, "/environments/dns/"+step, url.Values{"dns": {"router"}}); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/environments" {
-			t.Errorf("POST dns %s without a domain = %d to %q", step, rec.Code, rec.Header().Get("Location"))
+		if rec := h.post(&sess, "/environments/add/"+step, url.Values{"env_hosts": {"oak=debian-12"}}); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/environments" {
+			t.Errorf("POST add %s without a domain = %d to %q", step, rec.Code, rec.Header().Get("Location"))
 		}
 	}
 }
 
-// Every way out of Add hosts and Set DNS goes back to the environment's
-// block: the form's close and Cancel, the preview's close and Back, and
-// the job's; Change, and a failed job's Start again, go to the form at its
-// path, filled in; the confirm posts to its path.
+// Every way out of Add hosts goes back to the environment's block: the
+// form's close and Cancel, the preview's close and Back, and the job's;
+// Change, and a failed job's Start again, go to the form at its path,
+// filled in; the confirm posts to its path.
 func TestEnvironmentBackTargets(t *testing.T) {
 	h := newHarness(t)
 	addImages(h)
@@ -268,7 +265,6 @@ func TestEnvironmentBackTargets(t *testing.T) {
 		edit string
 	}{
 		{"add", url.Values{"env_hosts": {"oak=debian-12"}}, "/environments/kilo.alpha/add?env_hosts=oak%3Ddebian-12"},
-		{"dns", url.Values{"dns": {"router"}}, "/environments/kilo.alpha/dns?dns=router"},
 	} {
 		form := h.get(&sess, "/environments/kilo.alpha/"+c.sub).Body.String()
 		contains(t, c.sub+" form", form, `<a class="btn ghost sq" href="/environments#kilo.alpha" data-close aria-label="Close">`,
@@ -307,15 +303,14 @@ func TestPropEnvironmentPath(t *testing.T) {
 		if seg == "" || seg == "." || seg == ".." {
 			return // the path would be /environments/add, or above it
 		}
-		sub := rapid.SampledFrom([]string{"add", "dns"}).Draw(t, "sub")
 		before, _, _ := h.api.readCounts()
-		rec := h.get(&sess, "/environments/"+url.PathEscape(seg)+"/"+sub)
+		rec := h.get(&sess, "/environments/"+url.PathEscape(seg)+"/add")
 		after, _, _ := h.api.readCounts()
 		valid := pods.CheckDomain(seg) == nil
 		switch {
 		case !valid && after != before:
 			t.Fatalf("%q isn't a domain, but the cluster was read for it", seg)
-		case seg == "kilo.alpha" && (rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `action="/environments/kilo.alpha/`+sub+`/preview"`)):
+		case seg == "kilo.alpha" && (rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `action="/environments/kilo.alpha/add/preview"`)):
 			t.Fatalf("kilo.alpha = %d", rec.Code)
 		case strings.Contains(seg, "/") && rec.Code == http.StatusNotFound:
 			// An escaped slash the mux may not route.

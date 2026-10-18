@@ -25,10 +25,8 @@ type reviewView struct {
 	// table has those columns.
 	Rows        []reviewRow
 	Image, Addr bool
-	Set         bool // a teardown of everything: each VM's set
-	// DNS are a Set DNS's hosts, their DNS server now and after.
-	DNS  []dnsRow
-	Note string // a line after the rows
+	Set         bool   // a teardown of everything: each VM's set
+	Note        string // a line after the rows
 	// Kept are VMs a teardown leaves alone, each with why.
 	Kept []string
 	// Retry says which job this retries, and what of it.
@@ -70,14 +68,6 @@ type reviewRow struct {
 	Picked  bool
 	Where   string
 	Blocked string
-}
-
-// dnsRow is a host whose DNS a Set DNS changes: the last octets of its DNS
-// server now and after (Itself if that is its own address).
-type dnsRow struct {
-	Host, Now, After string
-	Itself           bool
-	Blocked          string
 }
 
 // kindUses says what each base-image kind is offered as.
@@ -354,56 +344,6 @@ func podTeardownReview(op operation, in jobs.Inputs, plan *pods.Plan, _ config.L
 	}
 	r.Say = strings.Join(append(say, diskSay...), " ")
 	return r
-}
-
-// dnsReview describes a Set DNS: each Windows and Linux host's DNS server
-// before (Item.DNSWas) and after. The others only record the choice.
-func dnsReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
-	r := &reviewView{Verb: op.Verb, Subject: in.Domain}
-	var changes []string
-	var target netip.Addr
-	router := false
-	for _, it := range plan.Items {
-		router = router || slices.Contains(pods.Tags(it.Tags), pods.ImageRouter)
-		if it.Guest == nil {
-			continue
-		}
-		row := dnsRow{Host: it.Host, Now: dnsWas(it.DNSWas, lan), After: lanOctet(lan, it.Guest.DNS),
-			Itself: it.Guest.DNS == it.Guest.IP, Blocked: it.Blocked}
-		r.DNS = append(r.DNS, row)
-		target = it.Guest.DNS
-		if it.Blocked == "" {
-			changes = append(changes, it.Host)
-		}
-	}
-	at := "the router (." + strconv.Itoa(pods.GatewayOctet) + ")"
-	if choice := strings.TrimSpace(in.DNS); choice != "" && choice != pods.DNSRouter {
-		at = choice + " (" + lanOctet(lan, target) + ")"
-	}
-	switch {
-	case len(changes) > 0:
-		r.Say = "Points " + andList(changes) + " at " + at + " through the guest agent."
-	case len(r.DNS) > 0:
-		r.Say = "No host's DNS changes now: each one is blocked. Confirming records " + at + " as the choice."
-	default:
-		r.Say = "No host here is a Windows or Linux host with an address, so no DNS changes. Confirming records " + at + " as the choice."
-	}
-	if router {
-		r.Say += " The router keeps its own settings."
-	}
-	return r
-}
-
-// dnsWas is a host's DNS server before a Set DNS: its address (lanOctet),
-// or the host it names if that has none.
-func dnsWas(was *pods.DNSServer, lan config.LAN) string {
-	switch {
-	case was == nil:
-		return ""
-	case !was.Addr.IsValid():
-		return was.Choice
-	}
-	return lanOctet(lan, was.Addr)
 }
 
 // lanOctet is ".N" for a, host N of lan, else a written out.

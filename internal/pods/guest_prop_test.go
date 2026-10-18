@@ -153,14 +153,9 @@ func checkGuest(t interface {
 	q := func(v string) string { return "'" + v + "'" }
 	winMAC, linMAC := q(strings.ToUpper(strings.ReplaceAll(mac, ":", "-"))), q(strings.ToLower(mac))
 	var want string
-	switch {
-	case g.DNSOnly && g.OS == ImageWindows:
-		want = fmt.Sprintf(windowsDNSScript, winMAC, q(dns), q(g.Domain))
-	case g.DNSOnly:
-		want = "MAC=" + linMAC + "\nDNS=" + q(dns) + "\nDOMAIN=" + q(g.Domain) + "\n" + linuxFindIface + linuxDNSScript
-	case g.OS == ImageWindows:
+	if g.OS == ImageWindows {
 		want = fmt.Sprintf(windowsScript, winMAC, q(ip), g.Prefix, q(gw), q(dns), q(g.Domain), q(g.Hostname), RebootMarker)
-	default:
+	} else {
 		want = "MAC=" + linMAC + "\nIP=" + q(ip) + "\nPREFIX=" + strconv.Itoa(g.Prefix) + "\nGW=" + q(gw) +
 			"\nDNS=" + q(dns) + "\nHOST=" + q(g.Hostname) + "\nDOMAIN=" + q(g.Domain) + "\n" + linuxFindIface + linuxScript
 	}
@@ -230,7 +225,6 @@ func TestPropGuestScriptsAreInjectionFree(t *testing.T) {
 			Hostname: guestValue(t, "hostname", bad("hostname"), "teak", "dc", "web-1", "a", strings.Repeat("z", 63)),
 			Domain:   guestValue(t, "domain", bad("domain"), "kilo.alpha", "a.b", "x-1.y.z"),
 			Prefix:   rapid.IntRange(1, 32).Draw(t, "prefix"),
-			DNSOnly:  rapid.Bool().Draw(t, "dns only"),
 		}
 		g, ok := storedGuest(t, g, guestValue(t, "ip", bad("ip"), "192.168.100.10", "10.0.0.5", "0.0.0.0"),
 			guestValue(t, "gateway", bad("gateway"), "192.168.100.2"), guestValue(t, "dns", bad("dns"), "192.168.100.2", "255.255.255.255"))

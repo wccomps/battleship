@@ -106,7 +106,7 @@ type deps struct {
 const usage = `usage: battleship <deploy|teardown|reset|power|snapshot> [flags]
        battleship jobs <list|show ID|cancel ID> [flags]
        battleship image <register|edit|deprecate|delete> [flags]
-       battleship env <create|add|dns|teardown> [flags]
+       battleship env <create|add|teardown> [flags]
        battleship serve [flags]
        battleship nodes [flags]
 

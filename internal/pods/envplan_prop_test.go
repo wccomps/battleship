@@ -3,9 +3,7 @@ package pods
 import (
 	"context"
 	"fmt"
-	"maps"
 	"net/netip"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -136,7 +134,7 @@ func checkEnvPlan(t interface{ Fatalf(string, ...any) }, plan *Plan, subnet stri
 		if _, err := GuestScript(g, "BC:24:11:00:21:01"); err != nil {
 			t.Fatalf("%s: %v", it.Name, err)
 		}
-		if g.OS == ImageWindows && !g.DNSOnly && len(g.Hostname) > MaxWindowsHostname {
+		if g.OS == ImageWindows && len(g.Hostname) > MaxWindowsHostname {
 			t.Fatalf("%s: renames Windows to %q", it.Name, g.Hostname)
 		}
 		if !inSubnet(AddrText(g.IP), subnet) {
@@ -156,35 +154,6 @@ func slotFake(name, notes string) *podstest.Fake {
 	f.Add(proxmox.VM{VMID: 2101, Name: name, Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "running"},
 		map[string]string{"net0": "virtio=BC:24:11:00:21:02,bridge=devint01", "description": notes})
 	return f
-}
-
-// Hostile notes or names on a well-formed host of a slot give an env-dns
-// guest that is blocked or passes every check; valid ones give a guest.
-func TestEnvDNSHostileNotes(t *testing.T) {
-	const subnet = "192.168.100"
-	valid := map[string]string{"ip": "192.168.100.10", "os": ImageLinux, "dns": "router"}
-	for _, key := range []string{"ip", "os", "dns"} {
-		for _, v := range append(slices.Clone(noteValues), "192.168.100.255", "192.168.100.3", " 192.168.100.10", "192.168.100.10 os=windows") {
-			fields := maps.Clone(valid)
-			fields[key] = v
-			notes := fmt.Sprintf("battleship: ip=%s os=%s base=debian-12-v1 dns=%s", fields["ip"], fields["os"], fields["dns"])
-			plan, err := NewPlanner(slotFake("teak.kilo.alpha", notes), envConfig()).EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha", DNS: DNSRouter})
-			if err != nil {
-				t.Fatalf("%s=%q: %v", key, v, err)
-			}
-			checkEnvPlan(t, plan, subnet)
-		}
-	}
-	for _, host := range []string{"teak", "Oak", "a'b", "x$(id)", "te\u0430k", "averyveryverylongname"} {
-		plan, err := NewPlanner(slotFake(host+".kilo.alpha", "battleship: ip=192.168.100.10 os=windows base=win2022-v1 dns=router"), envConfig()).
-			EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha", DNS: DNSRouter})
-		if err != nil {
-			t.Fatalf("%s: %v", host, err)
-		}
-		if n := checkEnvPlan(t, plan, subnet); host == "teak" && n != 1 {
-			t.Errorf("teak with valid notes: %d guests, want 1", n)
-		}
-	}
 }
 
 // However slot VMs are named, tagged and noted, every guest an environment
@@ -228,16 +197,13 @@ func TestPropEnvPlansConfigureOnlyCheckedGuests(t *testing.T) {
 			}
 			specs = append(specs, h)
 		}
-		dns := rapid.SampledFrom([]string{"", DNSRouter, "teak", "oak", "dc"}).Draw(t, "dns")
 		var plan *Plan
 		var err error
-		switch op := rapid.SampledFrom([]string{"create", "add", "dns"}).Draw(t, "op"); op {
+		switch op := rapid.SampledFrom([]string{"create", "add"}).Draw(t, "op"); op {
 		case "create":
 			plan, err = p.EnvCreate(context.Background(), EnvRequest{Domain: "new.env", Router: HostSpec{Host: "gw", Family: "gw"}, Hosts: specs})
 		case "add":
 			plan, err = p.EnvAdd(context.Background(), EnvRequest{Domain: "kilo.alpha", Hosts: specs})
-		case "dns":
-			plan, err = p.EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha", DNS: dns})
 		}
 		if err != nil {
 			return

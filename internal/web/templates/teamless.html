@@ -82,18 +82,6 @@
 </details>
 {{- end}}
 {{- end}}
-{{- if eq .Op.Kind "env-dns"}}{{with .DNSCards}}
-<fieldset class="field">
-<legend>DNS server for every host</legend>
-<div class="choices">
-{{- range .}}
-<label class="choice"><input type="radio" name="dns" value="{{.Value}}" required{{if .Checked}} checked{{end}}><span class="nm">{{if .Router}}Router{{with .Name}} · {{.}}{{end}}{{else}}{{.Name}}{{end}}</span>{{if .Current}}<span class="chip">current</span>{{end}}<span class="meta">{{.Addr}}{{with .Image}} · {{.}}{{end}}</span></label>
-{{- end}}
-</div>
-{{- with $.Data.StaleDNS}}<span class="hint">It was {{.}}, which is no longer one: choose another.</span>{{end}}
-</fieldset>
-<p class="hint">{{$.Data.DNSHint}}</p>
-{{- end}}{{end}}
 {{- if eq .Op.Kind "image-register"}}
 <div class="field">
 <label class="lbl" for="vmid">VM to copy in <span class="muted">· VMID</span></label>

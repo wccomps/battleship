@@ -91,7 +91,6 @@ func TestImageFormsPrefill(t *testing.T) {
 	for path, want := range map[string]string{
 		"/images/deprecate?image=debian-12-v1": `value="debian-12-v1"`,
 		"/images/edit?family=debian-12":        `value="debian-12"`,
-		"/environments/kilo.alpha/dns":         `action="/environments/kilo.alpha/dns/preview"`,
 		"/images/register":                     `name="vmid"`,
 	} {
 		rec := h.get(&sess, path)
@@ -134,7 +133,6 @@ func TestBrowserCatalogPages(t *testing.T) {
 				{"/environments/new", "env-new"},
 				{"/images/register", "image-register"},
 				{"/environments/kilo.alpha/add", "env-add"},
-				{"/environments/kilo.alpha/dns", "env-dns"},
 			} {
 				b.open(page.path)
 				b.noSideways(page.name)
@@ -312,7 +310,7 @@ func TestNavMarksTheSection(t *testing.T) {
 		_, _, body := h.preview(&sess, path, form)
 		return body
 	}
-	envJob := h.submitJob(jobs.Inputs{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"}, byLead)
+	envJob := h.submitJob(jobs.Inputs{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"oak=debian-12"}}, byLead)
 	imageJob := h.submitJob(jobs.Inputs{Kind: pods.KindImageEdit, ImageRequest: pods.ImageRequest{Family: "gw"}}, byLead)
 	teamJob := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Action: "start"}, byLead)
 	for _, c := range []struct {
@@ -321,8 +319,7 @@ func TestNavMarksTheSection(t *testing.T) {
 	}{
 		{"Create", h.get(&sess, "/environments/new").Body.String(), []string{envsPath}},
 		{"Add hosts", h.get(&sess, "/environments/kilo.alpha/add").Body.String(), []string{envsPath}},
-		{"Set DNS", h.get(&sess, "/environments/kilo.alpha/dns").Body.String(), []string{envsPath}},
-		{"Set DNS's review", review("/environments/kilo.alpha/dns", url.Values{"dns": {"router"}}), []string{envsPath}},
+		{"Add hosts's review", review("/environments/kilo.alpha/add", url.Values{"env_hosts": {"oak=debian-12"}}), []string{envsPath}},
 		{"Tear down's review", h.get(&sess, "/environments/kilo.alpha/teardown").Body.String(), []string{envsPath}},
 		{"an environment job", h.get(&sess, "/logs/"+itoa(envJob)).Body.String(), []string{envsPath}},
 		{"Register", h.get(&sess, "/images/register?vmid=152&family=elm").Body.String(), []string{"/images"}},

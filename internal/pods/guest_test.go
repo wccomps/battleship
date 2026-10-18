@@ -40,11 +40,9 @@ func golden(t *testing.T, name, got string) {
 }
 
 func TestLinuxGuestScript(t *testing.T) {
-	for name, dnsOnly := range map[string]bool{"linux.sh": false, "linux-dns.sh": true} {
-		g := testGuest
-		g.OS, g.DNSOnly = ImageLinux, dnsOnly
-		linuxGuestScript(t, name, g)
-	}
+	g := testGuest
+	g.OS = ImageLinux
+	linuxGuestScript(t, "linux.sh", g)
 }
 
 func linuxGuestScript(t *testing.T, name string, g Guest) {
@@ -66,11 +64,9 @@ func linuxGuestScript(t *testing.T, name string, g Guest) {
 }
 
 func TestWindowsGuestScript(t *testing.T) {
-	for name, dnsOnly := range map[string]bool{"windows.ps1": false, "windows-dns.ps1": true} {
-		g := testGuest
-		g.OS, g.DNSOnly = ImageWindows, dnsOnly
-		windowsGuestScript(t, name, g)
-	}
+	g := testGuest
+	g.OS = ImageWindows
+	windowsGuestScript(t, "windows.ps1", g)
 }
 
 func windowsGuestScript(t *testing.T, name string, g Guest) {
@@ -138,28 +134,6 @@ func TestStoredGuestRefusesUnsafeAddresses(t *testing.T) {
 			if err := json.Unmarshal(b, &g); err == nil {
 				t.Errorf("%s %q read as %+v", field, v, g)
 			}
-		}
-	}
-}
-
-// Set DNS runs on configured hosts: its scripts must not touch the address,
-// routes, other network files or the host name.
-func TestDNSOnlyScriptsLeaveTheRestAlone(t *testing.T) {
-	for _, os := range []string{ImageLinux, ImageWindows} {
-		g := testGuest
-		g.OS, g.DNSOnly = os, true
-		script, err := GuestScript(g, "bc:24:11:00:00:01")
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, bad := range []string{g.IP.String(), "Remove-Net", "New-Net", "Rename-Computer", "Dhcp", "battleship-off", "ifdown", "ifup",
-			"ipv4.addresses", "ipv4.method", "hostname", "cloud.cfg.d", "addresses: [$IP"} {
-			if strings.Contains(script, bad) {
-				t.Errorf("%s DNS-only script contains %q", os, bad)
-			}
-		}
-		if !strings.Contains(script, g.DNS.String()) || !strings.Contains(script, g.Domain) {
-			t.Errorf("%s DNS-only script lacks the server or domain", os)
 		}
 	}
 }
