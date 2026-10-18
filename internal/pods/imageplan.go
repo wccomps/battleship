@@ -17,10 +17,13 @@ type ImageRequest struct {
 	Family string // register, edit
 	Kind   string // register a new family; a new version keeps its family's
 	Image  string // deprecate, delete: e.g. debian-12-v1
-	// Details are what Edit details writes, and what register writes: nil
+	// Details are what Edit notes writes, and what register writes: nil
 	// is those of its source's notes (see RegisterDetails), and empty is
 	// none, the copy keeping its source's notes as they are.
 	Details *ImageDetails
+	// Notes is the free text Edit notes writes beside the details
+	// (WithFreeNotes); nil keeps the free text there is.
+	Notes *string
 }
 
 // agentEnabled reads a VM's agent option ("1", "enabled=1,…", "1,fstrim…").
@@ -261,9 +264,10 @@ func (p Planner) ImageDelete(ctx context.Context, req ImageRequest) (*Plan, erro
 		Locks: []string{"family:" + im.Family}}, nil
 }
 
-// ImageSetDetails plans writing details into the notes of a family's newest
-// version, the one new hosts are made from. Older versions keep theirs:
-// each is its own build, and hosts already made from them.
+// ImageSetDetails plans Edit notes: writing details, and free text if
+// asked, into the notes of a family's newest version, the one new hosts are
+// made from. Older versions keep theirs: each is its own build, and hosts
+// already made from them.
 func (p Planner) ImageSetDetails(ctx context.Context, req ImageRequest) (*Plan, error) {
 	if req.Details == nil {
 		return nil, fmt.Errorf("name the details to write")
@@ -271,6 +275,11 @@ func (p Planner) ImageSetDetails(ctx context.Context, req ImageRequest) (*Plan, 
 	d := *req.Details
 	if err := CheckDetails(d); err != nil {
 		return nil, err
+	}
+	if req.Notes != nil {
+		if err := CheckFreeNotes(*req.Notes); err != nil {
+			return nil, err
+		}
 	}
 	vms, err := p.API.ClusterVMs(ctx)
 	if err != nil {
@@ -284,11 +293,25 @@ func (p Planner) ImageSetDetails(ctx context.Context, req ImageRequest) (*Plan, 
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", newest.Name, err)
 	}
-	was, _, err := ParseDetails(cfg["description"])
+	desc := cfg["description"]
+	was, free, err := EditableNotes(desc)
+	unreadable := err != nil
+	if unreadable {
+		free = userText(desc) // all of it is replaced
+	}
 	it := Item{Name: newest.Name, VMID: newest.VMID, Node: newest.Node, Steps: []Step{StepDetails}, Details: &d,
-		DetailsWas: &DetailsWas{Details: was, Unreadable: err != nil}}
-	if err == nil && was == d {
-		it.Blocked = "the details of " + newest.Name + " are already these"
+		DetailsWas: &DetailsWas{Details: was, Unreadable: unreadable, Notes: free}}
+	after := free
+	if req.Notes != nil {
+		n := *req.Notes
+		it.FreeNotes, after = &n, n
+	}
+	ch, _ := DetailsChanges(cfg, d, it.FreeNotes) // checked above
+	switch {
+	case !unreadable && was == d && free == after:
+		it.Blocked = "the notes of " + newest.Name + " already say this"
+	case len(ch["description"]) > MaxNotesBytes:
+		it.Blocked = fmt.Sprintf("the notes of %s would be %d bytes; Proxmox keeps at most %d", newest.Name, len(ch["description"]), MaxNotesBytes)
 	}
 	return &Plan{Kind: KindImageDetails, Config: ConfigHash(KindImageDetails, p.Cfg), Items: []Item{it},
 		Locks: []string{"family:" + req.Family}}, nil

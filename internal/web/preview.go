@@ -278,7 +278,7 @@ func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
 		case pods.KindImageDelete:
 			return "Delete " + runnable[0].Name
 		case pods.KindImageDetails:
-			return "Save details of " + runnable[0].Name
+			return "Save notes of " + runnable[0].Name
 		}
 	}
 	vms := countVMs(n)

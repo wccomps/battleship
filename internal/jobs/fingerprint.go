@@ -32,6 +32,7 @@ func Fingerprint(plan *pods.Plan) string {
 		Guest      *pods.Guest        `json:",omitempty"`
 		Supersedes *fpSource          `json:",omitempty"`
 		Details    *pods.ImageDetails `json:",omitempty"`
+		FreeNotes  *string            `json:",omitempty"`
 	}
 	type fpTemplate struct {
 		Name           string
@@ -79,7 +80,7 @@ func Fingerprint(plan *pods.Plan) string {
 			VMState:     it.VMState,
 
 			Source: sourceFP(it.Source), Pool: it.Pool, Tags: it.Tags, Notes: it.Notes,
-			NICs: it.NICs, Guest: it.Guest, Supersedes: sourceFP(it.Supersedes), Details: it.Details,
+			NICs: it.NICs, Guest: it.Guest, Supersedes: sourceFP(it.Supersedes), Details: it.Details, FreeNotes: it.FreeNotes,
 		})
 	}
 	b, _ := json.Marshal(fp) // plain structs of strings, ints and bools can't fail

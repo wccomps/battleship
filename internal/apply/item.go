@@ -182,8 +182,13 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		if err := pods.CheckDetails(*it.Details); err != nil {
 			return false, err
 		}
+		if it.FreeNotes != nil {
+			if err := pods.CheckFreeNotes(*it.FreeNotes); err != nil {
+				return false, err
+			}
+		}
 		return e.applyConfig(ctx, it, false, func(cur map[string]string) map[string]string {
-			ch, _ := pods.DetailsChanges(cur, *it.Details) // checked: it can't refuse them
+			ch, _ := pods.DetailsChanges(cur, *it.Details, it.FreeNotes) // checked: it can't refuse them
 			return ch
 		})
 	case pods.StepConvert:

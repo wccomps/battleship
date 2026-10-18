@@ -504,9 +504,11 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .pw code{font-weight:600;overflow-wrap:anywhere;user-select:all}
 .pw .btn.sm{min-height:22px;padding:0 7px}
 .dunread{margin:0 0 6px}
-.dedit{margin-top:10px}
-.dedit form{display:grid;gap:12px;margin-top:10px}
-.dedit form .btn{justify-self:start}
+.sech .btn.sm{align-self:center}
+textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:vertical}
+.nchg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}
+.nchg .notes{margin-top:4px}
+.tbl.fams td.act{width:1%;white-space:nowrap;position:relative;z-index:1} /* above the row's link */
 .dfields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}
 .dfields .wide{grid-column:1/-1}
 .dfields .field{gap:4px}
@@ -564,8 +566,10 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
   .tbl.fams tr.kg th{display:block;padding:0}
   .tbl.fams td{display:block;padding:0;border:0}
   .tbl.fams td.cur{grid-column:2;grid-row:1;text-align:right}
-  .tbl.fams td.nl{grid-column:1/-1}
   .tbl.fams td.chev{display:none}
+  .tbl.fams td.nl{grid-column:1;grid-row:2}
+  .tbl.fams td.act{grid-column:2;grid-row:2;justify-self:end;align-self:start;width:auto}
+  .nchg{grid-template-columns:minmax(0,1fr)}
   .envh .acts{width:100%;margin-left:0}
   .envh .acts .btn{flex:1}
   .envt thead,.rvw thead,.jobt thead,.jobt .c-vmid{display:none}

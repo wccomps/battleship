@@ -72,8 +72,8 @@ var operations = []operation{
 		Section: sectionImages, Doing: "Deprecating"},
 	{Kind: pods.KindImageDelete, Path: "/images/delete", Title: "Delete base image", Icon: "teardown", Noun: "deletion",
 		Section: sectionImages, Doing: "Deleting", Done: "Deleted"},
-	{Kind: pods.KindImageDetails, Path: "/images/details", Title: "Edit details", Icon: "edit", Noun: "details change",
-		Section: sectionImages, Doing: "Editing details", Done: "Saved"},
+	{Kind: pods.KindImageDetails, Path: "/images/details", Title: "Edit notes", Icon: "edit", Noun: "notes change",
+		Section: sectionImages, Doing: "Editing notes", Done: "Saved"},
 }
 
 // nav is the nav entry its pages mark current: its section, or else its
@@ -173,6 +173,7 @@ const (
 	fieldGeneralized = "detail_generalized"
 	fieldInstalled   = "detail_installed"
 	fieldLicence     = "detail_licence"
+	fieldNotes       = "notes" // Edit notes's free text; posted even when empty
 	fromGridValue    = "grid"
 	yes              = "yes"
 )
@@ -212,6 +213,10 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 				Built: form.Get(fieldBuilt), Generalized: form.Get(fieldGeneralized), Installed: form.Get(fieldInstalled),
 				Licence: form.Get(fieldLicence)}.Trimmed()
 			in.Details = &d
+		}
+		if form.Has(fieldNotes) {
+			n := pods.CleanFreeNotes(form.Get(fieldNotes))
+			in.Notes = &n
 		}
 		return in
 	}
@@ -263,7 +268,11 @@ func inputFields(in jobs.Inputs) []field {
 		if in.VMID != 0 {
 			fs = append(fs, field{fieldVMID, strconv.Itoa(in.VMID)})
 		}
-		return append(fs, detailsFields(in.Details)...)
+		fs = append(fs, detailsFields(in.Details)...)
+		if in.Notes != nil {
+			fs = append(fs, field{fieldNotes, *in.Notes})
+		}
+		return fs
 	}
 	fs := []field{{fieldTeams, in.Teams}}
 	if len(in.Hosts) > 0 {
@@ -329,7 +338,7 @@ func detailsFields(d *pods.ImageDetails) []field {
 
 // formQuery is an operation's form URL prefilled with in, for "change" links.
 // A deploy's baseline box is always written, since the form ticks it when the
-// query is silent. Details are left out, and the form fills them in afresh. An environment's form has its domain in the path; without
+// query is silent. Details and notes are left out, and the form fills them in afresh. An environment's form has its domain in the path; without
 // a valid one, it is the Environments page.
 func formQuery(op operation, in jobs.Inputs) string {
 	if op.Kind.OnEnvironment() && op.domain == "" {
@@ -339,7 +348,7 @@ func formQuery(op operation, in jobs.Inputs) string {
 		op = op.at(in.Domain)
 	}
 	q := url.Values{}
-	in.Details = nil // a password stays out of addresses: the form reads them again
+	in.Details, in.Notes = nil, nil // a password stays out of addresses, and long text: the form reads them again
 	for _, f := range inputFields(in) {
 		if f.Name != fieldDomain || !op.Kind.OnEnvironment() {
 			q.Set(f.Name, f.Value)

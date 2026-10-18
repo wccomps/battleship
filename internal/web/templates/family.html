@@ -12,19 +12,14 @@
 {{- end}}
 </dl>
 <div class="sec">
-<h2 class="sub">Details</h2>
+<div class="sech"><h2 class="sub">Details</h2>
+{{- if .Current}}<span class="sp"></span>
+{{- if .MayNotes}}<a class="btn sm" href="{{notesHref .Family}}" data-panel-link>{{icon "edit"}}Edit</a>
+{{- else}}<button class="btn sm" type="button" disabled>{{icon "edit"}}Edit</button>{{end}}
+{{- end}}</div>
+{{- with .NotesLack}}<p class="lock">{{icon "lock"}}{{.}}</p>{{end}}
 {{- with details .Details .Unreadable}}{{template "details" .}}{{else}}
 <p class="meta">None yet.</p>
-{{- end}}
-{{- with .Current}}
-<details class="dedit">
-<summary class="disc">Edit details</summary>
-<form method="post" action="/images/details/preview">{{template "csrf" $csrf}}<input type="hidden" name="family" value="{{$d.Family}}">
-{{template "details-fields" $d.Details}}
-<p class="hint">Written into the notes of <code>{{.Name}}</code>, which new hosts copy. Older versions keep theirs.</p>
-<button class="btn" type="submit"{{if not $d.MayDetails}} disabled{{end}}>Review details</button>
-</form>
-</details>
 {{- end}}
 </div>
 {{- with .Notes}}

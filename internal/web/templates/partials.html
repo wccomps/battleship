@@ -114,6 +114,15 @@
 </table>
 </div>
 {{- end}}
+{{- with .NotesChange}}
+<div class="sec">
+<div class="sech"><h2 class="sub">Notes</h2>{{if .Changed}}<span class="chip">changed</span>{{else}}<span class="meta">unchanged</span>{{end}}</div>
+<div class="nchg">
+<div><div class="meta">Before</div>{{with .Before}}<div class="notes box">{{.}}</div>{{else}}<p class="meta">None.</p>{{end}}</div>
+<div><div class="meta">After</div>{{with .After}}<div class="notes box">{{.}}</div>{{else}}<p class="meta">None{{if .Before}}: removed{{end}}.</p>{{end}}</div>
+</div>
+</div>
+{{- end}}
 {{- with .Notes}}
 <div class="sec"><h2 class="sub">Notes</h2><div class="notes box">{{.}}</div></div>
 {{- end}}

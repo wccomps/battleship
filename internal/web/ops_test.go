@@ -765,6 +765,7 @@ func TestInputFieldsRoundTrip(t *testing.T) {
 			}
 			q.Set(fieldDomain, strings.Split(link.Path, "/")[2])
 		}
+		in.Notes = nil // long text stays out of links: the form reads it again
 		if got := formInputs(kind, q); !reflect.DeepEqual(got, in) {
 			t.Fatalf("%s: formInputs(formQuery(%#v)) = %#v", kind, in, got)
 		}
