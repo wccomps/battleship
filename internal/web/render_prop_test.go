@@ -180,7 +180,7 @@ func notesPageData(t *rapid.T, page string) any {
 	case "teamless":
 		p := drawHostile[catalogPage](t, "teamless")
 		p.Op, _ = operationFor(pods.KindImageDetails)
-		p.Edit = &notesEdit{Image: hostileText("image"), Was: pods.DetailsWas{Unreadable: rapid.Bool().Draw(t, "unreadable"), Block: hostileText("block")}}
+		p.Edit = &notesEdit{Image: hostileText("image"), Was: pods.NotesRead{Unreadable: rapid.Bool().Draw(t, "unreadable"), Block: hostileText("block")}}
 		if rapid.Bool().Draw(t, "nothing to edit") {
 			p.Edit.Err = hostileText("err")
 		}
@@ -191,7 +191,7 @@ func notesPageData(t *rapid.T, page string) any {
 		p := drawHostile[previewPage](t, "preview")
 		p.Op, _ = operationFor(pods.KindImageDetails)
 		p.Review = &reviewView{Verb: "Edit notes of", Subject: hostileText("subject"), Block: hostileText("block"), DetailsSay: hostileText("say"),
-			NotesChange: &notesChange{Before: hostileText("before"), After: hostileText("after"), Changed: rapid.Bool().Draw(t, "changed")}}
+			NotesChange: &notesChange{Before: hostileText("before"), After: hostileText("after")}}
 		return p
 	case "job":
 		v := drawHostile[jobView](t, "job")

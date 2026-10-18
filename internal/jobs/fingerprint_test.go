@@ -38,9 +38,9 @@ var fingerprinted = map[string]map[string]bool{
 		// Says why Blocked is set, which Blocked already covers.
 		"Unpermitted": false,
 		// What the review shows as before; Notes is what the job writes.
-		// An Edit notes writing free text fingerprints DetailsWas, all of
-		// which it replaces (TestFingerprintCoversNotesReplaced).
-		"DNSWas": false, "DetailsWas": false,
+		"DNSWas": false,
+		// The notes an Edit notes writes over (TestFingerprintCoversNotesReplaced).
+		"DetailsWas": true,
 	},
 	"Source": {
 		"VMID": true, "Node": true, "Name": true,

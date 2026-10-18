@@ -90,7 +90,7 @@ func (s *Server) registerDetails(ctx context.Context, vmid int) pods.ImageDetail
 // fields over notes it never read.
 type notesEdit struct {
 	Image string
-	Was   pods.DetailsWas
+	Was   pods.NotesRead
 	Err   string
 }
 
@@ -109,8 +109,7 @@ func (s *Server) notesForm(ctx context.Context, op operation, in jobs.Inputs, pr
 		p.Edit.Err = "Couldn't read the notes to edit: " + sentence(proxmox.Describe(err))
 		return p
 	}
-	free := at.Was.Notes
-	p.Edit.Was, p.Details = at.Was, pods.ImageNotes{ImageDetails: at.Was.Details, Free: &free}
+	p.Edit.Was, p.Details = at.Read, at.Read.Edit()
 	if d := in.Details; d != nil {
 		p.Details.ImageDetails = d.ImageDetails
 		if d.Free != nil {

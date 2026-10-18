@@ -358,7 +358,7 @@ func TestEditNotesJob(t *testing.T) {
 		{winDetails, "ok\n  **Details**"},
 		{winDetails, "bell\x07here"},
 		{winDetails, "bidi \u202eevil"},
-		{winDetails, "zero\u200bwidth"},
+		{winDetails, "isolate \u2066evil"},
 		{winDetails, strings.Repeat("é", pods.MaxFreeNotes+1)},
 	} {
 		rec := h.post(&sess, "/images/details/preview", notesForm("win2022", bad.d, bad.notes))

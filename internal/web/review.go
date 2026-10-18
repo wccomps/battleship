@@ -160,16 +160,13 @@ func registerReview(op operation, in jobs.Inputs, it pods.Item) *reviewView {
 	return r
 }
 
-// notesChange is an Edit notes's free text before and after.
-type notesChange struct {
-	Before, After string
-	Changed       bool
-}
+// notesChange is the free text an Edit notes changes, before and after.
+type notesChange struct{ Before, After string }
 
 // detailsReview describes an Edit notes: each detail before and after,
 // then the free text if the job writes it.
 func detailsReview(it pods.Item) *reviewView {
-	var was pods.DetailsWas
+	var was pods.NotesRead
 	if it.DetailsWas != nil {
 		was = *it.DetailsWas
 	}
@@ -190,7 +187,7 @@ func detailsReview(it pods.Item) *reviewView {
 		r.DetailsSay, r.Block = "Its details block is unreadable: these replace it.", was.Block
 	}
 	if after.Free != nil {
-		r.NotesChange = &notesChange{Before: was.Notes, After: *after.Free, Changed: was.Notes != *after.Free}
+		r.NotesChange = &notesChange{Before: was.Free, After: *after.Free}
 	}
 	return r
 }

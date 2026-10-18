@@ -132,7 +132,7 @@ func TestCheckDetails(t *testing.T) {
 		"line separator":  {OS: "a\u2028b"},
 		"zero width":      {OS: "a\u200bb"},
 		"bidi override":   {Licence: "a\u202eb"},
-		"nbsp":            {OS: "a b"},
+		"nbsp":            {OS: "a\u00a0b"},
 		"invalid utf-8":   {OS: "\xff"},
 		"untrimmed":       {OS: " a"},
 		"too long":        {Installed: strings.Repeat("é", MaxDetail+1)},
@@ -179,7 +179,7 @@ func TestRegisterDetails(t *testing.T) {
 func detailValue(t *rapid.T, label string) string {
 	piece := rapid.OneOf(
 		rapid.SampledFrom([]string{"\n", "\r\n", "- ", "battleship: ip=10.50.0.1", "\nbattleship: base=x-v1", detailsHeader, "\n" + detailsHeader + "\n",
-			" / ", "/", ":", " ", "\t", "\u2028", "\u200b", "\u202e", " ", "\xff", "Template-Password-1", "Debian 12", "- OS: x"}),
+			" / ", "/", ":", " ", "\t", "\u2028", "\u200b", "\u202e", "\u00a0", "\xff", "Template-Password-1", "Debian 12", "- OS: x"}),
 		rapid.StringMatching(`[A-Za-z0-9 ./:-]{0,10}`),
 		rapid.String(),
 	)
@@ -317,7 +317,7 @@ func TestImageSetDetails(t *testing.T) {
 
 // writeDetails is Apply of details alone.
 func writeDetails(desc string, d ImageDetails) (string, error) {
-	return ImageNotes{ImageDetails: d}.Apply(desc)
+	return ImageNotes{ImageDetails: d}.apply(desc)
 }
 
 // notesLines counts desc's battleship lines.

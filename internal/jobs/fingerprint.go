@@ -32,9 +32,9 @@ func Fingerprint(plan *pods.Plan) string {
 		Guest      *pods.Guest       `json:",omitempty"`
 		Supersedes *fpSource         `json:",omitempty"`
 		Details    *pods.ImageNotes  `json:",omitempty"`
-		// Replaces is the notes an Edit notes writing free text replaces:
+		// Replaces is the notes an Edit notes replaces, as pods reads them:
 		// changed since the preview, the job is stale, not a lost update.
-		Replaces *pods.DetailsWas `json:",omitempty"`
+		Replaces *pods.NotesRead `json:",omitempty"`
 	}
 	type fpTemplate struct {
 		Name           string
@@ -69,10 +69,6 @@ func Fingerprint(plan *pods.Plan) string {
 		})
 	}
 	for _, it := range plan.Items {
-		var replaces *pods.DetailsWas
-		if it.Details != nil && it.Details.Free != nil {
-			replaces = it.DetailsWas
-		}
 		fp.Items = append(fp.Items, fpItem{
 			Name:     it.Name,
 			VMID:     it.VMID,
@@ -86,7 +82,7 @@ func Fingerprint(plan *pods.Plan) string {
 			VMState:     it.VMState,
 
 			Source: sourceFP(it.Source), Pool: it.Pool, Tags: it.Tags, Notes: it.Notes,
-			NICs: it.NICs, Guest: it.Guest, Supersedes: sourceFP(it.Supersedes), Details: it.Details, Replaces: replaces,
+			NICs: it.NICs, Guest: it.Guest, Supersedes: sourceFP(it.Supersedes), Details: it.Details, Replaces: it.DetailsWas,
 		})
 	}
 	b, _ := json.Marshal(fp) // plain structs of strings, ints and bools can't fail

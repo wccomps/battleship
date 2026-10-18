@@ -153,7 +153,7 @@ func userText(desc string) string {
 	desc = strings.ReplaceAll(dropFormat(desc), "\x00", "\ufffd")
 	var keep []string
 	for _, line := range strings.Split(desc, "\n") {
-		if !strings.HasPrefix(strings.TrimSpace(line), notesPrefix) {
+		if !isNotesLine(line) {
 			keep = append(keep, strings.TrimRight(line, " \t\r"))
 		}
 	}

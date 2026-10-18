@@ -84,7 +84,7 @@ const (
 	StepLabel     Step = "label"              // set tags and the notes line
 	StepConvert   Step = "convert"            // make the VM a template
 	StepRetire    Step = "deprecate-previous" // tag the version this one replaces deprecated
-	StepDetails   Step = "details"            // write the details, and free text if asked, into the notes (ImageNotes.Apply)
+	StepDetails   Step = "details"            // write the details, and free text if asked, into the notes (ImageNotes.Changes)
 	StepWaitAgent Step = "wait-agent"
 	StepGuest     Step = "configure-guest"
 	StepVerify    Step = "verify"
@@ -198,19 +198,9 @@ type Item struct {
 	Details    *ImageNotes       `json:"details,omitempty"`
 	// DNSWas is a Set DNS item's DNS server before the job, for its review.
 	DNSWas *DNSServer `json:"dns_was,omitempty"`
-	// DetailsWas is an image's details and free text before an Edit
-	// notes, for its review.
-	DetailsWas *DetailsWas `json:"details_was,omitempty"`
-}
-
-// DetailsWas is an image's notes as Edit notes reads them (EditStart):
-// the details and the free text; when the details block is unreadable, no
-// details, Unreadable, and the block's lines in Block.
-type DetailsWas struct {
-	Details    ImageDetails `json:"details"`
-	Unreadable bool         `json:"unreadable,omitempty"`
-	Notes      string       `json:"notes,omitempty"`
-	Block      string       `json:"block,omitempty"`
+	// DetailsWas is an Edit notes's notes as it read them, for its review
+	// and fingerprint.
+	DetailsWas *NotesRead `json:"details_was,omitempty"`
 }
 
 // DNSServer is a DNS choice as a host's notes record it (a host name, or

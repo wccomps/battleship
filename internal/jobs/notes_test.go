@@ -11,8 +11,11 @@ import (
 	"github.com/wccomps/battleship/internal/store/storetest"
 )
 
-// Register and Edit details jobs stored before free text keep their
-// inputs and fingerprints: these were taken from the code before it.
+// Register jobs stored before free text keep their inputs and
+// fingerprints, taken from the code before it. An Edit details job's
+// fingerprint now covers the notes it replaces, so one queued when this
+// deploys goes stale once: a safe failure, where the old fingerprint let
+// it write over a newer change.
 func TestDetailsJobsKeepTheirFingerprints(t *testing.T) {
 	d := pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: "Debian 12", User: "debian", Password: "pw", Built: "2026-10-01",
 		Generalized: "cloud-init clean", Installed: "agent", Licence: "free"}}
@@ -20,12 +23,12 @@ func TestDetailsJobsKeepTheirFingerprints(t *testing.T) {
 		Steps: []pods.Step{pods.StepClone, pods.StepLabel, pods.StepDetails}, Details: &d, Notes: &pods.Notes{Source: "150"}}},
 		Locks: []string{"family:debian-12"}}
 	edit := &pods.Plan{Kind: pods.KindImageDetails, Items: []pods.Item{{Name: "debian-12-v1", VMID: 8001, Steps: []pods.Step{pods.StepDetails},
-		Details: &pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: "Debian 12"}}, DetailsWas: &pods.DetailsWas{Details: d.ImageDetails}}},
+		Details: &pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: "Debian 12"}}, DetailsWas: &pods.NotesRead{Details: d.ImageDetails}}},
 		Locks: []string{"family:debian-12"}}
 	if got := Fingerprint(reg); got != "5cacaa78573740281622ba6d3bdf54cb1e7d13529165496e3acf2db4a91e4ef5" {
 		t.Errorf("register fingerprint = %s", got)
 	}
-	if got := Fingerprint(edit); got != "ac841120574a0d6a2a7148b0f9296fc5b02e2c2f4b1634ffcff84179969db156" {
+	if got := Fingerprint(edit); got != "f01b723236d3c65918788ddfdf8a21e758b8f687f70a567844b5fc9cb27183eb" {
 		t.Errorf("Edit details fingerprint = %s", got)
 	}
 	in, _ := json.Marshal(Inputs{Kind: pods.KindImageDetails, Family: "debian-12", Details: &d})
@@ -111,6 +114,66 @@ func TestWorkerStalesNotesChangedSincePreview(t *testing.T) {
 	f.Mu.Unlock()
 	newWorker(st, f).runJob(bg, claim(t, st))
 	if j := job(t, st, id); j.Status != store.StatusStale || !strings.Contains(j.Error, "no longer matches the preview") {
+		t.Errorf("job = %s: %s, want stale", j.Status, j.Error)
+	}
+	if got := f.VMs[8001].Config["description"]; got != edited {
+		t.Errorf("notes = %q, want the edit in Proxmox kept", got)
+	}
+}
+
+// Two Edit notes that each change only details, from the same notes: the
+// one that runs second ends stale rather than write the first's change
+// back, whichever runs first.
+func TestWorkerStalesDetailsOnlyEditsOverEachOther(t *testing.T) {
+	alice := editNotes("Debian 12.1", "Patched.")
+	bob := editNotes("Debian 12", "Patched.")
+	bob.Details.User = "debian"
+	for _, order := range [][2]Inputs{{alice, bob}, {bob, alice}} {
+		st := storetest.New(t)
+		f := notesFamily(notesBefore)
+		first, second := submit(t, st, f, order[0]), submit(t, st, f, order[1])
+		w := newWorker(st, f)
+		w.runJob(bg, claim(t, st))
+		w.runJob(bg, claim(t, st))
+		if j := job(t, st, first); j.Status != store.StatusSucceeded {
+			t.Fatalf("first job = %s: %s", j.Status, j.Error)
+		}
+		if j := job(t, st, second); j.Status != store.StatusStale {
+			t.Errorf("second job = %s: %s, want stale", j.Status, j.Error)
+		}
+		d := order[0].Details.ImageDetails
+		if got, want := f.VMs[8001].Config["description"], "**Details**\n"+strings.Join(detailLines(d), "\n")+"\n\nPatched.\nbattleship: source=150"; got != want {
+			t.Errorf("notes = %q, want the first job's %q", got, want)
+		}
+	}
+}
+
+// detailLines are d's lines in a details block.
+func detailLines(d pods.ImageDetails) []string {
+	var out []string
+	for _, k := range pods.DetailKeys {
+		if v := d.Value(k); v != "" {
+			out = append(out, "- "+k+": "+v)
+		}
+	}
+	return out
+}
+
+// A details-only Edit notes whose notes change in Proxmox between its
+// preview and its run ends stale, the change kept.
+func TestWorkerStalesDetailsOnlyEditChangedInProxmox(t *testing.T) {
+	const start = "**Details**\n- OS: Debian 12\n- Login: root\n\nPatched.\nbattleship: source=150"
+	st := storetest.New(t)
+	f := notesFamily(start)
+	alice := editNotes("Debian 13", "Patched.")
+	alice.Details.User = "root"
+	id := submit(t, st, f, alice)
+	edited := "**Details**\n- OS: Debian 12\n- Login: admin\n\nPatched.\nbattleship: source=150"
+	f.Mu.Lock()
+	f.VMs[8001].Config["description"] = edited
+	f.Mu.Unlock()
+	newWorker(st, f).runJob(bg, claim(t, st))
+	if j := job(t, st, id); j.Status != store.StatusStale {
 		t.Errorf("job = %s: %s, want stale", j.Status, j.Error)
 	}
 	if got := f.VMs[8001].Config["description"]; got != edited {

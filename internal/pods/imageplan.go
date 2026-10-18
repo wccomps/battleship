@@ -81,7 +81,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		return nil, err
 	}
 	if req.Details != nil {
-		if err := req.Details.Check(); err != nil {
+		if err := req.Details.check(); err != nil {
 			return nil, err
 		}
 	}
@@ -263,12 +263,11 @@ func (p Planner) ImageDelete(ctx context.Context, req ImageRequest) (*Plan, erro
 }
 
 // NotesEdit is what Edit notes on a family works on: the family's newest
-// version, the one new hosts are made from, its notes as they are, and
-// what editing them starts from.
+// version, the one new hosts are made from, and its notes as read.
 type NotesEdit struct {
 	Image BaseImage
-	Desc  string
-	Was   DetailsWas
+	Read  NotesRead
+	desc  string
 }
 
 // NotesToEdit reads what Edit notes on family starts from.
@@ -285,15 +284,13 @@ func (p Planner) NotesToEdit(ctx context.Context, family string) (NotesEdit, err
 	if err != nil {
 		return NotesEdit{Image: newest}, fmt.Errorf("reading %s: %w", newest.Name, err)
 	}
-	return NotesEdit{Image: newest, Desc: cfg["description"], Was: EditStart(cfg["description"])}, nil
+	return NotesEdit{Image: newest, Read: readImageNotes(cfg["description"]), desc: cfg["description"]}, nil
 }
 
 // ImageSetDetails plans Edit notes: writing details, and free text if
 // asked, into the notes of a family's newest version (NotesToEdit). Older
 // versions keep theirs: each is its own build, and hosts already made from
-// them. Free text that is, once cleaned, the text editing starts from is
-// kept as it is, so a form sent back unchanged writes nothing there, even
-// text checkFreeNotes would refuse.
+// them.
 func (p Planner) ImageSetDetails(ctx context.Context, req ImageRequest) (*Plan, error) {
 	if req.Details == nil {
 		return nil, fmt.Errorf("name the details to write")
@@ -302,18 +299,15 @@ func (p Planner) ImageSetDetails(ctx context.Context, req ImageRequest) (*Plan, 
 	if err != nil {
 		return nil, err
 	}
-	n, was := *req.Details, at.Was
-	if n.Free != nil && CleanFreeNotes(*n.Free) == CleanFreeNotes(was.Notes) {
-		n.Free = nil
-	}
-	_, err = n.Apply(at.Desc)
+	n, same := req.Details.against(at.Read)
+	_, err = n.apply(at.desc)
 	var long notesTooLong
 	if err != nil && !errors.As(err, &long) {
 		return nil, err
 	}
-	it := Item{Name: at.Image.Name, VMID: at.Image.VMID, Node: at.Image.Node, Steps: []Step{StepDetails}, Details: &n, DetailsWas: &was}
+	it := Item{Name: at.Image.Name, VMID: at.Image.VMID, Node: at.Image.Node, Steps: []Step{StepDetails}, Details: &n, DetailsWas: &at.Read}
 	switch {
-	case !was.Unreadable && was.Details == n.ImageDetails && (n.Free == nil || *n.Free == was.Notes):
+	case same:
 		it.Blocked = "the notes of " + at.Image.Name + " already say this"
 	case err != nil:
 		it.Blocked = "the notes of " + at.Image.Name + " " + err.Error()

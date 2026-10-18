@@ -12,7 +12,7 @@ import (
 
 // ImageDetails are a base image's build facts. Proxmox keeps no key/value
 // data on a VM, so they live in its notes as a block Battleship writes
-// (ImageNotes.Apply) and reads (ParseDetails), a Markdown list that also reads
+// (ImageNotes.Changes) and reads (ParseDetails), a Markdown list that also reads
 // cleanly in Proxmox's notes panel:
 //
 //	**Details**
@@ -221,6 +221,23 @@ func parseBlock(lines []string) (ImageDetails, error) {
 	return d, nil
 }
 
+// splitNotes is desc's lines, the ranges of its details blocks, and the
+// details they hold: none without a block, and ErrDetailsUnreadable unless
+// there is one block, as Battleship writes it.
+func splitNotes(desc string) (lines []string, bs [][2]int, d ImageDetails, err error) {
+	lines = strings.Split(desc, "\n")
+	bs = blocks(lines)
+	switch len(bs) {
+	case 0:
+		return lines, bs, ImageDetails{}, nil
+	case 1:
+		if d, err = parseBlock(lines[bs[0][0]+1 : bs[0][1]]); err == nil {
+			return lines, bs, d, nil
+		}
+	}
+	return lines, bs, ImageDetails{}, ErrDetailsUnreadable
+}
+
 // ParseDetails reads desc's details block and the free text around it,
 // which is its user notes (UserNotes) less the block. Notes without a block
 // have empty details. A block that isn't as Battleship writes it (two of
@@ -228,17 +245,11 @@ func parseBlock(lines []string) (ImageDetails, error) {
 // ErrDetailsUnreadable and free is all of the user notes, block included,
 // for a page to show as they are.
 func ParseDetails(desc string) (d ImageDetails, free string, err error) {
-	lines := strings.Split(desc, "\n")
-	bs := blocks(lines)
-	switch len(bs) {
-	case 0:
-		return ImageDetails{}, UserNotes(desc), nil
-	case 1:
-		if d, err = parseBlock(lines[bs[0][0]+1 : bs[0][1]]); err == nil {
-			return d, UserNotes(strings.Join(without(lines, bs), "\n")), nil
-		}
+	lines, bs, d, err := splitNotes(desc)
+	if err != nil {
+		return ImageDetails{}, UserNotes(desc), err
 	}
-	return ImageDetails{}, UserNotes(desc), ErrDetailsUnreadable
+	return d, UserNotes(strings.Join(without(lines, bs), "\n")), nil
 }
 
 // without is lines less the ranges bs, each with the blank line after it,
@@ -260,7 +271,7 @@ func without(lines []string, bs [][2]int) []string {
 // of the first block (any others, such as a hand-made second one, are
 // taken out), else put first, before the notes people wrote; empty
 // details take the block out. Every other line stays exactly as it was.
-// CheckDetails lets no value end the block or add a line of its own.
+// d must pass CheckDetails (apply checks it), so no value ends the block.
 func withDetails(desc string, d ImageDetails) string {
 	lines := strings.Split(desc, "\n")
 	bs := blocks(lines)
@@ -304,9 +315,9 @@ type ImageNotes struct {
 	Free *string `json:"free,omitempty"`
 }
 
-// Check checks n before it is written: its details (CheckDetails), and its
+// check checks n before it is written: its details (CheckDetails), and its
 // free text if any (checkFreeNotes).
-func (n ImageNotes) Check() error {
+func (n ImageNotes) check() error {
 	err := CheckDetails(n.ImageDetails)
 	if err == nil && n.Free != nil {
 		err = checkFreeNotes(*n.Free)
@@ -314,13 +325,10 @@ func (n ImageNotes) Check() error {
 	return err
 }
 
-// Apply is notes desc with n written into them: with free text, rewritten
-// as n's block, the text, then desc's battleship lines as they were
-// (withFreeNotes); without, only the block set (withDetails). It refuses n
-// when Check does, and notes longer than maxNotesBytes (notesTooLong),
-// returning desc.
-func (n ImageNotes) Apply(desc string) (string, error) {
-	if err := n.Check(); err != nil {
+// apply is notes desc with n written into them, or desc and why n is
+// refused (check, notesTooLong).
+func (n ImageNotes) apply(desc string) (string, error) {
+	if err := n.check(); err != nil {
 		return desc, err
 	}
 	var out string
@@ -336,13 +344,57 @@ func (n ImageNotes) Apply(desc string) (string, error) {
 }
 
 // Changes is the config change that gives a VM whose config is cur notes
-// n (Apply); nil if there is none.
+// n; nil if there is none.
 func (n ImageNotes) Changes(cur map[string]string) (map[string]string, error) {
-	desc, err := n.Apply(cur["description"])
+	desc, err := n.apply(cur["description"])
 	if err != nil || desc == cur["description"] {
 		return nil, err
 	}
 	return map[string]string{"description": desc}, nil
+}
+
+// against is n as Edit notes writes it over notes read as r: free text
+// that is r's once cleaned is kept as it is (Free nil), so a form sent
+// back unchanged writes nothing there, even text checkFreeNotes would
+// refuse. same says n writes nothing r doesn't already say.
+func (n ImageNotes) against(r NotesRead) (_ ImageNotes, same bool) {
+	if n.Free != nil && CleanFreeNotes(*n.Free) == r.Free {
+		n.Free = nil
+	}
+	return n, !r.Unreadable && n.ImageDetails == r.Details && n.Free == nil
+}
+
+// NotesRead is an image's notes as Edit notes reads them
+// (readImageNotes): the details, and the free text beside them as editing
+// writes it (editText). An unreadable details block gives no details:
+// Unreadable is set, and Block holds the block's lines as pages show them.
+// Plans store it (Item.DetailsWas); one stored before Edit notes wrote free
+// text has only the details and Unreadable.
+type NotesRead struct {
+	Details    ImageDetails `json:"details"`
+	Unreadable bool         `json:"unreadable,omitempty"`
+	Free       string       `json:"notes,omitempty"`
+	Block      string       `json:"block,omitempty"`
+}
+
+// readImageNotes reads notes desc as Edit notes edits them.
+func readImageNotes(desc string) NotesRead {
+	lines, bs, d, err := splitNotes(desc)
+	r := NotesRead{Details: d, Free: editText(strings.Join(without(lines, bs), "\n"))}
+	if err != nil {
+		var in []string
+		for _, b := range bs {
+			in = append(in, strings.Join(lines[b[0]:b[1]], "\n"))
+		}
+		r.Unreadable, r.Block = true, userText(strings.Join(in, "\n\n"))
+	}
+	return r
+}
+
+// Edit is what an Edit notes form starts from: r's details and free text.
+func (r NotesRead) Edit() ImageNotes {
+	free := r.Free
+	return ImageNotes{ImageDetails: r.Details, Free: &free}
 }
 
 const (
@@ -356,7 +408,7 @@ const (
 	maxNotesBytes = 8192
 )
 
-// notesTooLong is Apply's refusal of notes of this many bytes.
+// notesTooLong is apply's refusal of notes of this many bytes.
 type notesTooLong int
 
 func (n notesTooLong) Error() string {
@@ -364,13 +416,15 @@ func (n notesTooLong) Error() string {
 }
 
 // freeSpaces are what CleanFreeNotes turns into plain text: line breaks
-// into LF, and a tab into four spaces.
-var freeSpaces = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\u2028", "\n", "\u2029", "\n", "\t", "    ")
+// (CR, VT, FF, NEL, the line and paragraph separators) into LF, and a tab
+// into four spaces.
+var freeSpaces = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\v", "\n", "\f", "\n", "\u0085", "\n", "\u2028", "\n", "\u2029", "\n",
+	"\t", "    ")
 
-// CleanFreeNotes is free text as Edit notes writes it, which userText reads
-// back unchanged: line breaks as LF, tabs and other spaces (NBSP, U+3000) as spaces, no
-// spaces at a line's end, no blank lines or spaces at the start or end.
-// Forms post text through it.
+// CleanFreeNotes is free text as Edit notes writes it: line breaks as LF
+// (freeSpaces), tabs and other spaces (NBSP, U+3000) as spaces, no spaces
+// at a line's end, no blank lines or spaces at the start or end. Forms post
+// text through it.
 func CleanFreeNotes(s string) string {
 	s = strings.Map(func(r rune) rune {
 		if r != ' ' && unicode.Is(unicode.Zs, r) {
@@ -385,18 +439,32 @@ func CleanFreeNotes(s string) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
+// hides reports whether r can hide what notes say: a control character
+// (C0, DEL, C1; a line's LF aside) or a bidirectional control.
+func hides(r rune) bool {
+	return r != '\n' && (unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r))
+}
+
 // checkFreeNotes checks free text before it is written beside the details
-// block: printable lines as CleanFreeNotes leaves them, at most
-// MaxFreeNotes characters, and no line that reads as the battleship line or
-// a details header, which are Battleship's.
+// block. Only what can hide what the notes say (hides), or pass for
+// Battleship's own lines, is refused.
 func checkFreeNotes(s string) error {
+	if !utf8.ValidString(s) {
+		return errors.New("the notes must be UTF-8 text")
+	}
+	if i := strings.IndexFunc(s, hides); i >= 0 {
+		r, _ := utf8.DecodeRuneInString(s[i:])
+		class := "a control character"
+		if !unicode.IsControl(r) {
+			class = "a bidirectional control"
+		}
+		return fmt.Errorf("the notes hold %s (U+%04X), which can hide what they say", class, r)
+	}
 	switch {
-	case !utf8.ValidString(s) || strings.ContainsFunc(s, func(r rune) bool { return r != '\n' && !unicode.IsPrint(r) }):
-		return errors.New("the notes must be printable text: no control or invisible characters")
 	case utf8.RuneCountInString(s) > MaxFreeNotes:
 		return fmt.Errorf("the notes are too long: at most %d characters", MaxFreeNotes)
 	case s != CleanFreeNotes(s):
-		return errors.New("the notes must not start or end with blank lines, or end a line with spaces")
+		return errors.New("the notes must have plain spaces and line breaks, and no spaces or blank lines at the start or end, or spaces ending a line")
 	}
 	for _, line := range strings.Split(s, "\n") {
 		switch {
@@ -416,24 +484,24 @@ func isNotesLine(line string) bool {
 	return strings.HasPrefix(strings.TrimSpace(dropFormat(line)), notesPrefix)
 }
 
-// EditStart is what Edit notes starts from in notes desc: their details,
-// and the free text, all of it (UserNotes without its cap) less the
-// details block. When the block is unreadable (ErrDetailsUnreadable) the
-// details are empty, Unreadable is set and Block holds the block's lines
-// as they read: the details written replace it.
-func EditStart(desc string) DetailsWas {
-	lines := strings.Split(desc, "\n")
-	bs := blocks(lines)
-	d, _, err := ParseDetails(desc)
-	was := DetailsWas{Details: d, Notes: userText(strings.Join(without(lines, bs), "\n"))}
-	if err != nil {
-		var in []string
-		for _, b := range bs {
-			in = append(in, strings.Join(lines[b[0]:b[1]], "\n"))
+// editText is text s as Edit notes edits it: cleaned (CleanFreeNotes),
+// less what checkFreeNotes refuses: characters that hide, and lines that
+// read as Battleship's own. Every other character, format characters
+// included, is kept, so a line no one edits is written back as it was.
+func editText(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if hides(r) {
+			return -1
 		}
-		was.Unreadable, was.Block = true, userText(strings.Join(in, "\n\n"))
+		return r
+	}, freeSpaces.Replace(s))
+	var keep []string
+	for _, line := range strings.Split(s, "\n") {
+		if !isNotesLine(line) && !isHeader(line) {
+			keep = append(keep, line)
+		}
 	}
-	return was
+	return CleanFreeNotes(strings.Join(keep, "\n"))
 }
 
 // withFreeNotes is notes desc rewritten as details d's block, then free
