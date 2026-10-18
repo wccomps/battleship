@@ -202,8 +202,8 @@ func envReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *r
 		}
 	}
 	var clones, resumes, guests []string
-	var dns netip.Addr                // the guests' DNS server
-	windows, atRouter := false, false // whether any is Windows, and whether dns is their gateway
+	var dns netip.Addr // the guests' DNS server
+	atRouter := false  // whether dns is their gateway
 	for _, it := range plan.Items {
 		spec := specs[it.Host]
 		row := reviewRow{Name: it.Name, Router: router.Host != "" && it.Host == router.Host, Image: spec.Family,
@@ -233,7 +233,6 @@ func envReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *r
 			guests = append(guests, it.Host)
 			dns = it.Guest.DNS
 			atRouter = it.Guest.DNS == it.Guest.Gateway
-			windows = windows || it.Guest.OS == pods.ImageWindows
 		}
 	}
 	pool := poolOf(plan.Items)
@@ -257,9 +256,6 @@ func envReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *r
 			" name, address, gateway ."+strconv.Itoa(pods.GatewayOctet)+" and DNS ("+at+") through the guest agent.")
 	}
 	r.Say = strings.Join(say, " ")
-	if op.Kind == pods.KindEnvCreate && windows && atRouter {
-		r.Note = "Once a domain controller is up, use Set DNS on " + in.Domain + " to point the hosts at it."
-	}
 	return r
 }
 

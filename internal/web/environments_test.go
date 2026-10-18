@@ -65,8 +65,8 @@ func hostNames(section string) []string {
 	return out
 }
 
-// Each used slot is a block anchored at its domain, with its slot, router
-// and DNS, its actions at its own paths, and its hosts router first, then
+// Each used slot is a block anchored at its domain, with its slot and
+// router, its actions at its own paths, and its hosts router first, then
 // by address, with their status, image and notes. The free slots are one
 // line of runs, naming the one Create takes.
 func TestEnvironmentsPage(t *testing.T) {
@@ -81,20 +81,19 @@ func TestEnvironmentsPage(t *testing.T) {
 	kilo := envSection(t, body, "kilo.alpha")
 	contains(t, "kilo.alpha", kilo,
 		`<h2 id="kilo.alpha-h">kilo.alpha</h2>`,
-		`<span>dev-01</span><span>router <b>gw</b></span><span>DNS <b>router</b></span>`,
+		`<span>dev-01</span><span>router <b>gw</b></span>`,
 		`<a class="btn sm" href="/environments/kilo.alpha/add">Add hosts</a>`,
-		`<a class="btn sm" href="/environments/kilo.alpha/dns">Set DNS</a>`,
 		`<span class="hname">gw</span> <span class="chip">router</span>`,
 		`<code>192.168.100.5</code>`,
 		`<span class="gl is-running"><i class="g" aria-hidden="true"></i>running</span> <span class="meta">· gw-v1</span>`,
 		`<div class="notes">admin / gwpass</div>`,
 		`<span class="gl is-stopped"><i class="g" aria-hidden="true"></i>stopped</span> <span class="meta">· debian-12-v2</span>`,
 		`<span class="meta">no address</span>`)
-	lacks(t, "kilo.alpha", kilo, "battleship:")
+	lacks(t, "kilo.alpha", kilo, "battleship:", "Set DNS", "DNS <b>")
 	if got := strings.Join(hostNames(kilo), " "); got != "gw yew teak elm" {
 		t.Errorf("hosts in order %q, want gw yew teak elm", got)
 	}
-	contains(t, "oscar.lima", envSection(t, body, "oscar.lima"), `<span>dev-04</span><span>router <b>none</b></span><span>DNS <b>ad</b></span>`)
+	contains(t, "oscar.lima", envSection(t, body, "oscar.lima"), `<span>dev-04</span><span>router <b>none</b></span>`)
 	if n := strings.Count(body, `<section class="env"`); n != 2 {
 		t.Errorf("%d blocks, want 2", n)
 	}
@@ -141,10 +140,10 @@ func TestEnvironmentsPageOddSlots(t *testing.T) {
 	mixed := envSection(t, body, "slot-02")
 	contains(t, "the mixed slot", mixed, `<h2 id="slot-02-h">dev-02</h2>`, `<span class="chip">mixed domains</span>`,
 		"don't share one domain", `<span class="hname">a.kilo.bravo</span>`, `<span class="hname">b.other.zone</span>`)
-	lacks(t, "the mixed slot", mixed, "Add hosts</a>", "Set DNS</a>", "/teardown")
+	lacks(t, "the mixed slot", mixed, "Add hosts</a>", "/teardown")
 
 	twin := envSection(t, body, "slot-05")
-	contains(t, "the second kilo.alpha", twin, `<h2 id="slot-05-h">kilo.alpha</h2>`, "kilo.alpha is also in dev-01: Add hosts, Set DNS and Tear down act on that one.")
+	contains(t, "the second kilo.alpha", twin, `<h2 id="slot-05-h">kilo.alpha</h2>`, "kilo.alpha is also in dev-01: Add hosts and Tear down act on that one.")
 	lacks(t, "the second kilo.alpha", twin, "Add hosts</a>", "/teardown")
 	if n := strings.Count(body, `id="kilo.alpha"`); n != 1 {
 		t.Errorf("%d blocks anchored at kilo.alpha", n)
@@ -170,11 +169,9 @@ func TestEnvironmentsPageLacksPrivileges(t *testing.T) {
 	contains(t, "as an operator", body,
 		`<button class="btn pri" type="button" disabled>Create environment</button>`,
 		`<button class="btn sm" type="button" disabled>Add hosts</button>`,
-		`<button class="btn sm" type="button" disabled>Set DNS</button>`,
 		`<button class="btn sm bad" type="button" disabled>Tear down kilo.alpha</button>`,
 		"Creating an environment needs VM.Clone, which you don&#39;t have.",
 		"Adding hosts needs VM.Clone, which you don&#39;t have.",
-		"Setting DNS needs VM.GuestAgent.Unrestricted, which you don&#39;t have.",
 		"Tearing down an environment needs VM.Allocate, which you don&#39;t have.")
 	lead := h.login(asLead)
 	lacks(t, "as a lead", h.get(&lead, "/environments").Body.String(), "disabled", "which you don&#39;t have")
