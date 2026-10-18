@@ -827,8 +827,32 @@ func TestBrowserTemplateSetsFollowTheGrid(t *testing.T) {
 	b.clean()
 }
 
-func TestBrowserTeardownForm(t *testing.T) {
+// setsHarness is bigHarness with sets: every pod's wks hosts are
+// kilo.alpha, pods 01-16's other hosts tango.delta, and pods 17-32's other
+// hosts deployed before sets were tagged.
+func setsHarness(t *testing.T) *harness {
+	t.Helper()
 	h, _ := bigHarness(t)
+	h.api.Mu.Lock()
+	for _, vm := range h.api.VMs {
+		team, host, ok := h.srv.naming.ParseVMName(vm.Name)
+		switch {
+		case !ok:
+		case strings.HasPrefix(host, "wks"):
+			vm.Config["tags"] = "set-kilo.alpha"
+		case team <= "16":
+			vm.Config["tags"] = "set-tango.delta"
+		}
+	}
+	h.api.Mu.Unlock()
+	h.poll()
+	return h
+}
+
+// The teardown form: pods first, then, as a page of its own, what they
+// hold, set by set, and a set (or everything) to tear down.
+func TestBrowserTeardownForm(t *testing.T) {
+	h := setsHarness(t)
 	lead := h.login(asLead)
 	for _, size := range sizes {
 		t.Run(size.name, func(t *testing.T) {
@@ -840,9 +864,62 @@ func TestBrowserTeardownForm(t *testing.T) {
 			if got := b.text("#host-field legend"); got != "Hosts · none = all" {
 				t.Errorf("hosts legend = %q", got)
 			}
-			b.shot("teardown-form-" + size.name)
-			b.clean()
+			if got := b.text(`label[for="teams"]`); got != "Pods" {
+				t.Errorf("pods label = %q", got)
+			}
+			if b.is(`!!document.getElementById("teardown-pick")`) {
+				t.Error("step 2 shows before the pods are chosen")
+			}
+			b.noSideways("teardown step 1")
+			b.shot("teardown-step1-" + size.name)
 
+			b.run("typing the pods", chromedp.SendKeys(`#teams`, "1-32", chromedp.ByQuery))
+			b.click(`#teardown-which button[type=submit]`)
+			b.waitFor("step 2", `location.search === "?teams=1-32" && !!document.getElementById("teardown-pick")`)
+			if got := b.text(`#held h2`); got != "In pods 01-32" {
+				t.Errorf("step 2 heading = %q", got)
+			}
+			deployed := b.text(`#held dl`)
+			for _, want := range []string{"kilo.alpha3 hosts in each of pods 01-32", "tango.delta", "unknown set"} {
+				if !strings.Contains(deployed, want) {
+					t.Errorf("deployed = %q, want %q", deployed, want)
+				}
+			}
+			if !b.is(`document.querySelectorAll('#teardown-pick input[name=set]').length === 3 && !document.querySelector('#teardown-pick input[name=set]:checked')`) {
+				t.Error("want three chips (two sets, everything), none chosen")
+			}
+			if got := b.text(`#teardown-pick .hint`); !strings.Contains(got, "can't tell the set of") {
+				t.Errorf("hint = %q", got)
+			}
+			b.noSideways("teardown step 2")
+			b.shot("teardown-step2-" + size.name)
+
+			b.click(`#teardown-pick input[value="kilo.alpha"] + span`)
+			b.click(`button[form="teardown-pick"]`)
+			b.waitFor("the review", `location.pathname === "/teardown/preview" && document.readyState === "complete"`)
+			if got := b.text("#pv-title"); got != "Review · Tear down kilo.alpha" {
+				t.Errorf("review title = %q", got)
+			}
+			if got := b.text("main .say.bad"); !strings.HasPrefix(got, "Tears down kilo.alpha in pods 01-32: 96 VMs.") {
+				t.Errorf("review says %q", got)
+			}
+			if !b.is(`document.querySelector('main button.pri').disabled`) {
+				t.Error("the confirm is on before the range is typed")
+			}
+			b.run("typing the range", chromedp.SendKeys(`#typed`, "1-32", chromedp.ByQuery))
+			if b.is(`document.querySelector('main button.pri').disabled`) {
+				t.Error("the confirm is off once the range is typed")
+			}
+			if got := b.text(`main button.pri`); got != "Delete 96 VMs" {
+				t.Errorf("confirm = %q", got)
+			}
+			b.noSideways("teardown review")
+			if size.width > 640 {
+				b.fullShot("teardown-review-" + size.name)
+			} else {
+				b.shot("teardown-review-" + size.name) // a whole page of 96 rows is too tall to read
+			}
+			b.clean()
 		})
 	}
 }
