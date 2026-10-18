@@ -175,8 +175,8 @@ var reports = rapid.OneOf(
 	}),
 	// Addresses that aren't a host's own, and text that isn't an address.
 	rapid.Map(rapid.SampledFrom([]string{"127.0.0.1/8", "169.254.1.1/16", "fe80::1/64", "::1/128", "0.0.0.0/0",
-		"2001:db8::5%eth0/64", "224.0.0.1/4", "ff02::1/64", "<script>alert(1)</script>", "10.50.12.133‮/24",
-		"10.50.12.133​", "010.050.012.133/24", ""}), func(s string) reported { return reported{text: s} }),
+		"2001:db8::5%eth0/64", "224.0.0.1/4", "ff02::1/64", "<script>alert(1)</script>", "10.50.12.133\u202e/24",
+		"10.50.12.133\u200b", "010.050.012.133/24", ""}), func(s string) reported { return reported{text: s} }),
 	rapid.Map(rapid.String(), func(s string) reported { return reported{text: "x" + s} }),
 )
 
