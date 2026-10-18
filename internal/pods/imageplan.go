@@ -131,6 +131,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		it.Blocked = "a VM named " + it.Name + " already exists"
 	}
 	var desc string // the source's notes, read unless it is blocked
+	var notices []string
 	if it.Blocked == "" {
 		cfg, err := p.API.VMConfig(ctx, src.Node, src.VMID)
 		if err != nil {
@@ -142,6 +143,9 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		_, it.Source.Notes, derr = ParseDetails(desc)
 		it.Source.Unreadable = derr != nil
 		it.Blocked = agentBlock(src, cfg, kind)
+		if ws := p.registerWarnings(cfg, kind); len(ws) > 0 {
+			notices = append(notices, fmt.Sprintf("%s: %s.", src.Name, strings.Join(ws, "; ")))
+		}
 		if d, ok := RegisterDetails(desc); ok && !d.Empty() && req.Details == nil {
 			it.Details = &ImageNotes{ImageDetails: d}
 		}
@@ -155,7 +159,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 	}
 	it.blockLongNotes(desc)
 	return &Plan{Kind: KindImageRegister, Config: ConfigHash(KindImageRegister, p.Cfg), Items: []Item{it},
-		Locks: []string{"family:" + req.Family}}, nil
+		Locks: []string{"family:" + req.Family}, Notices: notices}, nil
 }
 
 // SourceDetails are the details a register form starts with for VM vmid:

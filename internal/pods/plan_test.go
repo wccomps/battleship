@@ -469,3 +469,26 @@ func TestWillStopMasterOnlyWhenBuildingFromRunningMaster(t *testing.T) {
 		t.Error("rebuild from a running master: WillStopMaster = false")
 	}
 }
+
+func TestDeployMasterAndUntaggedWarnings(t *testing.T) {
+	f := podstest.New("cedar")
+	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "cedar", Pool: "dev-01", Tags: "dev;kilo.alpha"},
+		map[string]string{"net0": "virtio=BC:24:11:00:00:01,bridge=devint02", "net1": "virtio=BC:24:11:00:00:02,bridge=devext01",
+			"cpu": "x86-64-v2-AES", "agent": "0", "ide2": "local:iso/debian.iso,media=cdrom"})
+	f.Add(proxmox.VM{VMID: 2102, Name: "elm.kilo.alpha", Node: "cedar", Pool: "dev-01", Tags: ""},
+		map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint01"})
+
+	cfg := config.Default()
+	cfg.Deploy.CPUTypes = []string{"baseline"}
+	plan, err := NewPlanner(f, cfg).Deploy(context.Background(), DeployRequest{Pattern: "*.kilo.alpha", Teams: []string{"01"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		`Left out: elm.kilo.alpha in dev-01 lacks tag "dev".`,
+		"teak.kilo.alpha: net0 on devint02, expected devint01; 2 NICs, expected 1; CPU x86-64-v2-AES, expected baseline; guest agent off; CD-ROM attached.",
+	}
+	if !reflect.DeepEqual(plan.Notices, want) {
+		t.Errorf("Notices = %v, want %v", plan.Notices, want)
+	}
+}

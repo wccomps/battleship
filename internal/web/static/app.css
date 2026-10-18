@@ -479,7 +479,8 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .envt .gl{white-space:nowrap}
 .envt .al{display:block;white-space:nowrap}
 .envt .al code{white-space:normal;overflow-wrap:anywhere}
-.envt .al+.al{margin-top:2px}
+.envt .al+.al,.envt .si .al{margin-top:2px}
+.envt .si .chip{height:auto;min-height:22px;padding:1px 8px;white-space:normal}
 .chip.differs{background:var(--stale-bg);color:var(--stale)}
 .liveaddr{margin:0}
 .hname{font:600 var(--t2) var(--fm);overflow-wrap:anywhere}
@@ -496,9 +497,7 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 /* ---------- image details: a password behind its toggle, the fields form ---------- */
 .dkv dd{overflow-wrap:anywhere}
 .login{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 6px}
-.pw{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;min-width:0}
-/* Open, the password shows before its toggle (where details lays out its content). */
-.pw details{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;min-width:0}
+.pw,.pw details{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;min-width:0}
 .pw summary{order:1;cursor:pointer;list-style:none}
 .pw details:not([open]) .hide,.pw details[open] .show{display:none}
 .pw code{font-weight:600;overflow-wrap:anywhere;user-select:all}
@@ -506,10 +505,9 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .dunread{margin:0 0 6px}
 .sech .btn.sm{align-self:center}
 textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:vertical}
-.nchg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}
+.nchg,.dfields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}
 .nchg .notes{margin-top:4px}
-.tbl.fams td.act{width:1%;white-space:nowrap;position:relative;z-index:1} /* above the row's link */
-.dfields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}
+.tbl.fams td.act{width:1%;white-space:nowrap;position:relative;z-index:1}
 .dfields .wide{grid-column:1/-1}
 .dfields .field{gap:4px}
 .dfields .lbl{margin:0}

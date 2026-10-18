@@ -136,3 +136,23 @@ func TestImageEditMovesEveryNIC(t *testing.T) {
 		t.Errorf("NICs = %v, want %v", plan.Items[0].NICs, want)
 	}
 }
+
+func TestImageRegisterWarnings(t *testing.T) {
+	f := imageFake()
+	cfg := envConfig()
+	cfg.Deploy.CPUTypes = []string{"baseline"}
+	f.Add(proxmox.VM{VMID: 160, Name: "gw-build", Node: "birch"}, map[string]string{
+		"net0":  "virtio=BC:24:11:00:01:60,bridge=vmbr0,tag=5",
+		"cpu":   "x86-64-v2-AES",
+		"agent": "0",
+		"ide2":  "local:iso/pfsense.iso,media=cdrom",
+	})
+	plan, err := NewPlanner(f, cfg).ImageRegister(context.Background(), ImageRequest{VMID: 160, Family: "gw", Kind: ImageRouter})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"gw-build: missing router NIC (needs net0 and net1); net0 has VLAN tag 5; CPU x86-64-v2-AES, expected baseline; guest agent off; CD-ROM attached."}
+	if !slices.Equal(plan.Notices, want) {
+		t.Errorf("Notices = %v, want %v", plan.Notices, want)
+	}
+}

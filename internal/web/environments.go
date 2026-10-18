@@ -90,6 +90,7 @@ type envHostRow struct {
 	Running    bool
 	Status     string
 	Image      string
+	Warnings   []string
 	Details    pods.ImageDetails
 	Unreadable bool
 	Notes      string
@@ -242,7 +243,7 @@ func envBlocks(envs []pods.Environment, bases map[string]pods.BaseImage, addrs m
 		for _, h := range e.Hosts {
 			octet, _ := e.LAN.Octet(h.Addr)
 			row := envHostRow{VMID: h.VMID, Name: h.Name, Router: h.Router, Addr: pods.AddrText(h.Addr), Gateway: gw, octet: octet, Running: h.Status == "running",
-				Status: cmp.Or(h.Status, "unknown"), Image: h.Notes.Base, Details: h.Details, Unreadable: h.Unreadable, Notes: h.UserNotes,
+				Status: cmp.Or(h.Status, "unknown"), Image: h.Notes.Base, Warnings: h.Warnings, Details: h.Details, Unreadable: h.Unreadable, Notes: h.UserNotes,
 				Read: addrs != nil, LiveAddrs: addrs[h.VMID]}
 			if base, ok := bases[h.Notes.Base]; ok && h.Details.Empty() && !h.Unreadable && !base.Unreadable {
 				row.Details = base.Details
