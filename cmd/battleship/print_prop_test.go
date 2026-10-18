@@ -158,7 +158,7 @@ func TestPropPrintersEscapeUntrustedText(t *testing.T) {
 		case "inputs":
 			in := jobs.Inputs{Kind: rapid.SampledFrom(allKinds).Draw(t, "kind"), Teams: untrusted(t, "teams"), Hosts: untrustedList(t, "hosts"),
 				Pattern: untrusted(t, "pattern"), Action: untrusted(t, "action"), Snapshot: untrusted(t, "snapshot"),
-				Domain: untrusted(t, "domain"), Family: untrusted(t, "family"), Image: untrusted(t, "image")}
+				Domain: untrusted(t, "domain"), ImageRequest: pods.ImageRequest{Family: untrusted(t, "family"), Image: untrusted(t, "image")}}
 			raw, err := json.Marshal(in)
 			if err != nil {
 				t.Fatal(err)

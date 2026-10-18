@@ -173,7 +173,7 @@ func TestRegisterKeepsLongNotesProxmoxKeeps(t *testing.T) {
 	f.Add(proxmox.VM{VMID: 150, Name: "fresh", Node: "alder", Status: "stopped"}, map[string]string{"description": desc, "agent": "1",
 		"scsi0": "competitions:150/vm-150-disk-0.qcow2"})
 	e := catalogExec(f)
-	plan, err := pods.NewPlanner(f, e.Cfg).ImageRegister(context.Background(), pods.ImageRequest{VMID: 150, Family: "deb", Kind: "linux",
+	plan, err := pods.NewPlanner(f, e.Cfg).ImageRegister(context.Background(), pods.ImageRequest{VMID: 150, Family: "deb", ImageKind: "linux",
 		Details: &pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: "Debian 12"}}})
 	if err != nil || plan.Items[0].Blocked != "" {
 		t.Fatalf("plan = %+v, %v", plan, err)

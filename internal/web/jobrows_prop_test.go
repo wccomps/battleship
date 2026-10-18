@@ -163,8 +163,10 @@ func TestPropOpenStaysOnSite(t *testing.T) {
 		in := jobs.Inputs{
 			Kind:   rapid.SampledFrom(allKinds).Draw(t, "kind"),
 			Domain: rapid.OneOf(rapid.Just("kilo.alpha"), rapid.Custom(func(t *rapid.T) string { return hostile(t, "domain") })).Draw(t, "domain"),
-			Family: rapid.OneOf(rapid.Just("debian-12"), rapid.Just(""), rapid.Custom(func(t *rapid.T) string { return hostile(t, "family") })).Draw(t, "family"),
-			Image:  rapid.OneOf(rapid.Just("win2022-v3"), rapid.Custom(func(t *rapid.T) string { return hostile(t, "image") })).Draw(t, "image"),
+			ImageRequest: pods.ImageRequest{
+				Family: rapid.OneOf(rapid.Just("debian-12"), rapid.Just(""), rapid.Custom(func(t *rapid.T) string { return hostile(t, "family") })).Draw(t, "family"),
+				Image:  rapid.OneOf(rapid.Just("win2022-v3"), rapid.Custom(func(t *rapid.T) string { return hostile(t, "image") })).Draw(t, "image"),
+			},
 		}
 		op, _ := operationFor(in.Kind)
 		l := op.result(in)

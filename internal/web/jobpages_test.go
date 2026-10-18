@@ -1001,10 +1001,10 @@ func TestJobPageGoesBackToItsList(t *testing.T) {
 	h.poll()
 	op := h.login(asLead)
 	for in, want := range map[*jobs.Inputs][2]string{
-		{Kind: pods.KindImageDeprecate, Image: "debian-12-v1"}:       {`href="/images">`, "Images</a>"},
-		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"}: {`href="/environments#kilo.alpha">`, "Environments</a>"},
-		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"}:           {`href="/environments#kilo.alpha">`, "Environments</a>"},
-		{Kind: pods.KindPower, Teams: "1", Action: "stop"}:           {`href="/logs">`, "Logs</a>"},
+		{Kind: pods.KindImageDeprecate, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}}: {`href="/images">`, "Images</a>"},
+		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"}:                            {`href="/environments#kilo.alpha">`, "Environments</a>"},
+		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"}:                                      {`href="/environments#kilo.alpha">`, "Environments</a>"},
+		{Kind: pods.KindPower, Teams: "1", Action: "stop"}:                                      {`href="/logs">`, "Logs</a>"},
 	} {
 		id := h.submitJob(*in, byOperator)
 		page := h.get(&op, "/logs/"+itoa(id)).Body.String()
@@ -1113,7 +1113,7 @@ func TestInterruptedJobCanBeStartedAgain(t *testing.T) {
 	addImages(h)
 	h.poll()
 	op := h.login(asLead)
-	id := h.submitJob(jobs.Inputs{Kind: pods.KindImageDelete, Image: "debian-12-v1"}, byOperator)
+	id := h.submitJob(jobs.Inputs{Kind: pods.KindImageDelete, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}}, byOperator)
 	h.start(id)
 	h.finish(id, store.Outcome{Status: store.StatusInterrupted, Error: "the worker shut down during the job; re-run it to finish"})
 	page := h.get(&op, logHref(id)).Body.String()

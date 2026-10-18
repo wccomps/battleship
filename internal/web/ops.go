@@ -193,8 +193,12 @@ const (
 func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 	if kind.Teamless() {
 		in := jobs.Inputs{Kind: kind, Domain: strings.TrimSpace(form.Get(fieldDomain)), Router: strings.TrimSpace(form.Get(fieldRouter)),
-			DNS: strings.TrimSpace(form.Get(fieldDNS)), Family: strings.TrimSpace(form.Get(fieldFamily)),
-			ImageKind: strings.TrimSpace(form.Get(fieldImageKind)), Image: strings.TrimSpace(form.Get(fieldImage)),
+			DNS: strings.TrimSpace(form.Get(fieldDNS)),
+			ImageRequest: pods.ImageRequest{
+				Family:    strings.TrimSpace(form.Get(fieldFamily)),
+				ImageKind: strings.TrimSpace(form.Get(fieldImageKind)),
+				Image:     strings.TrimSpace(form.Get(fieldImage)),
+			},
 			Slot: slotName(form.Get(fieldSlot)), VMs: jobs.SplitList(strings.Join(form[fieldVMs], ","))}
 		for _, line := range strings.Split(form.Get(fieldEnvHosts), "\n") {
 			if line = strings.TrimSpace(line); line != "" {

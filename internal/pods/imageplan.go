@@ -15,14 +15,14 @@ import (
 
 // ImageRequest is a base-image job's input.
 type ImageRequest struct {
-	VMID   int    // register: the VM to copy
-	Family string // register, edit
-	Kind   string // register a new family; a new version keeps its family's
-	Image  string // deprecate, delete: e.g. debian-12-v1
+	VMID      int    `json:"vmid,omitempty"`       // register: the VM to copy
+	Family    string `json:"family,omitempty"`     // register, edit
+	ImageKind string `json:"image_kind,omitempty"` // register a new family; a new version keeps its family's
+	Image     string `json:"image,omitempty"`      // deprecate, delete: e.g. debian-12-v1
 	// Details are what Edit notes writes, and what register writes: nil
 	// is those of its source's notes (see RegisterDetails), and empty is
 	// none, the copy keeping its source's notes as they are.
-	Details *ImageNotes
+	Details *ImageNotes `json:"details,omitempty"`
 }
 
 // agentEnabled reads a VM's agent option ("1", "enabled=1,…", "1,fstrim…").
@@ -96,7 +96,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 	}
 	images := BaseImages(vms)
 	latest, exists := Latest(images, req.Family)
-	kind := req.Kind
+	kind := req.ImageKind
 	if exists {
 		if kind != "" && kind != latest.Kind {
 			return nil, fmt.Errorf("family %s is %s; a new version keeps its family's kind", req.Family, latest.Kind)

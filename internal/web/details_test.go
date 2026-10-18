@@ -369,8 +369,8 @@ func TestEditNotesJob(t *testing.T) {
 	if n := len(h.jobsInStore()); n != 1 {
 		t.Errorf("%d jobs stored, want 1", n)
 	}
-	if q := formQuery(operation{Kind: pods.KindImageDetails, Path: "/images/details"}, jobs.Inputs{Kind: pods.KindImageDetails, Family: "win2022",
-		Details: &pods.ImageNotes{ImageDetails: edited, Free: &notes}}); strings.Contains(q, "Template") || strings.Contains(q, "Rebooted") {
+	if q := formQuery(operation{Kind: pods.KindImageDetails, Path: "/images/details"}, jobs.Inputs{Kind: pods.KindImageDetails,
+		ImageRequest: pods.ImageRequest{Family: "win2022", Details: &pods.ImageNotes{ImageDetails: edited, Free: &notes}}}); strings.Contains(q, "Template") || strings.Contains(q, "Rebooted") {
 		t.Errorf("formQuery = %s", q)
 	}
 }

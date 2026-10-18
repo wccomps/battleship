@@ -1016,8 +1016,8 @@ func TestQueuedRegistersEachRunAsPreviewed(t *testing.T) {
 		f.VMs[id].Config["agent"] = "1"
 		f.Mu.Unlock()
 	}
-	first := submitReserving(t, st, f, Inputs{Kind: pods.KindImageRegister, VMID: 150, Family: "teak", ImageKind: pods.ImageLinux})
-	second := submitReserving(t, st, f, Inputs{Kind: pods.KindImageRegister, VMID: 151, Family: "oak", ImageKind: pods.ImageLinux})
+	first := submitReserving(t, st, f, Inputs{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{VMID: 150, Family: "teak", ImageKind: pods.ImageLinux}})
+	second := submitReserving(t, st, f, Inputs{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{VMID: 151, Family: "oak", ImageKind: pods.ImageLinux}})
 	w := newWorker(st, f)
 	for range 2 {
 		w.runJob(bg, claim(t, st))

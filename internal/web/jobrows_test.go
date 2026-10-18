@@ -283,10 +283,10 @@ func TestFinishedJobOpensItsResult(t *testing.T) {
 		{jobs.Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.bravo"}, `<a class="btn pri" href="/environments#kilo.bravo">Open kilo.bravo</a>`},
 		{jobs.Inputs{Kind: pods.KindEnvAdd, Domain: "kilo.alpha"}, `<a class="btn pri" href="/environments#kilo.alpha">Open kilo.alpha</a>`},
 		{jobs.Inputs{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"}, `<a class="btn pri" href="/environments#kilo.alpha">Open kilo.alpha</a>`},
-		{jobs.Inputs{Kind: pods.KindImageRegister, Family: "debian-12", VMID: 150}, `<a class="btn pri" href="/images/family/debian-12">Open debian-12</a>`},
-		{jobs.Inputs{Kind: pods.KindImageEdit, Family: "win2022"}, `<a class="btn pri" href="/images/family/win2022">Open win2022</a>`},
-		{jobs.Inputs{Kind: pods.KindImageDeprecate, Image: "debian-12-v1"}, `<a class="btn pri" href="/images/family/debian-12">Open debian-12</a>`},
-		{jobs.Inputs{Kind: pods.KindImageDelete, Image: "debian-12-v1"}, `<a class="btn pri" href="/images/family/debian-12">Open debian-12</a>`},
+		{jobs.Inputs{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{Family: "debian-12", VMID: 150}}, `<a class="btn pri" href="/images/family/debian-12">Open debian-12</a>`},
+		{jobs.Inputs{Kind: pods.KindImageEdit, ImageRequest: pods.ImageRequest{Family: "win2022"}}, `<a class="btn pri" href="/images/family/win2022">Open win2022</a>`},
+		{jobs.Inputs{Kind: pods.KindImageDeprecate, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}}, `<a class="btn pri" href="/images/family/debian-12">Open debian-12</a>`},
+		{jobs.Inputs{Kind: pods.KindImageDelete, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}}, `<a class="btn pri" href="/images/family/debian-12">Open debian-12</a>`},
 		{jobs.Inputs{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"}, ""},
 		{jobs.Inputs{Kind: pods.KindTeardown, Teams: "1"}, ""},
 		{jobs.Inputs{Kind: pods.KindPower, Teams: "1", Action: "start"}, ""},
@@ -375,8 +375,8 @@ func TestJobHeadNamesItsSubject(t *testing.T) {
 	}{
 		{jobs.Inputs{Kind: pods.KindPower, Teams: "1-3", Action: "start", Hosts: []string{"dc"}}, []string{`pods <span class="vm">01-03</span> · <span class="vm">dc</span>`}},
 		{jobs.Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.bravo", Slot: "02"}, []string{`Domain <span class="vm">kilo.bravo</span>`, `Slot <span class="vm">` + pods.ExpandSlot(h.cfg.Environments.Pool, 2) + `</span>`}},
-		{jobs.Inputs{Kind: pods.KindImageRegister, Family: "debian-12", VMID: 150}, []string{`Family <span class="vm">debian-12</span>`}},
-		{jobs.Inputs{Kind: pods.KindImageDeprecate, Image: "debian-12-v1"}, []string{`Image <span class="vm">debian-12-v1</span>`}},
+		{jobs.Inputs{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{Family: "debian-12", VMID: 150}}, []string{`Family <span class="vm">debian-12</span>`}},
+		{jobs.Inputs{Kind: pods.KindImageDeprecate, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}}, []string{`Image <span class="vm">debian-12-v1</span>`}},
 	} {
 		id := h.storeJob(c.in, store.StatusRunning)
 		contains(t, string(c.in.Kind)+" head", pieceOf(t, h.get(&sess, "/logs/"+itoa(id)).Body.String(), `<div class="sec" id="job-head">`), c.want...)

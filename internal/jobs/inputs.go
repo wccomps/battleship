@@ -43,14 +43,7 @@ type Inputs struct {
 	Router   string   `json:"router,omitempty"`    // create: "name=family"
 	EnvHosts []string `json:"env_hosts,omitempty"` // create, add: "name=family[:octet]" each
 	DNS      string   `json:"dns,omitempty"`       // env-dns: "router" or a host name
-	// Base images.
-	VMID      int    `json:"vmid,omitempty"`       // register: the VM to copy
-	Family    string `json:"family,omitempty"`     // register, edit
-	ImageKind string `json:"image_kind,omitempty"` // register a new family
-	Image     string `json:"image,omitempty"`      // deprecate, delete
-	// Details are what Edit notes writes, or a register's in place of
-	// those of its source's notes (pods.RegisterDetails).
-	Details *pods.ImageNotes `json:"details,omitempty"`
+	pods.ImageRequest
 }
 
 // Typed is what a person types to confirm in (pods.Kind.TypedConfirm): a
@@ -271,15 +264,15 @@ func planFor(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*p
 		}
 		return p.EnvDNS(ctx, req)
 	case pods.KindImageRegister:
-		return p.ImageRegister(ctx, pods.ImageRequest{VMID: in.VMID, Family: in.Family, Kind: in.ImageKind, Details: in.Details})
+		return p.ImageRegister(ctx, in.ImageRequest)
 	case pods.KindImageEdit:
-		return p.ImageEdit(ctx, pods.ImageRequest{Family: in.Family})
+		return p.ImageEdit(ctx, in.ImageRequest)
 	case pods.KindImageDetails:
-		return p.ImageSetDetails(ctx, pods.ImageRequest{Family: in.Family, Details: in.Details})
+		return p.ImageSetDetails(ctx, in.ImageRequest)
 	case pods.KindImageDeprecate:
-		return p.ImageDeprecate(ctx, pods.ImageRequest{Image: in.Image})
+		return p.ImageDeprecate(ctx, in.ImageRequest)
 	case pods.KindImageDelete:
-		return p.ImageDelete(ctx, pods.ImageRequest{Image: in.Image})
+		return p.ImageDelete(ctx, in.ImageRequest)
 	default: // KindPower; Validate rejected anything else
 		return p.Power(ctx, teams, in.Hosts, in.Action)
 	}

@@ -47,19 +47,19 @@ func TestImageRegisterBlocks(t *testing.T) {
 	ctx := context.Background()
 	f := imageFake()
 	p := NewPlanner(f, envConfig())
-	plan, err := p.ImageRegister(ctx, ImageRequest{VMID: 151, Family: "win2022", Kind: ImageWindows})
+	plan, err := p.ImageRegister(ctx, ImageRequest{VMID: 151, Family: "win2022", ImageKind: ImageWindows})
 	if err != nil || !strings.Contains(plan.Items[0].Blocked, "guest agent") {
 		t.Errorf("no agent: %+v, %v", plan, err)
 	}
 	f.VMs[150].Status = "running"
-	plan, _ = p.ImageRegister(ctx, ImageRequest{VMID: 150, Family: "deb", Kind: ImageLinux})
+	plan, _ = p.ImageRegister(ctx, ImageRequest{VMID: 150, Family: "deb", ImageKind: ImageLinux})
 	if !strings.Contains(plan.Items[0].Blocked, "running") {
 		t.Errorf("running source: %+v", plan.Items[0])
 	}
-	if _, err := p.ImageRegister(ctx, ImageRequest{VMID: 150, Family: "debian-12", Kind: ImageWindows}); err == nil {
+	if _, err := p.ImageRegister(ctx, ImageRequest{VMID: 150, Family: "debian-12", ImageKind: ImageWindows}); err == nil {
 		t.Error("a new version may change the family's kind")
 	}
-	if _, err := p.ImageRegister(ctx, ImageRequest{VMID: 150, Family: "new", Kind: "toaster"}); err == nil {
+	if _, err := p.ImageRegister(ctx, ImageRequest{VMID: 150, Family: "new", ImageKind: "toaster"}); err == nil {
 		t.Error("unknown kind accepted")
 	}
 	// Team-named sources are refused, each saying what it is.
@@ -67,7 +67,7 @@ func TestImageRegisterBlocks(t *testing.T) {
 	f.Add(proxmox.VM{VMID: 152, Name: "team01-oak", Node: "alder", Status: "stopped"}, nil)
 	for vmid, want := range map[int]string{10121: "team01-teak is a pod VM",
 		152: "team01-oak has pod 01's name but is VMID 152, outside the pod's VMIDs, so it isn't a pod VM; rename or remove it in Proxmox"} {
-		plan, err := p.ImageRegister(ctx, ImageRequest{VMID: vmid, Family: "deb", Kind: ImageLinux})
+		plan, err := p.ImageRegister(ctx, ImageRequest{VMID: vmid, Family: "deb", ImageKind: ImageLinux})
 		if err != nil || plan.Items[0].Blocked != want {
 			t.Errorf("register %d: %+v, %v; want blocked %q", vmid, plan, err, want)
 		}

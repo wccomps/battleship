@@ -891,7 +891,7 @@ func (v cliValues) raw(kind pods.Kind) jobs.Inputs {
 	return jobs.Inputs{Kind: kind, Teams: s[fieldTeams], Hosts: jobs.SplitList(s[fieldHosts]), VMs: jobs.SplitList(s[fieldVMs]),
 		Pattern: s[fieldPattern], Rebuild: v.rebuild, NoSnapshot: v.noSnap, Snapshot: s[fieldSnapshot], Description: s[fieldDescription],
 		VMState: v.vmstate, Action: s[fieldAction], Domain: s[fieldDomain], Router: s[fieldRouter], EnvHosts: v.envHosts, DNS: s[fieldDNS],
-		VMID: v.vmid, Family: s[fieldFamily], ImageKind: s[fieldImageKind], Image: s[fieldImage]}
+		ImageRequest: pods.ImageRequest{VMID: v.vmid, Family: s[fieldFamily], ImageKind: s[fieldImageKind], Image: s[fieldImage]}}
 }
 
 // posted is the form a page posts with the same values: boxes as "yes",
