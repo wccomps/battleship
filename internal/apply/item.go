@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/wccomps/battleship/internal/pods"
@@ -391,7 +392,16 @@ func (e *Executor) applyConfig(ctx context.Context, it *pods.Item, cloudInit boo
 	}
 	changed := len(ch) > 0
 	if changed {
+		// The digest of the read the change was worked out from: Proxmox
+		// refuses the write if the config changed since.
+		if d := cur["digest"]; d != "" {
+			ch = maps.Clone(ch)
+			ch["digest"] = d
+		}
 		if err := e.call(ctx, func() error { return e.api.SetVMConfig(ctx, it.Node, it.VMID, ch) }); err != nil {
+			if proxmox.IsModified(err) {
+				err = fmt.Errorf("its config changed since it was read, so nothing was written; run it again to work from the config as it is: %w", err)
+			}
 			return false, err
 		}
 	}

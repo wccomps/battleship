@@ -108,6 +108,10 @@ const (
 	// says "PID <pid> does not exist" (the Windows build prints the pid as
 	// "lld"), older ones "Invalid parameter 'pid'".
 	ExecGone
+	// Modified: a config write carried the digest of a read, and the config
+	// changed since. Never retried: the change was worked out from what is
+	// no longer there.
+	Modified
 )
 
 // ErrLocked marks an error the caller made for a VM it found locked by
@@ -146,6 +150,8 @@ func (c Classifier) Classify(err error) Meaning {
 		return ExecGone
 	case isAPI && apiErr.Status == 400:
 		return Permanent
+	case isAPI && strings.Contains(msg, "detected modified configuration"):
+		return Modified
 	case isAPI && strings.Contains(msg, "does not exist"):
 		return NotFound
 	case isAPI && strings.Contains(msg, "already exists"):
@@ -183,6 +189,10 @@ func IsForbidden(err error) bool { return Classifier{}.Classify(err) == Forbidde
 // node asked (see the NotFound meaning).
 func IsNotFound(err error) bool { return Classifier{}.Classify(err) == NotFound }
 
+// IsModified reports whether err says a config changed since the read a
+// write carried the digest of (see Modified).
+func IsModified(err error) bool { return Classifier{}.Classify(err) == Modified }
+
 // IsExecGone reports whether err says the guest agent no longer knows a
 // command's PID (see ExecGone).
 func IsExecGone(err error) bool { return Classifier{}.Classify(err) == ExecGone }
@@ -209,6 +219,9 @@ func Describe(err error) string {
 	}
 	if IsLapsed(err) {
 		return "authorization lapsed: Proxmox no longer accepts this login (" + err.Error() + ")"
+	}
+	if IsModified(err) {
+		return "the VM's config changed while Battleship was changing it, so this change wasn't written (" + err.Error() + ")"
 	}
 	return err.Error()
 }

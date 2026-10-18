@@ -56,6 +56,7 @@ func TestClassify(t *testing.T) {
 		{"nil", nil, Permanent},
 		{"cancel", fmt.Errorf("x: %w", context.Canceled), Permanent},
 		{"5xx", &APIError{Status: 500, Message: "boom"}, Transient},
+		{"config changed since the digest read", &APIError{Status: 500, Message: "detected modified configuration - file changed by other user? Try again."}, Modified},
 		{"connection", &url.Error{Op: "Get", URL: "https://pve", Err: errors.New("connection refused")}, Transient},
 		{"pattern", errors.New("got no worker upid"), Transient},
 		{"forbidden", &APIError{Status: 403, Message: "Permission check failed (/vms/1, VM.Audit)"}, Forbidden},

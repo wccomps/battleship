@@ -183,3 +183,37 @@ func TestRegisterKeepsLongNotesProxmoxKeeps(t *testing.T) {
 		t.Errorf("result %+v, notes %.40q (%d bytes)", res, got, len(got))
 	}
 }
+
+// A config write carries the digest of the read its change was worked out
+// from, so a change made in between isn't written over: the item fails
+// saying so, the change is kept, and neither the call nor a later round
+// tries again.
+func TestConfigWriteRefusedWhenConfigChangedSinceRead(t *testing.T) {
+	const desc = "**Details**\n- OS: Debian 12\n\nPatched.\nbattleship: source=150"
+	const bob = "**Details**\n- OS: Debian 12\n- Login: admin\n\nPatched.\nbattleship: source=150"
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 8000, Name: "deb-v1", Node: "alder", Template: true, Tags: "base;linux"}, map[string]string{"description": desc})
+	writes := 0
+	f.Gate = func(ctx context.Context, key string) (func(), error) {
+		if key == "setconfig:8000" {
+			f.Mu.Lock()
+			if writes++; writes == 1 {
+				f.VMs[8000].Config["description"] = bob
+			}
+			f.Mu.Unlock()
+		}
+		return nil, nil
+	}
+	e := catalogExec(f)
+	e.Cfg.Retry.Rounds = 2
+	plan := &pods.Plan{Kind: pods.KindImageDetails, Items: []pods.Item{{Name: "deb-v1", VMID: 8000, Node: "alder",
+		Steps: []pods.Step{pods.StepDetails}, Details: &pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: "Debian 13"}}}}}
+	res := e.Run(context.Background(), plan)
+	err := res.Failed["deb-v1"]
+	if len(res.Failed) != 1 || !proxmox.IsModified(err) || !strings.Contains(err.Error(), "changed since it was read, so nothing was written") {
+		t.Errorf("result %+v", res)
+	}
+	if got := f.VMs[8000].Config["description"]; got != bob || writes != 1 {
+		t.Errorf("notes = %q after %d writes, want the change made in between, after 1", got, writes)
+	}
+}

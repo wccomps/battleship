@@ -224,6 +224,9 @@ func (c *Client) VMConfig(ctx context.Context, node string, vmid int) (map[strin
 	return cfg, nil
 }
 
+// SetVMConfig changes the VM's config. A "digest" among the changes, one a
+// VMConfig read gave, makes Proxmox refuse the write if the config has
+// changed since (Modified).
 func (c *Client) SetVMConfig(ctx context.Context, node string, vmid int, changes map[string]string) error {
 	params := url.Values{}
 	for k, v := range changes {
