@@ -81,6 +81,7 @@ naming the missing privilege.
 | Network | `VM.Config.Network`, `VM.Config.Cloudinit`; `SDN.Use` | VM; `/sdn/zones/<proxmox.sdn_zone>/<bridge>` |
 | Disk limits / CD-ROM | `VM.Config.Disk` / `VM.Config.CDROM` | VM |
 | Clear notes (a clone copies its master's, which can hold a login) | `VM.Config.Options` | VM |
+| Edit notes (a base image's details and notes) | `VM.Config.Options` | the family's newest version |
 | Snapshot / roll back | `VM.Snapshot` (or `VM.Snapshot.Rollback`) | VM |
 | Power | `VM.PowerMgmt` | VM |
 | Delete | `VM.Allocate` | VM |

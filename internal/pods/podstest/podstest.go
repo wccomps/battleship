@@ -10,8 +10,11 @@ package podstest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
+	"net/http"
 	"path"
 	"regexp"
 	"slices"
@@ -345,7 +348,7 @@ func (f *Fake) VMConfig(ctx context.Context, node string, vmid int) (map[string]
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]string{}
+	out := map[string]string{"digest": configDigest(vm)}
 	maps.Copy(out, vm.Config)
 	if vm.Template {
 		out["template"] = "1"
@@ -380,8 +383,15 @@ func (f *Fake) SetVMConfig(ctx context.Context, node string, vmid int, changes m
 	if err != nil {
 		return err
 	}
+	if d, ok := changes["digest"]; ok && d != configDigest(vm) {
+		return &proxmox.APIError{Method: http.MethodPut, Path: fmt.Sprintf("/nodes/%s/qemu/%d/config", node, vmid), Status: 500,
+			Message: "checksum mismatch (file change by other user?)"}
+	}
 	for k, v := range changes {
-		if k == "delete" {
+		switch k {
+		case "digest":
+			continue
+		case "delete":
 			for _, d := range strings.Split(v, ",") {
 				delete(vm.Config, strings.TrimSpace(d))
 			}
@@ -827,4 +837,16 @@ func volumeFile(vol string) string {
 		name = vol
 	}
 	return name[strings.LastIndex(name, "/")+1:]
+}
+
+// configDigest is vm's config digest, which Proxmox gives with each read
+// (VMConfig) and checks a write's against (SetVMConfig): it changes with
+// any change to the config.
+func configDigest(vm *VM) string {
+	h := sha256.New()
+	for _, k := range slices.Sorted(maps.Keys(vm.Config)) {
+		fmt.Fprintf(h, "%q=%q\n", k, vm.Config[k])
+	}
+	fmt.Fprintf(h, "template=%v\n", vm.Template)
+	return hex.EncodeToString(h.Sum(nil))
 }

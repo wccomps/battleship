@@ -116,7 +116,7 @@ func TestImagesPageCatalogue(t *testing.T) {
 	addCatalog(h)
 	sess := h.login(asLead)
 	body := h.get(&sess, "/images").Body.String()
-	table, rest, ok := strings.Cut(body[strings.Index(body, `<table class="tbl fams cards">`):], "</table>")
+	table, rest, ok := strings.Cut(body[strings.Index(body, `<table class="tbl fams">`):], "</table>")
 	if !ok {
 		t.Fatalf("no catalogue:\n%s", body)
 	}

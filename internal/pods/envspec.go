@@ -140,7 +140,8 @@ const maxUserNotes = 4000
 // UserNotes is desc without battleship's lines: what people wrote, such as
 // logins. It is text for people; pages escape it like any other text. Format
 // characters (bidi overrides, zero widths) are dropped so notes can't
-// disguise what they say.
+// disguise what they say, and a NUL reads as U+FFFD, as pages show it and
+// as a stored job can hold it.
 func UserNotes(desc string) string {
 	s := userText(desc)
 	if r := []rune(s); len(r) > maxUserNotes {
@@ -151,10 +152,10 @@ func UserNotes(desc string) string {
 
 // userText is UserNotes without its cap.
 func userText(desc string) string {
-	desc = dropFormat(desc)
+	desc = strings.ReplaceAll(dropFormat(desc), "\x00", "\ufffd")
 	var keep []string
 	for _, line := range strings.Split(desc, "\n") {
-		if !strings.HasPrefix(strings.TrimSpace(line), notesPrefix) {
+		if !isNotesLine(line) {
 			keep = append(keep, strings.TrimRight(line, " \t\r"))
 		}
 	}

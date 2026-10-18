@@ -358,7 +358,7 @@ func (e *Executor) runItems(ctx context.Context, kind pods.Kind, items []pods.It
 				if err == nil {
 					delete(failed, it.Name)
 					succeeded[it.Name] = true
-				} else if failed[it.Name] = err; !proxmox.IsForbidden(err) { // a missing privilege is never tried again
+				} else if failed[it.Name] = err; !proxmox.IsForbidden(err) && !proxmox.IsModified(err) { // a missing privilege, or a change worked out from a config since changed, is never tried again
 					retry = append(retry, it)
 				}
 				return nil

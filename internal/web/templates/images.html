@@ -48,15 +48,14 @@
 <h2 class="sub" id="cat">Base images</h2>
 {{- with .Groups}}
 <div class="tscroll">
-<table class="tbl fams cards">
+<table class="tbl fams">
 <thead><tr><th scope="col">Family</th><th scope="col">Current</th><th scope="col">Notes</th><th scope="col"><span class="sr">Edit notes</span></th><th scope="col"><span class="sr">Open</span></th></tr></thead>
 <tbody>
 {{- range .}}
 <tr class="kg"><th scope="rowgroup" colspan="5">{{.Label}}</th></tr>
 {{- range .Families}}
 <tr class="link"><td><a class="fam" href="{{familyHref .Image.Family}}" data-panel-link>{{.Image.Family}}</a></td><td class="cur"><code>v{{.Image.Version}}</code> <span class="meta">· {{.Image.VMID}}</span></td><td class="nl">{{.What}}</td><td class="act"><div class="acts">
-{{- if .MayNotes}}<a class="btn sm" href="{{notesHref .Image.Family}}" data-panel-link aria-label="Edit notes of {{.Image.Family}}">{{icon "edit"}}Edit</a>
-{{- else}}<button class="btn sm" type="button" disabled aria-label="Edit notes of {{.Image.Family}}">{{icon "edit"}}Edit</button>{{end}}</div></td><td class="chev">{{icon "chev"}}</td></tr>
+{{- template "notes-button" notesButton .Image.Family .MayNotes}}</div></td><td class="chev">{{icon "chev"}}</td></tr>
 {{- end}}
 {{- end}}
 </tbody>

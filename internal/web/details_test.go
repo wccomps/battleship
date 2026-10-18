@@ -144,13 +144,13 @@ func TestDetailsShowAsValues(t *testing.T) {
 	// Edit notes; the form isn't folded into the page.
 	fam := h.get(&sess, "/images/family/win2022").Body.String()
 	inOrder(t, "the family page", fam, append(append([]string{`<div class="sech"><h2 class="sub">Details</h2><span class="sp"></span>` +
-		`<a class="btn sm" href="/images/details?family=win2022" data-panel-link>` + string(icon("edit")) + `Edit</a></div>`}, fields...),
+		`<a class="btn sm" href="/images/details?family=win2022" data-panel-link aria-label="Edit notes of win2022">` + string(icon("edit")) + `Edit</a></div>`}, fields...),
 		`<h2 class="sub">Notes</h2><div class="notes box">Patched monthly.</div>`)...)
 	lacks(t, "the family page", fam, "Details unreadable", "- OS:", "battleship:", "<details class=\"dedit\">", "detail_user", "disabled", "Editing notes needs")
 
 	odd := h.get(&sess, "/images/family/odd").Body.String()
 	contains(t, "an unreadable block", odd, `<p class="meta dunread">Details unreadable: the notes are shown as they are.</p>`,
-		`<div class="notes box">**Details**`+"\n- OS: Debian 12\n- Colour: blue\n\nfree words</div>", `<a class="btn sm" href="/images/details?family=odd" data-panel-link>`)
+		`<div class="notes box">**Details**`+"\n- OS: Debian 12\n- Colour: blue\n\nfree words</div>", `<a class="btn sm" href="/images/details?family=odd" data-panel-link aria-label="Edit notes of odd">`)
 	lacks(t, "an unreadable block", odd, "<dt>OS</dt>")
 
 	hx := h.get(&sess, "/images/family/hx").Body.String()
@@ -173,7 +173,8 @@ func TestDetailsShowAsValues(t *testing.T) {
 	contains(t, "the environment form's image notes", form, fields...)
 }
 
-// detailsForm is Edit details's fields, as the family page posts them.
+// detailsForm is details alone, as the register form posts them, or an
+// Edit notes form from before it posted free text.
 func detailsForm(family string, d pods.ImageDetails) url.Values {
 	return url.Values{fieldFamily: {family}, fieldDetails: {yes}, fieldUser: {d.User}, fieldPassword: {d.Password}, fieldOS: {d.OS},
 		fieldBuilt: {d.Built}, fieldGeneralized: {d.Generalized}, fieldInstalled: {d.Installed}, fieldLicence: {d.Licence}}
@@ -201,6 +202,7 @@ func (h *harness) runPlan(j store.Job) apply.Result {
 // the free text with CRLF line ends.
 func notesForm(family string, d pods.ImageDetails, notes string) url.Values {
 	f := detailsForm(family, d)
+	f.Set(fieldDetails, detailsWithNotes)
 	f.Set(fieldNotes, strings.ReplaceAll(notes, "\n", "\r\n"))
 	return f
 }
@@ -208,7 +210,38 @@ func notesForm(family string, d pods.ImageDetails, notes string) url.Values {
 var (
 	textareaRE    = regexp.MustCompile(`(?s)<textarea class="inp" id="notes" name="notes"[^>]*>(.*?)</textarea>`)
 	detailInputRE = regexp.MustCompile(`<input class="inp" type="text" name="(detail_[a-z]+)" value="([^"]*)"`)
+	formRE        = regexp.MustCompile(`(?s)<form class="sheet" method="post" action="(/images/details/preview)"[^>]*>(.*?)</form>`)
 )
+
+// browserText is text as a browser posts it from a page: the HTML parser
+// reads CR and CRLF as LF, and a form sends each LF as CRLF.
+func browserText(s string) string {
+	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+	return strings.ReplaceAll(s, "\n", "\r\n")
+}
+
+// browserForm is the Edit notes form on page as a browser posts it
+// unchanged: where it posts, and its hidden fields, details fields and
+// notes, without the CSRF token, which post sends.
+func browserForm(t interface{ Fatalf(string, ...any) }, page string) (string, url.Values) {
+	m := formRE.FindStringSubmatch(page)
+	if m == nil {
+		t.Fatalf("no Edit notes form in:\n%s", page)
+	}
+	form := url.Values{}
+	for _, f := range hiddenRE.FindAllStringSubmatch(m[2], -1) {
+		if f[1] != "csrf" {
+			form.Add(f[1], browserText(html.UnescapeString(f[2])))
+		}
+	}
+	for _, f := range detailInputRE.FindAllStringSubmatch(m[2], -1) {
+		form.Add(f[1], browserText(html.UnescapeString(f[2])))
+	}
+	if ta := textareaRE.FindStringSubmatch(m[2]); ta != nil {
+		form.Add(fieldNotes, browserText(strings.TrimPrefix(html.UnescapeString(ta[1]), "\n")))
+	}
+	return m[1], form
+}
 
 // notesFormValues reads Edit notes's form as a browser would: its details
 // fields and its free text.
@@ -272,7 +305,7 @@ func TestEditNotesJob(t *testing.T) {
 		`<div class="meta">After</div><div class="notes box">Patched monthly.`+"\n"+`Rebooted after &lt;KB5034439&gt; &amp; checked.</div>`,
 		`<a class="btn first" href="/images/family/win2022" data-panel-link>Back</a>`, "Save notes of win2022-v1</button>")
 	lacks(t, "the review", body, "battleship:", "<KB5034439>")
-	if action != "/images/details/confirm" || fields.Get(fieldPassword) != "Template-Password-2" || fields.Get(fieldDetails) != yes ||
+	if action != "/images/details/confirm" || fields.Get(fieldPassword) != "Template-Password-2" || fields.Get(fieldDetails) != detailsWithNotes ||
 		fields.Has(fieldInstalled) || fields.Get(fieldNotes) != notes {
 		t.Fatalf("confirm %s with %v", action, fields)
 	}
@@ -283,7 +316,8 @@ func TestEditNotesJob(t *testing.T) {
 	if len(js) != 1 || js[0].Kind != string(pods.KindImageDetails) {
 		t.Fatalf("jobs = %+v", js)
 	}
-	if in := readInputs(js[0]); in.Details == nil || *in.Details != edited || in.Family != "win2022" || in.Notes == nil || *in.Notes != notes {
+	if in := readInputs(js[0]); in.Details == nil || in.Details.ImageDetails != edited || in.Family != "win2022" || in.Details.Free == nil ||
+		*in.Details.Free != notes {
 		t.Errorf("job inputs = %+v", in)
 	}
 	if res := h.runPlan(js[0]); len(res.Succeeded) != 1 {
@@ -322,9 +356,9 @@ func TestEditNotesJob(t *testing.T) {
 		{pods.ImageDetails{OS: strings.Repeat("x", pods.MaxDetail+1)}, "x"},
 		{winDetails, "ok\nbattleship: ip=10.50.0.9 os=linux"},
 		{winDetails, "ok\n  **Details**"},
-		{winDetails, "tab\there"},
+		{winDetails, "bell\x07here"},
 		{winDetails, "bidi \u202eevil"},
-		{winDetails, "zero\u200bwidth"},
+		{winDetails, "isolate \u2066evil"},
 		{winDetails, strings.Repeat("é", pods.MaxFreeNotes+1)},
 	} {
 		rec := h.post(&sess, "/images/details/preview", notesForm("win2022", bad.d, bad.notes))
@@ -336,43 +370,70 @@ func TestEditNotesJob(t *testing.T) {
 		t.Errorf("%d jobs stored, want 1", n)
 	}
 	if q := formQuery(operation{Kind: pods.KindImageDetails, Path: "/images/details"}, jobs.Inputs{Kind: pods.KindImageDetails, Family: "win2022",
-		Details: &edited, Notes: &notes}); strings.Contains(q, "Template") || strings.Contains(q, "Rebooted") {
+		Details: &pods.ImageNotes{ImageDetails: edited, Free: &notes}}); strings.Contains(q, "Template") || strings.Contains(q, "Rebooted") {
 		t.Errorf("formQuery = %s", q)
 	}
 }
 
 // An image whose details block is unreadable is still editable: the form
 // starts with empty fields and the text outside the block, showing the
-// notes as they are, and saving writes a block Battleship reads.
+// block as it is. Saving with that text as it was writes a block
+// Battleship reads in the old one's place; saving other text writes the
+// notes afresh.
 func TestEditNotesOverUnreadableBlock(t *testing.T) {
 	h := newHarness(t)
 	addDetailed(h)
+	const odd = "intro\n\n**Details**\n- OS: Debian 12\n- Colour: blue\n\nfree words\nbattleship: source=99"
 	h.api.Mu.Lock()
-	h.api.VMs[8011].Config["description"] = "intro\n\n**Details**\n- OS: Debian 12\n- Colour: blue\n\nfree words\nbattleship: source=99"
+	h.api.VMs[8011].Config["description"] = odd
 	h.api.Mu.Unlock()
 	sess := h.login(asLead)
 
 	fam := h.get(&sess, "/images/family/odd").Body.String()
-	contains(t, "the family page", fam, "Details unreadable", `<a class="btn sm" href="/images/details?family=odd" data-panel-link>`)
+	contains(t, "the family page", fam, "Details unreadable", `<a class="btn sm" href="/images/details?family=odd" data-panel-link aria-label="Edit notes of odd">`)
 	form := h.get(&sess, notesHref("odd")).Body.String()
 	contains(t, "the form", form, "Its details block is unreadable, so the fields start empty.",
-		`<div class="notes box">intro`+"\n\n**Details**\n- OS: Debian 12\n- Colour: blue\n\nfree words</div>")
+		`<div class="meta">The block as it is:</div><div class="notes box">**Details**`+"\n- OS: Debian 12\n- Colour: blue</div>")
 	if d, notes := notesFormValues(t, form); !d.Empty() || notes != "intro\n\nfree words" {
 		t.Fatalf("the form opens with %+v, %q", d, notes)
 	}
-	action, fields, body := h.preview(&sess, "/images/details", notesForm("odd", pods.ImageDetails{OS: "Debian 12"}, "intro\n\nfree words"))
-	contains(t, "the review", body, "Its details block is unreadable: these replace it",
-		`<div class="meta">Before</div><div class="notes box">intro`+"\n\n**Details**")
+	for _, c := range []struct{ notes, want string }{
+		{"intro\n\nfree words", "intro\n\n**Details**\n- OS: Debian 12\n\nfree words\nbattleship: source=99"},
+		{"intro\n\nfree words, edited", "**Details**\n- OS: Debian 12\n\nintro\n\nfree words, edited\n\nbattleship: source=99"},
+	} {
+		h.api.Mu.Lock()
+		h.api.VMs[8011].Config["description"] = odd
+		h.api.Mu.Unlock()
+		action, fields, body := h.preview(&sess, "/images/details", notesForm("odd", pods.ImageDetails{OS: "Debian 12"}, c.notes))
+		contains(t, "the review", body, "Its details block is unreadable: these replace it.",
+			`<div class="notes box">**Details**`+"\n- OS: Debian 12\n- Colour: blue</div>")
+		if rec := h.post(&sess, action, fields); rec.Code != http.StatusSeeOther {
+			t.Fatalf("confirm = %d\n%s", rec.Code, rec.Body)
+		}
+		h.runPlan(h.jobsInStore()[0])
+		got := h.notesOf(8011)
+		if got != c.want {
+			t.Errorf("notes after the job =\n%s\nwant\n%s", got, c.want)
+		}
+		if d, _, err := pods.ParseDetails(got); err != nil || d.OS != "Debian 12" {
+			t.Errorf("read back %+v, %v", d, err)
+		}
+	}
+	contains(t, "the form", form, "Saving replaces it with the details below, or removes it if they are left empty.")
+	// Left empty, the fields write no block: the review says the block goes.
+	h.api.Mu.Lock()
+	h.api.VMs[8011].Config["description"] = odd
+	h.api.Mu.Unlock()
+	action, fields, body := h.preview(&sess, "/images/details", notesForm("odd", pods.ImageDetails{}, "intro\n\nfree words"))
+	contains(t, "the review", body, "Its details block is unreadable: it is removed, and no details are written.")
+	lacks(t, "the review", body, "these replace it")
 	if rec := h.post(&sess, action, fields); rec.Code != http.StatusSeeOther {
 		t.Fatalf("confirm = %d\n%s", rec.Code, rec.Body)
 	}
-	h.runPlan(h.jobsInStore()[0])
-	got := h.notesOf(8011)
-	if want := "**Details**\n- OS: Debian 12\n\nintro\n\nfree words\n\nbattleship: source=99"; got != want {
-		t.Errorf("notes after the job =\n%s\nwant\n%s", got, want)
-	}
-	if d, free, err := pods.ParseDetails(got); err != nil || d.OS != "Debian 12" || free != "intro\n\nfree words" {
-		t.Errorf("read back %+v, %q, %v", d, free, err)
+	js := h.jobsInStore()
+	h.runPlan(slices.MaxFunc(js, func(a, b store.Job) int { return int(a.ID - b.ID) }))
+	if got, want := h.notesOf(8011), "intro\n\nfree words\nbattleship: source=99"; got != want {
+		t.Errorf("notes after an empty write =\n%s\nwant\n%s", got, want)
 	}
 }
 
@@ -385,7 +446,7 @@ func TestEditNotesNeedsConfigOptions(t *testing.T) {
 	viewer := h.loginWith("details-viewer", []int{8010})
 	why := "Editing notes needs VM.Config.Options on win2022-v1, which you don&#39;t have."
 	fam := h.get(&viewer, "/images/family/win2022").Body.String()
-	contains(t, "the family page", fam, `<h2 class="sub">Details</h2><span class="sp"></span><button class="btn sm" type="button" disabled>`,
+	contains(t, "the family page", fam, `<h2 class="sub">Details</h2><span class="sp"></span><button class="btn sm" type="button" disabled aria-label="Edit notes of win2022">`,
 		`<p class="lock">`+string(icon("lock"))+why+`</p>`)
 	lacks(t, "the family page", fam, `href="/images/details`)
 	images := h.get(&viewer, "/images").Body.String()
@@ -399,7 +460,7 @@ func TestEditNotesNeedsConfigOptions(t *testing.T) {
 	// With it on win2022-v1 alone, only its Edit is on.
 	editor := h.loginWith("details-editor", []int{8010}, "VM.Config.Options")
 	fam = h.get(&editor, "/images/family/win2022").Body.String()
-	contains(t, "the family page with the privilege", fam, `<a class="btn sm" href="/images/details?family=win2022" data-panel-link>`)
+	contains(t, "the family page with the privilege", fam, `<a class="btn sm" href="/images/details?family=win2022" data-panel-link aria-label="Edit notes of win2022">`)
 	lacks(t, "the family page with the privilege", fam, `<button class="btn sm" type="button" disabled>`, "Editing notes needs")
 	images = h.get(&editor, "/images").Body.String()
 	contains(t, "the Images page with the privilege", images,
@@ -454,7 +515,7 @@ func TestRegisterPrefillsDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	it := plan.Items[0]
-	if !slices.Equal(it.Steps, []pods.Step{pods.StepClone, pods.StepLabel, pods.StepDetails, pods.StepCDROM, pods.StepConvert}) || it.Details == nil || *it.Details != d {
+	if !slices.Equal(it.Steps, []pods.Step{pods.StepClone, pods.StepLabel, pods.StepDetails, pods.StepCDROM, pods.StepConvert}) || it.Details == nil || it.Details.ImageDetails != d {
 		t.Fatalf("planned %v with %+v", it.Steps, it.Details)
 	}
 	if res := h.runPlan(j); len(res.Succeeded) != 1 {
@@ -565,8 +626,8 @@ func TestCatalogueSaysDetailsUnreadable(t *testing.T) {
 // Edit notes is one click from each Images row and from the family page's
 // Details: over Images it opens in the side panel, its review there too;
 // from the family page, as pages. The form and review fit phones and
-// laptops, light and dark, and an unreadable block's form shows the notes
-// as they are.
+// laptops, light and dark; an unreadable block's form shows the block as
+// it is, and a form with nothing to edit offers no save.
 func TestBrowserEditNotes(t *testing.T) {
 	h := browserHarness(t)
 	addDetailed(h)
@@ -610,6 +671,13 @@ func TestBrowserEditNotes(t *testing.T) {
 			b.open(notesHref("odd"))
 			b.noSideways("the form over an unreadable block")
 			b.fullShot("editnotes-unreadable-" + size.name)
+
+			b.open("/images/details")
+			if b.is(`!!document.querySelector("textarea, button.pri")`) {
+				t.Error("the form without a family offers a save")
+			}
+			b.noSideways("the form without a family")
+			b.shot("editnotes-nosave-" + size.name)
 			b.clean()
 		})
 	}
