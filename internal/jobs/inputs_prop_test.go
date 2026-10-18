@@ -72,12 +72,15 @@ var validInputs = []Inputs{
 	{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"web=debian:20"}},
 	{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "dc"},
 	{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"},
-	{Kind: pods.KindImageRegister, VMID: 100, Family: "debian-12", ImageKind: pods.ImageKinds[0]},
+	{Kind: pods.KindImageRegister, VMID: 150, Family: "debian-12", ImageKind: pods.ImageLinux},
 	{Kind: pods.KindImageEdit, Family: "debian-12"},
 	{Kind: pods.KindImageDeprecate, Image: "debian-12-v1"},
 	{Kind: pods.KindImageDelete, Image: "debian-12-v1"},
-	{Kind: pods.KindImageDetails, Family: "debian-12", Details: &pods.ImageDetails{OS: "Debian 12", User: "debian", Password: "Changeme1!"}},
+	{Kind: pods.KindImageDetails, Family: "debian-12", Details: &pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: "Debian 12", User: "debian",
+		Password: "Changeme1!"}, Free: strp("Patched monthly.")}},
 }
+
+func strp(s string) *string { return &s }
 
 // Validate refuses any string field, of any kind, that holds a control
 // character or invalid UTF-8.
@@ -166,11 +169,19 @@ var spoils = map[string][]spoil{
 	"Family": {{"debian-12", true}, {"x-v0", true}, {"WIN 2022", false}, {"debian-12-v1", false}, {"", false}, {" debian-12", false},
 		{"Debian-12", false}, {strings.Repeat("a", 41), false}},
 	"ImageKind": {{"linux", true}, {"", true}, {"router", true}, {"Linux", false}, {"toaster", false}, {" linux", false}},
-	"Details": {{&pods.ImageDetails{OS: "Debian 12"}, true}, {&pods.ImageDetails{}, true}, {&pods.ImageDetails{User: "a / b", Password: "c"}, false},
-		{&pods.ImageDetails{User: "root", Password: "a / b"}, true}, {&pods.ImageDetails{User: "a / b", Password: ""}, false},
-		{&pods.ImageDetails{OS: "a\nbattleship: ip=10.50.0.1"}, false}, {&pods.ImageDetails{Built: "a\u2028b"}, false},
-		{&pods.ImageDetails{Licence: "a\u200bb"}, false}, {&pods.ImageDetails{Password: "pw"}, false}, {&pods.ImageDetails{OS: " x"}, false},
-		{&pods.ImageDetails{Installed: strings.Repeat("x", pods.MaxDetail+1)}, false}},
+	// The details and free text: the planner checks them (pods.ImageNotes),
+	// so a spoilt one is refused by Validate's text check or by BuildPlan.
+	"Details": {{details(pods.ImageDetails{OS: "Debian 12"}), true}, {details(pods.ImageDetails{}), true},
+		{details(pods.ImageDetails{User: "a / b", Password: "c"}), false}, {details(pods.ImageDetails{User: "root", Password: "a / b"}), true},
+		{details(pods.ImageDetails{User: "a / b", Password: ""}), false}, {details(pods.ImageDetails{OS: "a\nbattleship: ip=10.50.0.1"}), false},
+		{details(pods.ImageDetails{Built: "a\u2028b"}), false}, {details(pods.ImageDetails{Licence: "a\u200bb"}), false},
+		{details(pods.ImageDetails{Password: "pw"}), false}, {details(pods.ImageDetails{OS: " x"}), false},
+		{details(pods.ImageDetails{Installed: strings.Repeat("x", pods.MaxDetail+1)}), false}},
+	"Free": {{strp("Patched monthly.\n\nRebooted."), true}, {strp(""), true}, {(*string)(nil), true}, {strp("x battleship: y"), true},
+		{strp("a\nbattleship: ip=10.50.0.1"), false}, {strp("  battleship: x"), false}, {strp("**Details**\n- OS: x"), false},
+		{strp("a\r\nb"), false}, {strp("a\tb"), false}, {strp("a\u200bb"), true}, {strp("Face \U0001FAE9"), true}, {strp("a\u202eb"), false},
+		{strp("a\u2066b"), false}, {strp("a\u0085b"), false}, {strp("a\n\u200bbattleship: x"), false}, {strp("a\x00"), false},
+		{strp("\xff"), false}, {strp(" a"), false}, {strp(strings.Repeat("x", pods.MaxFreeNotes+1)), false}},
 	"Image": {{"debian-12-v1", true}, {"x-v9999", true}, {"debian-12-v0", false}, {"debian-12", false}, {"debian-12-v10000", false},
 		{" debian-12-v1", false}, {"debian-12-v01", false}, {"Debian-12-v1", false}},
 }
@@ -184,7 +195,7 @@ var readsFields = map[pods.Kind][]string{
 	pods.KindEnvCreate: {"Domain", "Slot", "Router", "EnvHosts", "EnvVMs"}, pods.KindEnvAdd: {"Domain", "EnvHosts", "EnvVMs"}, pods.KindEnvDNS: {"Domain", "DNS"},
 	pods.KindEnvTeardown:   {"Domain", "Slot"},
 	pods.KindImageRegister: {"VMID", "Family", "ImageKind", "Details"}, pods.KindImageEdit: {"Family"},
-	pods.KindImageDeprecate: {"Image"}, pods.KindImageDelete: {"Image"}, pods.KindImageDetails: {"Family", "Details"},
+	pods.KindImageDeprecate: {"Image"}, pods.KindImageDelete: {"Image"}, pods.KindImageDetails: {"Family", "Details", "Free"},
 }
 
 // gateCluster has two teams, a master to deploy, a VM to register and base
@@ -198,10 +209,13 @@ func gateCluster() pods.Planner {
 	return pods.NewPlanner(f, testCfg())
 }
 
-func checkGate(t interface{ Fatalf(string, ...any) }, p pods.Planner, in Inputs, wantOK bool) {
+func checkGate(t interface{ Fatalf(string, ...any) }, p pods.Planner, in Inputs, field string, wantOK bool) {
 	err := in.Validate()
+	if err == nil && (field == "Details" || field == "Free") {
+		_, err = BuildPlan(bg, p, in)
+	}
 	if (err == nil) != wantOK {
-		t.Fatalf("Validate(%#v) = %v, want ok %v", in, err, wantOK)
+		t.Fatalf("Validate and plan (%#v) = %v, want ok %v", in, err, wantOK)
 	}
 	if err != nil {
 		return
@@ -226,10 +240,20 @@ func checkGate(t interface{ Fatalf(string, ...any) }, p pods.Planner, in Inputs,
 	}()
 }
 
-// setField sets in's field to v, cloning slices.
+// details are d without free text.
+func details(d pods.ImageDetails) *pods.ImageNotes { return &pods.ImageNotes{ImageDetails: d} }
+
+// setField sets in's field to v, cloning slices; Free is the details'
+// free text.
 func setField(in *Inputs, field string, v any) {
-	if field == "EnvVMs" {
+	switch field {
+	case "EnvVMs":
 		field = "VMs"
+	case "Free":
+		n := *in.Details
+		n.Free = v.(*string)
+		in.Details = &n
+		return
 	}
 	f := reflect.ValueOf(in).Elem().FieldByName(field)
 	if s, ok := v.([]string); ok {
@@ -254,7 +278,7 @@ func TestPropValidateIsTheGate(t *testing.T) {
 			for _, s := range spoils[field] {
 				in := base
 				setField(&in, field, s.value)
-				checkGate(t, p, in, s.ok)
+				checkGate(t, p, in, field, s.ok)
 			}
 		}
 	}
@@ -267,11 +291,11 @@ func TestPropValidateIsTheGate(t *testing.T) {
 		if str, ok := s.value.(string); ok && rapid.IntRange(0, 3).Draw(t, "wrap") == 0 {
 			setField(&in, field, textPiece.Draw(t, "before")+str+textPiece.Draw(t, "after"))
 			if err := in.Validate(); err == nil {
-				checkGate(t, p, in, true)
+				checkGate(t, p, in, field, true)
 			}
 			return
 		}
-		checkGate(t, p, in, s.ok)
+		checkGate(t, p, in, field, s.ok)
 	})
 }
 

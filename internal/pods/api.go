@@ -21,7 +21,7 @@ type Reads interface {
 	ClusterVMs(ctx context.Context) ([]proxmox.VM, error)
 	OnlineNodes(ctx context.Context) ([]string, error)
 	AgentPing(ctx context.Context, node string, vmid int) error
-	AgentExecStatus(ctx context.Context, node string, vmid, pid int) (proxmox.ExecStatus, error)
+	AgentExecStatus(ctx context.Context, node string, vmid, pid int, limit int64) (proxmox.ExecStatus, error)
 	AgentInterfaces(ctx context.Context, node string, vmid int) ([]proxmox.GuestNIC, error)
 	AgentHostname(ctx context.Context, node string, vmid int) (string, error)
 	VMConfig(ctx context.Context, node string, vmid int) (map[string]string, error)

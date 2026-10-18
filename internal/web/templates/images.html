@@ -1,7 +1,7 @@
 {{define "content" -}}
 {{- $csrf := .CSRF}}
 {{- with .Data}}
-{{- $lacks := .Lacks}}
+{{- $lacks := .Lacks}}{{$notesLack := .NotesLack}}
 <div class="page mid images">
 <h1 class="ptitle">Images</h1>
 {{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
@@ -49,17 +49,19 @@
 {{- with .Groups}}
 <div class="tscroll">
 <table class="tbl fams">
-<thead><tr><th scope="col">Family</th><th scope="col">Current</th><th scope="col">Notes</th><th scope="col"><span class="sr">Open</span></th></tr></thead>
+<thead><tr><th scope="col">Family</th><th scope="col">Current</th><th scope="col">Notes</th><th scope="col"><span class="sr">Edit notes</span></th><th scope="col"><span class="sr">Open</span></th></tr></thead>
 <tbody>
 {{- range .}}
-<tr class="kg"><th scope="rowgroup" colspan="4">{{.Label}}</th></tr>
+<tr class="kg"><th scope="rowgroup" colspan="5">{{.Label}}</th></tr>
 {{- range .Families}}
-<tr class="link"><td><a class="fam" href="{{familyHref .Image.Family}}" data-panel-link>{{.Image.Family}}</a></td><td class="cur"><code>v{{.Image.Version}}</code> <span class="meta">· {{.Image.VMID}}</span></td><td class="nl">{{.What}}</td><td class="chev">{{icon "chev"}}</td></tr>
+<tr class="link"><td><a class="fam" href="{{familyHref .Image.Family}}" data-panel-link>{{.Image.Family}}</a></td><td class="cur"><code>v{{.Image.Version}}</code> <span class="meta">· {{.Image.VMID}}</span></td><td class="nl">{{.What}}</td><td class="act"><div class="acts">
+{{- template "notes-button" notesButton .Image.Family .MayNotes}}</div></td><td class="chev">{{icon "chev"}}</td></tr>
 {{- end}}
 {{- end}}
 </tbody>
 </table>
 </div>
+{{- with $notesLack}}<p class="lock">{{icon "lock"}}{{.}}</p>{{end}}
 {{- else}}{{if not .ReadErr}}
 <p class="say">No base images yet. Install an OS on a VM in the images pool, generalize it and shut it down: it is listed above, ready to register.</p>
 {{- end}}{{end}}

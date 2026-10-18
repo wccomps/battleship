@@ -28,16 +28,18 @@ type catalogPage struct {
 	// DNSCards are Set DNS's choices; DNSHint says whose DNS it changes.
 	DNSCards []dnsCard
 	DNSHint  string
-	// Details fill a register's and an Edit details's fields: those given,
+	// Details fill a register's and an Edit notes's fields: those given,
 	// else those of the VM's notes or the family's newest version.
-	Details pods.ImageDetails
+	Details pods.ImageNotes
+	// Edit is what an Edit notes form edits (notesForm).
+	Edit *notesEdit
 	envForm
 }
 
 // newCatalogPage reads environments and images as the user, without the
 // images' notes: only the pages that show them read them (withNotes).
 func (s *Server) newCatalogPage(ctx context.Context) catalogPage {
-	p := catalogPage{Subnet: s.cfg.Environments.Subnet}
+	p := catalogPage{Subnet: s.cfg.Environments.Subnet.String()}
 	envs, vms, err := s.planner(ctx).Environments(ctx)
 	if err != nil {
 		p.ReadErr = "Couldn't read the cluster: " + sentence(proxmox.Describe(err))
@@ -83,7 +85,8 @@ func (p *catalogPage) dnsForm() {
 	choices := e.DNSChoices()
 	for _, c := range choices {
 		card := dnsCard{Value: c, Current: c == cur, Checked: c == chosen}
-		card.Addr, _ = e.DNSAddress(c)
+		addr, _ := e.DNSAddress(c)
+		card.Addr = pods.AddrText(addr)
 		if c == pods.DNSRouter {
 			card.Router = true
 			if r, ok := e.Host(e.RouterName()); ok {
@@ -137,6 +140,9 @@ func (s *Server) teamlessForm(w http.ResponseWriter, r *http.Request, status int
 // the request (newEnvForm); not ok if op's environment isn't there.
 func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, problem string) (catalogPage, bool) {
 	ctx := r.Context()
+	if op.Kind == pods.KindImageDetails {
+		return s.notesForm(ctx, op, in, problem), true
+	}
 	p := s.newCatalogPage(ctx)
 	p.Op, p.In, p.Error = op, in, problem
 	if op.Kind.OnEnvironment() {
@@ -155,9 +161,7 @@ func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, prob
 	case in.Details != nil:
 		p.Details = *in.Details
 	case op.Kind == pods.KindImageRegister && in.VMID != 0:
-		p.Details = s.registerDetails(ctx, in.VMID)
-	case op.Kind == pods.KindImageDetails:
-		p.Details = s.currentDetails(ctx, p.Images, in.Family)
+		p.Details = pods.ImageNotes{ImageDetails: s.registerDetails(ctx, in.VMID)}
 	}
 	if op.Machines {
 		form := r.URL.Query()
@@ -176,5 +180,11 @@ func (s *Server) renderCatalogForm(w http.ResponseWriter, r *http.Request, statu
 	s.render(w, r, status, "teamless", s.newView(w, r, p.Op.Title, p.Op.nav(), p))
 }
 
-// Back is where the form's close and Cancel go.
-func (p catalogPage) Back() string { return listPage(p.In) }
+// Back is where the form's close and Cancel go: an Edit notes on a
+// version goes to its family's page.
+func (p catalogPage) Back() string {
+	if p.Edit != nil && p.Edit.Image != "" {
+		return familyHref(p.In.Family)
+	}
+	return listPage(p.In)
+}

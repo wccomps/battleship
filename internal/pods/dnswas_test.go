@@ -25,12 +25,12 @@ func TestEnvHostAddresses(t *testing.T) {
 	env := envOf(t, NewPlanner(f, envConfig()), 1)
 	want := map[string]string{"gw.kilo.alpha": "192.168.100.2", "oak.kilo.alpha": "192.168.100.20", "elm.kilo.alpha": ""}
 	for _, h := range env.Hosts {
-		if h.Addr != want[h.Name] {
+		if AddrText(h.Addr) != want[h.Name] {
 			t.Errorf("%s: addr %q, want %q", h.Name, h.Addr, want[h.Name])
 		}
 	}
 	for choice, addr := range map[string]string{"": "192.168.100.2", DNSRouter: "192.168.100.2", "oak": "192.168.100.20"} {
-		if got, err := env.DNSAddress(choice); err != nil || got != addr {
+		if got, err := env.DNSAddress(choice); err != nil || AddrText(got) != addr {
 			t.Errorf("DNSAddress(%q) = %q, %v; want %q", choice, got, err, addr)
 		}
 	}
@@ -72,7 +72,7 @@ func TestPropEnvDNSKeepsTheDNSBefore(t *testing.T) {
 				t.Fatalf("teak (dns %q) was %+v, notes %+v", dns, it.DNSWas, it.Notes)
 			}
 			want := map[string]string{"": "192.168.100.2", "router": "192.168.100.2", "oak": "192.168.100.20", "teak": "192.168.100.10"}[teak.Notes.DNS]
-			if it.DNSWas.Addr != want {
+			if AddrText(it.DNSWas.Addr) != want {
 				t.Fatalf("teak (dns %q) was at %q, want %q", dns, it.DNSWas.Addr, want)
 			}
 			return

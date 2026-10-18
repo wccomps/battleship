@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/netip"
 	"slices"
 	"sort"
 	"strconv"
@@ -85,7 +86,7 @@ const (
 	StepLabel     Step = "label"              // set tags and the notes line
 	StepConvert   Step = "convert"            // make the VM a template
 	StepRetire    Step = "deprecate-previous" // tag the version this one replaces deprecated
-	StepDetails   Step = "details"            // write the details block in the notes (WithDetails)
+	StepDetails   Step = "details"            // write the details, and free text if asked, into the notes (ImageNotes.Changes)
 	StepWaitAgent Step = "wait-agent"
 	StepGuest     Step = "configure-guest"
 	StepVerify    Step = "verify"
@@ -201,27 +202,20 @@ type Item struct {
 	NICs       map[string]string `json:"nics,omitempty"`
 	Guest      *Guest            `json:"guest,omitempty"`
 	Supersedes *Source           `json:"supersedes,omitempty"`
-	Details    *ImageDetails     `json:"details,omitempty"`
+	Details    *ImageNotes       `json:"details,omitempty"`
 	// DNSWas is a Set DNS item's DNS server before the job, for its review.
 	DNSWas *DNSServer `json:"dns_was,omitempty"`
-	// DetailsWas is an image's details before an Edit details, for its
-	// review.
-	DetailsWas *DetailsWas `json:"details_was,omitempty"`
-}
-
-// DetailsWas is an image's details as its notes held them; Unreadable if
-// its block was (see ParseDetails), which the details step replaces.
-type DetailsWas struct {
-	Details    ImageDetails `json:"details"`
-	Unreadable bool         `json:"unreadable,omitempty"`
+	// DetailsWas is an Edit notes's notes as it read them, for its review
+	// and fingerprint.
+	DetailsWas *NotesRead `json:"details_was,omitempty"`
 }
 
 // DNSServer is a DNS choice as a host's notes record it (a host name, or
-// DNSRouter) and its address; Addr is "" when the choice names no host
-// that can serve DNS.
+// DNSRouter) and its address; Addr is the zero Addr when the choice names
+// no host that can serve DNS.
 type DNSServer struct {
-	Choice string `json:"choice"`
-	Addr   string `json:"addr,omitempty"`
+	Choice string     `json:"choice"`
+	Addr   netip.Addr `json:"addr,omitzero"`
 }
 
 // Plan is what an operation will do: the templates a deploy needs and one
@@ -329,7 +323,7 @@ func ConfigHash(kind Kind, c config.Config) string {
 	default:
 		return ""
 	}
-	b, _ := json.Marshal(v) // strings, ints, bools and a duration can't fail
+	b, _ := json.Marshal(v) // strings, ints, bools, a duration and a LAN's text can't fail
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
 }

@@ -18,6 +18,25 @@ import (
 //     sized to them;
 //   - links in text keep their underline, tables included.
 func TestTemplatesFollowControlConventions(t *testing.T) {
+	css, _ := fs.ReadFile(staticFS, "static/app.css")
+	_, phone, _ := strings.Cut(string(css), "@container app (max-width:640px){")
+	// phoneCards is whether a table's classes give its rows a phone rule
+	// laying them out as grids, each row a card.
+	phoneCards := func(class []string) bool {
+		if class == nil {
+			return false
+		}
+		for _, rule := range regexp.MustCompile(`([^{}]+)\{[^}]*display:grid`).FindAllStringSubmatch(phone, -1) {
+			for _, sel := range strings.Split(rule[1], ",") {
+				for _, c := range strings.Fields(class[1]) {
+					if sel = strings.TrimSpace(sel); c != "tbl" && (sel == "."+c+" tr" || sel == ".tbl."+c+" tr") {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	}
 	var (
 		anchorRE  = regexp.MustCompile(`<a\b[^>]*>`)
 		hrefRE    = regexp.MustCompile(`href="([^"{]*)`)
@@ -66,15 +85,14 @@ func TestTemplatesFollowControlConventions(t *testing.T) {
 		}
 		for _, table := range tableRE.FindAllString(src, -1) {
 			body, _, _ := strings.Cut(table[strings.Index(table, "<tbody")+1:], "</tbody>")
-			if strings.Contains(body, `class="btn`) && !strings.Contains(table[:strings.Index(table, ">")], "cards") {
-				t.Errorf("%s: a table with buttons in its rows isn't .tbl.cards: %.80s", name, table)
+			if strings.Contains(body, `class="btn`) && !phoneCards(classRE.FindStringSubmatch(table[:strings.Index(table, ">")])) {
+				t.Errorf("%s: a table with buttons in its rows doesn't turn its rows into cards on phones: %.80s", name, table)
 			}
 			if strings.Count(body, `<div class="acts">`) != strings.Count(body, `<td class="act">`) {
 				t.Errorf("%s: row buttons outside a td.act: %.80s", name, table)
 			}
 		}
 	}
-	css, _ := fs.ReadFile(staticFS, "static/app.css")
 	if regexp.MustCompile(`\.tbl a\{[^}]*text-decoration:none`).Match(css) {
 		t.Error("app.css takes the underline off links in tables")
 	}

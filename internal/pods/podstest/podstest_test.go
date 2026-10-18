@@ -30,7 +30,7 @@ func TestFakeGuestAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := f.AgentExecStatus(ctx, "alder", 2501, pid)
+	st, err := f.AgentExecStatus(ctx, "alder", 2501, pid, 1<<20)
 	if err != nil || !st.Exited || st.Out != "ok" {
 		t.Fatalf("status = %+v, %v", st, err)
 	}
@@ -55,7 +55,7 @@ func TestFakeGuestRestarts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		st, err := f.AgentExecStatus(ctx, "alder", 2501, pid)
+		st, err := f.AgentExecStatus(ctx, "alder", 2501, pid, 1<<20)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -75,7 +75,7 @@ func TestFakeGuestRestarts(t *testing.T) {
 	if err != nil || pid != 3 {
 		t.Fatalf("pid %d, %v", pid, err)
 	}
-	if _, err := f.AgentExecStatus(ctx, "alder", 2501, pid); !proxmox.IsExecGone(err) {
+	if _, err := f.AgentExecStatus(ctx, "alder", 2501, pid, 1<<20); !proxmox.IsExecGone(err) {
 		t.Errorf("status after the restart: %v", err)
 	}
 	for i := range 2 {
@@ -88,5 +88,30 @@ func TestFakeGuestRestarts(t *testing.T) {
 	}
 	if out := read(); pods.SetupComplete(out) {
 		t.Errorf("read %q after the restart says setup finished", out)
+	}
+}
+
+// A config write with a digest is refused, as Proxmox refuses it, when the
+// config changed since the read that gave the digest; one without a
+// digest, or with the current one, is made.
+func TestSetVMConfigChecksDigest(t *testing.T) {
+	ctx := context.Background()
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 100, Name: "a", Node: "alder"}, map[string]string{"description": "one"})
+	cfg, _ := f.VMConfig(ctx, "alder", 100)
+	if cfg["digest"] == "" {
+		t.Fatal("no digest read")
+	}
+	if err := f.SetVMConfig(ctx, "alder", 100, map[string]string{"description": "two", "digest": cfg["digest"]}); err != nil {
+		t.Fatalf("write with the current digest: %v", err)
+	}
+	if err := f.SetVMConfig(ctx, "alder", 100, map[string]string{"description": "three", "digest": cfg["digest"]}); !proxmox.IsModified(err) {
+		t.Errorf("write with a stale digest: %v", err)
+	}
+	if err := f.SetVMConfig(ctx, "alder", 100, map[string]string{"description": "four"}); err != nil {
+		t.Errorf("write without a digest: %v", err)
+	}
+	if got := f.VMs[100].Config; got["description"] != "four" || got["digest"] != "" {
+		t.Errorf("config = %v", got)
 	}
 }

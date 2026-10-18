@@ -278,7 +278,7 @@ func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
 		case pods.KindImageDelete:
 			return "Delete " + runnable[0].Name
 		case pods.KindImageDetails:
-			return "Save details of " + runnable[0].Name
+			return "Save notes of " + runnable[0].Name
 		}
 	}
 	vms := countVMs(n)
@@ -424,7 +424,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		}
 	}
 	p.Warnings = append(p.Warnings, plan.Notices...) // what was left alone, even when nothing runs
-	if p.Review = review(op, in, plan, p.Nothing); p.Review != nil {
+	if p.Review = review(op, in, plan, p.Nothing, s.cfg.Environments.Subnet); p.Review != nil {
 		p.Heading = p.Review.Verb + " " + p.Review.Subject
 		p.EditHref = reviewBack(op, in)
 		if opts.retryOf > 0 {

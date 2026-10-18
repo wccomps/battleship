@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"encoding/json"
+	"net/netip"
 	"testing"
 
 	"pgregory.net/rapid"
@@ -16,6 +17,23 @@ var fpTexts = []string{"", "a", "team01-dc", "x y", `"q"`, `\`, "<b>&amp;</b>", 
 
 func drawFPText(t *rapid.T, label string) string {
 	return rapid.OneOf(rapid.SampledFrom(fpTexts), rapid.String()).Draw(t, label)
+}
+
+// drawFPAddr draws no address, an IPv4, IPv6 or IPv4-in-IPv6 one, or an
+// IPv6 one with a zone, the one place an address carries text.
+func drawFPAddr(t *rapid.T, label string) netip.Addr {
+	b := [16]byte(rapid.SliceOfN(rapid.Byte(), 16, 16).Draw(t, label))
+	switch rapid.IntRange(0, 4).Draw(t, label+" kind") {
+	case 0:
+		return netip.Addr{}
+	case 1:
+		return netip.AddrFrom4([4]byte(b[:4]))
+	case 2:
+		return netip.AddrFrom16(b)
+	case 3:
+		return netip.AddrFrom16(netip.AddrFrom4([4]byte(b[:4])).As16())
+	}
+	return netip.AddrFrom16(b).WithZone(drawFPText(t, label+" zone"))
 }
 
 // drawStrings draws nil or a slice, empty or not.
@@ -71,7 +89,7 @@ func drawPlan(t *rapid.T) *pods.Plan {
 			it.Steps = []pods.Step{}
 		}
 		if rapid.Bool().Draw(t, "notes") {
-			it.Notes = &pods.Notes{IP: drawFPText(t, "ip"), OS: drawFPText(t, "os"), Base: drawFPText(t, "base"), DNS: drawFPText(t, "dns")}
+			it.Notes = &pods.Notes{IP: drawFPAddr(t, "ip"), OS: drawFPText(t, "os"), Base: drawFPText(t, "base"), DNS: drawFPText(t, "dns")}
 		}
 		switch rapid.IntRange(0, 2).Draw(t, "nics") {
 		case 1:
@@ -83,8 +101,8 @@ func drawPlan(t *rapid.T) *pods.Plan {
 			}
 		}
 		if rapid.Bool().Draw(t, "guest") {
-			it.Guest = &pods.Guest{OS: drawFPText(t, "os"), Hostname: drawFPText(t, "hostname"), Domain: drawFPText(t, "domain"), IP: drawFPText(t, "gip"),
-				Prefix: rapid.IntRange(0, 32).Draw(t, "prefix"), Gateway: drawFPText(t, "gw"), DNS: drawFPText(t, "gdns"), DNSOnly: rapid.Bool().Draw(t, "dnsonly")}
+			it.Guest = &pods.Guest{OS: drawFPText(t, "os"), Hostname: drawFPText(t, "hostname"), Domain: drawFPText(t, "domain"), IP: drawFPAddr(t, "gip"),
+				Prefix: rapid.IntRange(0, 32).Draw(t, "prefix"), Gateway: drawFPAddr(t, "gw"), DNS: drawFPAddr(t, "gdns"), DNSOnly: rapid.Bool().Draw(t, "dnsonly")}
 		}
 		p.Items = append(p.Items, it)
 	}

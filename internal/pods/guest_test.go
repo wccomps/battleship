@@ -2,8 +2,10 @@ package pods
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"flag"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +19,8 @@ import (
 
 var updateGolden = flag.Bool("update-golden", false, "rewrite testdata/guest from the current scripts")
 
-var testGuest = Guest{Hostname: "teak", Domain: "kilo.alpha", IP: "192.168.100.10", Prefix: 24, Gateway: "192.168.100.2", DNS: "192.168.100.2"}
+var testGuest = Guest{Hostname: "teak", Domain: "kilo.alpha", IP: netip.MustParseAddr("192.168.100.10"), Prefix: 24,
+	Gateway: netip.MustParseAddr("192.168.100.2"), DNS: netip.MustParseAddr("192.168.100.2")}
 
 func golden(t *testing.T, name, got string) {
 	t.Helper()
@@ -99,14 +102,14 @@ func TestNeedsReboot(t *testing.T) {
 // single-quoted string at a curly quote.
 func TestGuestCommandRefusesBadValues(t *testing.T) {
 	bad := map[string]func(g *Guest){
-		"quote in IP":       func(g *Guest) { g.IP = "192.168.100.10'; reboot; '" },
-		"curly quote in IP": func(g *Guest) { g.IP = "192.168.100.10\u2019" },
-		"gateway":           func(g *Guest) { g.Gateway = "192.168.100.2 x" },
-		"DNS":               func(g *Guest) { g.DNS = "" },
-		"hostname":          func(g *Guest) { g.Hostname = "te'ak" },
-		"domain":            func(g *Guest) { g.Domain = "kilo.al\u2018pha" },
-		"prefix":            func(g *Guest) { g.Prefix = 0 },
-		"OS":                func(g *Guest) { g.OS = "bsd" },
+		"IPv6 IP":               func(g *Guest) { g.IP = netip.MustParseAddr("2001:db8::10") },
+		"quote in an IPv6 zone": func(g *Guest) { g.DNS = netip.MustParseAddr("fe80::1%eth0';reboot;'") },
+		"IPv4 as IPv6 gateway":  func(g *Guest) { g.Gateway = netip.MustParseAddr("::ffff:192.168.100.2") },
+		"no DNS":                func(g *Guest) { g.DNS = netip.Addr{} },
+		"hostname":              func(g *Guest) { g.Hostname = "te'ak" },
+		"domain":                func(g *Guest) { g.Domain = "kilo.al\u2018pha" },
+		"prefix":                func(g *Guest) { g.Prefix = 0 },
+		"OS":                    func(g *Guest) { g.OS = "bsd" },
 	}
 	for name, mut := range bad {
 		for _, os := range []string{ImageLinux, ImageWindows} {
@@ -125,6 +128,20 @@ func TestGuestCommandRefusesBadValues(t *testing.T) {
 	}
 }
 
+// A guest's addresses reach it from a stored plan, so one a script couldn't
+// take quoted can't be read: the plan doesn't read.
+func TestStoredGuestRefusesUnsafeAddresses(t *testing.T) {
+	for _, field := range []string{"ip", "gateway", "dns"} {
+		for _, v := range []string{"192.168.100.10'; reboot; '", "192.168.100.10\u2019", "192.168.100.2 x", "192.168.100.010"} {
+			b, _ := json.Marshal(map[string]string{field: v})
+			var g Guest
+			if err := json.Unmarshal(b, &g); err == nil {
+				t.Errorf("%s %q read as %+v", field, v, g)
+			}
+		}
+	}
+}
+
 // Set DNS runs on configured hosts: its scripts must not touch the address,
 // routes, other network files or the host name.
 func TestDNSOnlyScriptsLeaveTheRestAlone(t *testing.T) {
@@ -135,13 +152,13 @@ func TestDNSOnlyScriptsLeaveTheRestAlone(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, bad := range []string{g.IP, "Remove-Net", "New-Net", "Rename-Computer", "Dhcp", "battleship-off", "ifdown", "ifup",
+		for _, bad := range []string{g.IP.String(), "Remove-Net", "New-Net", "Rename-Computer", "Dhcp", "battleship-off", "ifdown", "ifup",
 			"ipv4.addresses", "ipv4.method", "hostname", "cloud.cfg.d", "addresses: [$IP"} {
 			if strings.Contains(script, bad) {
 				t.Errorf("%s DNS-only script contains %q", os, bad)
 			}
 		}
-		if !strings.Contains(script, g.DNS) || !strings.Contains(script, g.Domain) {
+		if !strings.Contains(script, g.DNS.String()) || !strings.Contains(script, g.Domain) {
 			t.Errorf("%s DNS-only script lacks the server or domain", os)
 		}
 	}

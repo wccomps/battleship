@@ -157,13 +157,14 @@ func (s *Server) newEnvForm(ctx context.Context, p catalogPage, form url.Values)
 	case p.Env != nil:
 		var here []envHostRow
 		for _, h := range p.Env.Hosts {
-			here = append(here, envHostRow{Name: h.Host, Addr: h.Addr})
+			octet, _ := p.Env.LAN.Octet(h.Addr)
+			here = append(here, envHostRow{Name: h.Host, octet: octet})
 		}
 		slices.SortStableFunc(here, hostOrder)
 		for _, h := range here {
 			c := hereChip{Name: h.Name}
-			if o := pods.LastOctet(h.Addr); o != 0 {
-				c.Addr = "." + strconv.Itoa(o)
+			if h.octet != 0 {
+				c.Addr = "." + strconv.Itoa(h.octet)
 			}
 			f.Here = append(f.Here, c)
 		}

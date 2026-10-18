@@ -307,8 +307,10 @@ type jobView struct {
 	// RanAt is the full time, for a title.
 	Ran, RanAt string
 	Asked      []fact // the inputs beyond teams and hosts, e.g. the snapshot
-	// Details are the details a register or Edit details writes.
+	// Details are the details a register or Edit notes writes, and Notes
+	// the free text an Edit notes writes.
 	Details    *detailsView
+	Notes      string
 	Error      string
 	Headline   string // a succeeded deploy's or teardown's result (fleetHeadline)
 	Summary    *summaryView
@@ -443,7 +445,7 @@ var stepDoing = map[pods.Step]string{
 	pods.StepLabel:      "Setting tags and notes",
 	pods.StepConvert:    "Making it a template",
 	pods.StepRetire:     "Deprecating the previous version",
-	pods.StepDetails:    "Writing the details",
+	pods.StepDetails:    "Writing the notes",
 	pods.StepWaitAgent:  "Waiting for the guest agent",
 	pods.StepGuest:      "Setting up the guest",
 	pods.StepVerify:     "Checking the guest",
@@ -466,10 +468,10 @@ func doingOf(step pods.Step, it pods.Item) string {
 // addressOf is the address a plan item sets or keeps, if known.
 func addressOf(it pods.Item) string {
 	switch {
-	case it.Guest != nil && it.Guest.IP != "":
-		return it.Guest.IP
+	case it.Guest != nil && it.Guest.IP.IsValid():
+		return it.Guest.IP.String()
 	case it.Notes != nil:
-		return it.Notes.IP
+		return pods.AddrText(it.Notes.IP)
 	}
 	return ""
 }
@@ -677,7 +679,11 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	}
 	var plan pods.Plan
 	if json.Unmarshal(j.Plan, &plan) == nil && len(plan.Items) == 1 && plan.Items[0].Details != nil {
-		v.Details = detailsOf(*plan.Items[0].Details, false)
+		d := plan.Items[0].Details
+		v.Details = detailsOf(d.ImageDetails, false)
+		if d.Free != nil {
+			v.Notes = *d.Free
+		}
 	}
 	v.Ran, v.RanAt = minuteTime(now, j.CreatedAt), "made "+clockTime(now, j.CreatedAt)
 	if j.StartedAt != nil {

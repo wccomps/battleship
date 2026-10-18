@@ -161,7 +161,7 @@ func TestPropClientSurvivesAnyAnswer(t *testing.T) {
 		"AgentInterfaces":  func(ctx context.Context) { c.AgentInterfaces(ctx, "n1", 101) },
 		"AgentHostname":    func(ctx context.Context) { c.AgentHostname(ctx, "n1", 101) },
 		"AgentExec":        func(ctx context.Context) { c.AgentExec(ctx, "n1", 101, []string{"id"}, "") },
-		"AgentExecStatus":  func(ctx context.Context) { c.AgentExecStatus(ctx, "n1", 101, 7) },
+		"AgentExecStatus":  func(ctx context.Context) { c.AgentExecStatus(ctx, "n1", 101, 7, 1<<20) },
 		"AgentPing":        func(ctx context.Context) { c.AgentPing(ctx, "n1", 101) },
 		"Clone": func(ctx context.Context) {
 			c.Clone(ctx, CloneRequest{SourceNode: "n1", SourceVMID: 100, NewVMID: 101, Name: "x"})

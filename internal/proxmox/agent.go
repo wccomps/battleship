@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -13,8 +14,24 @@ import (
 // GuestNIC is a guest network interface as the QEMU guest agent reports it.
 type GuestNIC struct {
 	Name string
-	MAC  string   // lower case, colon-separated
-	IPs  []string // "address/prefix"
+	MAC  string // lower case, colon-separated
+	// IPs are its addresses as GuestIP reads them.
+	IPs []netip.Prefix
+}
+
+// The guest agent writes every answer to an Agent call, so each is capped
+// by what it carries (see agent). A small one (a PID, a host name, which
+// the guest's OS limits to 64 bytes, or nothing) fits maxSmallAnswer even
+// with every byte escaped.
+const maxSmallAnswer = 4 << 10
+
+// agent calls the guest agent's command cmd on vmid, refusing an answer
+// over limit bytes, which every Agent call must give.
+func (c *Client) agent(ctx context.Context, limit int64, method, node string, vmid int, cmd string, params url.Values, out any) error {
+	if limit <= 0 {
+		return fmt.Errorf("%s agent/%s: no cap on the answer", method, cmd)
+	}
+	return c.capped(limit).do(ctx, method, vmPath(node, vmid)+"/agent/"+cmd, params, out)
 }
 
 // ExecStatus is the state of a command the guest agent runs.
@@ -26,7 +43,7 @@ type ExecStatus struct {
 
 // AgentPing fails unless the VM's guest agent answers.
 func (c *Client) AgentPing(ctx context.Context, node string, vmid int) error {
-	return c.do(ctx, http.MethodPost, vmPath(node, vmid)+"/agent/ping", nil, nil)
+	return c.agent(ctx, maxSmallAnswer, http.MethodPost, node, vmid, "ping", nil, nil)
 }
 
 // AgentExec starts command in the guest with input on its stdin and returns
@@ -42,7 +59,7 @@ func (c *Client) AgentExec(ctx context.Context, node string, vmid int, command [
 	var raw struct {
 		PID json.Number `json:"pid"`
 	}
-	if err := c.do(ctx, http.MethodPost, vmPath(node, vmid)+"/agent/exec", params, &raw); err != nil {
+	if err := c.agent(ctx, maxSmallAnswer, http.MethodPost, node, vmid, "exec", params, &raw); err != nil {
 		return 0, err
 	}
 	pid, err := raw.PID.Int64()
@@ -52,8 +69,9 @@ func (c *Client) AgentExec(ctx context.Context, node string, vmid int, command [
 	return int(pid), nil
 }
 
-// AgentExecStatus reads the state of the guest command pid.
-func (c *Client) AgentExecStatus(ctx context.Context, node string, vmid, pid int) (ExecStatus, error) {
+// AgentExecStatus reads the state of the guest command pid. It refuses an
+// answer, which carries the command's output, over limit bytes.
+func (c *Client) AgentExecStatus(ctx context.Context, node string, vmid, pid int, limit int64) (ExecStatus, error) {
 	var raw struct {
 		Exited   json.RawMessage `json:"exited"`
 		ExitCode json.Number     `json:"exitcode"`
@@ -61,14 +79,20 @@ func (c *Client) AgentExecStatus(ctx context.Context, node string, vmid, pid int
 		Err      string          `json:"err-data"`
 	}
 	params := url.Values{"pid": {strconv.Itoa(pid)}}
-	if err := c.do(ctx, http.MethodGet, vmPath(node, vmid)+"/agent/exec-status", params, &raw); err != nil {
+	if err := c.agent(ctx, limit, http.MethodGet, node, vmid, "exec-status", params, &raw); err != nil {
 		return ExecStatus{}, err
 	}
 	exited := strings.TrimSpace(string(raw.Exited))
 	return ExecStatus{Exited: exited == "1" || exited == "true", ExitCode: int(int64Of(raw.ExitCode)), Out: raw.Out, Err: raw.Err}, nil
 }
 
-// AgentInterfaces lists the guest's network interfaces.
+// maxNICsAnswer bounds an answer to AgentInterfaces: 1 MiB is some 2,000
+// interfaces with their addresses and statistics, far more than any real
+// guest has.
+const maxNICsAnswer = 1 << 20
+
+// AgentInterfaces lists the guest's network interfaces. It refuses an
+// answer over maxNICsAnswer.
 func (c *Client) AgentInterfaces(ctx context.Context, node string, vmid int) ([]GuestNIC, error) {
 	var raw struct {
 		Result []struct {
@@ -80,27 +104,54 @@ func (c *Client) AgentInterfaces(ctx context.Context, node string, vmid int) ([]
 			} `json:"ip-addresses"`
 		} `json:"result"`
 	}
-	if err := c.do(ctx, http.MethodGet, vmPath(node, vmid)+"/agent/network-get-interfaces", nil, &raw); err != nil {
+	if err := c.agent(ctx, maxNICsAnswer, http.MethodGet, node, vmid, "network-get-interfaces", nil, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]GuestNIC, 0, len(raw.Result))
 	for _, r := range raw.Result {
 		n := GuestNIC{Name: r.Name, MAC: strings.ToLower(r.HW)}
 		for _, ip := range r.IPs {
-			n.IPs = append(n.IPs, ip.Addr+"/"+ip.Prefix.String())
+			bits, err := strconv.Atoi(ip.Prefix.String())
+			if err != nil {
+				bits = -1
+			}
+			if p, ok := GuestIP(ip.Addr, bits); ok {
+				n.IPs = append(n.IPs, p)
+			}
 		}
 		out = append(out, n)
 	}
 	return out, nil
 }
 
-// AgentHostname is the guest's host name.
+// GuestIP is an address the agent reports with prefix length bits, as
+// GuestNIC.IPs holds it. One without a valid length keeps its address, with
+// Bits -1; an IPv4 address written as IPv6 is read as IPv4, its length less
+// 96. One that doesn't parse, or has a zone, isn't kept (ok false).
+func GuestIP(addr string, bits int) (p netip.Prefix, ok bool) {
+	a, err := netip.ParseAddr(addr)
+	if err != nil || a.Zone() != "" {
+		return netip.Prefix{}, false
+	}
+	p = netip.PrefixFrom(a, bits)
+	if a.Is4In6() {
+		bits = -1
+		if p.Bits() >= 96 {
+			bits = p.Bits() - 96
+		}
+		p = netip.PrefixFrom(a.Unmap(), bits)
+	}
+	return p, true
+}
+
+// AgentHostname is the guest's host name. It refuses an answer over
+// maxSmallAnswer.
 func (c *Client) AgentHostname(ctx context.Context, node string, vmid int) (string, error) {
 	var raw struct {
 		Result struct {
 			Name string `json:"host-name"`
 		} `json:"result"`
 	}
-	err := c.do(ctx, http.MethodGet, vmPath(node, vmid)+"/agent/get-host-name", nil, &raw)
+	err := c.agent(ctx, maxSmallAnswer, http.MethodGet, node, vmid, "get-host-name", nil, &raw)
 	return raw.Result.Name, err
 }

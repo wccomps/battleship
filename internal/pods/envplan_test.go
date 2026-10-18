@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
@@ -50,12 +51,12 @@ func TestEnvCreatePlansSlotOne(t *testing.T) {
 		!slices.Equal(gw.Steps, []Step{StepClone, StepLabel, StepNetwork, StepStart}) {
 		t.Errorf("router = %+v", gw)
 	}
-	if teak.Guest == nil || teak.Guest.DNSOnly || teak.Guest.IP != "192.168.100.10" || teak.Guest.Gateway != "192.168.100.2" || teak.Guest.DNS != "192.168.100.2" ||
-		teak.Notes.IP != "192.168.100.10" || teak.Notes.OS != "linux" || teak.Notes.Base != "debian-12-v1" || teak.Notes.DNS != "router" ||
+	if teak.Guest == nil || teak.Guest.DNSOnly || AddrText(teak.Guest.IP) != "192.168.100.10" || AddrText(teak.Guest.Gateway) != "192.168.100.2" || AddrText(teak.Guest.DNS) != "192.168.100.2" ||
+		AddrText(teak.Notes.IP) != "192.168.100.10" || teak.Notes.OS != "linux" || teak.Notes.Base != "debian-12-v1" || teak.Notes.DNS != "router" ||
 		teak.NICs["net0"] != "devint01" || !slices.Equal(teak.Steps, []Step{StepClone, StepLabel, StepNetwork, StepStart, StepWaitAgent, StepGuest, StepVerify}) {
 		t.Errorf("teak = %+v guest %+v notes %+v", teak, teak.Guest, teak.Notes)
 	}
-	if oak.VMID%100 == teak.VMID%100 || oak.Node != "birch" || oak.Guest.OS != ImageWindows || LastOctet(oak.Guest.IP) == 10 {
+	if oak.VMID%100 == teak.VMID%100 || oak.Node != "birch" || oak.Guest.OS != ImageWindows || oak.Guest.IP.As4()[3] == 10 {
 		t.Errorf("oak = %+v", oak)
 	}
 	for _, k := range []string{"slot:01", "domain:kilo.alpha"} {
@@ -113,7 +114,7 @@ func TestEnvAddResumesExistingHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	it := plan.Items[0]
-	if it.VMID != 2101 || slices.Contains(it.Steps, StepClone) || it.Guest.IP != "192.168.100.77" || it.Blocked != "" {
+	if it.VMID != 2101 || slices.Contains(it.Steps, StepClone) || AddrText(it.Guest.IP) != "192.168.100.77" || it.Blocked != "" {
 		t.Errorf("resumed = %+v", it)
 	}
 	if _, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(), EnvRequest{Domain: "kilo.alpha", Router: HostSpec{Host: "gw2", Family: "gw"}}); err == nil {
@@ -140,7 +141,7 @@ func TestEnvDNSWorksWithoutImages(t *testing.T) {
 	if gw := byHost["gw"]; !slices.Equal(gw.Steps, []Step{StepLabel}) || gw.Notes.DNS != "oak" || gw.Tags != "dev;kilo.alpha;router" {
 		t.Errorf("gw = %+v", gw)
 	}
-	if oak := byHost["oak"]; oak.Guest.DNS != "192.168.100.20" || oak.Guest.OS != ImageWindows || !oak.Guest.DNSOnly ||
+	if oak := byHost["oak"]; AddrText(oak.Guest.DNS) != "192.168.100.20" || oak.Guest.OS != ImageWindows || !oak.Guest.DNSOnly ||
 		!slices.Equal(oak.Steps, []Step{StepGuest, StepVerify, StepLabel}) {
 		t.Errorf("oak = %+v", oak)
 	}
@@ -234,5 +235,18 @@ func TestEnvAddResumesTheExistingRouter(t *testing.T) {
 	}
 	if oak.Blocked != "" || oak.VMID == 2100 || !slices.Contains(oak.Steps, StepClone) || oak.Guest == nil {
 		t.Errorf("oak = %+v", oak)
+	}
+}
+
+// A config built in Go may leave the LAN zero, which Load never does: then
+// no host has an address, so each guest is blocked rather than configured.
+func TestEnvCreateWithoutALANBlocksGuests(t *testing.T) {
+	cfg := envConfig()
+	cfg.Environments.Subnet = config.LAN{}
+	plan := create(t, NewPlanner(envFake(), cfg), "teak=debian-12:10", "oak=win2022")
+	for _, it := range plan.Items[1:] {
+		if it.Blocked == "" || slices.Contains(it.Steps, StepGuest) {
+			t.Errorf("%s = %+v", it.Name, it)
+		}
 	}
 }

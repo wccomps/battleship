@@ -14,13 +14,13 @@ import (
 
 // Guest is what configure-guest sets inside an environment host.
 type Guest struct {
-	OS       string `json:"os"` // ImageWindows or ImageLinux
-	Hostname string `json:"hostname"`
-	Domain   string `json:"domain"`
-	IP       string `json:"ip"`
-	Prefix   int    `json:"prefix"`
-	Gateway  string `json:"gateway"`
-	DNS      string `json:"dns"`
+	OS       string     `json:"os"` // ImageWindows or ImageLinux
+	Hostname string     `json:"hostname"`
+	Domain   string     `json:"domain"`
+	IP       netip.Addr `json:"ip"`
+	Prefix   int        `json:"prefix"`
+	Gateway  netip.Addr `json:"gateway"`
+	DNS      netip.Addr `json:"dns"`
 	// DNSOnly sets only the DNS server and suffix, on a host already set up.
 	DNSOnly bool `json:"dns_only,omitempty"`
 }
@@ -49,11 +49,6 @@ func SetupComplete(out string) bool {
 
 var macRE = regexp.MustCompile(`^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$`)
 
-func isIPv4(s string) bool {
-	a, err := netip.ParseAddr(s)
-	return err == nil && a.Is4() && a.String() == s
-}
-
 // Check validates every value the scripts embed. They run as root or SYSTEM,
 // and the values come partly from VM notes, which users can edit.
 func (g Guest) Check() error {
@@ -69,9 +64,14 @@ func (g Guest) Check() error {
 	if g.Prefix < 1 || g.Prefix > 32 {
 		return fmt.Errorf("prefix length %d isn't 1-32", g.Prefix)
 	}
-	for _, a := range [][2]string{{"address", g.IP}, {"gateway", g.Gateway}, {"DNS server", g.DNS}} {
-		if !isIPv4(a[1]) {
-			return fmt.Errorf("%s %q isn't an IPv4 address", a[0], a[1])
+	// An address writes itself in canonical form, but an IPv6 one can carry
+	// any text in its zone: only IPv4 ones are taken.
+	for _, a := range []struct {
+		what string
+		a    netip.Addr
+	}{{"address", g.IP}, {"gateway", g.Gateway}, {"DNS server", g.DNS}} {
+		if !a.a.Is4() {
+			return fmt.Errorf("%s %q isn't an IPv4 address", a.what, AddrText(a.a))
 		}
 	}
 	return nil
@@ -110,16 +110,16 @@ func GuestScript(g Guest, mac string) (string, error) {
 	}
 	if g.DNSOnly {
 		if g.OS == ImageWindows {
-			return fmt.Sprintf(windowsDNSScript, quote(strings.ToUpper(strings.ReplaceAll(mac, ":", "-"))), quote(g.DNS), quote(g.Domain)), nil
+			return fmt.Sprintf(windowsDNSScript, quote(strings.ToUpper(strings.ReplaceAll(mac, ":", "-"))), quote(g.DNS.String()), quote(g.Domain)), nil
 		}
-		return fmt.Sprintf("MAC=%s\nDNS=%s\nDOMAIN=%s\n", quote(strings.ToLower(mac)), quote(g.DNS), quote(g.Domain)) + linuxFindIface + linuxDNSScript, nil
+		return fmt.Sprintf("MAC=%s\nDNS=%s\nDOMAIN=%s\n", quote(strings.ToLower(mac)), quote(g.DNS.String()), quote(g.Domain)) + linuxFindIface + linuxDNSScript, nil
 	}
 	if g.OS == ImageWindows {
-		return fmt.Sprintf(windowsScript, quote(strings.ToUpper(strings.ReplaceAll(mac, ":", "-"))), quote(g.IP), g.Prefix,
-			quote(g.Gateway), quote(g.DNS), quote(g.Domain), quote(g.Hostname), RebootMarker), nil
+		return fmt.Sprintf(windowsScript, quote(strings.ToUpper(strings.ReplaceAll(mac, ":", "-"))), quote(g.IP.String()), g.Prefix,
+			quote(g.Gateway.String()), quote(g.DNS.String()), quote(g.Domain), quote(g.Hostname), RebootMarker), nil
 	}
 	return fmt.Sprintf("MAC=%s\nIP=%s\nPREFIX=%d\nGW=%s\nDNS=%s\nHOST=%s\nDOMAIN=%s\n",
-		quote(strings.ToLower(mac)), quote(g.IP), g.Prefix, quote(g.Gateway), quote(g.DNS), quote(g.Hostname), quote(g.Domain)) + linuxFindIface + linuxScript, nil
+		quote(strings.ToLower(mac)), quote(g.IP.String()), g.Prefix, quote(g.Gateway.String()), quote(g.DNS.String()), quote(g.Hostname), quote(g.Domain)) + linuxFindIface + linuxScript, nil
 }
 
 // linuxFindIface sets $iface to the NIC with $MAC.

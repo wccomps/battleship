@@ -23,6 +23,19 @@
     return out;
   }
 
+  // swap puts fresh, a piece, in for its id's element, keeping a tick and
+  // focus.
+  function swap(fresh) {
+    var cur = $(fresh.id);
+    if (!cur || cur.outerHTML === fresh.outerHTML) return;
+    var box = cur.querySelector("input[type=checkbox]"), freshBox = fresh.querySelector("input[type=checkbox]");
+    if (box && freshBox) freshBox.checked = box.checked;
+    var focused = cur.contains(document.activeElement), onBox = box && document.activeElement === box;
+    cur.replaceWith(fresh);
+    var target = onBox ? freshBox : fresh.querySelector("a, button, input");
+    if (focused && target) target.focus();
+  }
+
   // -- The live dot
 
   // The dot says "off" while an event stream is down; otherwise the grid's
@@ -97,18 +110,6 @@
       each(document.querySelectorAll("[data-retry]"), function (el) {
         el.textContent = tries ? "Reconnecting · try " + tries : "Reconnecting";
       });
-    }
-
-    // Swap fresh in for its id's element, keeping a tick and focus.
-    function swap(fresh) {
-      var cur = $(fresh.id);
-      if (!cur || cur.outerHTML === fresh.outerHTML) return;
-      var box = cur.querySelector("input[type=checkbox]"), freshBox = fresh.querySelector("input[type=checkbox]");
-      if (box && freshBox) freshBox.checked = box.checked;
-      var focused = cur.contains(document.activeElement), onBox = box && document.activeElement === box;
-      cur.replaceWith(fresh);
-      var target = onBox ? freshBox : fresh.querySelector("a, button, input");
-      if (focused && target) target.focus();
     }
 
     // The grid's shape: its classes, header and cell ids.
@@ -569,6 +570,28 @@
       setTimeout(function () { say.textContent = "Copy"; }, 2000);
     });
   });
+
+  // -- Live addresses
+
+  // The Environments page loads with assigned addresses; data-fill is the
+  // URL of pieces (sse.go's piece) that swap in the live ones. If they can't
+  // be read, the line stays as it was, its link reading them without this.
+  function fill(line) {
+    var say = line.querySelector("[data-fill-say]"), was = say ? say.textContent : "";
+    if (say) say.textContent = "Reading live addresses…";
+    line.setAttribute("aria-busy", "true");
+    var undo = function () {
+      if (say) say.textContent = was;
+      line.removeAttribute("aria-busy");
+    };
+    fetch(line.getAttribute("data-fill"), { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      if (!r.ok || r.headers.get("X-Battleship-Pieces") !== "1") throw new Error("no addresses");
+      return r.text();
+    }).then(function (html) {
+      Array.prototype.slice.call(parse(html).children).forEach(swap);
+    }).catch(undo);
+  }
+  each(document.querySelectorAll("main [data-fill]"), fill);
 
   // -- Start
 

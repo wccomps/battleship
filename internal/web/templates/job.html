@@ -46,6 +46,9 @@
 {{- with .Details}}
 <div class="sec"><h2 class="sub">Details</h2>{{template "details" .}}</div>
 {{- end}}
+{{- with .Notes}}
+<div class="sec"><h2 class="sub">Notes</h2><div class="notes box">{{.}}</div></div>
+{{- end}}
 {{- end}}
 
 {{define "job-op" -}}

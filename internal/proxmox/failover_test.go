@@ -518,3 +518,31 @@ func selfSigned(t *testing.T) tls.Certificate {
 
 // activeEndpoint is the host:port c's calls go to first.
 func activeEndpoint(c *Client) string { return c.endpoints[c.active.Load()].host }
+
+// A status line over maxHeader (a guest agent's error can fill it) is an
+// answer too large to read: the endpoint answered, so the call neither fails
+// over nor is retried, and the error says so.
+func TestHeaderOverCapNeitherFailsOverNorRetries(t *testing.T) {
+	a := newNode(t, pveStatus(t, 500, "Agent error: pid 7 does not exist "+strings.Repeat("z", maxHeader+1)))
+	b := newNode(t, okNode)
+	c, logs := failoverClient(t, a.srv.URL, b.srv.URL)
+	r := Retrier{Retryable: transient("does not exist", "timeout"), Attempts: 3, Initial: time.Millisecond, Max: time.Millisecond,
+		Sleep: func(context.Context, time.Duration) error { return nil }}
+	err := r.Do(context.Background(), func() error { _, err := c.ClusterVMs(context.Background()); return err })
+	if err == nil || !strings.Contains(err.Error(), "answer too large") || len(err.Error()) > 1<<10 {
+		t.Fatalf("err = %.200v, want a short \"answer too large\"", err)
+	}
+	var endpointsErr *EndpointsError
+	if errors.As(err, &endpointsErr) {
+		t.Errorf("err = %.200v, want no failover", err)
+	}
+	if NewClassifier([]string{"does not exist", "timeout"}).Classify(err) != Permanent {
+		t.Errorf("err = %.200v is not permanent", err)
+	}
+	if a.count("GET") != 1 || b.count("") != 0 {
+		t.Errorf("a %d, b %d requests, want 1 and 0", a.count("GET"), b.count(""))
+	}
+	if activeEndpoint(c) != a.host() || len(logs.get()) != 0 {
+		t.Errorf("active %s, logs %q: want no switch", activeEndpoint(c), logs.get())
+	}
+}

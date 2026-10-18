@@ -22,6 +22,9 @@ type imagesView struct {
 	// Lacks names the privilege Register needs when the user holds it
 	// nowhere; the buttons are then disabled.
 	Lacks string
+	// NotesLack names the privilege Edit notes needs on the families whose
+	// rows' Edit is disabled.
+	NotesLack string
 }
 
 // readyRow is a VM ready to register: a form of its own.
@@ -39,10 +42,12 @@ type kindGroup struct {
 
 // familyRow is a family in the catalogue: its current version (for a
 // retired family, its newest) and what it is: the OS its details give,
-// else the first line of its notes.
+// else the first line of its notes. MayNotes is whether the user may edit
+// the current version's notes, which its row offers.
 type familyRow struct {
-	Image pods.BaseImage
-	What  string
+	Image    pods.BaseImage
+	What     string
+	MayNotes bool
 }
 
 // kindLabels are the catalogue's group headings.
@@ -84,9 +89,9 @@ func catalogue(images []pods.BaseImage) (groups []kindGroup, retired []familyRow
 	byKind := map[string][]familyRow{}
 	for _, f := range pods.FamilyNames(images) {
 		if cur, ok := pods.Newest(images, f); ok {
-			byKind[cur.Kind] = append(byKind[cur.Kind], familyRow{cur, what(cur)})
+			byKind[cur.Kind] = append(byKind[cur.Kind], familyRow{Image: cur, What: what(cur)})
 		} else if latest, ok := pods.Latest(images, f); ok {
-			retired = append(retired, familyRow{latest, what(latest)})
+			retired = append(retired, familyRow{Image: latest, What: what(latest)})
 		}
 	}
 	for _, k := range pods.ImageKinds {
@@ -157,6 +162,24 @@ func (s *Server) imagesPage(w http.ResponseWriter, r *http.Request) {
 	if len(p.Ready) > 0 && !s.mayRun(r.Context(), pods.KindImageRegister) {
 		p.Lacks = lacksOf(pods.KindImageRegister, "")
 	}
+	var lack []string
+	rows := 0
+	for _, g := range p.Groups {
+		for i := range g.Families {
+			f := &g.Families[i]
+			rows++
+			if f.MayNotes = s.mayOn(r.Context(), f.Image.VMID, pods.OfferPrivileges(pods.KindImageDetails)...); !f.MayNotes {
+				lack = append(lack, f.Image.Name)
+			}
+		}
+	}
+	switch {
+	case len(lack) == 0:
+	case len(lack) == rows && rows > 1:
+		p.NotesLack = lacksOf(pods.KindImageDetails, "the base images")
+	default:
+		p.NotesLack = lacksOf(pods.KindImageDetails, andList(lack))
+	}
 	s.render(w, r, http.StatusOK, "images", s.newView(w, r, "Images", "images", p))
 }
 
@@ -182,8 +205,10 @@ type familyView struct {
 	// lack.
 	MayClone bool
 	Lacks    []string
-	// MayDetails is whether the user may edit the current version's details.
-	MayDetails bool
+	// MayNotes is whether the user may edit the current version's notes
+	// (Edit notes); NotesLack says what they lack if not.
+	MayNotes  bool
+	NotesLack string
 }
 
 // versionRow is a version of a family, with its one action: Deprecate on
@@ -199,6 +224,19 @@ type versionRow struct {
 const familiesPath = "/images/family/"
 
 func familyHref(family string) string { return familiesPath + url.PathEscape(family) }
+
+// notesHref is Edit notes's form for family.
+func notesHref(family string) string {
+	op, _ := operationFor(pods.KindImageDetails)
+	return op.Path + "?" + url.Values{fieldFamily: {family}}.Encode()
+}
+
+// notesButton is a family's Edit notes button (the "notes-button"
+// template): a link to its form, or disabled when the user may not.
+type notesButton struct {
+	Family string
+	May    bool
+}
 
 // oldFamilyPage sends a family page's old address, /images/{family}, to
 // its page.
@@ -249,8 +287,8 @@ func (s *Server) familyPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if p.Current != nil {
-		if p.MayDetails = s.mayOn(ctx, p.Current.VMID, pods.OfferPrivileges(pods.KindImageDetails)...); !p.MayDetails {
-			p.Lacks = append(p.Lacks, lacksOf(pods.KindImageDetails, p.Current.Name))
+		if p.MayNotes = s.mayOn(ctx, p.Current.VMID, pods.OfferPrivileges(pods.KindImageDetails)...); !p.MayNotes {
+			p.NotesLack = lacksOf(pods.KindImageDetails, p.Current.Name)
 		}
 	}
 	if noDeprecate {

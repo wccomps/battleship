@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"reflect"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/wccomps/battleship/internal/auth"
+	"github.com/wccomps/battleship/internal/pods"
 )
 
 // hostileStrings break pages that don't escape them, mixed with names that
@@ -39,9 +41,28 @@ func hostile(t *rapid.T, label string) string {
 	return strings.Join(rapid.SliceOfN(piece, 1, 3).Draw(t, label), "")
 }
 
+// hostileAddr is no address, an IPv4 or IPv6 one, or an IPv6 one with a
+// hostile zone, the one place an address carries text.
+func hostileAddr(t *rapid.T, label string) netip.Addr {
+	b := [16]byte(rapid.SliceOfN(rapid.Byte(), 16, 16).Draw(t, label))
+	switch rapid.IntRange(0, 3).Draw(t, label+" kind") {
+	case 0:
+		return netip.Addr{}
+	case 1:
+		return netip.AddrFrom4([4]byte(b[:4]))
+	case 2:
+		return netip.AddrFrom16(b)
+	}
+	return netip.AddrFrom16(b).WithZone(hostile(t, label+" zone"))
+}
+
 // fillHostile recursively fills v with hostile strings and small values
 // (sizes derive from numbers); callers fix up fields the app always sets.
 func fillHostile(t *rapid.T, v reflect.Value, path string) {
+	if v.Type() == reflect.TypeFor[netip.Addr]() {
+		v.Set(reflect.ValueOf(hostileAddr(t, path)))
+		return
+	}
 	switch v.Kind() {
 	case reflect.String:
 		v.SetString(hostile(t, path))
@@ -167,6 +188,77 @@ func TestPropPagesEscapeHostileText(t *testing.T) {
 	})
 }
 
+// notesPageData draws hostile data for page with Edit notes's view data
+// always set: the form's notes and an unreadable block's raw notes, the
+// review's free text before and after, the job's notes, and the Images and
+// family pages' Edit and the lines saying why it's off.
+func notesPageData(t *rapid.T, page string) any {
+	hostileText := func(label string) string {
+		return strings.Join(rapid.SliceOfN(rapid.SampledFrom(append(hostileStrings, "</textarea><script>x()</script>", "\n", "**Details**")), 1, 4).Draw(t, label), "")
+	}
+	switch page {
+	case "teamless":
+		p := drawHostile[catalogPage](t, "teamless")
+		p.Op, _ = operationFor(pods.KindImageDetails)
+		p.Edit = &notesEdit{Image: hostileText("image"), Was: pods.NotesRead{Unreadable: rapid.Bool().Draw(t, "unreadable"), Block: hostileText("block")}}
+		if rapid.Bool().Draw(t, "nothing to edit") {
+			p.Edit.Err = hostileText("err")
+		}
+		free := hostileText("notes")
+		p.Details.Free = &free
+		return p
+	case "preview":
+		p := drawHostile[previewPage](t, "preview")
+		p.Op, _ = operationFor(pods.KindImageDetails)
+		p.Review = &reviewView{Verb: "Edit notes of", Subject: hostileText("subject"), Block: hostileText("block"), DetailsSay: hostileText("say"),
+			NotesChange: &notesChange{Before: hostileText("before"), After: hostileText("after")}}
+		return p
+	case "job":
+		v := drawHostile[jobView](t, "job")
+		v.Notes = hostileText("job notes")
+		return v
+	case "images":
+		v := drawHostile[imagesView](t, "images")
+		v.NotesLack = hostileText("lack")
+		v.Groups = append(v.Groups, kindGroup{Label: hostileText("label"), Families: []familyRow{{Image: pods.BaseImage{Family: hostileText("family")},
+			What: hostileText("what"), MayNotes: rapid.Bool().Draw(t, "may")}}})
+		return v
+	}
+	v := drawHostile[familyView](t, "family")
+	v.Current = &pods.BaseImage{Name: hostileText("current")}
+	v.Family, v.NotesLack, v.MayNotes = hostileText("family"), hostileText("lack"), rapid.Bool().Draw(t, "may")
+	return v
+}
+
+// Edit notes's view data, hostile, renders escaped in every page that
+// shows it: no script gets in, and the markup stays well formed.
+func TestPropNotesViewsEscapeHostileText(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		page := rapid.SampledFrom([]string{"teamless", "preview", "job", "images", "family"}).Draw(t, "page")
+		v := drawHostile[view](t, "view")
+		v.refresh = "/x"
+		v.Data = notesPageData(t, page)
+		root := rapid.SampledFrom([]string{"layout", "panel"}).Draw(t, "root")
+		var buf bytes.Buffer
+		if err := pages[page].ExecuteTemplate(&buf, root, v); err != nil {
+			t.Fatalf("rendering %s as %s: %v", page, root, err)
+		}
+		tags, err := checkMarkup(buf.String())
+		if err != nil {
+			t.Fatalf("%s as %s: %v", page, root, err)
+		}
+		scripts := 0
+		for _, tag := range tags {
+			if tag.Name == "script" {
+				scripts++
+			}
+		}
+		if want := map[string]int{"layout": 1, "panel": 0}[root]; scripts != want {
+			t.Fatalf("%s as %s has %d scripts, want %d", page, root, scripts, want)
+		}
+	})
+}
+
 // offSiteURL draws addresses that leave the site, or nearly do, mixed with
 // local paths that carry hostile text.
 var offSiteURL = rapid.OneOf(
@@ -255,6 +347,8 @@ func TestPropFragmentsEscapeHostileText(t *testing.T) {
 		{"job", "job-items", func(t *rapid.T) any { return drawHostile[jobView](t, "job") }},
 		{"job", "job-log-lines", func(t *rapid.T) any { return drawHostile[[]eventView](t, "events") }},
 		{"jobs", "jobs-table", func(t *rapid.T) any { return drawHostile[jobsList](t, "jobs") }},
+		{"catalog", "env-addr", func(t *rapid.T) any { return drawHostile[envHostRow](t, "addr") }},
+		{"catalog", "env-live", func(t *rapid.T) any { return drawHostile[envsView](t, "envs") }},
 	}
 	rapid.Check(t, func(t *rapid.T) {
 		f := rapid.SampledFrom(frags).Draw(t, "fragment")

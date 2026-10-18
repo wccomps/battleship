@@ -8,6 +8,9 @@
 <p class="lock">{{icon "lock"}}{{.}}</p>
 {{- end}}
 {{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
+{{- if .MayLive}}
+{{template "env-live" .}}
+{{- end}}
 {{- range .Envs}}
 {{- $b := .}}
 <section class="env" id="{{.ID}}" aria-labelledby="{{.ID}}-h">
@@ -38,7 +41,7 @@
 <tbody>
 {{- range .}}
 <tr><td class="hn"><span class="hname">{{.Name}}</span>{{if .Router}} <span class="chip">router</span>{{end}}</td>
-<td class="ad">{{with .Addr}}<code>{{.}}</code>{{else}}<span class="meta">no address</span>{{end}}</td>
+{{template "env-addr" .}}
 <td class="si"><span class="gl is-{{if .Running}}running{{else}}stopped{{end}}"><i class="g" aria-hidden="true"></i>{{.Status}}</span>{{with .Image}} <span class="meta">· {{.}}</span>{{end}}</td>
 <td class="nt">{{with details .Details .Unreadable}}{{template "details" .}}{{end}}{{with .Notes}}<div class="notes">{{.}}</div>{{end}}</td></tr>
 {{- end}}
@@ -56,4 +59,29 @@
 {{- end}}
 </div>
 {{- end}}
+{{- end}}
+
+{{/* env-live says whether the addresses are live; without them, the
+     script fills them in from data-fill, and the link reads them without it. */}}
+{{define "env-live" -}}
+<p class="meta liveaddr" id="env-live"{{if not .LiveRead}} data-fill="/environments/addresses"{{end}}>
+{{- if .LiveRead}}<span>Addresses are live from the guest agents, where they answered.</span> <a href="/environments?live=1">Read again</a>
+{{- else}}<span data-fill-say>Addresses as assigned.</span> <a href="/environments?live=1">Show live addresses</a>{{end}}</p>
+{{- end}}
+
+{{/* env-addr is a host's address cell: its assigned address, or once read
+     (.Read) its live one, flagged if it differs from an assigned one, the
+     router's WAN address
+     and a host's external one. */}}
+{{define "env-addr" -}}
+<td class="ad" id="addr-{{.VMID}}">
+{{- if and .Read .Live}}
+{{- with .LAN}}<span class="al"><code>{{.}}</code>{{if $.Differs}} <span class="chip differs">differs</span>{{end}}</span>
+{{- else}}<span class="al"><span class="chip differs">no live address</span></span>{{end}}
+{{- if .Differs}}<span class="al meta">assigned {{.Addr}}</span>{{end}}
+{{- else}}<span class="al">{{with .Addr}}<code>{{.}}</code>{{else}}<span class="meta">no address</span>{{end}}{{if .Read}} <span class="meta">· not live</span>{{end}}</span>
+{{- end}}
+{{- with .WAN}}<span class="al"><span class="meta">WAN</span> <code>{{.}}</code></span>{{end}}
+{{- with .External}}<span class="al"><span class="meta">external</span> <code>{{.}}</code></span>{{end -}}
+</td>
 {{- end}}

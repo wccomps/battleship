@@ -62,7 +62,7 @@ func TestEnvTeardownDeletesOnlyItsOwnVMs(t *testing.T) {
 			t.Errorf("%s = %+v", it.Name, it)
 		}
 	}
-	if teak := plan.Items[2]; teak.VMID != 2101 || teak.Node != "alder" || teak.Notes.IP != "192.168.100.10" || teak.Notes.Base != "debian-12-v2" {
+	if teak := plan.Items[2]; teak.VMID != 2101 || teak.Node != "alder" || AddrText(teak.Notes.IP) != "192.168.100.10" || teak.Notes.Base != "debian-12-v2" {
 		t.Errorf("teak = %+v notes %+v", teak, teak.Notes)
 	}
 	if want := []KeptVM{{Name: "stray", Why: "outside dev-01 but has a NIC on its networks"}}; !slices.Equal(plan.Kept, want) || len(plan.Notices) != 0 {

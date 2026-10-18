@@ -75,8 +75,8 @@ var operations = []operation{
 		Section: sectionImages, Doing: "Deprecating"},
 	{Kind: pods.KindImageDelete, Path: "/images/delete", Title: "Delete base image", Icon: "teardown", Noun: "deletion",
 		Section: sectionImages, Doing: "Deleting", Done: "Deleted"},
-	{Kind: pods.KindImageDetails, Path: "/images/details", Title: "Edit details", Icon: "edit", Noun: "details change",
-		Section: sectionImages, Doing: "Editing details", Done: "Saved"},
+	{Kind: pods.KindImageDetails, Path: "/images/details", Title: "Edit notes", Icon: "edit", Noun: "notes change",
+		Section: sectionImages, Doing: "Editing notes", Done: "Saved"},
 }
 
 // nav is the nav entry its pages mark current: its section, or else its
@@ -168,8 +168,11 @@ const (
 	fieldHostImage   = "host_image"
 	fieldHostOctet   = "host_octet"
 	fieldMore        = "more" // asks the form again with more host rows (blankRows)
-	// The details fields (detailsFields); fieldDetails says they were posted.
+	// The details fields (detailsFields). fieldDetails is yes, or
+	// detailsWithNotes when the free text comes too, which a server from
+	// before Edit notes refuses rather than drop the text.
 	fieldDetails     = "details"
+	detailsWithNotes = "with-notes"
 	fieldOS          = "detail_os"
 	fieldUser        = "detail_user"
 	fieldPassword    = "detail_password"
@@ -177,6 +180,8 @@ const (
 	fieldGeneralized = "detail_generalized"
 	fieldInstalled   = "detail_installed"
 	fieldLicence     = "detail_licence"
+	fieldNotes       = "notes"
+	fieldNotesFrom   = "notes_from" // the notes an Edit notes form opened on (pods.ImageNotes.From)
 	fromGridValue    = "grid"
 	yes              = "yes"
 )
@@ -211,11 +216,16 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 			}
 		}
 		in.VMID, _ = strconv.Atoi(strings.TrimSpace(form.Get(fieldVMID)))
-		if form.Get(fieldDetails) == yes {
-			d := pods.ImageDetails{OS: form.Get(fieldOS), User: form.Get(fieldUser), Password: form.Get(fieldPassword),
+		if posted := form.Get(fieldDetails); posted == yes || posted == detailsWithNotes {
+			n := pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: form.Get(fieldOS), User: form.Get(fieldUser), Password: form.Get(fieldPassword),
 				Built: form.Get(fieldBuilt), Generalized: form.Get(fieldGeneralized), Installed: form.Get(fieldInstalled),
-				Licence: form.Get(fieldLicence)}.Trimmed()
-			in.Details = &d
+				Licence: form.Get(fieldLicence)}.Trimmed()}
+			if posted == detailsWithNotes {
+				free := pods.CleanFreeNotes(form.Get(fieldNotes))
+				n.Free = &free
+			}
+			n.From = strings.TrimSpace(form.Get(fieldNotesFrom))
+			in.Details = &n
 		}
 		return in
 	}
@@ -319,15 +329,18 @@ func Normalize(in jobs.Inputs) jobs.Inputs {
 	return formInputs(in.Kind, form)
 }
 
-// detailsFields are details as the form fields formInputs reads: the
-// fields set, and fieldDetails, which says details were given even when
-// none is set.
-func detailsFields(d *pods.ImageDetails) []field {
+// detailsFields are notes as the form fields formInputs reads: the
+// details set, the free text if any, and fieldDetails, which says details
+// were given even when none is set.
+func detailsFields(d *pods.ImageNotes) []field {
 	if d == nil {
 		return nil
 	}
 	fs := []field{{fieldDetails, yes}}
-	for _, f := range []field{{fieldOS, d.OS}, {fieldUser, d.User}, {fieldPassword, d.Password}, {fieldBuilt, d.Built},
+	if d.Free != nil {
+		fs = []field{{fieldDetails, detailsWithNotes}, {fieldNotes, *d.Free}}
+	}
+	for _, f := range []field{{fieldNotesFrom, d.From}, {fieldOS, d.OS}, {fieldUser, d.User}, {fieldPassword, d.Password}, {fieldBuilt, d.Built},
 		{fieldGeneralized, d.Generalized}, {fieldInstalled, d.Installed}, {fieldLicence, d.Licence}} {
 		if f.Value != "" {
 			fs = append(fs, f)
@@ -336,10 +349,12 @@ func detailsFields(d *pods.ImageDetails) []field {
 	return fs
 }
 
-// formQuery is an operation's form URL prefilled with in, for "change" links.
-// A deploy's baseline box is always written, since the form ticks it when the
-// query is silent. Details are left out, and the form fills them in afresh. An environment's form has its domain in the path; without
-// a valid one, it is the Environments page.
+// formQuery is an operation's form URL prefilled with in, for "change"
+// links. A deploy's baseline box is always written, since the form ticks it
+// when the query is silent. Details and notes are left out, a password and
+// long text kept out of addresses: the form reads them again. An
+// environment's form has its domain in the path; without a valid one, it
+// is the Environments page.
 func formQuery(op operation, in jobs.Inputs) string {
 	if op.Kind.OnEnvironment() && op.domain == "" {
 		if pods.CheckDomain(in.Domain) != nil {
@@ -348,7 +363,7 @@ func formQuery(op operation, in jobs.Inputs) string {
 		op = op.at(in.Domain)
 	}
 	q := url.Values{}
-	in.Details = nil // a password stays out of addresses: the form reads them again
+	in.Details = nil
 	for _, f := range inputFields(in) {
 		if f.Name != fieldDomain || !op.Kind.OnEnvironment() {
 			q.Set(f.Name, f.Value)

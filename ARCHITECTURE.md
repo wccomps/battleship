@@ -73,7 +73,7 @@ once, and pushes changes to open pages.
 | **plan, item, step** | What a job will do: one item per VM, each with ordered steps (clone, network, …, start) |
 | **blocked** | An item that can't run (missing privilege, missing snapshot); shown in the preview |
 | **fingerprint** | A hash of a plan, to tell whether the cluster changed since the preview |
-| **round** | One pass over a job's items; failed items get a retry round, except failures for a missing privilege |
+| **round** | One pass over a job's items; failed items get a retry round, except failures for a missing privilege or a config changed by someone else |
 | **baseline** | The `initial` snapshot taken at deploy; a reset rolls back to it |
 | **drift** | A pod VM whose config no longer matches the rules a deploy sets: NICs, disk limits, empty notes, pool, baseline, at most one non-empty set tag. No set tag isn't drift: every VM deployed before sets has none |
 | **leftover / orphaned disks** | Disks a deleted VM left on the storage |

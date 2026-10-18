@@ -24,14 +24,17 @@ func Fingerprint(plan *pods.Plan) string {
 		Description string `json:",omitempty"`
 		VMState     bool   `json:",omitempty"`
 
-		Source     *fpSource          `json:",omitempty"`
-		Pool       string             `json:",omitempty"`
-		Tags       string             `json:",omitempty"`
-		Notes      *pods.Notes        `json:",omitempty"`
-		NICs       map[string]string  `json:",omitempty"`
-		Guest      *pods.Guest        `json:",omitempty"`
-		Supersedes *fpSource          `json:",omitempty"`
-		Details    *pods.ImageDetails `json:",omitempty"`
+		Source     *fpSource         `json:",omitempty"`
+		Pool       string            `json:",omitempty"`
+		Tags       string            `json:",omitempty"`
+		Notes      *pods.Notes       `json:",omitempty"`
+		NICs       map[string]string `json:",omitempty"`
+		Guest      *pods.Guest       `json:",omitempty"`
+		Supersedes *fpSource         `json:",omitempty"`
+		Details    *pods.ImageNotes  `json:",omitempty"`
+		// Replaces is the notes an Edit notes replaces, as pods reads them:
+		// changed since the preview, the job is stale, not a lost update.
+		Replaces *pods.NotesRead `json:",omitempty"`
 	}
 	type fpTemplate struct {
 		Name           string
@@ -79,10 +82,10 @@ func Fingerprint(plan *pods.Plan) string {
 			VMState:     it.VMState,
 
 			Source: sourceFP(it.Source), Pool: it.Pool, Tags: it.Tags, Notes: it.Notes,
-			NICs: it.NICs, Guest: it.Guest, Supersedes: sourceFP(it.Supersedes), Details: it.Details,
+			NICs: it.NICs, Guest: it.Guest, Supersedes: sourceFP(it.Supersedes), Details: it.Details, Replaces: it.DetailsWas,
 		})
 	}
-	b, _ := json.Marshal(fp) // plain structs of strings, ints and bools can't fail
+	b, _ := json.Marshal(fp) // plain structs of strings, ints, bools and addresses can't fail
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
