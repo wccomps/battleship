@@ -53,11 +53,26 @@ func editNotes(os, free string) Inputs {
 
 const notesBefore = "**Details**\n- OS: Debian 12\n\nPatched.\nbattleship: source=150"
 
-// An Edit notes writing free text replaces all of it, so its fingerprint
-// covers the notes it replaces: a change to them since the preview,
+// An Edit notes's fingerprint covers the notes it replaces, whether it
+// writes free text or details alone: a change to them since the preview,
 // visible or in an unreadable block, makes the plan differ.
 func TestFingerprintCoversNotesReplaced(t *testing.T) {
 	in := editNotes("Debian 12", "Patched.\nRebooted.")
+	detailsOnly := editNotes("Debian 13", "Patched.")
+	for _, after := range []string{
+		"**Details**\n- OS: Debian 12\n\nPatched.\nDO NOT DEPLOY: AV broken\nbattleship: source=150",
+		"**Details**\n- OS: Debian 12\n- Login: admin\n\nPatched.\nbattleship: source=150",
+	} {
+		f := notesFamily(notesBefore)
+		before, err := BuildPlan(bg, pods.NewPlanner(f, testCfg()), detailsOnly)
+		if err != nil || before.Items[0].Details.Free != nil {
+			t.Fatalf("details-only plan = %+v, %v", before, err)
+		}
+		f.VMs[8001].Config["description"] = after
+		if now, _ := BuildPlan(bg, pods.NewPlanner(f, testCfg()), detailsOnly); Fingerprint(before) == Fingerprint(now) {
+			t.Errorf("notes changed to %q under a details-only preview; the fingerprint didn't", after)
+		}
+	}
 	for _, after := range []string{
 		"**Details**\n- OS: Debian 12\n\nPatched.\nDO NOT DEPLOY: AV broken\nbattleship: source=150",
 		"**Details**\n- OS: Debian 13\n\nPatched.\nbattleship: source=150",
