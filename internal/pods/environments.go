@@ -1,6 +1,7 @@
 package pods
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/netip"
@@ -105,8 +106,9 @@ type EnvHost struct {
 	// router's WAN and LAN NICs are those on the slot's external and
 	// internal bridges, or net0 and net1.
 	LANMAC, WANMAC string
-	Agent          bool   // its config enables the guest agent
-	desc           string // its notes, for the plans that write them
+	Agent          bool     // its config enables the guest agent
+	Warnings       []string // discrepancies between its config or tags and its slot
+	desc           string   // its notes, for the plans that write them
 }
 
 // Environment is what a slot holds.
@@ -311,6 +313,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 				h.WANMAC, h.LANMAC = routerMACs(cfg, envs[si].Slot)
 			}
 			h.Agent = agentEnabled(cfg["agent"])
+			h.Warnings = p.hostWarnings(vm, cfg, envs[si].Slot, h.Router)
 			envs[si].Hosts = append(envs[si].Hosts, h)
 			continue
 		}
@@ -386,6 +389,166 @@ func nicBridgesAll(cfg map[string]string) []string {
 		if b := nicBridge(cfg[fmt.Sprintf("net%d", i)]); b != "" {
 			out = append(out, b)
 		}
+	}
+	return out
+}
+
+// CPUType is a VM config's CPU model ("cputype=…", or the head before ',').
+func CPUType(raw string) string {
+	head, opts := splitOptions(raw)
+	if t := opts["cputype"]; t != "" {
+		return t
+	}
+	return strings.TrimPrefix(head, "cputype=")
+}
+
+// cpuWarning returns a discrepancy when raw's CPU model isn't one of
+// cpuTypes (or "custom-"+t), or "" when cpuTypes is empty or matches.
+func cpuWarning(raw string, cpuTypes []string) string {
+	if len(cpuTypes) == 0 {
+		return ""
+	}
+	got := CPUType(raw)
+	for _, want := range cpuTypes {
+		if got == want || got == "custom-"+want {
+			return ""
+		}
+	}
+	if got == "" {
+		got = "default (kvm64)"
+	}
+	return fmt.Sprintf("CPU %s, expected %s", got, strings.Join(cpuTypes, " or "))
+}
+
+// vlanWarnings reports any NIC with a VLAN tag.
+func vlanWarnings(cfg map[string]string) []string {
+	var out []string
+	for i := range 32 {
+		k := fmt.Sprintf("net%d", i)
+		if _, opts := splitOptions(cfg[k]); opts["tag"] != "" {
+			out = append(out, fmt.Sprintf("%s has VLAN tag %s", k, opts["tag"]))
+		}
+	}
+	return out
+}
+
+// slotNICWarnings checks a slot VM's NIC count, bridges, and VLAN tags.
+func slotNICWarnings(cfg map[string]string, s Slot, router bool) []string {
+	var out []string
+	n := CountInterfaces(cfg)
+	hasHW := n > 0 || len(DiskVolumes(cfg)) > 0
+	if router {
+		if hasHW {
+			if cfg["net0"] == "" || cfg["net1"] == "" {
+				out = append(out, "missing router NIC (needs net0 and net1)")
+			} else {
+				if b := nicBridge(cfg["net0"]); b != s.ExtBridge {
+					out = append(out, fmt.Sprintf("net0 on %s, expected %s", cmp.Or(b, "no bridge"), s.ExtBridge))
+				}
+				if b := nicBridge(cfg["net1"]); b != s.IntBridge {
+					out = append(out, fmt.Sprintf("net1 on %s, expected %s", cmp.Or(b, "no bridge"), s.IntBridge))
+				}
+			}
+		}
+		if n > 2 {
+			out = append(out, fmt.Sprintf("%d NICs, expected 2", n))
+		}
+	} else {
+		if hasHW {
+			if cfg["net0"] == "" {
+				out = append(out, "no net0 NIC")
+			} else if b := nicBridge(cfg["net0"]); b != s.IntBridge {
+				out = append(out, fmt.Sprintf("net0 on %s, expected %s", cmp.Or(b, "no bridge"), s.IntBridge))
+			}
+		}
+		if n > 1 {
+			out = append(out, fmt.Sprintf("%d NICs, expected 1", n))
+		}
+	}
+	return append(out, vlanWarnings(cfg)...)
+}
+
+// hostWarnings checks a slot VM's tags and config for discrepancies.
+func (p Planner) hostWarnings(vm proxmox.VM, cfg map[string]string, s Slot, router bool) []string {
+	var out []string
+	tags := Tags(vm.Tags)
+	var missing []string
+	if p.Cfg.Deploy.MasterTag != "" && !slices.Contains(tags, p.Cfg.Deploy.MasterTag) {
+		missing = append(missing, p.Cfg.Deploy.MasterTag)
+	}
+	if d := Domain(vm.Name); d != "" && CheckDomain(d) == nil && !slices.Contains(tags, d) {
+		missing = append(missing, d)
+	}
+	if len(missing) == 1 {
+		out = append(out, "missing tag "+missing[0])
+	} else if len(missing) > 1 {
+		out = append(out, "missing tags "+strings.Join(missing, ", "))
+	}
+	out = append(out, slotNICWarnings(cfg, s, router)...)
+	if w := cpuWarning(cfg["cpu"], p.Cfg.Deploy.CPUTypes); w != "" {
+		out = append(out, w)
+	}
+	if !agentEnabled(cfg["agent"]) && (cfg["agent"] != "" || len(DiskVolumes(cfg)) > 0) {
+		out = append(out, "guest agent off")
+	}
+	if len(CDROMChanges(cfg)) > 0 {
+		out = append(out, "CD-ROM attached")
+	}
+	return out
+}
+
+// masterWarnings checks a deploy master VM's config for discrepancies.
+func (p Planner) masterWarnings(vm proxmox.VM, cfg map[string]string, slotByPool map[string]Slot) []string {
+	var out []string
+	slot, inSlot := slotByPool[vm.Pool]
+	if inSlot {
+		router := slices.Contains(Tags(vm.Tags), ImageRouter)
+		out = append(out, slotNICWarnings(cfg, slot, router)...)
+	} else {
+		out = append(out, vlanWarnings(cfg)...)
+	}
+	if w := cpuWarning(cfg["cpu"], p.Cfg.Deploy.CPUTypes); w != "" {
+		out = append(out, w)
+	}
+	if !agentEnabled(cfg["agent"]) && (cfg["agent"] != "" || (inSlot && len(DiskVolumes(cfg)) > 0)) {
+		out = append(out, "guest agent off")
+	}
+	if len(CDROMChanges(cfg)) > 0 {
+		out = append(out, "CD-ROM attached")
+	}
+	return out
+}
+
+// registerWarnings checks a register source VM's config for discrepancies
+// that don't block registration.
+func (p Planner) registerWarnings(cfg map[string]string, kind string) []string {
+	var out []string
+	n := CountInterfaces(cfg)
+	hasHW := n > 0 || len(DiskVolumes(cfg)) > 0
+	if kind == ImageRouter {
+		if hasHW && (cfg["net0"] == "" || cfg["net1"] == "") {
+			out = append(out, "missing router NIC (needs net0 and net1)")
+		}
+		if n > 2 {
+			out = append(out, fmt.Sprintf("%d NICs, expected 2", n))
+		}
+	} else {
+		if hasHW && cfg["net0"] == "" {
+			out = append(out, "no net0 NIC")
+		}
+		if n > 1 {
+			out = append(out, fmt.Sprintf("%d NICs, expected 1", n))
+		}
+	}
+	out = append(out, vlanWarnings(cfg)...)
+	if w := cpuWarning(cfg["cpu"], p.Cfg.Deploy.CPUTypes); w != "" {
+		out = append(out, w)
+	}
+	if (kind == ImageRouter || kind == ImageOther) && !agentEnabled(cfg["agent"]) && (cfg["agent"] != "" || len(DiskVolumes(cfg)) > 0) {
+		out = append(out, "guest agent off")
+	}
+	if len(CDROMChanges(cfg)) > 0 {
+		out = append(out, "CD-ROM attached")
 	}
 	return out
 }

@@ -419,11 +419,25 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		used[vm.VMID] = vm.Name
 	}
 
+	slotByPool := map[string]Slot{}
+	for _, s := range Slots(p.Cfg.Environments) {
+		slotByPool[s.Pool] = s
+	}
 	plan := &Plan{Kind: KindDeploy, Teams: req.Teams, Config: ConfigHash(KindDeploy, p.Cfg)}
+	for _, u := range untagged {
+		if _, inSlot := slotByPool[u.Pool]; inSlot {
+			if host, _ := p.Naming.SplitMaster(u.Name); MatchesHost(host, req.Hosts) {
+				plan.Notices = append(plan.Notices, fmt.Sprintf("Left out: %s in %s lacks tag %q.", u.Name, u.Pool, p.Cfg.Deploy.MasterTag))
+			}
+		}
+	}
 	for _, m := range kept {
-		spec, err := p.templateSpec(ctx, m, req.Rebuild, byName, used, vms)
+		spec, ws, err := p.templateSpec(ctx, m, req.Rebuild, byName, used, vms, slotByPool)
 		if err != nil {
 			return nil, err
+		}
+		if len(ws) > 0 {
+			plan.Notices = append(plan.Notices, fmt.Sprintf("%s: %s.", m.Name, strings.Join(ws, "; ")))
 		}
 		spec.WillStopMaster = spec.Blocked == "" && spec.Builds() && m.Status == "running"
 		plan.Templates = append(plan.Templates, spec)
@@ -463,11 +477,13 @@ func (p Planner) blockDuplicateHosts(specs []TemplateSpec, team string) {
 }
 
 func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool,
-	byName map[string][]proxmox.VM, used map[int]string, vms []proxmox.VM) (TemplateSpec, error) {
+	byName map[string][]proxmox.VM, used map[int]string, vms []proxmox.VM,
+	slotByPool map[string]Slot) (TemplateSpec, []string, error) {
 	cfg, err := p.API.VMConfig(ctx, m.Node, m.VMID)
 	if err != nil {
-		return TemplateSpec{}, fmt.Errorf("reading master %s: %w", m.Name, err)
+		return TemplateSpec{}, nil, fmt.Errorf("reading master %s: %w", m.Name, err)
 	}
+	ws := p.masterWarnings(m, cfg, slotByPool)
 	host, _ := p.Naming.SplitMaster(m.Name)
 	spec := TemplateSpec{
 		Name:       p.Naming.TemplateName(m.Name),
@@ -496,7 +512,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool,
 		// Clones copy the template, so it describes the pod, not the master.
 		tcfg, err := p.API.VMConfig(ctx, existing.Node, existing.VMID)
 		if err != nil {
-			return TemplateSpec{}, fmt.Errorf("reading template %s: %w", spec.Name, err)
+			return TemplateSpec{}, nil, fmt.Errorf("reading template %s: %w", spec.Name, err)
 		}
 		spec.Interfaces, spec.GPU = p.describe(tcfg)
 		spec.CPU, spec.CloudInit, spec.Bridges = tcfg["cpu"], HasCloudInit(tcfg), NICBridges(tcfg)
@@ -523,7 +539,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool,
 	if spec.Blocked == "" && (spec.VMID < base || spec.VMID >= base+100) {
 		spec.Blocked = fmt.Sprintf("template VMID %d is outside %d-%d, so its clone VMIDs could collide with another template's", spec.VMID, base, base+99)
 	}
-	return spec, nil
+	return spec, ws, nil
 }
 
 // describe reads the NIC count and GPU flag from a VM config.

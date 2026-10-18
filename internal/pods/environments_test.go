@@ -99,3 +99,59 @@ func TestNICMAC(t *testing.T) {
 		t.Error("NICMAC found a MAC in a NIC without one")
 	}
 }
+
+func TestEnvironmentHostWarnings(t *testing.T) {
+	f := podstest.New("alder")
+	cfg := envConfig()
+	cfg.Deploy.CPUTypes = []string{"baseline", "baseline-nested"}
+
+	// Clean router and host: no warnings.
+	f.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;router"},
+		map[string]string{"net0": "virtio=BC:24:11:00:00:01,bridge=devext01", "net1": "virtio=BC:24:11:00:00:02,bridge=devint01",
+			"cpu": "custom-baseline", "agent": "1", "scsi0": "competitions:2100/vm-2100-disk-0.qcow2"})
+	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha"},
+		map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint01",
+			"cpu": "cputype=custom-baseline-nested", "agent": "1,fstrim_cloned_disks=1", "scsi0": "competitions:2101/vm-2101-disk-0.qcow2",
+			"ide2": "competitions:vm-2101-cloudinit,media=cdrom"})
+	// Drifted host: missing tags, wrong bridge, extra NIC, VLAN tag, wrong CPU, guest agent off, CD-ROM attached.
+	f.Add(proxmox.VM{VMID: 2102, Name: "elm.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: ""},
+		map[string]string{"net0": "virtio=BC:24:11:00:00:04,bridge=devint02,tag=10", "net1": "virtio=BC:24:11:00:00:05,bridge=devext01",
+			"cpu": "x86-64-v2-AES", "agent": "0", "scsi0": "competitions:2102/vm-2102-disk-0.qcow2",
+			"ide2": "local:iso/debian.iso,media=cdrom"})
+	// Drifted router: swapped bridges and default CPU.
+	f.Add(proxmox.VM{VMID: 2200, Name: "gw.oscar.lima", Node: "alder", Pool: "dev-02", Tags: "dev;oscar.lima;router"},
+		map[string]string{"net0": "virtio=BC:24:11:00:00:06,bridge=devint02", "net1": "virtio=BC:24:11:00:00:07,bridge=devext02",
+			"agent": "1", "scsi0": "competitions:2200/vm-2200-disk-0.qcow2"})
+
+	envs, _, err := NewPlanner(f, cfg).Environments(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw, _ := envs[0].Host("gw.kilo.alpha")
+	teak, _ := envs[0].Host("teak.kilo.alpha")
+	if len(gw.Warnings) != 0 || len(teak.Warnings) != 0 {
+		t.Errorf("clean hosts have warnings: gw=%v teak=%v", gw.Warnings, teak.Warnings)
+	}
+	elm, _ := envs[0].Host("elm.kilo.alpha")
+	wantElm := []string{
+		"missing tags dev, kilo.alpha",
+		"net0 on devint02, expected devint01",
+		"2 NICs, expected 1",
+		"net0 has VLAN tag 10",
+		"CPU x86-64-v2-AES, expected baseline or baseline-nested",
+		"guest agent off",
+		"CD-ROM attached",
+	}
+	if !slices.Equal(elm.Warnings, wantElm) {
+		t.Errorf("elm.Warnings = %v, want %v", elm.Warnings, wantElm)
+	}
+	rgw, _ := envs[1].Host("gw.oscar.lima")
+	wantRouter := []string{
+		"net0 on devint02, expected devext02",
+		"net1 on devext02, expected devint02",
+		"CPU default (kvm64), expected baseline or baseline-nested",
+	}
+	if !slices.Equal(rgw.Warnings, wantRouter) {
+		t.Errorf("rgw.Warnings = %v, want %v", rgw.Warnings, wantRouter)
+	}
+}

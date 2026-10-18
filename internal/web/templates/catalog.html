@@ -42,7 +42,7 @@
 {{- range .}}
 <tr><td class="hn"><span class="hname">{{.Name}}</span>{{if .Router}} <span class="chip">router</span>{{end}}</td>
 {{template "env-addr" .}}
-<td class="si"><span class="gl is-{{if .Running}}running{{else}}stopped{{end}}"><i class="g" aria-hidden="true"></i>{{.Status}}</span>{{with .Image}} <span class="meta">· {{.}}</span>{{end}}</td>
+<td class="si"><span class="gl is-{{if .Running}}running{{else}}stopped{{end}}"><i class="g" aria-hidden="true"></i>{{.Status}}</span>{{with .Image}} <span class="meta">· {{.}}</span>{{end}}{{range .Warnings}}<span class="al"><span class="chip is-drifted">{{.}}</span></span>{{end}}</td>
 <td class="nt">{{with details .Details .Unreadable}}{{template "details" .}}{{end}}{{with .Notes}}<div class="notes">{{.}}</div>{{end}}</td></tr>
 {{- end}}
 </tbody>

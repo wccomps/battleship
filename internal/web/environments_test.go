@@ -13,6 +13,7 @@ import (
 
 	"pgregory.net/rapid"
 
+	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -34,8 +35,12 @@ func addEnvs(h *harness) {
 		{2100, "gw.kilo.alpha", "dev-01", "dev;kilo.alpha;router", "running", "admin / gwpass\nbattleship: base=gw-v1 dns=router"},
 		{2400, "ad.oscar.lima", "dev-04", "dev;oscar.lima;windows", "running", "battleship: ip=192.168.100.10 os=windows base=win10-v1 dns=ad"},
 	} {
-		h.api.Add(proxmox.VM{VMID: vm.vmid, Name: vm.name, Node: "n1", Pool: vm.pool, Tags: vm.tags, Status: vm.status},
-			map[string]string{"description": vm.desc, "net0": "virtio=BC:24:11:00:21:00,bridge=devint" + vm.pool[4:]})
+		cfg := map[string]string{"description": vm.desc, "net0": "virtio=BC:24:11:00:21:00,bridge=devint" + vm.pool[4:]}
+		if vm.vmid == 2100 {
+			cfg["net0"] = "virtio=BC:24:11:00:21:00,bridge=devext01"
+			cfg["net1"] = "virtio=BC:24:11:00:21:01,bridge=devint01"
+		}
+		h.api.Add(proxmox.VM{VMID: vm.vmid, Name: vm.name, Node: "n1", Pool: vm.pool, Tags: vm.tags, Status: vm.status}, cfg)
 	}
 }
 
@@ -435,4 +440,26 @@ func TestPropSlotRuns(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestEnvironmentsPageHostWarnings(t *testing.T) {
+	h := newHarness(t, func(c *config.Config) {
+		c.Deploy.CPUTypes = []string{"baseline"}
+	})
+	h.api.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "", Status: "running"},
+		map[string]string{
+			"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v2",
+			"net0":        "virtio=BC:24:11:00:21:01,bridge=devint02",
+			"cpu":         "x86-64-v2-AES",
+			"agent":       "0",
+			"ide2":        "local:iso/debian.iso,media=cdrom",
+		})
+	sess := h.login(asLead)
+	body := h.get(&sess, "/environments").Body.String()
+	contains(t, "the environment row", body,
+		`<span class="chip is-drifted">missing tags dev, kilo.alpha</span>`,
+		`<span class="chip is-drifted">net0 on devint02, expected devint01</span>`,
+		`<span class="chip is-drifted">CPU x86-64-v2-AES, expected baseline</span>`,
+		`<span class="chip is-drifted">guest agent off</span>`,
+		`<span class="chip is-drifted">CD-ROM attached</span>`)
 }
