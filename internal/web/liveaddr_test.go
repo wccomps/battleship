@@ -76,13 +76,15 @@ func addrCell(t *testing.T, body string, vmid int) string {
 func checkLiveCells(t *testing.T, body string) {
 	t.Helper()
 	contains(t, "the router", addrCell(t, body, 2100), `<code>192.168.100.2</code>`, `<span class="meta">WAN</span> <code>10.50.12.133</code>`)
-	lacks(t, "the router", addrCell(t, body, 2100), "differs", "not live", "external")
+	lacks(t, "the router", addrCell(t, body, 2100), "differs", "no guest agent", "external")
 	contains(t, "teak", addrCell(t, body, 2101), `<code>192.168.100.10</code>`, `<span class="meta">external</span> <code>10.50.12.10</code>`)
-	lacks(t, "teak", addrCell(t, body, 2101), "differs", "not live", "fe80", "WAN")
+	lacks(t, "teak", addrCell(t, body, 2101), "differs", "no guest agent", "fe80", "WAN")
 	contains(t, "yew", addrCell(t, body, 2102), `<code>192.168.100.7</code> <span class="chip differs">differs</span>`,
 		`<span class="al meta">assigned 192.168.100.5</span>`, `<code>10.50.12.7</code>`)
-	for vmid, assigned := range map[int]string{2103: "20", 2104: "30", 2105: "40"} {
-		contains(t, strconv.Itoa(vmid), addrCell(t, body, vmid), `<code>192.168.100.`+assigned+`</code> <span class="meta">· not live</span>`,
+	contains(t, "elm (stopped)", addrCell(t, body, 2103), `<span class="al"><code>192.168.100.20</code></span>`, `<code>10.50.12.20</code>`)
+	lacks(t, "elm (stopped)", addrCell(t, body, 2103), "no guest agent", "differs")
+	for vmid, assigned := range map[int]string{2104: "30", 2105: "40"} {
+		contains(t, strconv.Itoa(vmid), addrCell(t, body, vmid), `<code>192.168.100.`+assigned+`</code> <span class="meta">· no guest agent</span>`,
 			`<code>10.50.12.`+assigned+`</code>`)
 	}
 }
@@ -101,8 +103,8 @@ func TestEnvironmentsLiveAddresses(t *testing.T) {
 	contains(t, "the page", body, `<p class="meta liveaddr" id="env-live" data-fill="/environments/addresses">`,
 		`<a href="/environments?live=1">Show live addresses</a>`,
 		`<td class="ad" id="addr-2102"><span class="al"><code>192.168.100.5</code></span></td>`,
-		`<td class="ad" id="addr-2100"><span class="al"><code>192.168.100.2</code></span></td>`)
-	lacks(t, "the page", body, "not live", "10.50.12", "differs")
+		`<td class="ad" id="addr-2100"><span class="al"><span class="meta">no address</span></span></td>`)
+	lacks(t, "the page", body, "no guest agent", "<code>192.168.100.2</code>", "10.50.12", "differs")
 	if n := h.api.agentReadCount(); n != 0 {
 		t.Errorf("the page read %d agents", n)
 	}
@@ -161,7 +163,7 @@ func TestEnvironmentsLiveAddressesPrivileges(t *testing.T) {
 	contains(t, "as an operator", body, "Showing live addresses needs VM.GuestAgent.Audit, which you don&#39;t have.",
 		`<code>192.168.100.5</code>`)
 	lacks(t, "as an operator", body, "data-fill", "live=1", `id="env-live"`)
-	lacks(t, "the operator's live page", h.get(&op, "/environments?live=1").Body.String(), "10.50.12", "not live")
+	lacks(t, "the operator's live page", h.get(&op, "/environments?live=1").Body.String(), "10.50.12", "no guest agent")
 	// Asked for the pieces anyway, the server says what the page says.
 	rec := h.get(&op, "/environments/addresses")
 	if rec.Code != http.StatusForbidden || rec.Header().Get(piecesHeader) != "" ||
@@ -181,12 +183,12 @@ func TestEnvironmentsLiveAddressesPrivileges(t *testing.T) {
 	pieces := h.get(&partial, "/environments/addresses").Body.String()
 	contains(t, "the router", addrCell(t, pieces, 2100), `<code>10.50.12.133</code>`)
 	contains(t, "yew", addrCell(t, pieces, 2102), `<span class="chip differs">differs</span>`)
-	contains(t, "teak", addrCell(t, pieces, 2101), `<code>192.168.100.10</code> <span class="meta">· not live</span>`, `<code>10.50.12.10</code>`)
+	contains(t, "teak", addrCell(t, pieces, 2101), `<code>192.168.100.10</code> <span class="meta">· no guest agent</span>`, `<code>10.50.12.10</code>`)
 }
 
-// A stopped router leaves its hosts without external addresses, and an
-// agent's error, or an answer without a host's address, shows none of its
-// own.
+// A stopped router shows no address and leaves its hosts without external
+// addresses; a running router without an agent says so, and one configured
+// at the wrong LAN address is flagged against the gateway.
 func TestEnvironmentsLiveAddressesWithoutRouter(t *testing.T) {
 	h := newHarness(t)
 	addLiveEnv(h, false)
@@ -196,9 +198,29 @@ func TestEnvironmentsLiveAddressesWithoutRouter(t *testing.T) {
 	sess := h.login(asLead)
 	pieces := h.get(&sess, "/environments/addresses").Body.String()
 	lacks(t, "the pieces", pieces, "10.50.12", "fe80", "169.254", "external")
-	contains(t, "the router", addrCell(t, pieces, 2100), `<code>192.168.100.2</code> <span class="meta">· not live</span>`)
+	contains(t, "the stopped router", addrCell(t, pieces, 2100), `<span class="al"><span class="meta">no address</span></span>`)
+	lacks(t, "the stopped router", addrCell(t, pieces, 2100), "192.168.100.2", "no guest agent")
 	contains(t, "teak", addrCell(t, pieces, 2101), `<span class="chip differs">no live address</span>`, `assigned 192.168.100.10`)
-	contains(t, "yew", addrCell(t, pieces, 2102), `<code>192.168.100.5</code> <span class="meta">· not live</span>`)
+	contains(t, "yew", addrCell(t, pieces, 2102), `<code>192.168.100.5</code> <span class="meta">· no guest agent</span>`)
+
+	// A running router whose guest agent isn't running says no guest agent,
+	// not 192.168.100.2.
+	h.api.setStatus(2100, "running")
+	h.api.FailOn("agent-nics:2100", &proxmox.APIError{Status: 500, Message: "QEMU guest agent is not running"})
+	cell := addrCell(t, h.get(&sess, "/environments/addresses").Body.String(), 2100)
+	contains(t, "router without agent", cell, `<span class="al"><span class="meta">no guest agent</span></span>`)
+	lacks(t, "router without agent", cell, "192.168.100.2", "no address")
+
+	// A running router set up at the wrong LAN address shows its live
+	// address and flags it against the expected gateway.
+	h.api.FailOn("agent-nics:2100", nil)
+	h.api.SetGuest(2100, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{
+		{Name: "wan", MAC: "bc:24:11:00:21:00", IPs: podstest.IPs("10.50.12.133/24")},
+		{Name: "lan", MAC: "bc:24:11:00:21:01", IPs: podstest.IPs("192.168.100.1/24")},
+	}})
+	cell = addrCell(t, h.get(&sess, "/environments/addresses").Body.String(), 2100)
+	contains(t, "router at .1", cell, `<code>192.168.100.1</code> <span class="chip differs">differs</span>`,
+		`<span class="al meta">expected 192.168.100.2</span>`, `<span class="meta">WAN</span> <code>10.50.12.133</code>`)
 }
 
 // A VM battleship didn't make has no assigned address: its live one shows

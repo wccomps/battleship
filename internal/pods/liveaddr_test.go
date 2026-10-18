@@ -209,7 +209,7 @@ func TestPropGuestAddr(t *testing.T) {
 // net1, and hosts on its LAN.
 func kiloAlpha(hosts ...EnvHost) Environment {
 	e := Environment{Slot: Slots(envConfig().Environments)[0], Domain: "kilo.alpha", LAN: kiloLAN}
-	e.Hosts = append([]EnvHost{{Name: "gw.kilo.alpha", VMID: 2100, Router: true, Addr: e.Gateway(), WANMAC: wanMAC, LANMAC: lanMAC}}, hosts...)
+	e.Hosts = append([]EnvHost{{Name: "gw.kilo.alpha", VMID: 2100, Router: true, WANMAC: wanMAC, LANMAC: lanMAC}}, hosts...)
 	return e
 }
 
@@ -284,6 +284,12 @@ func TestEnvironmentAddrs(t *testing.T) {
 		if a.External != "" || (vmid == 2100) != (a.WAN == "10.50.12.133") {
 			t.Errorf("%d: %+v with a /16 WAN network", vmid, a)
 		}
+	}
+	// A router whose LAN address isn't the gateway is flagged as differing,
+	// even though its notes assign no address.
+	nics[2100] = []proxmox.GuestNIC{{MAC: lanMAC, IPs: podstest.IPs("192.168.100.1/24")}, router[1]}
+	if a := e.addrs(readOf(e, nics))[2100]; !a.Live || a.LAN != "192.168.100.1" || !a.Differs || a.WAN != "10.50.12.133" {
+		t.Errorf("router at .1: %+v", a)
 	}
 }
 
@@ -361,14 +367,20 @@ func TestEnvironmentsReadsNICs(t *testing.T) {
 		map[string]string{"net0": "virtio=BC:24:11:00:21:00,bridge=devext01", "net1": "virtio=BC:24:11:00:21:01,bridge=devint01", "agent": "1"})
 	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha"},
 		map[string]string{"net0": "e1000=BC:24:11:00:21:10,bridge=devint01", "agent": "enabled=0"})
+	f.Add(proxmox.VM{VMID: 2200, Name: "gw.kilo.bravo", Node: "alder", Pool: "dev-02", Tags: "dev;kilo.bravo;router"},
+		map[string]string{"net0": "virtio=BC:24:11:00:22:01,bridge=devint02", "net1": "virtio=BC:24:11:00:22:00,bridge=devext02", "agent": "1"})
 	envs, _, err := NewPlanner(f, envConfig()).Environments(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	gw, _ := envs[0].Host("gw.kilo.alpha")
 	teak, _ := envs[0].Host("teak.kilo.alpha")
+	swapped, _ := envs[1].Host("gw.kilo.bravo")
 	if gw.WANMAC != wanMAC || gw.LANMAC != lanMAC || !gw.Agent {
 		t.Errorf("router: WAN %q LAN %q agent %v", gw.WANMAC, gw.LANMAC, gw.Agent)
+	}
+	if swapped.WANMAC != "bc:24:11:00:22:00" || swapped.LANMAC != "bc:24:11:00:22:01" {
+		t.Errorf("router with net0 on devint02: WAN %q LAN %q", swapped.WANMAC, swapped.LANMAC)
 	}
 	if teak.WANMAC != "" || teak.LANMAC != "bc:24:11:00:21:10" || teak.Agent {
 		t.Errorf("host: WAN %q LAN %q agent %v", teak.WANMAC, teak.LANMAC, teak.Agent)

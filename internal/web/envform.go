@@ -158,7 +158,10 @@ func (s *Server) newEnvForm(ctx context.Context, p catalogPage, form url.Values)
 		var here []envHostRow
 		for _, h := range p.Env.Hosts {
 			octet, _ := p.Env.LAN.Octet(h.Addr)
-			here = append(here, envHostRow{Name: h.Host, octet: octet})
+			if h.Router {
+				octet = pods.GatewayOctet
+			}
+			here = append(here, envHostRow{Name: h.Host, Router: h.Router, octet: octet})
 		}
 		slices.SortStableFunc(here, hostOrder)
 		for _, h := range here {

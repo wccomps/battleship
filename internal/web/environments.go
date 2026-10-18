@@ -86,6 +86,7 @@ type envHostRow struct {
 	Name       string
 	Router     bool
 	Addr       string
+	Gateway    string
 	Running    bool
 	Status     string
 	Image      string
@@ -237,9 +238,10 @@ func envBlocks(envs []pods.Environment, bases map[string]pods.BaseImage, addrs m
 			}
 			b.DNS = e.DNS()
 		}
+		gw := pods.AddrText(e.Gateway())
 		for _, h := range e.Hosts {
 			octet, _ := e.LAN.Octet(h.Addr)
-			row := envHostRow{VMID: h.VMID, Name: h.Name, Router: h.Router, Addr: pods.AddrText(h.Addr), octet: octet, Running: h.Status == "running",
+			row := envHostRow{VMID: h.VMID, Name: h.Name, Router: h.Router, Addr: pods.AddrText(h.Addr), Gateway: gw, octet: octet, Running: h.Status == "running",
 				Status: cmp.Or(h.Status, "unknown"), Image: h.Notes.Base, Details: h.Details, Unreadable: h.Unreadable, Notes: h.UserNotes,
 				Read: addrs != nil, LiveAddrs: addrs[h.VMID]}
 			if base, ok := bases[h.Notes.Base]; ok && h.Details.Empty() && !h.Unreadable && !base.Unreadable {
@@ -262,11 +264,16 @@ func envBlocks(envs []pods.Environment, bases map[string]pods.BaseImage, addrs m
 	return out
 }
 
-// hostOrder is by address, the router's .2 first, then hosts without one,
-// by name.
+// hostOrder puts the router first, then hosts with an address by octet,
+// then hosts without one, by name.
 func hostOrder(a, b envHostRow) int {
 	oa, ob := a.octet, b.octet
 	switch {
+	case a.Router != b.Router:
+		if a.Router {
+			return -1
+		}
+		return 1
 	case (oa == 0) != (ob == 0):
 		if oa == 0 {
 			return 1
