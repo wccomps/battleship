@@ -61,6 +61,26 @@ func TestAgentInterfacesAndHostname(t *testing.T) {
 	}
 }
 
+// An IPv4 address written as IPv6 reads as IPv4, so every caller sees one
+// form of it.
+func TestAgentInterfacesReadIPv4WrittenAsIPv6(t *testing.T) {
+	f, c := newFake(t)
+	f.routes["GET /nodes/cedar/qemu/2501/agent/network-get-interfaces"] = jsonData(`{"result":[
+		{"name":"ens18","hardware-address":"BC:24:11:00:00:01","ip-addresses":[
+			{"ip-address":"::ffff:10.50.12.133","prefix":120},
+			{"ip-address":"::FFFF:10.50.12.134","prefix":64},
+			{"ip-address":"::ffff:10.50.12.135"}]}]}`)
+	nics, err := c.AgentInterfaces(context.Background(), "cedar", 2501)
+	if err != nil || len(nics) != 1 {
+		t.Fatalf("nics = %+v, %v", nics, err)
+	}
+	want := []netip.Prefix{netip.MustParsePrefix("10.50.12.133/24"),
+		netip.PrefixFrom(netip.MustParseAddr("10.50.12.134"), -1), netip.PrefixFrom(netip.MustParseAddr("10.50.12.135"), -1)}
+	if !slices.Equal(nics[0].IPs, want) {
+		t.Errorf("addresses %v, want %v", nics[0].IPs, want)
+	}
+}
+
 // agentCall is an Agent call with its cap, and an answer to it of n bytes
 // (at least min) that it reads whole if it fits.
 type agentCall struct {
@@ -121,7 +141,9 @@ func TestPropAgentAnswersCapped(t *testing.T) {
 
 // What the agent writes for an address reads back as that address, with
 // the prefix length it wrote if that is a whole number the address can
-// have, else -1. An address that doesn't parse, or has a zone, is left out.
+// have, else -1. An IPv4 address written as IPv6 reads back as the IPv4
+// address, with that length less 96, or -1 if it is under 96. An address
+// that doesn't parse, or has a zone, is left out.
 func TestPropAgentInterfacesAddrs(t *testing.T) {
 	f, c := newFake(t)
 	var mu sync.Mutex
@@ -138,14 +160,17 @@ func TestPropAgentInterfacesAddrs(t *testing.T) {
 			kept         bool
 		}
 		ips := rapid.SliceOfN(rapid.Custom(func(t *rapid.T) wrote {
-			var a netip.Addr
+			var a, v4 netip.Addr
 			switch rapid.IntRange(0, 2).Draw(t, "family") {
 			case 0:
 				a = netip.AddrFrom4([4]byte(rapid.SliceOfN(rapid.Byte(), 4, 4).Draw(t, "v4")))
 			case 1:
 				a = netip.AddrFrom16([16]byte(rapid.SliceOfN(rapid.Byte(), 16, 16).Draw(t, "v6")))
 			default:
-				a = netip.AddrFrom16(netip.AddrFrom4([4]byte(rapid.SliceOfN(rapid.Byte(), 4, 4).Draw(t, "v4 in v6"))).As16())
+				v4 = netip.AddrFrom4([4]byte(rapid.SliceOfN(rapid.Byte(), 4, 4).Draw(t, "v4 in v6")))
+				b := [16]byte{10: 0xff, 11: 0xff}
+				copy(b[12:], v4.AsSlice())
+				a = netip.AddrFrom16(b)
 			}
 			text := a.String()
 			if rapid.Bool().Draw(t, "upper") {
@@ -171,6 +196,12 @@ func TestPropAgentInterfacesAddrs(t *testing.T) {
 				w.kept = false
 			}
 			w.want = netip.PrefixFrom(a, bits)
+			if v4.IsValid() {
+				w.want = netip.PrefixFrom(v4, -1)
+				if bits >= 96 {
+					w.want = netip.PrefixFrom(v4, bits-96)
+				}
+			}
 			return w
 		}), 0, 8).Draw(t, "ips")
 		var parts []string

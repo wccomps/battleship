@@ -39,9 +39,6 @@ func TestGuestAddr(t *testing.T) {
 		{"IPv4 over an earlier IPv6", []proxmox.GuestNIC{nic(wanMAC, "2001:db8::5/64", "10.50.12.133/16")}, wanMAC, "10.50.12.133/16"},
 		{"IPv6 when there is no IPv4", []proxmox.GuestNIC{nic(wanMAC, "fe80::1/64", "2001:DB8::5/64")}, wanMAC, "2001:db8::5/64"},
 		{"no link-local, loopback or unspecified", []proxmox.GuestNIC{nic(wanMAC, "169.254.3.4/16", "127.0.0.1/8", "::1/128", "0.0.0.0/0", "fe80::1/64", "224.0.0.1/4", "255.255.255.255/32")}, wanMAC, ""},
-		{"IPv4 written as IPv6", []proxmox.GuestNIC{nic(wanMAC, "::ffff:10.50.12.133/120")}, wanMAC, "10.50.12.133/24"},
-		{"IPv4 written as IPv6, prefix too short", []proxmox.GuestNIC{nic(wanMAC, "::ffff:10.50.12.133/64")}, wanMAC, "10.50.12.133/-1"},
-		{"IPv4 written as IPv6, no prefix", []proxmox.GuestNIC{nic(wanMAC, "::ffff:10.50.12.133")}, wanMAC, "10.50.12.133/-1"},
 		{"no prefix", []proxmox.GuestNIC{nic(wanMAC, "10.50.12.133")}, wanMAC, "10.50.12.133/-1"},
 		{"no NIC with the MAC", []proxmox.GuestNIC{nic(lanMAC, "192.168.100.2/24")}, wanMAC, ""},
 		{"no MAC to look for", []proxmox.GuestNIC{nic("", "192.168.100.2/24")}, "", ""},
@@ -124,7 +121,7 @@ type reported struct {
 }
 
 var reports = rapid.OneOf(
-	// IPv4, written as such or as IPv6, with any prefix or none.
+	// IPv4, with any prefix or none.
 	rapid.Custom(func(t *rapid.T) reported {
 		var b [4]byte
 		for i := range b {
@@ -132,17 +129,12 @@ var reports = rapid.OneOf(
 		}
 		a := netip.AddrFrom4(b)
 		host := !a.IsLoopback() && !a.IsLinkLocalUnicast() && !a.IsMulticast() && !a.IsUnspecified() && b != [4]byte{255, 255, 255, 255}
-		as, mapped := a, rapid.Bool().Draw(t, "as IPv6")
-		if mapped {
-			as = netip.AddrFrom16(a.As16())
+		p := rapid.IntRange(-1, 40).Draw(t, "prefix")
+		bits := p
+		if p > 32 {
+			bits = -1
 		}
-		p, bits := rapid.IntRange(-1, 140).Draw(t, "prefix"), -1
-		if mapped && p >= 96 && p <= 128 {
-			bits = p - 96
-		} else if !mapped && p >= 0 && p <= 32 {
-			bits = p
-		}
-		return reported{ip: netip.PrefixFrom(as, p), host: host, v4: true, want: a.String() + "/" + strconv.Itoa(bits)}
+		return reported{ip: netip.PrefixFrom(a, p), host: host, v4: true, want: a.String() + "/" + strconv.Itoa(bits)}
 	}),
 	// A global IPv6 address.
 	rapid.Custom(func(t *rapid.T) reported {
@@ -160,7 +152,7 @@ var reports = rapid.OneOf(
 	}),
 	// Addresses that aren't a host's own.
 	rapid.Map(rapid.SampledFrom([]string{"127.0.0.1/8", "169.254.1.1/16", "fe80::1/64", "::1/128", "0.0.0.0/0",
-		"224.0.0.1/4", "ff02::1/64", "255.255.255.255/32", "::ffff:127.0.0.1/104", "::/0"}), func(s string) reported {
+		"224.0.0.1/4", "ff02::1/64", "255.255.255.255/32", "::/0"}), func(s string) reported {
 		return reported{ip: netip.MustParsePrefix(s)}
 	}),
 )

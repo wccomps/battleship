@@ -15,9 +15,7 @@ import (
 type GuestNIC struct {
 	Name string
 	MAC  string // lower case, colon-separated
-	// IPs are its addresses, each with the prefix length the agent
-	// reports. One reported without a valid length keeps its address, with
-	// Bits -1. One that doesn't parse, or has a zone, is left out.
+	// IPs are its addresses as GuestIP reads them.
 	IPs []netip.Prefix
 }
 
@@ -109,19 +107,37 @@ func (c *Client) AgentInterfaces(ctx context.Context, node string, vmid int) ([]
 	for _, r := range raw.Result {
 		n := GuestNIC{Name: r.Name, MAC: strings.ToLower(r.HW)}
 		for _, ip := range r.IPs {
-			a, err := netip.ParseAddr(ip.Addr)
-			if err != nil || a.Zone() != "" {
-				continue
-			}
 			bits, err := strconv.Atoi(ip.Prefix.String())
 			if err != nil {
 				bits = -1
 			}
-			n.IPs = append(n.IPs, netip.PrefixFrom(a, bits))
+			if p, ok := GuestIP(ip.Addr, bits); ok {
+				n.IPs = append(n.IPs, p)
+			}
 		}
 		out = append(out, n)
 	}
 	return out, nil
+}
+
+// GuestIP is an address the agent reports with prefix length bits, as
+// GuestNIC.IPs holds it. One without a valid length keeps its address, with
+// Bits -1; an IPv4 address written as IPv6 is read as IPv4, its length less
+// 96. One that doesn't parse, or has a zone, isn't kept (ok false).
+func GuestIP(addr string, bits int) (p netip.Prefix, ok bool) {
+	a, err := netip.ParseAddr(addr)
+	if err != nil || a.Zone() != "" {
+		return netip.Prefix{}, false
+	}
+	p = netip.PrefixFrom(a, bits)
+	if a.Is4In6() {
+		bits = -1
+		if p.Bits() >= 96 {
+			bits = p.Bits() - 96
+		}
+		p = netip.PrefixFrom(a.Unmap(), bits)
+	}
+	return p, true
 }
 
 // AgentHostname is the guest's host name. It refuses an answer over

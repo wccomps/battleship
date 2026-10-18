@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -25,16 +26,22 @@ type Guest struct {
 	SetupPending int
 }
 
-// IPs are GuestNIC.IPs from "address/prefix", or a bare address for one
-// reported without a valid prefix.
+// IPs are GuestNIC.IPs as AgentInterfaces reads what an agent writes:
+// "address/prefix", or a bare address for one reported without a prefix.
+// It panics on one AgentInterfaces leaves out.
 func IPs(s ...string) []netip.Prefix {
 	out := make([]netip.Prefix, len(s))
 	for i, ip := range s {
-		if strings.Contains(ip, "/") {
-			out[i] = netip.MustParsePrefix(ip)
-		} else {
-			out[i] = netip.PrefixFrom(netip.MustParseAddr(ip), -1)
+		addr, prefix, has := strings.Cut(ip, "/")
+		bits, err := strconv.Atoi(prefix)
+		if !has {
+			bits, err = -1, nil
 		}
+		p, ok := proxmox.GuestIP(addr, bits)
+		if err != nil || !ok {
+			panic("podstest.IPs: AgentInterfaces leaves out " + ip)
+		}
+		out[i] = p
 	}
 	return out
 }

@@ -31,31 +31,22 @@ func guestAddr(nics []proxmox.GuestNIC, mac string) netip.Prefix {
 			continue
 		}
 		for _, ip := range n.IPs {
-			p, ok := hostAddr(ip)
-			switch {
-			case !ok:
-			case p.Addr().Is4():
-				return p
+			switch a := ip.Addr(); {
+			case !isHostAddr(a):
+			case a.Is4():
+				return ip
 			case !v6.Addr().IsValid():
-				v6 = p
+				v6 = ip
 			}
 		}
 	}
 	return v6
 }
 
-// hostAddr is p if its address can be a host's own; an IPv4 address
-// written as IPv6 is read as IPv4, prefix and all.
-func hostAddr(p netip.Prefix) (netip.Prefix, bool) {
-	a, bits := p.Addr(), p.Bits()
-	if a.Is4In6() {
-		a, bits = a.Unmap(), bits-96
-	}
-	if !a.IsValid() || a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsMulticast() || a.IsUnspecified() ||
-		a == netip.AddrFrom4([4]byte{255, 255, 255, 255}) {
-		return netip.Prefix{}, false
-	}
-	return netip.PrefixFrom(a, bits), true
+// isHostAddr is whether a can be a host's own address.
+func isHostAddr(a netip.Addr) bool {
+	return !a.IsLoopback() && !a.IsLinkLocalUnicast() && !a.IsLinkLocalMulticast() && !a.IsMulticast() && !a.IsUnspecified() &&
+		a != netip.AddrFrom4([4]byte{255, 255, 255, 255})
 }
 
 // externalAddr is the address of LAN host octet from outside, given the
