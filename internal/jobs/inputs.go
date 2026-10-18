@@ -43,24 +43,190 @@ type Inputs struct {
 	Router   string   `json:"router,omitempty"`    // create: "name=family"
 	EnvHosts []string `json:"env_hosts,omitempty"` // create, add: "name=family[:octet]" each
 	DNS      string   `json:"dns,omitempty"`       // env-dns: "router" or a host name
-	// Base images.
-	VMID      int    `json:"vmid,omitempty"`       // register: the VM to copy
-	Family    string `json:"family,omitempty"`     // register, edit
-	ImageKind string `json:"image_kind,omitempty"` // register a new family
-	Image     string `json:"image,omitempty"`      // deprecate, delete
-	// Details are what Edit notes writes, or a register's in place of
-	// those of its source's notes (pods.RegisterDetails).
-	Details *pods.ImageNotes `json:"details,omitempty"`
+	pods.ImageRequest
+}
+
+type inputField uint16
+
+const (
+	inTeams inputField = 1 << iota
+	inVMs
+	inSlot
+	inDetails
+	inFreeNotes
+	inDomain
+	inFamily
+	inImage
+)
+
+// request records a Kind's input and planning rules: which field groups it
+// accepts or requires, what a typed confirmation asks for, its kind-specific
+// checks, and how BuildPlan calls the planner.
+type request struct {
+	takes inputField
+	needs inputField
+	typed func(Inputs) (val, what string)
+	check func(Inputs) []error
+	plan  func(context.Context, pods.Planner, Inputs, []string) (*pods.Plan, error)
+}
+
+var requests = map[pods.Kind]request{
+	pods.KindDeploy: {
+		takes: inTeams | inVMs,
+		check: func(in Inputs) []error {
+			if strings.TrimSpace(in.Pattern) == "" {
+				return []error{errors.New("deploy needs a template pattern")}
+			}
+			return nil
+		},
+		plan: func(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*pods.Plan, error) {
+			return p.Deploy(ctx, pods.DeployRequest{
+				Pattern: in.Pattern, Teams: teams, Hosts: in.Hosts, Rebuild: in.Rebuild, Snapshot: !in.NoSnapshot,
+			})
+		},
+	},
+	pods.KindTeardown: {
+		takes: inTeams | inVMs,
+		typed: func(in Inputs) (string, string) { return strings.TrimSpace(in.Teams), "the pod range" },
+		check: func(in Inputs) []error {
+			if _, err := pods.ParseSet(string(in.Set)); err != nil {
+				return []error{err}
+			}
+			return nil
+		},
+		plan: func(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*pods.Plan, error) {
+			set, _ := pods.ParseSet(string(in.Set))
+			return p.Teardown(ctx, teams, in.Hosts, set)
+		},
+	},
+	pods.KindReset: {
+		takes: inTeams | inVMs,
+		plan: func(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*pods.Plan, error) {
+			return p.Reset(ctx, teams, in.Hosts, in.Snapshot)
+		},
+	},
+	pods.KindPower: {
+		takes: inTeams | inVMs,
+		check: func(in Inputs) []error {
+			if !pods.IsPowerAction(in.Action) {
+				return []error{fmt.Errorf("power action must be start, shutdown, stop or reboot, not %q", in.Action)}
+			}
+			return nil
+		},
+		plan: func(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*pods.Plan, error) {
+			return p.Power(ctx, teams, in.Hosts, in.Action)
+		},
+	},
+	pods.KindSnapshot: {
+		takes: inTeams | inVMs,
+		check: func(in Inputs) []error {
+			var errs []error
+			if err := pods.CheckSnapshotName(in.Snapshot); err != nil {
+				errs = append(errs, err)
+			}
+			if n := utf8.RuneCountInString(in.Description); n > MaxSnapshotDescription {
+				errs = append(errs, fmt.Errorf("the snapshot description is too long: %d characters, at most %d", n, MaxSnapshotDescription))
+			}
+			return errs
+		},
+		plan: func(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*pods.Plan, error) {
+			return p.Snapshot(ctx, pods.SnapshotRequest{
+				Teams: teams, Hosts: in.Hosts, Name: in.Snapshot, Description: in.Description, VMState: in.VMState,
+			})
+		},
+	},
+	pods.KindEnvCreate: {
+		takes: inDomain | inSlot | inVMs,
+		check: func(in Inputs) []error {
+			if req, _ := in.EnvRequest(); req.Router.Host == "" {
+				return []error{errors.New("a new environment needs a router, e.g. gw=opnsense")}
+			}
+			return nil
+		},
+		plan: envPlan(pods.Planner.EnvCreate),
+	},
+	pods.KindEnvAdd: {
+		takes: inDomain | inVMs,
+		check: func(in Inputs) []error {
+			if req, _ := in.EnvRequest(); req.Router.Host == "" && len(in.EnvHosts) == 0 {
+				return []error{errors.New("name at least one host to add")}
+			}
+			return nil
+		},
+		plan: envPlan(pods.Planner.EnvAdd),
+	},
+	pods.KindEnvDNS: {
+		takes: inDomain,
+		check: func(in Inputs) []error {
+			if req, _ := in.EnvRequest(); req.DNS != "" && req.DNS != pods.DNSRouter {
+				if err := pods.CheckHostname(req.DNS); err != nil {
+					return []error{err}
+				}
+			}
+			return nil
+		},
+		plan: envPlan(pods.Planner.EnvDNS),
+	},
+	pods.KindEnvTeardown: {
+		takes: inDomain | inSlot,
+		typed: func(in Inputs) (string, string) { return strings.TrimSpace(in.Domain), "the domain" },
+		plan:  envPlan(pods.Planner.EnvTeardown),
+	},
+	pods.KindImageRegister: {
+		takes: inFamily | inDetails,
+		check: func(in Inputs) []error {
+			var errs []error
+			if in.VMID < 100 {
+				errs = append(errs, errors.New("name the VM to register by its VMID"))
+			}
+			if in.ImageKind != "" && !slices.Contains(pods.ImageKinds, in.ImageKind) {
+				errs = append(errs, fmt.Errorf("image kind must be one of %s", strings.Join(pods.ImageKinds, ", ")))
+			}
+			return errs
+		},
+		plan: imagePlan(pods.Planner.ImageRegister),
+	},
+	pods.KindImageEdit: {
+		takes: inFamily,
+		plan:  imagePlan(pods.Planner.ImageEdit),
+	},
+	pods.KindImageDetails: {
+		takes: inFamily | inDetails | inFreeNotes,
+		needs: inDetails,
+		plan:  imagePlan(pods.Planner.ImageSetDetails),
+	},
+	pods.KindImageDeprecate: {
+		takes: inImage,
+		plan:  imagePlan(pods.Planner.ImageDeprecate),
+	},
+	pods.KindImageDelete: {
+		takes: inImage,
+		plan:  imagePlan(pods.Planner.ImageDelete),
+	},
+}
+
+func envPlan(fn func(pods.Planner, context.Context, pods.EnvRequest) (*pods.Plan, error)) func(context.Context, pods.Planner, Inputs, []string) (*pods.Plan, error) {
+	return func(ctx context.Context, p pods.Planner, in Inputs, _ []string) (*pods.Plan, error) {
+		req, err := in.EnvRequest()
+		if err != nil {
+			return nil, err
+		}
+		return fn(p, ctx, req)
+	}
+}
+
+func imagePlan(fn func(pods.Planner, context.Context, pods.ImageRequest) (*pods.Plan, error)) func(context.Context, pods.Planner, Inputs, []string) (*pods.Plan, error) {
+	return func(ctx context.Context, p pods.Planner, in Inputs, _ []string) (*pods.Plan, error) {
+		return fn(p, ctx, in.ImageRequest)
+	}
 }
 
 // Typed is what a person types to confirm in (pods.Kind.TypedConfirm): a
 // teardown's pod range or an environment's domain, as given.
 func (in Inputs) Typed() string {
-	switch in.Kind {
-	case pods.KindTeardown:
-		return strings.TrimSpace(in.Teams)
-	case pods.KindEnvTeardown:
-		return strings.TrimSpace(in.Domain)
+	if r := requests[in.Kind]; r.typed != nil {
+		v, _ := r.typed(in)
+		return v
 	}
 	return ""
 }
@@ -68,11 +234,9 @@ func (in Inputs) Typed() string {
 // TypedWhat names what Typed is, for asking for it: "the pod range" or
 // "the domain"; "" when nothing is typed.
 func (in Inputs) TypedWhat() string {
-	switch in.Kind {
-	case pods.KindTeardown:
-		return "the pod range"
-	case pods.KindEnvTeardown:
-		return "the domain"
+	if r := requests[in.Kind]; r.typed != nil {
+		_, what := r.typed(in)
+		return what
 	}
 	return ""
 }
@@ -85,48 +249,75 @@ func (in Inputs) Validate() error {
 	if err := in.checkText(); err != nil {
 		return err
 	}
-	if in.Kind.Teamless() {
-		return errors.Join(in.validateTeamless()...)
+	r, ok := requests[in.Kind]
+	if !ok {
+		return fmt.Errorf("unknown job kind %q", in.Kind)
 	}
 	var errs []error
-	switch in.Kind {
-	case pods.KindDeploy:
-		if strings.TrimSpace(in.Pattern) == "" {
-			errs = append(errs, errors.New("deploy needs a template pattern"))
+	if r.takes&inTeams != 0 {
+		if _, err := pods.ParseTeams(in.Teams); err != nil {
+			errs = append(errs, fmt.Errorf("pods: %w", err))
 		}
-	case pods.KindPower:
-		if !pods.IsPowerAction(in.Action) {
-			errs = append(errs, fmt.Errorf("power action must be start, shutdown, stop or reboot, not %q", in.Action))
+		for _, h := range in.Hosts {
+			if strings.TrimSpace(h) == "" {
+				errs = append(errs, errors.New("hosts must not contain blank entries"))
+				break
+			}
 		}
-	case pods.KindSnapshot:
-		if err := pods.CheckSnapshotName(in.Snapshot); err != nil {
+		for _, v := range in.VMs {
+			if strings.TrimSpace(v) == "" {
+				errs = append(errs, errors.New("vms must not contain blank entries"))
+				break
+			}
+		}
+	} else if in.Teams != "" || len(in.Hosts) > 0 {
+		errs = append(errs, errors.New("pods and hosts don't apply to images and environments"))
+	}
+	if r.takes&inTeams == 0 && len(in.VMs) > 0 {
+		if r.takes&inVMs == 0 {
+			errs = append(errs, errors.New("VMs apply only to creating environments and adding hosts"))
+		} else {
+			for _, v := range in.VMs {
+				if host, domain, _ := strings.Cut(v, "."); pods.CheckHostname(host) != nil || domain != strings.TrimSpace(in.Domain) {
+					errs = append(errs, fmt.Errorf("vms: %q isn't a VM of %s", v, strings.TrimSpace(in.Domain)))
+					break
+				}
+			}
+		}
+	}
+	if in.Slot != "" && r.takes&inSlot == 0 {
+		errs = append(errs, errors.New("a slot applies only to creating or tearing down an environment"))
+	}
+	switch {
+	case in.Details == nil:
+		if r.needs&inDetails != 0 {
+			errs = append(errs, errors.New("name the details to write"))
+		}
+	case r.takes&inDetails == 0:
+		errs = append(errs, errors.New("details apply only to registering a base image and editing its notes"))
+	case (in.Details.Free != nil || in.Details.From != "") && r.takes&inFreeNotes == 0:
+		errs = append(errs, errors.New("free text, and the notes a form opened on, apply only to editing a base image's notes"))
+	}
+	if r.takes&inDomain != 0 {
+		if err := pods.CheckDomain(strings.TrimSpace(in.Domain)); err != nil {
 			errs = append(errs, err)
 		}
-		if n := utf8.RuneCountInString(in.Description); n > MaxSnapshotDescription {
-			errs = append(errs, fmt.Errorf("the snapshot description is too long: %d characters, at most %d", n, MaxSnapshotDescription))
-		}
-	case pods.KindTeardown:
-		if _, err := pods.ParseSet(string(in.Set)); err != nil {
+		if _, err := in.EnvRequest(); err != nil {
 			errs = append(errs, err)
 		}
-	case pods.KindReset:
-	default:
-		errs = append(errs, fmt.Errorf("unknown job kind %q", in.Kind))
 	}
-	if _, err := pods.ParseTeams(in.Teams); err != nil {
-		errs = append(errs, fmt.Errorf("pods: %w", err))
-	}
-	for _, h := range in.Hosts {
-		if strings.TrimSpace(h) == "" {
-			errs = append(errs, errors.New("hosts must not contain blank entries"))
-			break
+	if r.takes&inFamily != 0 {
+		if err := pods.CheckFamily(in.Family); err != nil {
+			errs = append(errs, err)
 		}
 	}
-	for _, v := range in.VMs {
-		if strings.TrimSpace(v) == "" {
-			errs = append(errs, errors.New("vms must not contain blank entries"))
-			break
+	if r.takes&inImage != 0 {
+		if _, _, ok := pods.ParseImageName(in.Image); !ok {
+			errs = append(errs, fmt.Errorf("%q isn't a base image name like debian-12-v1", in.Image))
 		}
+	}
+	if r.check != nil {
+		errs = append(errs, r.check(in)...)
 	}
 	return errors.Join(errs...)
 }
@@ -178,7 +369,7 @@ func BuildPlan(ctx context.Context, p pods.Planner, in Inputs) (*pods.Plan, erro
 			return nil, err
 		}
 	}
-	plan, err := planFor(ctx, p, in, teams)
+	plan, err := requests[in.Kind].plan(ctx, p, in, teams)
 	if err != nil {
 		return nil, err
 	}
@@ -241,50 +432,6 @@ func MissingVMs(in Inputs, plan *pods.Plan) []string {
 	return slices.Compact(out)
 }
 
-func planFor(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*pods.Plan, error) {
-	switch in.Kind {
-	case pods.KindDeploy:
-		return p.Deploy(ctx, pods.DeployRequest{
-			Pattern: in.Pattern, Teams: teams, Hosts: in.Hosts, Rebuild: in.Rebuild, Snapshot: !in.NoSnapshot,
-		})
-	case pods.KindTeardown:
-		set, _ := pods.ParseSet(string(in.Set))
-		return p.Teardown(ctx, teams, in.Hosts, set)
-	case pods.KindReset:
-		return p.Reset(ctx, teams, in.Hosts, in.Snapshot)
-	case pods.KindSnapshot:
-		return p.Snapshot(ctx, pods.SnapshotRequest{
-			Teams: teams, Hosts: in.Hosts, Name: in.Snapshot, Description: in.Description, VMState: in.VMState,
-		})
-	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS, pods.KindEnvTeardown:
-		req, err := in.EnvRequest()
-		if err != nil {
-			return nil, err
-		}
-		switch in.Kind {
-		case pods.KindEnvCreate:
-			return p.EnvCreate(ctx, req)
-		case pods.KindEnvAdd:
-			return p.EnvAdd(ctx, req)
-		case pods.KindEnvTeardown:
-			return p.EnvTeardown(ctx, req)
-		}
-		return p.EnvDNS(ctx, req)
-	case pods.KindImageRegister:
-		return p.ImageRegister(ctx, pods.ImageRequest{VMID: in.VMID, Family: in.Family, Kind: in.ImageKind, Details: in.Details})
-	case pods.KindImageEdit:
-		return p.ImageEdit(ctx, pods.ImageRequest{Family: in.Family})
-	case pods.KindImageDetails:
-		return p.ImageSetDetails(ctx, pods.ImageRequest{Family: in.Family, Details: in.Details})
-	case pods.KindImageDeprecate:
-		return p.ImageDeprecate(ctx, pods.ImageRequest{Image: in.Image})
-	case pods.KindImageDelete:
-		return p.ImageDelete(ctx, pods.ImageRequest{Image: in.Image})
-	default: // KindPower; Validate rejected anything else
-		return p.Power(ctx, teams, in.Hosts, in.Action)
-	}
-}
-
 // SplitList splits a comma-separated list, trimming spaces and dropping
 // empty entries.
 func SplitList(s string) []string {
@@ -324,76 +471,4 @@ func (in Inputs) EnvRequest() (pods.EnvRequest, error) {
 		req.Hosts = append(req.Hosts, h)
 	}
 	return req, errors.Join(errs...)
-}
-
-// validateTeamless checks the inputs of image and environment kinds.
-func (in Inputs) validateTeamless() []error {
-	var errs []error
-	if in.Teams != "" || len(in.Hosts) > 0 {
-		errs = append(errs, errors.New("pods and hosts don't apply to images and environments"))
-	}
-	switch {
-	case len(in.VMs) == 0:
-	case in.Kind != pods.KindEnvCreate && in.Kind != pods.KindEnvAdd:
-		errs = append(errs, errors.New("VMs apply only to creating environments and adding hosts"))
-	default:
-		for _, v := range in.VMs {
-			if host, domain, _ := strings.Cut(v, "."); pods.CheckHostname(host) != nil || domain != strings.TrimSpace(in.Domain) {
-				errs = append(errs, fmt.Errorf("vms: %q isn't a VM of %s", v, strings.TrimSpace(in.Domain)))
-				break
-			}
-		}
-	}
-	if in.Slot != "" && in.Kind != pods.KindEnvCreate && in.Kind != pods.KindEnvTeardown {
-		errs = append(errs, errors.New("a slot applies only to creating or tearing down an environment"))
-	}
-	switch {
-	case in.Details == nil:
-		if in.Kind == pods.KindImageDetails {
-			errs = append(errs, errors.New("name the details to write"))
-		}
-	case in.Kind != pods.KindImageRegister && in.Kind != pods.KindImageDetails:
-		errs = append(errs, errors.New("details apply only to registering a base image and editing its notes"))
-	case (in.Details.Free != nil || in.Details.From != "") && in.Kind != pods.KindImageDetails:
-		errs = append(errs, errors.New("free text, and the notes a form opened on, apply only to editing a base image's notes"))
-	}
-	switch in.Kind {
-	case pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS, pods.KindEnvTeardown:
-		if err := pods.CheckDomain(strings.TrimSpace(in.Domain)); err != nil {
-			errs = append(errs, err)
-		}
-		req, err := in.EnvRequest()
-		if err != nil {
-			errs = append(errs, err)
-		}
-		switch {
-		case in.Kind == pods.KindEnvCreate && req.Router.Host == "":
-			errs = append(errs, errors.New("a new environment needs a router, e.g. gw=opnsense"))
-		case in.Kind == pods.KindEnvAdd && req.Router.Host == "" && len(in.EnvHosts) == 0:
-			errs = append(errs, errors.New("name at least one host to add"))
-		case in.Kind == pods.KindEnvDNS && req.DNS != "" && req.DNS != pods.DNSRouter:
-			if err := pods.CheckHostname(req.DNS); err != nil {
-				errs = append(errs, err)
-			}
-		}
-	case pods.KindImageRegister:
-		if in.VMID < 100 {
-			errs = append(errs, errors.New("name the VM to register by its VMID"))
-		}
-		if err := pods.CheckFamily(in.Family); err != nil {
-			errs = append(errs, err)
-		}
-		if in.ImageKind != "" && !slices.Contains(pods.ImageKinds, in.ImageKind) {
-			errs = append(errs, fmt.Errorf("image kind must be one of %s", strings.Join(pods.ImageKinds, ", ")))
-		}
-	case pods.KindImageEdit, pods.KindImageDetails:
-		if err := pods.CheckFamily(in.Family); err != nil {
-			errs = append(errs, err)
-		}
-	case pods.KindImageDeprecate, pods.KindImageDelete:
-		if _, _, ok := pods.ParseImageName(in.Image); !ok {
-			errs = append(errs, fmt.Errorf("%q isn't a base image name like debian-12-v1", in.Image))
-		}
-	}
-	return errs
 }

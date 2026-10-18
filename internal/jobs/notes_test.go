@@ -31,7 +31,7 @@ func TestDetailsJobsKeepTheirFingerprints(t *testing.T) {
 	if got := Fingerprint(edit); got != "f01b723236d3c65918788ddfdf8a21e758b8f687f70a567844b5fc9cb27183eb" {
 		t.Errorf("Edit details fingerprint = %s", got)
 	}
-	in, _ := json.Marshal(Inputs{Kind: pods.KindImageDetails, Family: "debian-12", Details: &d})
+	in, _ := json.Marshal(Inputs{Kind: pods.KindImageDetails, ImageRequest: pods.ImageRequest{Family: "debian-12", Details: &d}})
 	if want := `{"kind":"image-details","teams":"","family":"debian-12","details":{"os":"Debian 12","user":"debian","password":"pw",` +
 		`"built":"2026-10-01","generalized":"cloud-init clean","installed":"agent","licence":"free"}}`; string(in) != want {
 		t.Errorf("inputs = %s", in)
@@ -48,7 +48,7 @@ func notesFamily(desc string) *fakeAPI {
 
 // editNotes is an Edit notes on debian-12 writing free text.
 func editNotes(os, free string) Inputs {
-	return Inputs{Kind: pods.KindImageDetails, Family: "debian-12", Details: &pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: os}, Free: &free}}
+	return Inputs{Kind: pods.KindImageDetails, ImageRequest: pods.ImageRequest{Family: "debian-12", Details: &pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: os}, Free: &free}}}
 }
 
 const notesBefore = "**Details**\n- OS: Debian 12\n\nPatched.\nbattleship: source=150"

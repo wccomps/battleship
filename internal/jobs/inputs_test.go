@@ -17,6 +17,29 @@ import (
 
 var bg = context.Background()
 
+func TestEveryKindHasRequest(t *testing.T) {
+	for _, k := range pods.Kinds {
+		r, ok := requests[k]
+		if !ok {
+			t.Errorf("%s has no request row", k)
+		}
+		if r.takes == 0 || r.plan == nil {
+			t.Errorf("%s request row is incomplete: takes=%v plan=%v", k, r.takes, r.plan != nil)
+		}
+		if (r.takes&inTeams == 0) != k.Teamless() {
+			t.Errorf("%s: takes teams = %t, Teamless = %t", k, r.takes&inTeams != 0, k.Teamless())
+		}
+		if (r.typed != nil) != k.TypedConfirm() {
+			t.Errorf("%s: typed = %t, TypedConfirm = %t", k, r.typed != nil, k.TypedConfirm())
+		}
+	}
+	for k := range requests {
+		if !slices.Contains(pods.Kinds, k) {
+			t.Errorf("requests lists %s, which is not in pods.Kinds", k)
+		}
+	}
+}
+
 func TestValidate(t *testing.T) {
 	cases := []struct {
 		in   Inputs
@@ -188,9 +211,9 @@ func TestTeamlessInputsValidate(t *testing.T) {
 		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"},
 		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"},
 		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha", Slot: "03"},
-		{Kind: pods.KindImageRegister, VMID: 150, Family: "debian-12", ImageKind: "linux"},
-		{Kind: pods.KindImageEdit, Family: "debian-12"},
-		{Kind: pods.KindImageDelete, Image: "debian-12-v1"},
+		{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{VMID: 150, Family: "debian-12", ImageKind: "linux"}},
+		{Kind: pods.KindImageEdit, ImageRequest: pods.ImageRequest{Family: "debian-12"}},
+		{Kind: pods.KindImageDelete, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}},
 	}
 	for _, in := range good {
 		if err := in.Validate(); err != nil {
@@ -202,8 +225,8 @@ func TestTeamlessInputsValidate(t *testing.T) {
 		{Kind: pods.KindEnvCreate, Domain: "kilo", Router: "gw=x"},
 		{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"teak"}},
 		{Kind: pods.KindEnvAdd, Domain: "kilo.alpha"},
-		{Kind: pods.KindImageRegister, Family: "debian-12"},
-		{Kind: pods.KindImageDeprecate, Image: "debian-12"},
+		{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{Family: "debian-12"}},
+		{Kind: pods.KindImageDeprecate, ImageRequest: pods.ImageRequest{Image: "debian-12"}},
 		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", Teams: "1"},
 		{Kind: pods.KindEnvTeardown},
 		{Kind: pods.KindEnvTeardown, Domain: "kilo"},
@@ -242,7 +265,7 @@ func TestRetryInputsRefusesTeamless(t *testing.T) {
 	for _, in := range []Inputs{
 		{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", Slot: "02", EnvHosts: []string{"dc=debian"}},
 		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router", VMs: []string{"dc.kilo.alpha"}},
-		{Kind: pods.KindImageEdit, Family: "debian-12", VMs: []string{"dc.kilo.alpha"}},
+		{Kind: pods.KindImageEdit, ImageRequest: pods.ImageRequest{Family: "debian-12"}, VMs: []string{"dc.kilo.alpha"}},
 	} {
 		if err := in.Validate(); err == nil {
 			t.Errorf("%+v is valid", in)
@@ -260,16 +283,16 @@ func TestValidateDetails(t *testing.T) {
 		in Inputs
 		ok bool
 	}{
-		{Inputs{Kind: pods.KindImageDetails, Family: "debian-12", Details: d}, true},
-		{Inputs{Kind: pods.KindImageDetails, Family: "debian-12"}, false},
-		{Inputs{Kind: pods.KindImageDetails, Family: "debian-12-v1", Details: d}, false},
-		{Inputs{Kind: pods.KindImageRegister, VMID: 150, Family: "debian-12", Details: d}, true},
-		{Inputs{Kind: pods.KindImageRegister, VMID: 150, Family: "debian-12"}, true},
-		{Inputs{Kind: pods.KindImageEdit, Family: "debian-12", Details: d}, false},
-		{Inputs{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", Details: d}, false},
-		{Inputs{Kind: pods.KindImageDetails, Family: "debian-12", Details: free}, true},
-		{Inputs{Kind: pods.KindImageRegister, VMID: 150, Family: "debian-12", Details: free}, false},
-		{Inputs{Kind: pods.KindImageEdit, Family: "debian-12", Details: free}, false},
+		{Inputs{Kind: pods.KindImageDetails, ImageRequest: pods.ImageRequest{Family: "debian-12", Details: d}}, true},
+		{Inputs{Kind: pods.KindImageDetails, ImageRequest: pods.ImageRequest{Family: "debian-12"}}, false},
+		{Inputs{Kind: pods.KindImageDetails, ImageRequest: pods.ImageRequest{Family: "debian-12-v1", Details: d}}, false},
+		{Inputs{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{VMID: 150, Family: "debian-12", Details: d}}, true},
+		{Inputs{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{VMID: 150, Family: "debian-12"}}, true},
+		{Inputs{Kind: pods.KindImageEdit, ImageRequest: pods.ImageRequest{Family: "debian-12", Details: d}}, false},
+		{Inputs{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", ImageRequest: pods.ImageRequest{Details: d}}, false},
+		{Inputs{Kind: pods.KindImageDetails, ImageRequest: pods.ImageRequest{Family: "debian-12", Details: free}}, true},
+		{Inputs{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{VMID: 150, Family: "debian-12", Details: free}}, false},
+		{Inputs{Kind: pods.KindImageEdit, ImageRequest: pods.ImageRequest{Family: "debian-12", Details: free}}, false},
 	} {
 		if err := c.in.Validate(); (err == nil) != c.ok {
 			t.Errorf("Validate(%s, details %v) = %v, want ok %v", c.in.Kind, c.in.Details != nil, err, c.ok)

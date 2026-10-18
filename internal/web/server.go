@@ -250,14 +250,14 @@ func (s *Server) volunteerRoutes(mux *http.ServeMux) {
 
 	for _, op := range operations {
 		mux.Handle("GET "+op.Path, s.require(s.inEnv(op, s.opForm)))
-		if op.Kind == pods.KindReset || op.Kind == pods.KindSnapshot || op.Kind == pods.KindImageRegister {
+		if op.PostForm {
 			// The grid's "Reset to snapshot…" and "Take snapshot…" post the ticked VMs
 			// here, and a register's review its inputs, to edit its details.
 			mux.Handle("POST "+op.Path, s.require(s.opForm(op)))
 		}
 		mux.Handle("POST "+op.Path+"/preview", s.require(s.inEnv(op, s.opPreview)))
 		mux.Handle("POST "+op.Path+"/confirm", s.require(s.inEnv(op, s.opConfirm)))
-		if op.Kind == pods.KindEnvAdd || op.Kind == pods.KindEnvDNS {
+		if op.Kind.OnEnvironment() && !op.Formless {
 			s.oldEnvRoutes(mux, op)
 		}
 	}

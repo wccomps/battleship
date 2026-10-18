@@ -139,8 +139,8 @@ func TestPropEditNotesFormRefusesNotesChangedSince(t *testing.T) {
 		if rec.Code != http.StatusOK || !strings.Contains(body, "/images/details/confirm") {
 			rt.Fatalf("notes %q, unchanged: preview = %d\n%s", a, rec.Code, body)
 		}
-		if _, fields := confirmOf(h.t, body); form.Get(fieldNotesFrom) == "" || fields.Get(fieldNotesFrom) != form.Get(fieldNotesFrom) {
-			rt.Fatalf("the form's mark %q, the confirm's %q", form.Get(fieldNotesFrom), fields.Get(fieldNotesFrom))
+		if form.Get(fieldNotesFrom) == "" {
+			rt.Fatalf("the form has no notes_from mark: %v", form)
 		}
 	})
 }
@@ -171,10 +171,10 @@ func TestEditNotesFormWithoutNotesOffersNoSave(t *testing.T) {
 	h.noJobs("unread notes")
 }
 
-// The Edit notes form, and its review's confirm, mark that they post free
-// text (fieldDetails is detailsWithNotes), so a server that reads only "yes"
-// reads no details and refuses them rather than run details alone; and a
-// confirm whose free text its preview didn't have is refused.
+// The Edit notes form marks that it posts free text (fieldDetails is
+// detailsWithNotes), so a server that reads only "yes" reads no details and
+// refuses it rather than run details alone; and free text added to a
+// confirm's fields is ignored in favour of the stored preview's inputs.
 func TestEditNotesMarksFreeText(t *testing.T) {
 	h := newHarness(t)
 	addDetailed(h)
@@ -185,17 +185,19 @@ func TestEditNotesMarksFreeText(t *testing.T) {
 	}
 	form.Set(fieldNotes, "Patched monthly.\r\nRebooted.")
 	_, fields, _ := h.preview(&sess, "/images/details", form)
-	if fields.Get(fieldDetails) != detailsWithNotes || fields.Get(fieldNotes) != "Patched monthly.\nRebooted." {
-		t.Errorf("the confirm posts %v", fields)
+	if fields.Has(fieldNotes) || fields.Has(fieldNotesFrom) {
+		t.Errorf("the confirm carries notes fields: %v", fields)
 	}
 
 	_, fields, _ = h.preview(&sess, "/images/details", detailsForm("win2022", pods.ImageDetails{OS: "Debian 12"}))
 	fields.Set(fieldDetails, detailsWithNotes)
 	fields.Set(fieldNotes, "Typed after the review.")
-	if rec := h.post(&sess, "/images/details/confirm", fields); rec.Code != http.StatusBadRequest {
-		t.Errorf("a confirm with free text its preview lacked = %d", rec.Code)
+	if rec := h.post(&sess, "/images/details/confirm", fields); rec.Code != http.StatusSeeOther {
+		t.Fatalf("confirm = %d\n%s", rec.Code, rec.Body)
 	}
-	h.noJobs("free text the preview lacked")
+	if in := readInputs(h.jobsInStore()[0]); in.Details == nil || in.Details.Free != nil || in.Details.OS != "Debian 12" {
+		t.Errorf("job inputs = %+v", in.Details)
+	}
 }
 
 // The Edit notes form reads the cluster's VMs and the one version's

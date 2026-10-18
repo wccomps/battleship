@@ -29,10 +29,6 @@ var terminalTricks = []string{
 	"\u202e", "\u2066", "\u200b", "\ufeff", "\u2028", "\xff", "\xc3", `\`, `"`, "team01-dc", "dc", "",
 }
 
-var allKinds = []pods.Kind{pods.KindDeploy, pods.KindTeardown, pods.KindReset, pods.KindPower, pods.KindSnapshot,
-	pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete,
-	pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS, pods.KindEnvTeardown}
-
 // untrusted draws text a web user, an IdP, Proxmox or a guest could write.
 func untrusted(t *rapid.T, label string) string {
 	piece := rapid.OneOf(
@@ -91,7 +87,7 @@ func TestPropPrintersEscapeUntrustedText(t *testing.T) {
 		var fields []string
 		switch printer := rapid.SampledFrom([]string{"plan", "event", "summary", "inputs"}).Draw(t, "printer"); printer {
 		case "plan":
-			plan := &pods.Plan{Kind: rapid.SampledFrom(allKinds).Draw(t, "kind"), Teams: untrustedList(t, "teams")}
+			plan := &pods.Plan{Kind: rapid.SampledFrom(pods.Kinds).Draw(t, "kind"), Teams: untrustedList(t, "teams")}
 			for range rapid.IntRange(0, 3).Draw(t, "templates") {
 				plan.Templates = append(plan.Templates, pods.TemplateSpec{Name: untrusted(t, "template"), Node: untrusted(t, "node"),
 					Blocked: untrusted(t, "blocked"), MasterName: untrusted(t, "master"), WillStopMaster: rapid.Bool().Draw(t, "stops"),
@@ -156,9 +152,9 @@ func TestPropPrintersEscapeUntrustedText(t *testing.T) {
 			}
 			lines += len(sum.CleanupFailed)
 		case "inputs":
-			in := jobs.Inputs{Kind: rapid.SampledFrom(allKinds).Draw(t, "kind"), Teams: untrusted(t, "teams"), Hosts: untrustedList(t, "hosts"),
+			in := jobs.Inputs{Kind: rapid.SampledFrom(pods.Kinds).Draw(t, "kind"), Teams: untrusted(t, "teams"), Hosts: untrustedList(t, "hosts"),
 				Pattern: untrusted(t, "pattern"), Action: untrusted(t, "action"), Snapshot: untrusted(t, "snapshot"),
-				Domain: untrusted(t, "domain"), Family: untrusted(t, "family"), Image: untrusted(t, "image")}
+				Domain: untrusted(t, "domain"), ImageRequest: pods.ImageRequest{Family: untrusted(t, "family"), Image: untrusted(t, "image")}}
 			raw, err := json.Marshal(in)
 			if err != nil {
 				t.Fatal(err)

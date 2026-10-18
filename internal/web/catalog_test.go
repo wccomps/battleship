@@ -313,7 +313,7 @@ func TestNavMarksTheSection(t *testing.T) {
 		return body
 	}
 	envJob := h.submitJob(jobs.Inputs{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"}, byLead)
-	imageJob := h.submitJob(jobs.Inputs{Kind: pods.KindImageEdit, Family: "gw"}, byLead)
+	imageJob := h.submitJob(jobs.Inputs{Kind: pods.KindImageEdit, ImageRequest: pods.ImageRequest{Family: "gw"}}, byLead)
 	teamJob := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Action: "start"}, byLead)
 	for _, c := range []struct {
 		what, body string

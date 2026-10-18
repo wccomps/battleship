@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
@@ -228,14 +229,14 @@ func familyHref(family string) string { return familiesPath + url.PathEscape(fam
 // notesHref is Edit notes's form for family.
 func notesHref(family string) string {
 	op, _ := operationFor(pods.KindImageDetails)
-	return op.Path + "?" + url.Values{fieldFamily: {family}}.Encode()
+	return formQuery(op, jobs.Inputs{Kind: pods.KindImageDetails, ImageRequest: pods.ImageRequest{Family: family}})
 }
 
-// notesButton is a family's Edit notes button (the "notes-button"
-// template): a link to its form, or disabled when the user may not.
-type notesButton struct {
-	Family string
-	May    bool
+// offer is an offered action on a page: a link to its form, or disabled
+// when the user may not.
+type offer struct {
+	Href, Label string
+	May         bool
 }
 
 // oldFamilyPage sends a family page's old address, /images/{family}, to

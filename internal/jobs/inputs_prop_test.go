@@ -72,12 +72,12 @@ var validInputs = []Inputs{
 	{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"web=debian:20"}},
 	{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "dc"},
 	{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"},
-	{Kind: pods.KindImageRegister, VMID: 150, Family: "debian-12", ImageKind: pods.ImageLinux},
-	{Kind: pods.KindImageEdit, Family: "debian-12"},
-	{Kind: pods.KindImageDeprecate, Image: "debian-12-v1"},
-	{Kind: pods.KindImageDelete, Image: "debian-12-v1"},
-	{Kind: pods.KindImageDetails, Family: "debian-12", Details: &pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: "Debian 12", User: "debian",
-		Password: "Changeme1!"}, Free: strp("Patched monthly.")}},
+	{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{VMID: 150, Family: "debian-12", ImageKind: pods.ImageLinux}},
+	{Kind: pods.KindImageEdit, ImageRequest: pods.ImageRequest{Family: "debian-12"}},
+	{Kind: pods.KindImageDeprecate, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}},
+	{Kind: pods.KindImageDelete, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}},
+	{Kind: pods.KindImageDetails, ImageRequest: pods.ImageRequest{Family: "debian-12", Details: &pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: "Debian 12", User: "debian",
+		Password: "Changeme1!"}, Free: strp("Patched monthly.")}}},
 }
 
 func strp(s string) *string { return &s }
@@ -94,26 +94,113 @@ func TestPropValidateRefusesUnprintableText(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		in := rapid.SampledFrom(validInputs).Draw(t, "inputs")
 		in.Hosts, in.VMs, in.EnvHosts = slices.Clone(in.Hosts), slices.Clone(in.VMs), slices.Clone(in.EnvHosts)
-		v := reflect.ValueOf(&in).Elem()
 		var fields []reflect.Value
-		for i := range v.NumField() {
-			f := v.Field(i)
-			switch {
-			case f.Kind() == reflect.String && f.Type() != reflect.TypeFor[pods.Kind]():
-				fields = append(fields, f)
-			case f.Kind() == reflect.Slice:
-				if f.Len() == 0 {
-					f.Set(reflect.ValueOf([]string{"x"}))
+		var addFields func(reflect.Value)
+		addFields = func(v reflect.Value) {
+			for i := range v.NumField() {
+				f := v.Field(i)
+				switch {
+				case f.Kind() == reflect.Struct:
+					addFields(f)
+				case f.Kind() == reflect.String && f.Type() != reflect.TypeFor[pods.Kind]():
+					fields = append(fields, f)
+				case f.Kind() == reflect.Slice:
+					if f.Len() == 0 {
+						f.Set(reflect.ValueOf([]string{"x"}))
+					}
+					fields = append(fields, f.Index(rapid.IntRange(0, f.Len()-1).Draw(t, "index")))
 				}
-				fields = append(fields, f.Index(rapid.IntRange(0, f.Len()-1).Draw(t, "index")))
 			}
 		}
+		addFields(reflect.ValueOf(&in).Elem())
 		f := fields[rapid.IntRange(0, len(fields)-1).Draw(t, "field")]
 		s := f.String()
 		at := rapid.IntRange(0, len(s)).Draw(t, "at")
 		f.SetString(s[:at] + bad.Draw(t, "bad") + s[at:])
 		if err := in.Validate(); err == nil {
 			t.Fatalf("Validate accepted %+v", in)
+		}
+	})
+}
+
+// Embedding pods.ImageRequest keeps Inputs's JSON byte-for-byte equal to
+// the flat struct stored jobs and previews were written from, and reads
+// back from it the same.
+func TestPropInputsJSON(t *testing.T) {
+	type flatInputs struct {
+		Kind        pods.Kind        `json:"kind"`
+		Teams       string           `json:"teams"`
+		Hosts       []string         `json:"hosts,omitempty"`
+		Pattern     string           `json:"pattern,omitempty"`
+		Rebuild     bool             `json:"rebuild,omitempty"`
+		NoSnapshot  bool             `json:"no_snapshot,omitempty"`
+		Set         pods.Set         `json:"set,omitempty"`
+		Snapshot    string           `json:"snapshot,omitempty"`
+		Description string           `json:"description,omitempty"`
+		VMState     bool             `json:"vmstate,omitempty"`
+		Action      string           `json:"action,omitempty"`
+		VMs         []string         `json:"vms,omitempty"`
+		Domain      string           `json:"domain,omitempty"`
+		Slot        string           `json:"slot,omitempty"`
+		Router      string           `json:"router,omitempty"`
+		EnvHosts    []string         `json:"env_hosts,omitempty"`
+		DNS         string           `json:"dns,omitempty"`
+		VMID        int              `json:"vmid,omitempty"`
+		Family      string           `json:"family,omitempty"`
+		ImageKind   string           `json:"image_kind,omitempty"`
+		Image       string           `json:"image,omitempty"`
+		Details     *pods.ImageNotes `json:"details,omitempty"`
+	}
+	text := rapid.OneOf(rapid.Just(""), rapid.String(), rapid.SampledFrom([]string{"debian-12", "kilo.alpha", "linux"}))
+	list := rapid.OneOf(rapid.Just([]string(nil)), rapid.SliceOfN(text, 1, 3))
+	rapid.Check(t, func(t *rapid.T) {
+		var det *pods.ImageNotes
+		if rapid.Bool().Draw(t, "hasDetails") {
+			n := pods.ImageNotes{
+				ImageDetails: pods.ImageDetails{
+					OS: text.Draw(t, "os"), User: text.Draw(t, "user"), Password: text.Draw(t, "password"),
+					Built: text.Draw(t, "built"), Generalized: text.Draw(t, "generalized"),
+					Installed: text.Draw(t, "installed"), Licence: text.Draw(t, "licence"),
+				},
+				From: text.Draw(t, "from"),
+			}
+			if rapid.Bool().Draw(t, "hasFree") {
+				free := text.Draw(t, "free")
+				n.Free = &free
+			}
+			det = &n
+		}
+		f := flatInputs{
+			Kind: pods.Kind(text.Draw(t, "kind")), Teams: text.Draw(t, "teams"),
+			Hosts: list.Draw(t, "hosts"), Pattern: text.Draw(t, "pattern"),
+			Rebuild: rapid.Bool().Draw(t, "rebuild"), NoSnapshot: rapid.Bool().Draw(t, "noSnapshot"),
+			Set: pods.Set(text.Draw(t, "set")), Snapshot: text.Draw(t, "snapshot"),
+			Description: text.Draw(t, "description"), VMState: rapid.Bool().Draw(t, "vmstate"),
+			Action: text.Draw(t, "action"), VMs: list.Draw(t, "vms"),
+			Domain: text.Draw(t, "domain"), Slot: text.Draw(t, "slot"),
+			Router: text.Draw(t, "router"), EnvHosts: list.Draw(t, "envHosts"),
+			DNS: text.Draw(t, "dns"), VMID: rapid.OneOf(rapid.Just(0), rapid.IntRange(-10, 9999)).Draw(t, "vmid"),
+			Family: text.Draw(t, "family"), ImageKind: text.Draw(t, "imageKind"),
+			Image: text.Draw(t, "image"), Details: det,
+		}
+		in := Inputs{
+			Kind: f.Kind, Teams: f.Teams, Hosts: f.Hosts, Pattern: f.Pattern,
+			Rebuild: f.Rebuild, NoSnapshot: f.NoSnapshot, Set: f.Set,
+			Snapshot: f.Snapshot, Description: f.Description, VMState: f.VMState,
+			Action: f.Action, VMs: f.VMs, Domain: f.Domain, Slot: f.Slot,
+			Router: f.Router, EnvHosts: f.EnvHosts, DNS: f.DNS,
+			ImageRequest: pods.ImageRequest{
+				VMID: f.VMID, Family: f.Family, ImageKind: f.ImageKind, Image: f.Image, Details: f.Details,
+			},
+		}
+		was, err1 := json.Marshal(f)
+		now, err2 := json.Marshal(in)
+		if err1 != nil || err2 != nil || string(now) != string(was) {
+			t.Fatalf("Inputs JSON %s (%v), flat %s (%v)", now, err2, was, err1)
+		}
+		var back Inputs
+		if err := json.Unmarshal(was, &back); err != nil || !reflect.DeepEqual(back, in) {
+			t.Fatalf("read back %#v (%v), want %#v", back, err, in)
 		}
 	})
 }
@@ -225,7 +312,7 @@ func checkGate(t interface{ Fatalf(string, ...any) }, p pods.Planner, in Inputs,
 	if uerr := json.Unmarshal(data, &back); merr != nil || uerr != nil || !reflect.DeepEqual(back, in) || back.Validate() != nil {
 		t.Fatalf("%#v reads back from its job as %#v (%v, %v)", in, back, merr, uerr)
 	}
-	if in.Kind == pods.KindEnvCreate || in.Kind == pods.KindEnvAdd || in.Kind == pods.KindEnvDNS || in.Kind == pods.KindEnvTeardown {
+	if requests[in.Kind].takes&inDomain != 0 {
 		if _, err := in.EnvRequest(); err != nil {
 			t.Fatalf("EnvRequest(%#v): %v", in, err)
 		}

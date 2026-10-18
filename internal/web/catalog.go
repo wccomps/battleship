@@ -36,16 +36,22 @@ type catalogPage struct {
 	envForm
 }
 
-// newCatalogPage reads environments and images as the user, without the
-// images' notes: only the pages that show them read them (withNotes).
-func (s *Server) newCatalogPage(ctx context.Context) catalogPage {
+// newCatalogPage reads images and, for an environment form, environments
+// as the user, without the images' notes: only the pages that show them
+// read them (withNotes).
+func (s *Server) newCatalogPage(ctx context.Context, section string) catalogPage {
 	p := catalogPage{Subnet: s.cfg.Environments.Subnet.String()}
-	envs, vms, err := s.planner(ctx).Environments(ctx)
+	var vms []proxmox.VM
+	var err error
+	if section == sectionEnvironments {
+		p.Envs, vms, err = s.planner(ctx).Environments(ctx)
+	} else {
+		vms, err = s.planner(ctx).API.ClusterVMs(ctx)
+	}
 	if err != nil {
 		p.ReadErr = "Couldn't read the cluster: " + sentence(proxmox.Describe(err))
 		return p
 	}
-	p.Envs = envs
 	p.Images = pods.BaseImages(vms)
 	p.Families = pods.FamilyNames(p.Images)
 	p.Routers = pods.Families(p.Images, pods.ImageRouter)
@@ -74,6 +80,12 @@ func (p catalogPage) StaleDNS() string {
 type dnsCard struct {
 	Value, Name, Addr, Image string
 	Router, Current, Checked bool
+}
+
+func dnsPrefill(_ *Server, _ context.Context, p *catalogPage) {
+	if p.Env != nil {
+		p.dnsForm()
+	}
 }
 
 // dnsForm fills in Set DNS's cards, In.DNS (else the current choice)
@@ -140,11 +152,11 @@ func (s *Server) teamlessForm(w http.ResponseWriter, r *http.Request, status int
 // the request (newEnvForm); not ok if op's environment isn't there.
 func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, problem string) (catalogPage, bool) {
 	ctx := r.Context()
-	if op.Kind == pods.KindImageDetails {
-		return s.notesForm(ctx, op, in, problem), true
-	}
-	p := s.newCatalogPage(ctx)
+	p := s.newCatalogPage(ctx, op.Section)
 	p.Op, p.In, p.Error = op, in, problem
+	if in.Details != nil {
+		p.Details = *in.Details
+	}
 	if op.Kind.OnEnvironment() {
 		e, ok := pods.EnvByDomain(p.Envs, in.Domain)
 		if !ok && p.ReadErr == "" {
@@ -152,16 +164,10 @@ func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, prob
 		}
 		if ok {
 			p.Env = &e
-			if op.Kind == pods.KindEnvDNS {
-				p.dnsForm()
-			}
 		}
 	}
-	switch {
-	case in.Details != nil:
-		p.Details = *in.Details
-	case op.Kind == pods.KindImageRegister && in.VMID != 0:
-		p.Details = pods.ImageNotes{ImageDetails: s.registerDetails(ctx, in.VMID)}
+	if op.prefill != nil {
+		op.prefill(s, ctx, &p)
 	}
 	if op.Machines {
 		form := r.URL.Query()
@@ -184,7 +190,8 @@ func (s *Server) renderCatalogForm(w http.ResponseWriter, r *http.Request, statu
 // version goes to its family's page.
 func (p catalogPage) Back() string {
 	if p.Edit != nil && p.Edit.Image != "" {
-		return familyHref(p.In.Family)
+		_, href := p.Op.home(p.In)
+		return href
 	}
-	return listPage(p.In)
+	return p.Op.listPage(p.In)
 }

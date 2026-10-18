@@ -415,26 +415,9 @@ func TestRetryFailed(t *testing.T) {
 		t.Errorf("retry confirm = %s %v", action, form)
 	}
 
-	// The VM list is bound to the preview: a confirm that changes it is
-	// refused.
-	for _, vms := range []string{"team01-dc,team01-web,team02-dc,team02-web", ""} {
-		f := url.Values{}
-		for k, v := range form {
-			f[k] = v
-		}
-		f.Set("vms", vms)
-		if vms == "" {
-			f.Del("vms")
-		}
-		if rec := h.post(&op, action, f); rec.Code != http.StatusBadRequest {
-			t.Errorf("confirm with vms %q = %d, want 400", vms, rec.Code)
-		}
-	}
-	if n := len(h.jobsInStore()); n != 1 {
-		t.Fatalf("jobs after tampered confirms = %d, want 1", n)
-	}
-
-	// Confirming it is an ordinary confirm, and the job has just those VMs.
+	// The VM list is read from the stored preview: a confirm that changes
+	// the form's vms field still submits just the preview's VMs.
+	form.Set("vms", "team01-dc,team01-web,team02-dc,team02-web")
 	if rec := h.post(&op, action, form); rec.Code != http.StatusSeeOther {
 		t.Fatalf("retry confirm = %d\n%s", rec.Code, rec.Body)
 	}
@@ -1001,10 +984,10 @@ func TestJobPageGoesBackToItsList(t *testing.T) {
 	h.poll()
 	op := h.login(asLead)
 	for in, want := range map[*jobs.Inputs][2]string{
-		{Kind: pods.KindImageDeprecate, Image: "debian-12-v1"}:       {`href="/images">`, "Images</a>"},
-		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"}: {`href="/environments#kilo.alpha">`, "Environments</a>"},
-		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"}:           {`href="/environments#kilo.alpha">`, "Environments</a>"},
-		{Kind: pods.KindPower, Teams: "1", Action: "stop"}:           {`href="/logs">`, "Logs</a>"},
+		{Kind: pods.KindImageDeprecate, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}}: {`href="/images">`, "Images</a>"},
+		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"}:                            {`href="/environments#kilo.alpha">`, "Environments</a>"},
+		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"}:                                      {`href="/environments#kilo.alpha">`, "Environments</a>"},
+		{Kind: pods.KindPower, Teams: "1", Action: "stop"}:                                      {`href="/logs">`, "Logs</a>"},
 	} {
 		id := h.submitJob(*in, byOperator)
 		page := h.get(&op, "/logs/"+itoa(id)).Body.String()
@@ -1113,7 +1096,7 @@ func TestInterruptedJobCanBeStartedAgain(t *testing.T) {
 	addImages(h)
 	h.poll()
 	op := h.login(asLead)
-	id := h.submitJob(jobs.Inputs{Kind: pods.KindImageDelete, Image: "debian-12-v1"}, byOperator)
+	id := h.submitJob(jobs.Inputs{Kind: pods.KindImageDelete, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}}, byOperator)
 	h.start(id)
 	h.finish(id, store.Outcome{Status: store.StatusInterrupted, Error: "the worker shut down during the job; re-run it to finish"})
 	page := h.get(&op, logHref(id)).Body.String()

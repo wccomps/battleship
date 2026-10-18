@@ -15,14 +15,14 @@ import (
 
 // ImageRequest is a base-image job's input.
 type ImageRequest struct {
-	VMID   int    // register: the VM to copy
-	Family string // register, edit
-	Kind   string // register a new family; a new version keeps its family's
-	Image  string // deprecate, delete: e.g. debian-12-v1
+	VMID      int    `json:"vmid,omitempty"`       // register: the VM to copy
+	Family    string `json:"family,omitempty"`     // register, edit
+	ImageKind string `json:"image_kind,omitempty"` // register a new family; a new version keeps its family's
+	Image     string `json:"image,omitempty"`      // deprecate, delete: e.g. debian-12-v1
 	// Details are what Edit notes writes, and what register writes: nil
 	// is those of its source's notes (see RegisterDetails), and empty is
 	// none, the copy keeping its source's notes as they are.
-	Details *ImageNotes
+	Details *ImageNotes `json:"details,omitempty"`
 }
 
 // agentEnabled reads a VM's agent option ("1", "enabled=1,…", "1,fstrim…").
@@ -96,7 +96,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 	}
 	images := BaseImages(vms)
 	latest, exists := Latest(images, req.Family)
-	kind := req.Kind
+	kind := req.ImageKind
 	if exists {
 		if kind != "" && kind != latest.Kind {
 			return nil, fmt.Errorf("family %s is %s; a new version keeps its family's kind", req.Family, latest.Kind)
@@ -156,6 +156,25 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 	it.blockLongNotes(desc)
 	return &Plan{Kind: KindImageRegister, Config: ConfigHash(KindImageRegister, p.Cfg), Items: []Item{it},
 		Locks: []string{"family:" + req.Family}}, nil
+}
+
+// SourceDetails are the details a register form starts with for VM vmid:
+// those its notes give (RegisterDetails), or none if it can't be read.
+func (p Planner) SourceDetails(ctx context.Context, vmid int) ImageDetails {
+	vms, err := p.API.ClusterVMs(ctx)
+	if err != nil {
+		return ImageDetails{}
+	}
+	src, ok := vmByID(vms, vmid)
+	if !ok {
+		return ImageDetails{}
+	}
+	cfg, err := p.API.VMConfig(ctx, src.Node, src.VMID)
+	if err != nil {
+		return ImageDetails{}
+	}
+	d, _ := RegisterDetails(cfg["description"])
+	return d
 }
 
 // sourceBlock is why ImageRegister won't copy src in, whatever its family,

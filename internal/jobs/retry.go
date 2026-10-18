@@ -30,7 +30,7 @@ func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 		return Inputs{}, fmt.Errorf("job %d is %s: %w", job.ID, job.Status, ErrNotRetryable)
 	}
 	kind := pods.Kind(job.Kind)
-	if kind.Teamless() && kind != pods.KindEnvCreate && kind != pods.KindEnvAdd && kind != pods.KindEnvTeardown {
+	if !kind.Retryable() {
 		return Inputs{}, fmt.Errorf("job %d: run it again from its form; image jobs and DNS changes resume what exists: %w", job.ID, ErrNotRetryable)
 	}
 	var in Inputs
@@ -98,7 +98,7 @@ func envRetry(id int64, in Inputs, plan pods.Plan, planned map[string]pods.Item,
 	if !in.Kind.RetriedWhole() {
 		in.VMs = sortedUnique(names)
 	}
-	if (in.Kind == pods.KindEnvCreate || in.Kind == pods.KindEnvTeardown) && in.Slot == "" {
+	if requests[in.Kind].takes&inSlot != 0 && in.Slot == "" {
 		in.Slot = plan.DevSlot()
 	}
 	return in, nil
