@@ -9,7 +9,7 @@ import (
 
 // A VM a failed destroy left half-deleted is listed in its slot's block,
 // in the pool or only at one of its VMIDs, and keeps that slot from being
-// offered; Set DNS doesn't name it.
+// offered.
 func TestEnvironmentsPageShowsHalfDeletedVMs(t *testing.T) {
 	h := newHarness(t)
 	addCatalog(h)
@@ -24,5 +24,4 @@ func TestEnvironmentsPageShowsHalfDeletedVMs(t *testing.T) {
 	}
 	contains(t, "dev-03", envSection(t, body, "slot-03"), `<span class="hname">VM 2350</span>`)
 	contains(t, "the free line", body, `<span class="vm">dev-02, dev-05 – dev-10</span>`)
-	lacks(t, "Set DNS", h.get(&sess, "/environments/kilo.alpha/dns").Body.String(), "VM 2104")
 }

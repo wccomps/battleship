@@ -27,7 +27,6 @@ var confirmPreviews = map[pods.Kind]url.Values{
 	pods.KindTeardown:       {"teams": {"1-2"}},
 	pods.KindEnvCreate:      {"domain": {"new.env"}, "router": {"gw=gw"}, "env_hosts": {"teak=debian-12\noak=debian-12:20"}},
 	pods.KindEnvAdd:         {"domain": {"lab.env"}, "env_hosts": {"oak=debian-12"}},
-	pods.KindEnvDNS:         {"domain": {"lab.env"}, "dns": {"teak"}},
 	pods.KindEnvTeardown:    {"domain": {"lab.env"}},
 	pods.KindImageRegister:  {"vmid": {"7000"}, "family": {"debian-13"}, "image_kind": {"linux"}},
 	pods.KindImageEdit:      {"family": {"debian-12"}},
@@ -39,7 +38,7 @@ var confirmPreviews = map[pods.Kind]url.Values{
 var confirmFields = []string{
 	fieldTeams, fieldHosts, fieldVMs, fieldPattern, fieldRebuild, fieldBaseline, fieldSnapshot, fieldDescription, fieldVMState,
 	fieldAction, fieldNonce, fieldFingerprint, fieldTyped, fieldRetryOf, fieldFrom, fieldDomain, fieldRouter, fieldEnvHosts,
-	fieldDNS, fieldVMID, fieldFamily, fieldImageKind, fieldImage, fieldDetails, fieldNotes, fieldNotesFrom,
+	fieldVMID, fieldFamily, fieldImageKind, fieldImage, fieldDetails, fieldNotes, fieldNotesFrom,
 }
 
 // operationOf is kind's operation, opened for lab.env if it acts on an
@@ -76,7 +75,7 @@ func confirmFieldsOf(kind pods.Kind) []string {
 		fs = append(fs, fieldTyped)
 	}
 	if kind.Teamless() {
-		return append(fs, fieldDomain, fieldRouter, fieldEnvHosts, fieldDNS, fieldVMID, fieldFamily, fieldImageKind, fieldImage, fieldDetails, fieldNotes, fieldNotesFrom)
+		return append(fs, fieldDomain, fieldRouter, fieldEnvHosts, fieldVMID, fieldFamily, fieldImageKind, fieldImage, fieldDetails, fieldNotes, fieldNotesFrom)
 	}
 	fs = append(fs, fieldTeams, fieldHosts, fieldVMs)
 	switch kind {

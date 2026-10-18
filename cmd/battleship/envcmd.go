@@ -68,7 +68,7 @@ func parseImage(args []string, stderr io.Writer) (c command, code int, ok bool) 
 	return command{in: web.Normalize(in), cfgPath: *cfgPath, yes: *yes, queue: *queue}, 0, true
 }
 
-// runEnv handles battleship env create|add|dns|teardown.
+// runEnv handles battleship env create|add|teardown.
 func runEnv(ctx context.Context, args []string, d deps) int {
 	c, code, ok := parseEnv(args, d.stderr)
 	if !ok {
@@ -80,9 +80,9 @@ func runEnv(ctx context.Context, args []string, d deps) int {
 // parseEnv reads an environment command's flags into the inputs the web
 // form would give (web.Normalize); if not ok, the command exits with code.
 func parseEnv(args []string, stderr io.Writer) (c command, code int, ok bool) {
-	kinds := map[string]pods.Kind{"create": pods.KindEnvCreate, "add": pods.KindEnvAdd, "dns": pods.KindEnvDNS, "teardown": pods.KindEnvTeardown}
+	kinds := map[string]pods.Kind{"create": pods.KindEnvCreate, "add": pods.KindEnvAdd, "teardown": pods.KindEnvTeardown}
 	if len(args) == 0 || kinds[args[0]] == "" {
-		fmt.Fprintln(stderr, "usage: battleship env create|add|dns|teardown [flags]")
+		fmt.Fprintln(stderr, "usage: battleship env create|add|teardown [flags]")
 		return c, 2, false
 	}
 	in := jobs.Inputs{Kind: kinds[args[0]]}
@@ -98,8 +98,6 @@ func parseEnv(args []string, stderr io.Writer) (c command, code int, ok bool) {
 		}
 		fs.StringVar(&in.Router, "router", "", "router as name=image, e.g. gw=opnsense (required to create)")
 		fs.Var(&hosts, "host", "host as name=image or name=image:octet, e.g. dc=win2022:10; repeat for each")
-	case pods.KindEnvDNS:
-		fs.StringVar(&in.DNS, "server", "router", "router, or the host to use as DNS server, e.g. dc")
 	}
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

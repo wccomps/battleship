@@ -276,17 +276,6 @@ func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
 		return "Create " + vms
 	case pods.KindEnvAdd:
 		return "Add " + strconv.Itoa(n) + byCount(n, " host", " hosts")
-	case pods.KindEnvDNS:
-		set := 0 // the hosts whose DNS changes; the others only record the choice
-		for _, it := range runnable {
-			if it.Guest != nil {
-				set++
-			}
-		}
-		if set == 0 {
-			return "Record the choice"
-		}
-		return "Set DNS on " + strconv.Itoa(set) + byCount(set, " host", " hosts")
 	case pods.KindPower:
 		return powerLabel(in.Action) + " " + vms
 	case pods.KindTeardown:
@@ -465,7 +454,6 @@ func teamlessFacts(in jobs.Inputs, pool string) []fact {
 	add("Router", in.Router)
 	add("Hosts", strings.Join(in.EnvHosts, ", "))
 	add("Only these VMs", strings.Join(in.VMs, ", "))
-	add("DNS server", in.DNS)
 	if in.VMID != 0 {
 		add("VM", strconv.Itoa(in.VMID))
 	}

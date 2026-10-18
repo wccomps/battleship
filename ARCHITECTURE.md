@@ -39,7 +39,7 @@ form ──> preview ──> confirm ──> stored job ──> worker claims it
 6. **Finish.** The worker records the outcome (`store.Finish`). Retrying a
    pod job, or an environment's create or add, previews and submits a new
    job for just the VMs that didn't finish; an environment's teardown is
-   planned again whole in its slot. Image jobs and Set DNS can't be
+   planned again whole in its slot. Image jobs can't be
    retried: run them again from their form, and they resume what exists.
 
 Every Proxmox call is made with the submitter's credential; battleship holds

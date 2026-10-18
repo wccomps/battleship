@@ -42,7 +42,6 @@ type Inputs struct {
 	Slot     string   `json:"slot,omitempty"`      // create, teardown: two digits, e.g. "02"; empty takes the first free, or the domain's
 	Router   string   `json:"router,omitempty"`    // create: "name=family"
 	EnvHosts []string `json:"env_hosts,omitempty"` // create, add: "name=family[:octet]" each
-	DNS      string   `json:"dns,omitempty"`       // env-dns: "router" or a host name
 	pods.ImageRequest
 }
 
@@ -154,18 +153,6 @@ var requests = map[pods.Kind]request{
 			return nil
 		},
 		plan: envPlan(pods.Planner.EnvAdd),
-	},
-	pods.KindEnvDNS: {
-		takes: inDomain,
-		check: func(in Inputs) []error {
-			if req, _ := in.EnvRequest(); req.DNS != "" && req.DNS != pods.DNSRouter {
-				if err := pods.CheckHostname(req.DNS); err != nil {
-					return []error{err}
-				}
-			}
-			return nil
-		},
-		plan: envPlan(pods.Planner.EnvDNS),
 	},
 	pods.KindEnvTeardown: {
 		takes: inDomain | inSlot,
@@ -331,7 +318,7 @@ func (in Inputs) checkText() error {
 	}{
 		{"pods", []string{in.Teams}}, {"hosts", in.Hosts}, {"vms", in.VMs}, {"pattern", []string{in.Pattern}}, {"set", []string{string(in.Set)}},
 		{"snapshot", []string{in.Snapshot}}, {"description", []string{in.Description}}, {"action", []string{in.Action}},
-		{"domain", []string{in.Domain}}, {"slot", []string{in.Slot}}, {"router", []string{in.Router}}, {"env hosts", in.EnvHosts}, {"dns", []string{in.DNS}},
+		{"domain", []string{in.Domain}}, {"slot", []string{in.Slot}}, {"router", []string{in.Router}}, {"env hosts", in.EnvHosts},
 		{"family", []string{in.Family}}, {"image kind", []string{in.ImageKind}}, {"image", []string{in.Image}},
 	}
 	if d := in.Details; d != nil {
@@ -446,7 +433,7 @@ func SplitList(s string) []string {
 
 // EnvRequest parses an environment job's inputs.
 func (in Inputs) EnvRequest() (pods.EnvRequest, error) {
-	req := pods.EnvRequest{Domain: strings.TrimSpace(in.Domain), DNS: strings.TrimSpace(in.DNS)}
+	req := pods.EnvRequest{Domain: strings.TrimSpace(in.Domain)}
 	var errs []error
 	if in.Slot != "" {
 		n, ok := pods.ParseSlotName(in.Slot)

@@ -39,10 +39,9 @@ func envOf(t fataler, p Planner, slot int) Environment {
 	return envs[i]
 }
 
-// A half-deleted VM isn't one of the environment's hosts: Set DNS doesn't
-// plan it, and it isn't a DNS choice. It still keeps the slot from being
-// free.
-func TestSetDNSLeavesAHalfDeletedVMAlone(t *testing.T) {
+// A half-deleted VM isn't one of the environment's hosts. It still keeps the
+// slot from being free.
+func TestHalfDeletedVMIsNotAHost(t *testing.T) {
 	f := teardownFake()
 	f.Add(halfDeleted(2103, "dev-01", "dev;kilo.alpha"))
 	p := NewPlanner(f, envConfig())
@@ -50,15 +49,8 @@ func TestSetDNSLeavesAHalfDeletedVMAlone(t *testing.T) {
 	if env.Domain != "kilo.alpha" || env.Free() || len(env.HalfDeleted) != 1 || env.HalfDeleted[0].VMID != 2103 {
 		t.Fatalf("env = %+v", env)
 	}
-	if _, ok := env.Host("VM 2103"); ok || slices.Contains(env.DNSChoices(), "VM 2103") {
+	if _, ok := env.Host("VM 2103"); ok {
 		t.Errorf("the half-deleted VM is a host: %+v", env)
-	}
-	plan, err := p.EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha", DNS: "teak"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if slices.ContainsFunc(plan.Items, func(it Item) bool { return it.VMID == 2103 }) {
-		t.Errorf("Set DNS plans the half-deleted VM: %q", itemNames(plan))
 	}
 }
 
@@ -82,8 +74,8 @@ func TestHalfDeletedRouterIsNoRouter(t *testing.T) {
 	}
 }
 
-// Whatever VMs a slot holds, half-deleted ones are never hosts: no Set DNS
-// or Add hosts plan touches them, while a teardown lists each one, blocked,
+// Whatever VMs a slot holds, half-deleted ones are never hosts: no Add
+// hosts plan touches them, while a teardown lists each one, blocked,
 // whether in the pool or only in the slot's VMIDs.
 func TestPropHalfDeletedOnlyForTeardown(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
@@ -107,13 +99,6 @@ func TestPropHalfDeletedOnlyForTeardown(t *testing.T) {
 		ctx := context.Background()
 		touches := func(plan *Plan) bool {
 			return slices.ContainsFunc(plan.Items, func(it Item) bool { return slices.Contains(gone, it.VMID) })
-		}
-		dns, err := p.EnvDNS(ctx, EnvRequest{Domain: "kilo.alpha"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if touches(dns) {
-			t.Fatalf("Set DNS plans a half-deleted VM: %+v", dns.Items)
 		}
 		add, err := p.EnvAdd(ctx, EnvRequest{Domain: "kilo.alpha", Hosts: []HostSpec{{Host: "dc", Family: "debian-12"}}})
 		if err != nil {

@@ -107,7 +107,7 @@ else the name less `-build`) and, where it can tell, the kind, or says why it ca
 **Environments → Create** clones a router and hosts into a free dev slot, the first unless you choose one
 (`battleship env create -domain kilo.alpha -router gw=opnsense -host dc=win2022:10 -host web=debian-12`, `-slot 02`).
 Windows and Linux hosts get their name, a static address on the slot's LAN (`.2` is the gateway) and DNS through
-the QEMU guest agent. **Set DNS** (`env dns -domain kilo.alpha -server dc`) points them at a domain controller once it is promoted.
+the QEMU guest agent.
 **Tear down** (`env teardown -domain kilo.alpha`, confirmed by typing the domain) deletes the VMs in its slot's pool,
 never VMs from outside it on its networks.
 The page shows each host's live address from its guest agent, and its external one, assuming the router image

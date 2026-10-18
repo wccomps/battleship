@@ -76,13 +76,6 @@ func TestEveryNotesWriteIsBoundAtPlan(t *testing.T) {
 			}
 			return plan.Items[0], nil
 		},
-		"set DNS": func(desc string) (Item, error) {
-			plan, err := dnsHosts(desc).EnvDNS(ctx, EnvRequest{Domain: "kilo.alpha", DNS: "teak"})
-			if err != nil {
-				return Item{}, err
-			}
-			return plan.Items[1], nil
-		},
 	} {
 		it, err := plan(fits)
 		if err != nil || it.Blocked != "" {

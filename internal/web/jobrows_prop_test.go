@@ -18,7 +18,7 @@ import (
 
 // allKinds are the operation kinds, and one battleship doesn't know.
 var allKinds = []pods.Kind{pods.KindPower, pods.KindReset, pods.KindSnapshot, pods.KindDeploy, pods.KindTeardown,
-	pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvDNS, pods.KindEnvTeardown,
+	pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvTeardown,
 	pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete, "x"}
 
 var (

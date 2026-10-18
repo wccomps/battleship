@@ -12,7 +12,6 @@ import (
 	"github.com/wccomps/battleship/internal/apply"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/pods"
-	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -98,8 +97,6 @@ func TestJobsLockEveryVMTheyChange(t *testing.T) {
 	f := envCluster()
 	f.Add(proxmox.VM{VMID: 150, Name: "deb-fresh", Node: "alder", Status: "stopped"},
 		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:01:50,bridge=vmbr0"})
-	// Set DNS runs its script only once the host's agent answers.
-	f.SetGuest(2101, podstest.Guest{Up: true})
 	api := &changeLog{Reads: f, changes: f}
 	p := pods.NewPlanner(f, cfg)
 	exec := &apply.Executor{API: api, Cfg: cfg, Sleep: func(ctx context.Context, d time.Duration) error { return ctx.Err() }}
@@ -126,7 +123,6 @@ func TestJobsLockEveryVMTheyChange(t *testing.T) {
 		{"env add", func() (*pods.Plan, error) {
 			return p.EnvAdd(ctx, pods.EnvRequest{Domain: "kilo.alpha", Hosts: []pods.HostSpec{host}})
 		}},
-		{"env dns", func() (*pods.Plan, error) { return p.EnvDNS(ctx, pods.EnvRequest{Domain: "kilo.alpha", DNS: "router"}) }},
 		{"image register", func() (*pods.Plan, error) {
 			return p.ImageRegister(ctx, pods.ImageRequest{VMID: 150, Family: "debian-12"})
 		}},

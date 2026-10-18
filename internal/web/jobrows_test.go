@@ -282,7 +282,6 @@ func TestFinishedJobOpensItsResult(t *testing.T) {
 	}{
 		{jobs.Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.bravo"}, `<a class="btn pri" href="/environments#kilo.bravo">Open kilo.bravo</a>`},
 		{jobs.Inputs{Kind: pods.KindEnvAdd, Domain: "kilo.alpha"}, `<a class="btn pri" href="/environments#kilo.alpha">Open kilo.alpha</a>`},
-		{jobs.Inputs{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"}, `<a class="btn pri" href="/environments#kilo.alpha">Open kilo.alpha</a>`},
 		{jobs.Inputs{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{Family: "debian-12", VMID: 150}}, `<a class="btn pri" href="/images/family/debian-12">Open debian-12</a>`},
 		{jobs.Inputs{Kind: pods.KindImageEdit, ImageRequest: pods.ImageRequest{Family: "win2022"}}, `<a class="btn pri" href="/images/family/win2022">Open win2022</a>`},
 		{jobs.Inputs{Kind: pods.KindImageDeprecate, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}}, `<a class="btn pri" href="/images/family/debian-12">Open debian-12</a>`},
@@ -350,7 +349,7 @@ func TestActiveJobPageReloadsWithoutScript(t *testing.T) {
 		"": true, store.StatusRunning: true,
 		store.StatusSucceeded: false, store.StatusFailed: false, store.StatusCompletedWithFailures: false, store.StatusInterrupted: false,
 	} {
-		id := h.storeJob(jobs.Inputs{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"}, status)
+		id := h.storeJob(jobs.Inputs{Kind: pods.KindEnvAdd, Domain: "kilo.alpha"}, status)
 		page := h.get(&sess, "/logs/"+itoa(id)).Body.String()
 		if got := strings.Contains(page, reload); got != want {
 			t.Errorf("job %q: page reloads %v, want %v", status, got, want)

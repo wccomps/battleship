@@ -102,7 +102,7 @@ func drawPlan(t *rapid.T) *pods.Plan {
 		}
 		if rapid.Bool().Draw(t, "guest") {
 			it.Guest = &pods.Guest{OS: drawFPText(t, "os"), Hostname: drawFPText(t, "hostname"), Domain: drawFPText(t, "domain"), IP: drawFPAddr(t, "gip"),
-				Prefix: rapid.IntRange(0, 32).Draw(t, "prefix"), Gateway: drawFPAddr(t, "gw"), DNS: drawFPAddr(t, "gdns"), DNSOnly: rapid.Bool().Draw(t, "dnsonly")}
+				Prefix: rapid.IntRange(0, 32).Draw(t, "prefix"), Gateway: drawFPAddr(t, "gw"), DNS: drawFPAddr(t, "gdns")}
 		}
 		p.Items = append(p.Items, it)
 	}

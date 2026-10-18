@@ -39,10 +39,9 @@ func TestEnvPlansCarryTheirSlot(t *testing.T) {
 		"add": func() (*Plan, error) {
 			return p.EnvAdd(ctx, EnvRequest{Domain: "kilo.bravo", Hosts: []HostSpec{{Host: "dc", Family: "debian-12"}}})
 		},
-		"dns":      func() (*Plan, error) { return p.EnvDNS(ctx, EnvRequest{Domain: "kilo.bravo"}) },
 		"teardown": func() (*Plan, error) { return p.EnvTeardown(ctx, EnvRequest{Domain: "kilo.bravo"}) },
 	}
-	want := map[string]string{"create": "03", "add": "02", "dns": "02", "teardown": "02"}
+	want := map[string]string{"create": "03", "add": "02", "teardown": "02"}
 	for name, plan := range plans {
 		got, err := plan()
 		if err != nil {

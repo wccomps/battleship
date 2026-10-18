@@ -51,7 +51,7 @@ func TestEnvCreatePlansSlotOne(t *testing.T) {
 		!slices.Equal(gw.Steps, []Step{StepClone, StepLabel, StepNetwork, StepStart}) {
 		t.Errorf("router = %+v", gw)
 	}
-	if teak.Guest == nil || teak.Guest.DNSOnly || AddrText(teak.Guest.IP) != "192.168.100.10" || AddrText(teak.Guest.Gateway) != "192.168.100.2" || AddrText(teak.Guest.DNS) != "192.168.100.2" ||
+	if teak.Guest == nil || AddrText(teak.Guest.IP) != "192.168.100.10" || AddrText(teak.Guest.Gateway) != "192.168.100.2" || AddrText(teak.Guest.DNS) != "192.168.100.2" ||
 		AddrText(teak.Notes.IP) != "192.168.100.10" || teak.Notes.OS != "linux" || teak.Notes.Base != "debian-12-v1" || teak.Notes.DNS != "router" ||
 		teak.NICs["net0"] != "devint01" || !slices.Equal(teak.Steps, []Step{StepClone, StepLabel, StepNetwork, StepStart, StepWaitAgent, StepGuest, StepVerify}) {
 		t.Errorf("teak = %+v guest %+v notes %+v", teak, teak.Guest, teak.Notes)
@@ -122,37 +122,6 @@ func TestEnvAddResumesExistingHost(t *testing.T) {
 	}
 }
 
-func TestEnvDNSWorksWithoutImages(t *testing.T) {
-	f := podstest.New("alder") // no base images left on the cluster
-	f.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;router", Status: "running"},
-		map[string]string{"description": "battleship: base=gw-v1 dns=router"})
-	f.Add(proxmox.VM{VMID: 2101, Name: "oak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "running"},
-		map[string]string{"description": "battleship: ip=192.168.100.20 os=windows base=win2022-v1 dns=router"})
-	f.Add(proxmox.VM{VMID: 2102, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "stopped"},
-		map[string]string{"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1 dns=router"})
-	plan, err := NewPlanner(f, envConfig()).EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha", DNS: "oak"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	byHost := map[string]Item{}
-	for _, it := range plan.Items {
-		byHost[it.Host] = it
-	}
-	if gw := byHost["gw"]; !slices.Equal(gw.Steps, []Step{StepLabel}) || gw.Notes.DNS != "oak" || gw.Tags != "dev;kilo.alpha;router" {
-		t.Errorf("gw = %+v", gw)
-	}
-	if oak := byHost["oak"]; AddrText(oak.Guest.DNS) != "192.168.100.20" || oak.Guest.OS != ImageWindows || !oak.Guest.DNSOnly ||
-		!slices.Equal(oak.Steps, []Step{StepGuest, StepVerify, StepLabel}) {
-		t.Errorf("oak = %+v", oak)
-	}
-	if !strings.Contains(byHost["teak"].Blocked, "stopped") {
-		t.Errorf("teak = %+v", byHost["teak"])
-	}
-	if _, err := NewPlanner(f, envConfig()).EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha", DNS: "gw"}); err == nil {
-		t.Error("the router host was accepted as a DNS server (use router)")
-	}
-}
-
 func TestEnvAddBlocksResumeOfAnotherKind(t *testing.T) {
 	f := envFake()
 	f.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;router"},
@@ -177,40 +146,6 @@ func TestEnvCreatePlanIsDeterministic(t *testing.T) {
 	b := create(t, NewPlanner(f, envConfig()), "teak=debian-12:10", "oak=win2022")
 	if !reflect.DeepEqual(a, b) {
 		t.Errorf("plans differ:\n%+v\n%+v", a, b)
-	}
-}
-
-// Notes are user-editable: an address that isn't a host of the subnet,
-// quoted or not, leaves the host without one rather than reaching a script.
-func TestEnvDNSIgnoresBadNoteAddresses(t *testing.T) {
-	for _, ip := range []string{"192.168.100.20'", "192.168.100.20\u2019;x", "10.50.1.20", "192.168.100.3", "192.168.100.020"} {
-		f := podstest.New("alder")
-		f.Add(proxmox.VM{VMID: 2101, Name: "oak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "running"},
-			map[string]string{"description": "battleship: ip=" + ip + " os=windows base=win2022-v1 dns=router"})
-		p := NewPlanner(f, envConfig())
-		if _, err := p.EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha", DNS: "oak"}); err == nil {
-			t.Errorf("%q: oak was accepted as a DNS server", ip)
-		}
-		plan, err := p.EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha", DNS: "router"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if it := plan.Items[0]; it.Guest != nil || !slices.Equal(it.Steps, []Step{StepLabel}) {
-			t.Errorf("%q: oak = %+v guest %+v", ip, it, it.Guest)
-		}
-	}
-}
-
-func TestEnvDNSBlocksAHostNameScriptsCantTake(t *testing.T) {
-	f := podstest.New("alder")
-	f.Add(proxmox.VM{VMID: 2101, Name: "Oak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "running"},
-		map[string]string{"description": "battleship: ip=192.168.100.20 os=windows base=win2022-v1 dns=router"})
-	plan, err := NewPlanner(f, envConfig()).EnvDNS(context.Background(), EnvRequest{Domain: "kilo.alpha"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if b := plan.Items[0].Blocked; !strings.Contains(b, "Oak") {
-		t.Errorf("blocked = %q", b)
 	}
 }
 

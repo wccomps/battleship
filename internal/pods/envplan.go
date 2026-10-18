@@ -19,7 +19,6 @@ type EnvRequest struct {
 	Slot   int
 	Router HostSpec   // create (required); add (only if the environment has none)
 	Hosts  []HostSpec // create, add
-	DNS    string     // set DNS: DNSRouter or one of the environment's host names
 }
 
 // envPlanIn is an empty plan of kind for domain in slot, locking both.
@@ -378,44 +377,4 @@ func orString(a, b string) string {
 		return a
 	}
 	return b
-}
-
-// EnvDNS plans pointing every Windows and Linux host of an environment at
-// req.DNS, and recording the choice on every host. Each item keeps the DNS
-// its host had (DNSWas).
-func (p Planner) EnvDNS(ctx context.Context, req EnvRequest) (*Plan, error) {
-	env, _, err := p.findEnv(ctx, req.Domain)
-	if err != nil {
-		return nil, err
-	}
-	choice := strings.TrimSpace(req.DNS)
-	if choice == "" {
-		choice = DNSRouter
-	}
-	addr, err := env.DNSAddress(choice)
-	if err != nil {
-		return nil, err
-	}
-	plan := p.envPlanIn(KindEnvDNS, env.Slot, env.Domain)
-	for _, h := range env.Hosts {
-		notes := h.Notes
-		notes.DNS = choice
-		was := &DNSServer{Choice: h.Notes.DNS}
-		was.Addr, _ = env.DNSAddress(was.Choice)
-		it := Item{Name: h.Name, Host: h.Host, VMID: h.VMID, Node: h.Node, Tags: h.Tags, Notes: &notes, DNSWas: was, Steps: []Step{StepLabel}}
-		if h.servesDNS() {
-			it.Guest = &Guest{OS: h.Notes.OS, Hostname: h.Host, Domain: env.Domain, IP: h.Notes.IP, Prefix: env.LAN.Bits(),
-				Gateway: env.Gateway(), DNS: addr, DNSOnly: true}
-			if err := it.Guest.Check(); err != nil {
-				it.Blocked = err.Error()
-			}
-			it.Steps = []Step{StepGuest, StepVerify, StepLabel}
-			if it.Blocked == "" && h.Status != "running" {
-				it.Blocked = h.Name + " is " + h.Status + "; start it first so its DNS can be set"
-			}
-		}
-		it.blockLongNotes(h.desc)
-		plan.Items = append(plan.Items, it)
-	}
-	return plan, nil
 }

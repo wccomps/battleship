@@ -70,7 +70,6 @@ var validInputs = []Inputs{
 	{Kind: pods.KindPower, Teams: "1", Action: "stop"},
 	{Kind: pods.KindEnvCreate, Domain: "kilo.alpha", Slot: "02", Router: "gw=opnsense", EnvHosts: []string{"dc=windows"}},
 	{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"web=debian:20"}},
-	{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "dc"},
 	{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"},
 	{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{VMID: 150, Family: "debian-12", ImageKind: pods.ImageLinux}},
 	{Kind: pods.KindImageEdit, ImageRequest: pods.ImageRequest{Family: "debian-12"}},
@@ -144,7 +143,6 @@ func TestPropInputsJSON(t *testing.T) {
 		Slot        string           `json:"slot,omitempty"`
 		Router      string           `json:"router,omitempty"`
 		EnvHosts    []string         `json:"env_hosts,omitempty"`
-		DNS         string           `json:"dns,omitempty"`
 		VMID        int              `json:"vmid,omitempty"`
 		Family      string           `json:"family,omitempty"`
 		ImageKind   string           `json:"image_kind,omitempty"`
@@ -179,7 +177,7 @@ func TestPropInputsJSON(t *testing.T) {
 			Action: text.Draw(t, "action"), VMs: list.Draw(t, "vms"),
 			Domain: text.Draw(t, "domain"), Slot: text.Draw(t, "slot"),
 			Router: text.Draw(t, "router"), EnvHosts: list.Draw(t, "envHosts"),
-			DNS: text.Draw(t, "dns"), VMID: rapid.OneOf(rapid.Just(0), rapid.IntRange(-10, 9999)).Draw(t, "vmid"),
+			VMID:   rapid.OneOf(rapid.Just(0), rapid.IntRange(-10, 9999)).Draw(t, "vmid"),
 			Family: text.Draw(t, "family"), ImageKind: text.Draw(t, "imageKind"),
 			Image: text.Draw(t, "image"), Details: det,
 		}
@@ -188,7 +186,7 @@ func TestPropInputsJSON(t *testing.T) {
 			Rebuild: f.Rebuild, NoSnapshot: f.NoSnapshot, Set: f.Set,
 			Snapshot: f.Snapshot, Description: f.Description, VMState: f.VMState,
 			Action: f.Action, VMs: f.VMs, Domain: f.Domain, Slot: f.Slot,
-			Router: f.Router, EnvHosts: f.EnvHosts, DNS: f.DNS,
+			Router: f.Router, EnvHosts: f.EnvHosts,
 			ImageRequest: pods.ImageRequest{
 				VMID: f.VMID, Family: f.Family, ImageKind: f.ImageKind, Image: f.Image, Details: f.Details,
 			},
@@ -251,7 +249,6 @@ var spoils = map[string][]spoil{
 	"EnvVMs": {{[]string{"dc.kilo.alpha"}, true}, {[]string{"gw.kilo.alpha", "dc.kilo.alpha"}, true}, {[]string(nil), true},
 		{[]string{"team01-dc"}, false}, {[]string{"dc.kilo.bravo"}, false}, {[]string{"dc"}, false}, {[]string{""}, false},
 		{[]string{"Dc.kilo.alpha"}, false}, {[]string{" dc.kilo.alpha"}, false}, {[]string{"dc.kilo.alpha", "x.y"}, false}},
-	"DNS":  {{"router", true}, {"dc", true}, {"", true}, {" dc ", true}, {"Dc", false}, {"-x", false}, {"a b", false}, {"dc.kilo", false}},
 	"VMID": {{100, true}, {150, true}, {1 << 40, true}, {99, false}, {0, false}, {-1, false}},
 	"Family": {{"debian-12", true}, {"x-v0", true}, {"WIN 2022", false}, {"debian-12-v1", false}, {"", false}, {" debian-12", false},
 		{"Debian-12", false}, {strings.Repeat("a", 41), false}},
@@ -279,7 +276,7 @@ var spoils = map[string][]spoil{
 var readsFields = map[pods.Kind][]string{
 	pods.KindDeploy: {"Pattern", "Rebuild", "NoSnapshot"}, pods.KindPower: {"Action"}, pods.KindSnapshot: {"Snapshot", "Description", "VMState"},
 	pods.KindTeardown: {"Set"}, pods.KindReset: {},
-	pods.KindEnvCreate: {"Domain", "Slot", "Router", "EnvHosts", "EnvVMs"}, pods.KindEnvAdd: {"Domain", "EnvHosts", "EnvVMs"}, pods.KindEnvDNS: {"Domain", "DNS"},
+	pods.KindEnvCreate: {"Domain", "Slot", "Router", "EnvHosts", "EnvVMs"}, pods.KindEnvAdd: {"Domain", "EnvHosts", "EnvVMs"},
 	pods.KindEnvTeardown:   {"Domain", "Slot"},
 	pods.KindImageRegister: {"VMID", "Family", "ImageKind", "Details"}, pods.KindImageEdit: {"Family"},
 	pods.KindImageDeprecate: {"Image"}, pods.KindImageDelete: {"Image"}, pods.KindImageDetails: {"Family", "Details", "Free"},

@@ -322,7 +322,7 @@ func (s *Server) inEnv(op operation, next func(operation) http.Handler) http.Han
 // noEnv sends an environment operation without an environment (domain, if
 // it names one that doesn't exist) back to Environments, saying why.
 func (s *Server) noEnv(w http.ResponseWriter, r *http.Request, domain string) {
-	msg := "Add hosts, Set DNS and Tear down start from an environment: pick one below."
+	msg := "Add hosts and Tear down start from an environment: pick one below."
 	if domain != "" {
 		msg = "There's no environment " + domain + ". It may have been torn down or renamed; pick one below."
 	}

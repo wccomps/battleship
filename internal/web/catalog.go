@@ -1,7 +1,6 @@
 package web
 
 import (
-	"cmp"
 	"context"
 	"net/http"
 	"slices"
@@ -23,11 +22,8 @@ type catalogPage struct {
 	Families []string         // every family, once
 	Subnet   string
 	ReadErr  string // why the cluster couldn't be read
-	// Env is the environment an env-add or env-dns form works on.
+	// Env is the environment an env-add form works on.
 	Env *pods.Environment
-	// DNSCards are Set DNS's choices; DNSHint says whose DNS it changes.
-	DNSCards []dnsCard
-	DNSHint  string
 	// Details fill a register's and an Edit notes's fields: those given,
 	// else those of the VM's notes or the family's newest version.
 	Details pods.ImageNotes
@@ -59,74 +55,6 @@ func (s *Server) newCatalogPage(ctx context.Context, section string) catalogPage
 		p.Others = append(p.Others, pods.Families(p.Images, k)...)
 	}
 	return p
-}
-
-// StaleDNS is the environment's DNS choice if it can no longer be chosen
-// (its host is gone), or "".
-func (p catalogPage) StaleDNS() string {
-	if p.Env == nil {
-		return ""
-	}
-	cur := p.Env.DNS()
-	if slices.Contains(p.Env.DNSChoices(), cur) {
-		return ""
-	}
-	return cur
-}
-
-// dnsCard is a Set DNS choice (pods.Environment.DNSChoices): the router or
-// a host, its address and image. Current is the environment's choice;
-// Checked, the one the form shows chosen.
-type dnsCard struct {
-	Value, Name, Addr, Image string
-	Router, Current, Checked bool
-}
-
-func dnsPrefill(_ *Server, _ context.Context, p *catalogPage) {
-	if p.Env != nil {
-		p.dnsForm()
-	}
-}
-
-// dnsForm fills in Set DNS's cards, In.DNS (else the current choice)
-// checked, and the hint naming the hosts whose DNS it sets.
-func (p *catalogPage) dnsForm() {
-	e := p.Env
-	cur := e.DNS()
-	chosen := cmp.Or(p.In.DNS, cur)
-	choices := e.DNSChoices()
-	for _, c := range choices {
-		card := dnsCard{Value: c, Current: c == cur, Checked: c == chosen}
-		addr, _ := e.DNSAddress(c)
-		card.Addr = pods.AddrText(addr)
-		if c == pods.DNSRouter {
-			card.Router = true
-			if r, ok := e.Host(e.RouterName()); ok {
-				card.Name, card.Image = r.Host, r.Notes.Base
-			}
-		} else if h, ok := e.Host(c + "." + e.Domain); ok {
-			card.Name, card.Image = c, h.Notes.Base
-		}
-		p.DNSCards = append(p.DNSCards, card)
-	}
-	set := choices[1:]
-	var keep []string
-	for _, h := range e.Hosts {
-		switch {
-		case h.Router:
-			keep = append([]string{"the router"}, keep...)
-		case !slices.Contains(set, h.Host):
-			keep = append(keep, h.Host)
-		}
-	}
-	if len(set) == 0 {
-		p.DNSHint = "No host here is a Windows or Linux host with an address: the choice is only recorded."
-		return
-	}
-	p.DNSHint = "Changes " + andList(set) + " through the guest agent."
-	if len(keep) > 0 {
-		p.DNSHint += " " + sentence(andList(keep)+byCount(len(keep), " keeps its", " keep their")+" own settings")
-	}
 }
 
 // withNotes reads the notes of the images an environment form lists.

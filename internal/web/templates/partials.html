@@ -153,19 +153,6 @@
 </table>
 </div>
 {{- end}}
-{{- with .DNS}}
-<div class="tscroll">
-<table class="tbl dnsr">
-<thead><tr><th scope="col">Host</th><th scope="col">DNS now</th><th scope="col">After</th></tr></thead>
-<tbody>
-{{- range .}}
-<tr{{if .Blocked}} class="blk"{{end}}><td><span class="vm">{{.Host}}</span></td><td class="meta">{{with .Now}}<code>{{.}}</code>{{else}}—{{end}}</td>
-{{- if .Blocked}}<td><span class="st s-cancel">{{icon "blocked"}}<span>{{names .Blocked}}</span></span></td>{{else}}<td><code>{{.After}}</code>{{if .Itself}} <span class="meta">itself</span>{{end}}</td>{{end}}</tr>
-{{- end}}
-</tbody>
-</table>
-</div>
-{{- end}}
 {{- with .Note}}<p class="meta">{{names .}}</p>{{end}}
 {{- with .Kept}}
 <div class="sec">

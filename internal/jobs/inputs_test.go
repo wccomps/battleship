@@ -208,7 +208,6 @@ func TestTeamlessInputsValidate(t *testing.T) {
 	good := []Inputs{
 		{Kind: pods.KindEnvCreate, Domain: "kilo.alpha", Router: "gw=opnsense", EnvHosts: []string{"teak=debian-12:10"}},
 		{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"oak=win2022"}},
-		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router"},
 		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"},
 		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha", Slot: "03"},
 		{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{VMID: 150, Family: "debian-12", ImageKind: "linux"}},
@@ -227,7 +226,6 @@ func TestTeamlessInputsValidate(t *testing.T) {
 		{Kind: pods.KindEnvAdd, Domain: "kilo.alpha"},
 		{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{Family: "debian-12"}},
 		{Kind: pods.KindImageDeprecate, ImageRequest: pods.ImageRequest{Image: "debian-12"}},
-		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", Teams: "1"},
 		{Kind: pods.KindEnvTeardown},
 		{Kind: pods.KindEnvTeardown, Domain: "kilo"},
 		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha", Slot: "3"},
@@ -253,10 +251,10 @@ func TestTeamlessLockKeys(t *testing.T) {
 	}
 }
 
-// Image jobs and DNS changes are started again from their forms; a slot
-// is only a create's, and VMs only a create's or an add's.
+// Image jobs are started again from their forms; a slot is only a create's or
+// teardown's, and VMs only a create's or an add's.
 func TestRetryInputsRefusesTeamless(t *testing.T) {
-	for _, kind := range []pods.Kind{pods.KindEnvDNS, pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete, pods.KindImageDetails} {
+	for _, kind := range []pods.Kind{pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete, pods.KindImageDetails} {
 		job := store.Job{ID: 7, Kind: string(kind), Status: string(store.StatusCompletedWithFailures)}
 		if _, err := RetryInputs(job, nil); !errors.Is(err, ErrNotRetryable) {
 			t.Errorf("%s: err = %v", kind, err)
@@ -264,7 +262,6 @@ func TestRetryInputsRefusesTeamless(t *testing.T) {
 	}
 	for _, in := range []Inputs{
 		{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", Slot: "02", EnvHosts: []string{"dc=debian"}},
-		{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", DNS: "router", VMs: []string{"dc.kilo.alpha"}},
 		{Kind: pods.KindImageEdit, ImageRequest: pods.ImageRequest{Family: "debian-12"}, VMs: []string{"dc.kilo.alpha"}},
 	} {
 		if err := in.Validate(); err == nil {
@@ -289,7 +286,7 @@ func TestValidateDetails(t *testing.T) {
 		{Inputs{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{VMID: 150, Family: "debian-12", Details: d}}, true},
 		{Inputs{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{VMID: 150, Family: "debian-12"}}, true},
 		{Inputs{Kind: pods.KindImageEdit, ImageRequest: pods.ImageRequest{Family: "debian-12", Details: d}}, false},
-		{Inputs{Kind: pods.KindEnvDNS, Domain: "kilo.alpha", ImageRequest: pods.ImageRequest{Details: d}}, false},
+		{Inputs{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha", ImageRequest: pods.ImageRequest{Details: d}}, false},
 		{Inputs{Kind: pods.KindImageDetails, ImageRequest: pods.ImageRequest{Family: "debian-12", Details: free}}, true},
 		{Inputs{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{VMID: 150, Family: "debian-12", Details: free}}, false},
 		{Inputs{Kind: pods.KindImageEdit, ImageRequest: pods.ImageRequest{Family: "debian-12", Details: free}}, false},

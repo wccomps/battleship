@@ -31,7 +31,7 @@ func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 	}
 	kind := pods.Kind(job.Kind)
 	if !kind.Retryable() {
-		return Inputs{}, fmt.Errorf("job %d: run it again from its form; image jobs and DNS changes resume what exists: %w", job.ID, ErrNotRetryable)
+		return Inputs{}, fmt.Errorf("job %d: run it again from its form; image jobs resume what exists: %w", job.ID, ErrNotRetryable)
 	}
 	var in Inputs
 	if err := json.Unmarshal(job.Inputs, &in); err != nil {

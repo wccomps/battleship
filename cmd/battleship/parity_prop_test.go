@@ -29,7 +29,6 @@ var cliFlags = map[string]map[string]string{
 	"delete":    {"image": "Image"},
 	"create":    {"domain": "Domain", "slot": "Slot", "router": "Router", "host": "EnvHosts"},
 	"add":       {"domain": "Domain", "router": "Router", "host": "EnvHosts"},
-	"dns":       {"domain": "Domain", "server": "DNS"},
 	// battleship env teardown, apart from the team teardown.
 	"env-teardown": {"domain": "Domain"},
 }
@@ -51,7 +50,7 @@ func parseCLI(sub string, args []string) (command, bool) {
 	switch sub {
 	case "register", "edit", "deprecate", "delete":
 		c, _, ok = parseImage(append([]string{sub}, args...), io.Discard)
-	case "create", "add", "dns":
+	case "create", "add":
 		c, _, ok = parseEnv(append([]string{sub}, args...), io.Discard)
 	case "env-teardown":
 		c, _, ok = parseEnv(append([]string{"teardown"}, args...), io.Discard)
@@ -66,7 +65,7 @@ func kindOf(sub string) pods.Kind {
 	switch sub {
 	case "register", "edit", "deprecate", "delete":
 		return pods.Kind("image-" + sub)
-	case "create", "add", "dns":
+	case "create", "add":
 		return pods.Kind("env-" + sub)
 	}
 	return pods.Kind(sub)
@@ -98,9 +97,6 @@ func checkParity(t interface{ Fatalf(string, ...any) }, sub string, values map[s
 			}
 		}
 	}
-	if sub == "dns" && values["server"] == nil {
-		raw.DNS = "router" // the form's default too
-	}
 	for flag, field := range cliBools[sub] {
 		if boxes[flag] {
 			args = append(args, "-"+flag)
@@ -126,7 +122,7 @@ func checkParity(t interface{ Fatalf(string, ...any) }, sub string, values map[s
 // A command line asks for the same job as the web form given the same
 // values.
 func TestPropCLIAsksWhatTheFormDoes(t *testing.T) {
-	subs := []string{"deploy", "teardown", "reset", "power", "snapshot", "register", "edit", "deprecate", "delete", "create", "add", "dns", "env-teardown"}
+	subs := []string{"deploy", "teardown", "reset", "power", "snapshot", "register", "edit", "deprecate", "delete", "create", "add", "env-teardown"}
 	valid := map[string]string{"teams": "1", "templates": "*.x", "action": "stop", "name": "round2", "vm": "7000", "family": "debian-12",
 		"image": "debian-12-v1", "domain": "kilo.alpha", "router": "gw=gw"}
 	for _, sub := range subs {

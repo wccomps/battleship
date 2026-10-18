@@ -134,26 +134,11 @@ func TestGuestWithABadValueFailsTheItem(t *testing.T) {
 	f := guestFake(t)
 	it := guestItem(pods.ImageWindows)
 	it.Guest.IP = netip.MustParseAddr("fe80::1%eth0'")
-	res := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindEnvDNS, Items: []pods.Item{it}})
+	res := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{it}})
 	if err := res.Failed["oak.kilo.alpha"]; err == nil || !strings.Contains(err.Error(), "IPv4") {
 		t.Errorf("failed = %v", err)
 	}
 	if len(f.Execs) != 0 {
-		t.Errorf("execs = %+v", f.Execs)
-	}
-}
-
-func TestSetDNSRunsOnlyTheDNSScript(t *testing.T) {
-	f := guestFake(t)
-	f.ExecHook = applied(f, "")
-	it := guestItem(pods.ImageLinux)
-	it.Guest.DNSOnly = true
-	it.Steps = []pods.Step{pods.StepGuest, pods.StepVerify}
-	res := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindEnvDNS, Items: []pods.Item{it}})
-	if len(res.Succeeded) != 1 {
-		t.Fatalf("result = %+v", res)
-	}
-	if len(f.Execs) != 1 || strings.Contains(f.Execs[0].Input, "addresses: [$IP") || !strings.Contains(f.Execs[0].Input, "dns-nameservers") {
 		t.Errorf("execs = %+v", f.Execs)
 	}
 }
