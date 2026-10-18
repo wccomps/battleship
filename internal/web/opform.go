@@ -32,7 +32,7 @@ type formPage struct {
 	// HostsAll means ticking none means all.
 	HostOpts []hostOpt
 	HostsAll bool
-	Picker   *snapshotPicker
+	Step     *stepTwo // a two-step form's (operation.Pick)
 	// FromGrid means the VMs were ticked on the grid: the form lists them instead
 	// of asking for teams and hosts.
 	FromGrid bool
@@ -62,20 +62,41 @@ func hostOpts(names, ticked []string) []hostOpt {
 	return out
 }
 
-// snapshotPicker is the reset form's step 2: snapshots read from the reset's
-// first VM or, for exact VMs, those they have in common.
-type snapshotPicker struct {
-	Source  string         // where the list comes from, e.g. "The snapshots of team01-dc, the first VM this covers."
-	Options []snapshotView // the first, with no name, is each VM's own baseline
-	// BaselineText explains the baseline option, e.g. "initial, else the newest
-	// fresh_clone_*".
-	BaselineText string
-	// BaselineIs is the snapshot that is every source VM's baseline, if it is one
-	// snapshot; it isn't offered again under its own name.
-	BaselineIs string
-	Selected   string // "" is the baseline
-	Note       string // e.g. why the list is short
-	HasPicked  bool   // teams (and hosts) were chosen, so step 2 shows
+// stepTwo is the second step of a two-step form (operation.Pick), once
+// pods and hosts are chosen (HasPicked): what the cluster holds for them,
+// and a choice among it.
+type stepTwo struct {
+	HasPicked bool
+	Held      *heldView // what the pods hold, if the step lists it
+	Legend    string    // the choice's: "Snapshot"
+	Options   []stepOpt
+	Hints     []string // under the choice
+	Note      string   // after it, e.g. why the list is short
+	// Button is the preview button's label; Danger marks it, with the
+	// operation's icon, as destroying something.
+	Button string
+	Danger bool
+}
+
+// stepOpt is a choice of a stepTwo. Sans sets its label apart from names.
+type stepOpt struct {
+	Value, Label  string
+	Checked, Sans bool
+}
+
+// heldView lists what a teardown's pods hold, set by set.
+type heldView struct {
+	Heading string // "In pods 01-32"
+	Rows    []heldRow
+	Empty   string // when there are none
+	Err     string // why the pods couldn't be read
+}
+
+// heldRow is one set the pods hold: "tango.delta", "12 hosts in each of
+// pods 01-32". Muted is the unknown set.
+type heldRow struct {
+	Label, Text string
+	Muted       bool
 }
 
 // opForm serves an operation's form, prefilled from the query string ("change"
@@ -111,7 +132,7 @@ func (s *Server) opForm(op operation) http.Handler {
 			}
 			in = s.selected(r.Context(), in)
 		}
-		p := s.newFormPage(r.Context(), op, in, q.Has(fieldTeams) || grid)
+		p := s.newFormPage(r.Context(), op, in, q.Has(fieldTeams) || grid, op.Pick != "" && q.Has(op.Pick))
 		p.FromGrid = grid
 		s.render(w, r, http.StatusOK, "opform", s.newView(w, r, op.Title, op.nav(), p))
 	})
@@ -132,9 +153,9 @@ func (s *Server) reviewPage(w http.ResponseWriter, r *http.Request, op operation
 	s.showPreview(w, r, http.StatusOK, op, in, plan, false, previewOptions{})
 }
 
-// newFormPage prepares an operation's form for in. picked means the reset
-// form's first step was submitted, so snapshots are listed.
-func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, picked bool) formPage {
+// newFormPage prepares op's form for in. On a two-step form, picked shows
+// step 2 and chosen marks op.Pick as already given (even when "").
+func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, picked, chosen bool) formPage {
 	p := formPage{
 		Op:        op,
 		In:        in,
@@ -152,9 +173,10 @@ func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, 
 		p.PowerActions = powerChoicesOf(pods.PowerActions)
 	case pods.KindDeploy:
 		p.TemplateSets, p.SetsErr = s.deploySets(ctx)
+		inSet, hasSet := pods.SetOfPattern(in.Pattern)
 		var chosen *setView
 		for i := range p.TemplateSets {
-			if p.TemplateSets[i].Pattern == in.Pattern || (in.Pattern == "" && i == 0) {
+			if p.TemplateSets[i].Pattern == in.Pattern || (hasSet && p.TemplateSets[i].Name == string(inSet)) || (in.Pattern == "" && i == 0) {
 				p.TemplateSets[i].Checked = true
 				chosen = &p.TemplateSets[i]
 			}
@@ -171,8 +193,13 @@ func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, 
 		} else {
 			p.HostOpts, p.HostsAll = hostOpts(nil, in.Hosts), true
 		}
-	case pods.KindReset:
-		p.Picker = s.snapshotPicker(ctx, in, picked)
+	}
+	if op.Pick != "" {
+		p.Step = &stepTwo{}
+		if teams, err := pods.ParseTeams(in.Teams); picked && err == nil {
+			p.Step = s.stepTwo(ctx, op, in, teams, chosen)
+			p.Step.HasPicked = true
+		}
 	}
 	if op.Kind != pods.KindDeploy {
 		p.HostOpts, p.HostsAll = hostOpts(s.view(ctx).Grid().Hosts, in.Hosts), true
@@ -190,7 +217,7 @@ func (s *Server) renderForm(w http.ResponseWriter, r *http.Request, status int, 
 		s.teamlessForm(w, r, status, op, in, problem)
 		return
 	}
-	p := s.newFormPage(r.Context(), op, in, in.Teams != "")
+	p := s.newFormPage(r.Context(), op, in, in.Teams != "", true)
 	p.Error = problem
 	s.render(w, r, status, "opform", s.newView(w, r, op.Title, op.nav(), p))
 }
@@ -208,52 +235,61 @@ func (s *Server) deploySets(ctx context.Context) ([]setView, string) {
 	return s.startOf(g, false).Sets, ""
 }
 
-// snapshotPicker reads the snapshots of the first VM a reset of in covers
+// stepTwo reads what op's second step offers for in's teams.
+func (s *Server) stepTwo(ctx context.Context, op operation, in jobs.Inputs, teams []string, chosen bool) *stepTwo {
+	if op.Kind == pods.KindTeardown {
+		return s.setStep(ctx, in, teams, chosen)
+	}
+	return s.snapshotStep(ctx, in, teams)
+}
+
+// snapshotStep offers the snapshots of the first VM a reset of in covers
 // (first team, first matching grid host). The per-VM baseline is always
-// offered first, preselected unless in names another snapshot.
-func (s *Server) snapshotPicker(ctx context.Context, in jobs.Inputs, picked bool) *snapshotPicker {
-	p := &snapshotPicker{HasPicked: picked, Selected: in.Snapshot, BaselineText: pods.BaselineText(s.cfg.Deploy)}
-	if !picked {
-		return p
-	}
-	teams, err := pods.ParseTeams(in.Teams)
-	if err != nil {
-		p.HasPicked = false
-		return p
-	}
+// offered first, chosen unless in names another snapshot.
+func (s *Server) snapshotStep(ctx context.Context, in jobs.Inputs, teams []string) *stepTwo {
+	step := &stepTwo{Legend: "Snapshot", Button: "Preview"}
 	var snaps []string
+	var baseline string
 	if len(in.VMs) > 0 {
-		snaps, p.BaselineIs = s.commonSnapshots(ctx, p, in.VMs)
+		snaps, baseline = s.commonSnapshots(ctx, step, in.VMs)
 	} else if team, host, ok := s.firstVM(ctx, teams, in.Hosts); ok {
 		d, err := s.detail(ctx, team, host)
-		p.Source = "The snapshots of " + d.Cell.Name + ", the first VM this covers."
+		step.Hints = append(step.Hints, "The snapshots of "+d.Cell.Name+", the first VM this covers.")
 		switch {
 		case err != nil:
-			p.Note = "Couldn't read the snapshots of " + d.Cell.Name + ": " + proxmox.Describe(err) + ". Only the baseline is offered."
+			step.Note = "Couldn't read the snapshots of " + d.Cell.Name + ": " + proxmox.Describe(err) + ". Only the baseline is offered."
 		default:
-			snaps = d.Snapshots
-			p.BaselineIs = d.Baseline
+			snaps, baseline = d.Snapshots, d.Baseline
 			if d.Baseline == "" {
-				p.Note = d.Cell.Name + " has no baseline snapshot."
+				step.Note = d.Cell.Name + " has no baseline snapshot."
 			}
 		}
 	} else {
-		p.Note = "The grid shows no VM for those teams and hosts, so only the baseline is offered."
+		step.Note = "The grid shows no VM for those pods and hosts, so only the baseline is offered."
 	}
 	names := append([]string{""}, slices.DeleteFunc(slices.Clone(snaps), func(n string) bool {
-		return n == p.BaselineIs && n != p.Selected
+		return n == baseline && n != in.Snapshot
 	})...)
-	if !slices.Contains(names, p.Selected) {
-		names = append(names, p.Selected)
+	if !slices.Contains(names, in.Snapshot) {
+		names = append(names, in.Snapshot)
 	}
 	seen := map[string]bool{}
 	for _, n := range names {
-		if !seen[n] {
-			seen[n] = true
-			p.Options = append(p.Options, snapshotView{Name: n, Baseline: n == ""})
+		if seen[n] {
+			continue
 		}
+		seen[n] = true
+		o := stepOpt{Value: n, Label: n, Checked: n == in.Snapshot}
+		if n == "" {
+			o.Label = "baseline"
+			if baseline != "" {
+				o.Label += " (" + baseline + ")"
+			}
+		}
+		step.Options = append(step.Options, o)
 	}
-	return p
+	step.Hints = append(step.Hints, "baseline: "+pods.BaselineText(s.cfg.Deploy))
+	return step
 }
 
 // pickerReads caps the VMs the picker reads for exact VMs: each read takes a
@@ -262,9 +298,10 @@ func (s *Server) snapshotPicker(ctx context.Context, in jobs.Inputs, picked bool
 const pickerReads = 4
 
 // commonSnapshots reads up to pickerReads of the named grid VMs and returns
-// the snapshots all have, in the first one's order. It records the source in
-// p, and their shared baseline if all were read and it is one snapshot.
-func (s *Server) commonSnapshots(ctx context.Context, p *snapshotPicker, names []string) (_ []string, baseline string) {
+// the snapshots all have, in the first one's order, and their shared baseline
+// if all were read and it is one snapshot. It records the source and any note
+// on step.
+func (s *Server) commonSnapshots(ctx context.Context, step *stepTwo, names []string) (_ []string, baseline string) {
 	var cells []status.Cell
 	for _, row := range s.view(ctx).Grid().Rows {
 		for _, c := range row.Cells {
@@ -274,7 +311,7 @@ func (s *Server) commonSnapshots(ctx context.Context, p *snapshotPicker, names [
 		}
 	}
 	if len(cells) == 0 {
-		p.Note = "The grid shows none of these VMs, so only the baseline is offered."
+		step.Note = "The grid shows none of these VMs, so only the baseline is offered."
 		return nil, ""
 	}
 	var common, read []string
@@ -282,7 +319,7 @@ func (s *Server) commonSnapshots(ctx context.Context, p *snapshotPicker, names [
 	for i, c := range cells[:min(len(cells), pickerReads)] {
 		d, err := s.detail(ctx, c.Team, c.Host)
 		if err != nil {
-			p.Note = "Couldn't read the snapshots of " + c.Name + ": " + proxmox.Describe(err) + ". Only the baseline is offered."
+			step.Note = "Couldn't read the snapshots of " + c.Name + ": " + proxmox.Describe(err) + ". Only the baseline is offered."
 			return nil, ""
 		}
 		read = append(read, c.Name)
@@ -300,14 +337,14 @@ func (s *Server) commonSnapshots(ctx context.Context, p *snapshotPicker, names [
 	}
 	if len(cells) > len(read) {
 		baseline = "" // the unread VMs' baselines may be other snapshots
-		p.Source = fmt.Sprintf("The snapshots that %s, the first %d of the %d VMs, all have.", strings.Join(read, ", "), len(read), len(cells))
+		step.Hints = append(step.Hints, fmt.Sprintf("The snapshots that %s, the first %d of the %d VMs, all have.", strings.Join(read, ", "), len(read), len(cells)))
 	} else if len(read) == 1 {
-		p.Source = "The snapshots of " + read[0] + "."
+		step.Hints = append(step.Hints, "The snapshots of "+read[0]+".")
 	} else {
-		p.Source = "The snapshots that " + strings.Join(read, ", ") + " all have."
+		step.Hints = append(step.Hints, "The snapshots that "+strings.Join(read, ", ")+" all have.")
 	}
 	if !allBaseline {
-		p.Note = "Not all of them have a baseline snapshot."
+		step.Note = "Not all of them have a baseline snapshot."
 	}
 	return common, baseline
 }

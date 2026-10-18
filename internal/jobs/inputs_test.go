@@ -28,7 +28,7 @@ func TestValidate(t *testing.T) {
 		{Inputs{Kind: pods.KindPower, Teams: "1", Action: "start"}, ""},
 		{Inputs{Kind: pods.KindPower, Teams: "1", Action: "explode"}, "power action must be"},
 		{Inputs{Kind: "nuke", Teams: "1"}, `unknown job kind "nuke"`},
-		{Inputs{Kind: pods.KindReset, Teams: ""}, "teams: no teams given"},
+		{Inputs{Kind: pods.KindReset, Teams: ""}, "pods: no pods given"},
 		{Inputs{Kind: pods.KindReset, Teams: "1", Hosts: []string{"dc", " "}}, "blank entries"},
 	}
 	for _, tc := range cases {

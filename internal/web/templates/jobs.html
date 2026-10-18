@@ -26,7 +26,7 @@
 {{define "jobs-table" -}}
 <div class="jobs" id="jobs-table">
 {{- if .Rows}}
-<div class="jobs-h" aria-hidden="true"><span>Status</span><span>#</span><span>Operation</span><span>Teams</span><span>Started by</span><span>Started</span><span>Took</span></div>
+<div class="jobs-h" aria-hidden="true"><span>Status</span><span>#</span><span>Operation</span><span>Pods</span><span>Started by</span><span>Started</span><span>Took</span></div>
 <ol>
 {{- range .Rows}}
 <li><a class="job" href="/logs/{{.ID}}">

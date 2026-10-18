@@ -31,7 +31,7 @@ func userCfgTimeout(node string, vmid int) error {
 
 func teardownTeam01(t *testing.T, f *podstest.Fake) *pods.Plan {
 	t.Helper()
-	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
+	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestDeletesAreCapped(t *testing.T) {
 		teams = append(teams, team)
 		f.Add(proxmox.VM{VMID: 10021 + 100*i, Name: "team" + team + "-teak", Node: "cedar"}, nil)
 	}
-	plan, err := testPlanner(f).Teardown(context.Background(), teams, nil)
+	plan, err := testPlanner(f).Teardown(context.Background(), teams, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestTeardownPlansHalfDeletedVMs(t *testing.T) {
 	f.FailOn("wait:"+podstest.UPID("cedar", "qmdestroy", 10121), userCfgTimeout("cedar", 10121))
 	testExecutor(f, &recorder{}).Run(context.Background(), teardownTeam01(t, f))
 
-	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
+	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,13 +336,13 @@ func TestTeardownPlansHalfDeletedVMs(t *testing.T) {
 		t.Fatalf("items = %+v, want one for half-deleted VMID 10121", plan.Items)
 	}
 	wantHalfDeletedAdvice(t, plan.Items[0].Blocked)
-	if other, _ := testPlanner(f).Teardown(context.Background(), []string{"02"}, nil); len(other.Items) != 0 {
+	if other, _ := testPlanner(f).Teardown(context.Background(), []string{"02"}, nil, ""); len(other.Items) != 0 {
 		t.Errorf("team 02's teardown planned %+v", other.Items)
 	}
 
 	named := newCluster()
 	named.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "stopped"}, map[string]string{"name": "team01-teak", "lock": "destroyed"})
-	plan, err = testPlanner(named).Teardown(context.Background(), []string{"01"}, nil)
+	plan, err = testPlanner(named).Teardown(context.Background(), []string{"01"}, nil, "")
 	if err != nil || len(plan.Items) != 1 || plan.Items[0].Name != "team01-teak" {
 		t.Fatalf("named half-deleted VM: items %+v, err %v; want it once, by name", plan, err)
 	}

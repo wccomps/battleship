@@ -10,7 +10,7 @@ import (
 )
 
 // ErrUnknownCell means the grid has no such team and host.
-var ErrUnknownCell = errors.New("no such team VM in the status grid")
+var ErrUnknownCell = errors.New("no such pod VM in the status grid")
 
 // Detail is a live read of one grid cell.
 type Detail struct {
@@ -32,7 +32,7 @@ func (p *Poller) Detail(ctx context.Context, team, host string) (Detail, error) 
 	p.mu.Unlock()
 	d := Detail{Cell: c}
 	if !ok {
-		return Detail{}, fmt.Errorf("team %q host %q: %w", team, host, ErrUnknownCell)
+		return Detail{}, fmt.Errorf("pod %q host %q: %w", team, host, ErrUnknownCell)
 	}
 	if c.State == StateMissing {
 		return d, nil

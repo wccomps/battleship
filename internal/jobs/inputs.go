@@ -23,6 +23,10 @@ type Inputs struct {
 	Pattern    string    `json:"pattern,omitempty"`     // deploy
 	Rebuild    bool      `json:"rebuild,omitempty"`     // deploy
 	NoSnapshot bool      `json:"no_snapshot,omitempty"` // deploy
+	// Set is the one template set a teardown takes (pods.ParseSet). A
+	// teardown without one, as every one stored before sets, takes
+	// everything in its pods (among Hosts).
+	Set pods.Set `json:"set,omitempty"`
 	// Snapshot is a reset's target (empty: baseline) or a snapshot job's
 	// new snapshot.
 	Snapshot    string `json:"snapshot,omitempty"`
@@ -50,7 +54,7 @@ type Inputs struct {
 }
 
 // Typed is what a person types to confirm in (pods.Kind.TypedConfirm): a
-// teardown's team range or an environment's domain, as given.
+// teardown's pod range or an environment's domain, as given.
 func (in Inputs) Typed() string {
 	switch in.Kind {
 	case pods.KindTeardown:
@@ -61,12 +65,12 @@ func (in Inputs) Typed() string {
 	return ""
 }
 
-// TypedWhat names what Typed is, for asking for it: "the team range" or
+// TypedWhat names what Typed is, for asking for it: "the pod range" or
 // "the domain"; "" when nothing is typed.
 func (in Inputs) TypedWhat() string {
 	switch in.Kind {
 	case pods.KindTeardown:
-		return "the team range"
+		return "the pod range"
 	case pods.KindEnvTeardown:
 		return "the domain"
 	}
@@ -101,12 +105,16 @@ func (in Inputs) Validate() error {
 		if n := utf8.RuneCountInString(in.Description); n > MaxSnapshotDescription {
 			errs = append(errs, fmt.Errorf("the snapshot description is too long: %d characters, at most %d", n, MaxSnapshotDescription))
 		}
-	case pods.KindTeardown, pods.KindReset:
+	case pods.KindTeardown:
+		if _, err := pods.ParseSet(string(in.Set)); err != nil {
+			errs = append(errs, err)
+		}
+	case pods.KindReset:
 	default:
 		errs = append(errs, fmt.Errorf("unknown job kind %q", in.Kind))
 	}
 	if _, err := pods.ParseTeams(in.Teams); err != nil {
-		errs = append(errs, fmt.Errorf("teams: %w", err))
+		errs = append(errs, fmt.Errorf("pods: %w", err))
 	}
 	for _, h := range in.Hosts {
 		if strings.TrimSpace(h) == "" {
@@ -130,7 +138,7 @@ func (in Inputs) checkText() error {
 		name   string
 		values []string
 	}{
-		{"teams", []string{in.Teams}}, {"hosts", in.Hosts}, {"vms", in.VMs}, {"pattern", []string{in.Pattern}},
+		{"pods", []string{in.Teams}}, {"hosts", in.Hosts}, {"vms", in.VMs}, {"pattern", []string{in.Pattern}}, {"set", []string{string(in.Set)}},
 		{"snapshot", []string{in.Snapshot}}, {"description", []string{in.Description}}, {"action", []string{in.Action}},
 		{"domain", []string{in.Domain}}, {"slot", []string{in.Slot}}, {"router", []string{in.Router}}, {"env hosts", in.EnvHosts}, {"dns", []string{in.DNS}},
 		{"family", []string{in.Family}}, {"image kind", []string{in.ImageKind}}, {"image", []string{in.Image}},
@@ -189,9 +197,9 @@ func checkVMs(in Inputs, teams []string, naming pods.Naming) error {
 		team, _, ok := naming.ParseVMName(name)
 		switch {
 		case !ok:
-			errs = append(errs, fmt.Errorf("vms: %q is not a team VM name", name))
+			errs = append(errs, fmt.Errorf("vms: %q is not a pod VM name", name))
 		case !slices.Contains(teams, team):
-			errs = append(errs, fmt.Errorf("vms: %s is not in teams %s", name, in.Teams))
+			errs = append(errs, fmt.Errorf("vms: %s is not in pods %s", name, in.Teams))
 		}
 	}
 	return errors.Join(errs...)
@@ -240,7 +248,8 @@ func planFor(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*p
 			Pattern: in.Pattern, Teams: teams, Hosts: in.Hosts, Rebuild: in.Rebuild, Snapshot: !in.NoSnapshot,
 		})
 	case pods.KindTeardown:
-		return p.Teardown(ctx, teams, in.Hosts)
+		set, _ := pods.ParseSet(string(in.Set))
+		return p.Teardown(ctx, teams, in.Hosts, set)
 	case pods.KindReset:
 		return p.Reset(ctx, teams, in.Hosts, in.Snapshot)
 	case pods.KindSnapshot:
@@ -321,7 +330,7 @@ func (in Inputs) EnvRequest() (pods.EnvRequest, error) {
 func (in Inputs) validateTeamless() []error {
 	var errs []error
 	if in.Teams != "" || len(in.Hosts) > 0 {
-		errs = append(errs, errors.New("teams and hosts don't apply to images and environments"))
+		errs = append(errs, errors.New("pods and hosts don't apply to images and environments"))
 	}
 	switch {
 	case len(in.VMs) == 0:

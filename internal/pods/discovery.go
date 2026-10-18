@@ -162,10 +162,10 @@ func AssignNodes(teams, nodes []string, vms []proxmox.VM) map[string]string {
 	return out
 }
 
-// MasterSet is the masters sharing the part after the host, e.g.
-// dc.kilo.alpha and web.kilo.alpha form "kilo.alpha" (pattern "*.kilo.alpha").
+// MasterSet is the masters of one set (SplitMaster), e.g. dc.kilo.alpha
+// and web.kilo.alpha form kilo.alpha.
 type MasterSet struct {
-	Name    string   // e.g. "kilo.alpha"
+	Name    Set
 	Hosts   []string // sorted, each once
 	Masters int      // master VMs, counting any that share a name
 	Running int      // of them, those running; a template build stops them
@@ -176,9 +176,9 @@ type MasterSet struct {
 // and unique.
 func MasterSets(vms []proxmox.VM, n Naming, tag string) (sets []MasterSet, others []string) {
 	masters, _, _ := FindMasters(vms, n, "*", tag)
-	index := map[string]int{}
+	index := map[Set]int{}
 	for _, m := range masters {
-		host, set, _ := strings.Cut(m.Name, ".")
+		host, set := n.SplitMaster(m.Name)
 		if host == "" || set == "" {
 			if len(others) == 0 || others[len(others)-1] != m.Name { // masters are sorted by name
 				others = append(others, m.Name)

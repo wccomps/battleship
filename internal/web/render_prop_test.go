@@ -122,8 +122,8 @@ func pageData(t *rapid.T, page string) any {
 	case "opform":
 		p := drawHostile[formPage](t, "opform")
 		p.Op = rapid.SampledFrom(operations).Draw(t, "op")
-		if p.Op.Kind == pods.KindReset && p.Picker == nil {
-			p.Picker = &snapshotPicker{}
+		if p.Op.Pick != "" && p.Step == nil {
+			p.Step = &stepTwo{}
 		}
 		return p
 	case "message":

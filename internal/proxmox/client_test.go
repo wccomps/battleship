@@ -689,6 +689,36 @@ func TestWhenRefusedCallsBackOn401(t *testing.T) {
 	}
 }
 
+func TestTagAccess(t *testing.T) {
+	f, c := newFake(t)
+	f.routes["GET /cluster/options"] = jsonData(`{"allowed-tags":["dev"]}`)
+	ta, err := c.TagAccess(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ta.Allows("set-kilo.alpha") || ta.Mode != "" {
+		t.Errorf("default options: %+v, Allows(set-kilo.alpha) = %v", ta, ta.Allows("set-kilo.alpha"))
+	}
+
+	f.routes["GET /cluster/options"] = jsonData(`{"user-tag-access":{"user-allow":"existing"},"allowed-tags":["dev","set-kilo.alpha"],"registered-tags":["set-tango.delta"]}`)
+	ta, err = c.TagAccess(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ta.Allows("SET-KILO.ALPHA") || ta.Allows("set-kilo.bravo") || ta.Allows("set-tango.delta") {
+		t.Errorf("existing options: %+v", ta)
+	}
+
+	f.routes["GET /cluster/options"] = jsonData(`{"user-tag-access":{"user-allow":"free"},"registered-tags":["set-tango.delta"]}`)
+	ta, err = c.TagAccess(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ta.Allows("set-kilo.bravo") || ta.Allows("set-tango.delta") {
+		t.Errorf("free with registered: %+v", ta)
+	}
+}
+
 // The error text in a status line, which a guest agent's error can fill,
 // is kept up to maxMessage bytes; a header longer than maxHeader isn't read.
 func TestLongStatusLineIsCut(t *testing.T) {

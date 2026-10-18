@@ -28,17 +28,18 @@ const Realm = "auth.example.org"
 type Server struct {
 	srv *httptest.Server
 
-	mu      sync.Mutex
-	now     func() time.Time
-	users   map[string]*user
-	tickets map[string]ticket // by ticket
-	states  map[string]loginState
-	codes   map[string]string // authorization code -> user
-	current string            // whom the identity provider signs in
-	idpErr  string            // if set, the identity provider refuses with it
-	logins  int
-	renews  int
-	perms   int // /access/permissions calls
+	mu        sync.Mutex
+	now       func() time.Time
+	users     map[string]*user
+	tickets   map[string]ticket // by ticket
+	states    map[string]loginState
+	codes     map[string]string // authorization code -> user
+	current   string            // whom the identity provider signs in
+	idpErr    string            // if set, the identity provider refuses with it
+	logins    int
+	renews    int
+	perms     int // /access/permissions calls
+	tagAccess proxmox.TagAccess
 }
 
 type user struct {
@@ -66,6 +67,7 @@ func New(t testing.TB) *Server {
 	mux.HandleFunc("POST /api2/json/access/openid/login", s.login)
 	mux.HandleFunc("POST /api2/json/access/ticket", s.renew)
 	mux.HandleFunc("GET /api2/json/access/permissions", s.permissions)
+	mux.HandleFunc("GET /api2/json/cluster/options", s.options)
 	mux.HandleFunc("GET /idp/authorize", s.authorize)
 	s.srv = httptest.NewTLSServer(mux)
 	t.Cleanup(s.srv.Close)
@@ -384,6 +386,26 @@ func (s *Server) Known(name string) bool {
 	defer s.mu.Unlock()
 	_, ok := s.users[name]
 	return ok
+}
+
+// SetTagAccess sets the fake's /cluster/options tag policy.
+func (s *Server) SetTagAccess(t proxmox.TagAccess) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tagAccess = t
+}
+
+func (s *Server) options(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.caller(w, r) == "" {
+		return
+	}
+	out := map[string]any{"allowed-tags": s.tagAccess.Allowed, "registered-tags": s.tagAccess.Registered}
+	if s.tagAccess.Mode != "" {
+		out["user-tag-access"] = map[string]string{"user-allow": s.tagAccess.Mode}
+	}
+	reply(w, out)
 }
 
 // CertPool holds the fake's certificate, as proxmox.ca_file would hold the

@@ -28,7 +28,7 @@ func runQueued(ctx context.Context, d deps, cfg config.Config, in jobs.Inputs, p
 		fmt.Fprintf(d.stdout, "Queued job %d. A worker (battleship serve) runs it; follow it with: battleship jobs show %d\n", id, id)
 		return 0
 	}
-	fmt.Fprintf(d.stdout, "\nJob %d queued; a worker (battleship serve) runs it once no other job uses its teams or templates. "+
+	fmt.Fprintf(d.stdout, "\nJob %d queued; a worker (battleship serve) runs it once no other job uses its pods or templates. "+
 		"Following it here; Ctrl-C cancels it.\n", id)
 	followJob(ctx, d, cfg, st, id)
 	return reportJob(context.WithoutCancel(ctx), d, st, id)
@@ -52,7 +52,7 @@ func waitingMessage(ctx context.Context, st *store.Store, id int64, idle int) st
 	case err != nil:
 		return ""
 	case len(blockers) > 0:
-		return fmt.Sprintf("Waiting for job(s) %s, which use the same teams or templates.", joinIDs(blockers))
+		return fmt.Sprintf("Waiting for job(s) %s, which use the same pods or templates.", joinIDs(blockers))
 	case idle >= noWorkerPolls:
 		return "No worker has taken it yet; is battleship serve running?"
 	}

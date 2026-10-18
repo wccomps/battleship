@@ -1,56 +1,71 @@
 {{define "content" -}}
 {{- $csrf := .CSRF}}
 {{- with .Data}}
-{{- if eq .Op.Kind "reset"}}
+{{- if .Op.Pick}}
 <div class="sheet" aria-labelledby="form-title">
 {{template "form-head" .}}
 <div class="pb form">
 {{- with .Error}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
 {{- if not .FromGrid}}
-<form method="get" action="{{.Op.Path}}" class="stack" id="reset-which">
+<form method="get" action="{{.Op.Path}}" class="stack" id="{{.Op.Kind}}-which">
 {{template "team-fields" .}}
-<div><button type="submit" class="btn">{{if .Picker.HasPicked}}Choose again{{else}}Next{{end}}</button></div>
+<div><button type="submit" class="btn">{{if .Step.HasPicked}}Choose again{{else}}Next{{end}}</button></div>
 </form>
 {{- end}}
-{{- if .Picker.HasPicked}}
-<form method="post" action="{{.Op.Path}}/preview" class="stack" id="reset-pick">
+{{- with .Step}}{{if .HasPicked}}
+<form method="post" action="{{$.Data.Op.Path}}/preview" class="stack" id="{{$.Data.Op.Kind}}-pick">
 {{template "csrf" $csrf}}
-{{- if .FromGrid}}
+{{- if $.Data.FromGrid}}
 <input type="hidden" name="from" value="grid">
 {{- end}}
-<input type="hidden" name="teams" value="{{.In.Teams}}">
-{{- if .HostsText}}
-<input type="hidden" name="hosts" value="{{.HostsText}}">
+<input type="hidden" name="teams" value="{{$.Data.In.Teams}}">
+{{- with $.Data.HostsText}}
+<input type="hidden" name="hosts" value="{{.}}">
 {{- end}}
-{{- if .VMsText}}
-<input type="hidden" name="vms" value="{{.VMsText}}">
+{{- with $.Data.VMsText}}
+<input type="hidden" name="vms" value="{{.}}">
 {{- end}}
-{{- if .FromGrid}}
-<ul class="hosts" aria-label="VMs">{{range .In.VMs}}<li>{{.}}</li>{{end}}</ul>
+{{- if $.Data.FromGrid}}
+<ul class="hosts" aria-label="VMs">{{range $.Data.In.VMs}}<li>{{.}}</li>{{end}}</ul>
 {{- end}}
-<fieldset class="field">
-<legend>Snapshot</legend>
-<div class="opts">
-{{- range .Picker.Options}}
-<label class="opt"><input type="radio" name="snapshot" value="{{.Name}}"{{if eq .Name $.Data.Picker.Selected}} checked{{end}}><span>{{if .Baseline}}baseline{{with $.Data.Picker.BaselineIs}} ({{.}}){{end}}{{else}}{{.Name}}{{end}}</span></label>
+{{- with .Held}}
+<div class="field" id="held">
+<h2 class="lbl">{{.Heading}}</h2>
+{{- with .Err}}
+<p class="warn" role="alert">{{icon "warn"}}<span>{{names .}}</span></p>
+{{- else}}
+{{- if .Rows}}
+<dl class="kv">
+{{- range .Rows}}<dt>{{if .Muted}}<span class="muted">{{.Label}}</span>{{else}}<span class="vm">{{.Label}}</span>{{end}}</dt><dd>{{.Text}}</dd>{{end}}
+</dl>
+{{- else}}
+<p class="say">{{icon "dash"}}<span>{{.Empty}}</span></p>
+{{- end}}
 {{- end}}
 </div>
-{{- with .Picker.Source}}
+{{- end}}
+<fieldset class="field">
+<legend>{{.Legend}}</legend>
+<div class="opts">
+{{- range .Options}}
+<label class="opt{{if .Sans}} sans{{end}}"><input type="radio" name="{{$.Data.Op.Pick}}" value="{{.Value}}" required{{if .Checked}} checked{{end}}><span>{{.Label}}</span></label>
+{{- end}}
+</div>
+{{- range .Hints}}
 <span class="hint">{{names .}}</span>
 {{- end}}
-<span class="hint">baseline: {{.Picker.BaselineText}}</span>
 </fieldset>
-{{- with .Picker.Note}}
+{{- with .Note}}
 <p class="say">{{icon "stale"}}<span>{{names .}}</span></p>
 {{- end}}
 </form>
-{{- end}}
+{{- end}}{{end}}
 </div>
 <div class="pf">
 <a class="btn" href="/" data-close>Cancel</a>
-{{- if .Picker.HasPicked}}
-<button type="submit" class="btn pri" form="reset-pick">Preview</button>
-{{- end}}
+{{- with .Step}}{{if .HasPicked}}
+<button type="submit" class="btn pri{{if .Danger}} bad{{end}}" form="{{$.Data.Op.Kind}}-pick">{{if .Danger}}{{icon $.Data.Op.Icon}}{{end}}{{.Button}}</button>
+{{- end}}{{end}}
 </div>
 </div>
 {{- else if eq .Op.Kind "snapshot"}}
@@ -131,11 +146,7 @@
 </div>
 <div class="pf">
 <a class="btn" href="/" data-close>Cancel</a>
-{{- if eq .Op.Kind "teardown"}}
-<button type="submit" class="btn pri bad">{{icon "teardown"}}Preview teardown</button>
-{{- else}}
 <button type="submit" class="btn pri">Preview</button>
-{{- end}}
 </div>
 </form>
 {{- end}}
@@ -152,7 +163,7 @@
 
 {{define "team-fields" -}}
 <div class="field">
-<label class="lbl" for="teams">Teams</label>
+<label class="lbl" for="teams">Pods</label>
 <input class="inp" type="text" id="teams" name="teams" value="{{.In.Teams}}" required autocomplete="off" spellcheck="false" aria-describedby="teams-hint">
 <span class="hint" id="teams-hint">{{with .AllTeams}}{{.}} · {{end}}3,7 · 12-14</span>
 </div>

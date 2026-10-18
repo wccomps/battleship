@@ -19,7 +19,7 @@ func TestAllTeamsPowerSaysSo(t *testing.T) {
 	h.poll()
 	op := h.login(asOperator)
 	_, fields, body := h.preview(&op, "/power", selection([]string{"team01-dc", "team02-dc", "team03-dc"}, "action", "start"))
-	contains(t, "all-teams power", body, "This covers every team (01-03).")
+	contains(t, "all-teams power", body, "This covers every pod (01-03).")
 	lacks(t, "all-teams power", body, `name="typed"`)
 	if fields.Get("teams") != "1-3" {
 		t.Errorf("confirm fields = %v", fields)
@@ -136,12 +136,12 @@ func TestTeamsShownWithTwoDigits(t *testing.T) {
 	h.poll()
 	lead := h.login(asLead)
 	_, _, body := h.preview(&lead, "/power", url.Values{"teams": {"1-3"}, "action": {"start"}})
-	contains(t, "preview", body, `<dt>Teams</dt><dd><span class="vm">01-03</span></dd>`, "This covers every team (01-03).")
+	contains(t, "preview", body, `<dt>Pods</dt><dd><span class="vm">01-03</span></dd>`, "This covers every pod (01-03).")
 	_, _, body = h.preview(&lead, "/teardown", url.Values{"teams": {"1-3"}})
 	contains(t, "teardown preview", body, `Type <code>1-3</code>`)
 	id := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "1,3", Action: "start"}, byOperator)
 	contains(t, "jobs", h.get(&lead, "/logs").Body.String(), `<span class="j-teams"><span class="vm">01, 03</span>`)
-	contains(t, "job", h.get(&lead, "/logs/"+itoa(id)).Body.String(), `teams <span class="vm">01, 03</span>`)
+	contains(t, "job", h.get(&lead, "/logs/"+itoa(id)).Body.String(), `pods <span class="vm">01, 03</span>`)
 }
 
 // Starting VMs that already run, or stopping stopped ones, does nothing to

@@ -31,7 +31,7 @@ func TestGridPage(t *testing.T) {
 		// Headers select their column or row.
 		`<a class="hb" href="/?select=host:dc" data-select="host:dc" role="button" aria-pressed="false"><span class="sr">Select every </span>dc</a>`,
 		`data-select="host:ftp"`, `data-select="host:web"`,
-		`<a class="hb" href="/?select=team:01" data-select="team:01" role="button" aria-pressed="false"><span class="sr">Select team </span>01</a>`,
+		`<a class="hb" href="/?select=team:01" data-select="team:01" role="button" aria-pressed="false"><span class="sr">Select pod </span>01</a>`,
 		`data-select="team:02"`, `data-select="team:03"`,
 		// Every state is a shape, with its word in the tooltip and for
 		// screen readers.
@@ -64,7 +64,7 @@ func TestGridLayoutShowsUserAndNav(t *testing.T) {
 	contains(t, "lead's page", body,
 		`<a href="/" aria-current="page">Grid</a>`,
 		`<a href="/logs">Logs</a>`,
-		`<nav class="lead-ops" aria-label="Team operations">`, `<a class="btn" href="/deploy">`, "Deploy teams</a>", "Tear down teams</a>",
+		`<nav class="lead-ops" aria-label="Pod operations">`, `<a class="btn" href="/deploy">`, "Deploy pods</a>", "Tear down pods</a>",
 		`<summary aria-label="Account: Test lead, test-lead@auth.example.org"><span class="who" aria-hidden="true">T</span></summary>`,
 		"Test lead", `<span class="role">test-lead@auth.example.org · `,
 		`<form method="post" action="/auth/logout">`,

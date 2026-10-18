@@ -56,7 +56,11 @@ type cellPage struct {
 	Baseline    string
 	HasBaseline bool
 	Network     []configRow
-	LastJob     *lastJobView
+	// Set is c.Sets.Label(): the VM's set when SetKnown (c.Sets.Of()), else
+	// "not recorded" (no set tag) or pods.UnknownSet (Drift says why).
+	Set      string
+	SetKnown bool
+	LastJob  *lastJobView
 	// What the buttons offer; the operations check again on submit.
 	CanReset, CanPower, CanSnapshot bool
 	PowerActions                    []powerChoice // for the VM's power state
@@ -88,7 +92,7 @@ func (s *Server) cellPage(w http.ResponseWriter, r *http.Request) {
 	d, err := s.detail(r.Context(), team, host)
 	if errors.Is(err, status.ErrUnknownCell) {
 		s.errorPage(w, r, http.StatusNotFound, "No such VM",
-			"The grid has no team "+team+" VM for host "+host+".", "/", "Back to the grid")
+			"The grid has no pod "+team+" VM for host "+host+".", "/", "Back to the grid")
 		return
 	}
 	c := d.Cell
@@ -104,6 +108,8 @@ func (s *Server) cellPage(w http.ResponseWriter, r *http.Request) {
 	for _, dr := range c.Drift {
 		p.Drift = append(p.Drift, driftView{Reason: strings.TrimRight(dr.Reason, ". "), JobID: dr.JobID})
 	}
+	_, p.SetKnown = c.Sets.Of()
+	p.Set = c.Sets.Label()
 	for _, name := range d.Snapshots {
 		p.Snapshots = append(p.Snapshots, snapshotView{Name: name, Baseline: name == d.Baseline})
 	}
@@ -202,7 +208,7 @@ func (s *Server) detail(ctx context.Context, team, host string) (status.Detail, 
 	if err != nil && d.Cell.Name == "" && !errors.Is(err, status.ErrUnknownCell) {
 		c, ok := view.Grid().Cell(team, host)
 		if !ok {
-			return status.Detail{}, fmt.Errorf("team %q host %q: %w", team, host, status.ErrUnknownCell)
+			return status.Detail{}, fmt.Errorf("pod %q host %q: %w", team, host, status.ErrUnknownCell)
 		}
 		d = status.Detail{Cell: c}
 	}

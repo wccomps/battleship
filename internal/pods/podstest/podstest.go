@@ -393,7 +393,11 @@ func (f *Fake) SetVMConfig(ctx context.Context, node string, vmid int, changes m
 			continue
 		case "delete":
 			for _, d := range strings.Split(v, ",") {
-				delete(vm.Config, strings.TrimSpace(d))
+				d = strings.TrimSpace(d)
+				delete(vm.Config, d)
+				if d == "tags" {
+					vm.Tags = ""
+				}
 			}
 			continue
 		}
@@ -694,7 +698,7 @@ func (f *Fake) DeleteVM(ctx context.Context, node string, vmid int) (string, err
 	case f.HalfDestroy[vmid]:
 		f.freeVolumes(vmid)
 		vm.Config = map[string]string{"lock": "destroyed"}
-		vm.Name = fmt.Sprintf("VM %d", vmid)
+		vm.Name, vm.Tags = fmt.Sprintf("VM %d", vmid), ""
 	case f.DeleteLeaves[vmid]:
 	case f.DeleteKeepsDisks[vmid]:
 		delete(f.VMs, vmid)

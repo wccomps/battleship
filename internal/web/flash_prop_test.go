@@ -300,7 +300,7 @@ func TestPropCellPageOnlyForGridCells(t *testing.T) {
 	})
 }
 
-var pickerOptionRE = regexp.MustCompile(`<input type="radio" name="snapshot" value="([^"]*)"( checked)?>`)
+var pickerOptionRE = regexp.MustCompile(`<input type="radio" name="snapshot" value="([^"]*)" required( checked)?>`)
 
 // The reset picker offers the baseline first, then each snapshot of the VM
 // once, leaves out the one the baseline already stands for, keeps whatever

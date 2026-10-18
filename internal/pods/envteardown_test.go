@@ -68,8 +68,8 @@ func TestEnvTeardownDeletesOnlyItsOwnVMs(t *testing.T) {
 	if want := []KeptVM{{Name: "stray", Why: "outside dev-01 but has a NIC on its networks"}}; !slices.Equal(plan.Kept, want) || len(plan.Notices) != 0 {
 		t.Errorf("kept = %q, notices = %q", plan.Kept, plan.Notices)
 	}
-	if got := plan.Kept[0].String(); got != "Not touched: stray is outside dev-01 but has a NIC on its networks." {
-		t.Errorf("kept as a notice: %q", got)
+	if got := KeptLines(plan.Kept); !slices.Equal(got, []string{"stray is outside dev-01 but has a NIC on its networks."}) {
+		t.Errorf("kept lines: %q", got)
 	}
 	if plan.Slot != "01" || slices.ContainsFunc(plan.Items, func(it Item) bool { return it.Pool != "dev-01" }) {
 		t.Errorf("slot %q, items %+v", plan.Slot, plan.Items)

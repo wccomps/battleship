@@ -377,8 +377,8 @@ func TestSnapshotPickerLeavesSharedReadAlone(t *testing.T) {
 
 	picked := make(chan struct{})
 	go func() {
-		var p snapshotPicker
-		h.srv.commonSnapshots(ctx, &p, []string{"team01-dc", "team01-web"})
+		var step stepTwo
+		h.srv.commonSnapshots(ctx, &step, []string{"team01-dc", "team01-web"})
 		close(picked)
 	}()
 	awaitRead(t, h.api.entered)

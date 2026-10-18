@@ -38,7 +38,7 @@
 </details>
 {{- end}}
 {{- if .Lead}}
-<nav class="lead-ops" aria-label="Team operations">
+<nav class="lead-ops" aria-label="Pod operations">
 {{- range .Lead}}<a class="btn{{if eq .Key "teardown"}} bad{{end}}" href="{{.Href}}"{{if eq .Key $.Active}} aria-current="page"{{end}}>{{opIcon .Key}}{{.Label}}</a>{{end -}}
 </nav>
 {{- end}}

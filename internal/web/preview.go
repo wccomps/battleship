@@ -63,8 +63,8 @@ type previewPage struct {
 	// Reselect, for a reset or snapshot of grid-ticked VMs, labels a button that
 	// posts them back to the operation's form to choose again.
 	Reselect string
-	// Review, if set, replaces the facts, consequence and table: an image or
-	// environment operation's review.
+	// Review, if set, replaces the facts, consequence and table: an image,
+	// environment or pods teardown operation's review.
 	Review *reviewView
 }
 
@@ -86,7 +86,7 @@ type capacityRow struct {
 	Text  string // "60 GiB used of 64 GiB, needs 12 GiB, 4 GiB free", as the CLI says it
 }
 
-// fact is a labelled value, e.g. "Teams: 1-3".
+// fact is a labelled value, e.g. "Pods: 1-3".
 type fact struct{ Label, Value string }
 
 // templateRow is a template a deploy uses.
@@ -395,17 +395,20 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		p.Warnings = append(p.Warnings, s.everyTeamNote(ctx))
 	}
 	if missing := jobs.MissingVMs(in, plan); len(missing) > 0 {
-		p.Warnings = append(p.Warnings, fmt.Sprintf("%d of the %d VMs asked for by name no longer exist or match the teams and hosts, so they are left out: %s.",
+		p.Warnings = append(p.Warnings, fmt.Sprintf("%d of the %d VMs asked for by name no longer exist or match the pods and hosts, so they are left out: %s.",
 			len(missing), len(in.VMs), strings.Join(missing, ", ")))
 	}
 	switch {
 	case len(plan.Items) == 0:
-		p.Nothing = "No team VMs match these teams and hosts."
+		p.Nothing = "No VMs in these pods match these hosts."
 		if op.Kind.Teamless() {
 			p.Nothing = "Nothing to do."
 		}
 		if op.Kind == pods.KindDeploy {
 			p.Nothing = "No masters match this template set and these hosts."
+		}
+		if op.Kind == pods.KindTeardown && in.Set != "" {
+			p.Nothing = "No VMs of " + string(in.Set) + " are in these pods and hosts."
 		}
 	case p.Runnable == 0:
 		p.Nothing = "Every VM is blocked: nothing can run."
@@ -442,7 +445,7 @@ func previewFacts(in jobs.Inputs, fromGrid bool, retryOf int64) []fact {
 	case in.Kind.Teamless():
 		return nil // its review says it all
 	case !fromGrid:
-		fs = append(fs, fact{"Teams", teamsText(in.Teams)})
+		fs = append(fs, fact{"Pods", teamsText(in.Teams)})
 		if len(in.Hosts) > 0 || in.Kind == pods.KindDeploy || in.Kind == pods.KindTeardown {
 			fs = append(fs, fact{"Hosts", hostsText(in.Hosts)})
 		}
@@ -629,9 +632,11 @@ func consequence(kind pods.Kind, in jobs.Inputs, items []pods.Item) string {
 		if len(nodes) > 0 {
 			on = " on " + strings.Join(nodes, ", ")
 		}
-		return vms + " will be created or repaired from " + strings.TrimPrefix(in.Pattern, "*.") + on + "."
-	case pods.KindTeardown:
-		return vms + pick(" will be stopped and deleted with their disks. This can't be undone.", " will be stopped and deleted with its disks. This can't be undone.")
+		from := in.Pattern
+		if set, ok := pods.SetOfPattern(in.Pattern); ok {
+			from = string(set)
+		}
+		return vms + " will be created or repaired from " + from + on + "."
 	case pods.KindSnapshot:
 		msg := vms + pick(" get a new snapshot, ", " gets a new snapshot, ") + in.Snapshot + "."
 		if in.VMState {
@@ -711,9 +716,9 @@ func stepsText(it pods.Item) string {
 func (s *Server) everyTeamNote(ctx context.Context) string {
 	all := s.view(ctx).Teams()
 	if len(all) == 0 {
-		return "No team has VMs on the grid, so this counts as every team."
+		return "No pod has VMs on the grid, so this counts as every pod."
 	}
-	return fmt.Sprintf("This covers every team (%s).", teamsText(pods.FormatTeams(all)))
+	return fmt.Sprintf("This covers every pod (%s).", teamsText(pods.FormatTeams(all)))
 }
 
 // teamsText shows a team range with two-digit teams: "1-3,7" reads "01-03, 07".

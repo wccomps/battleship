@@ -65,9 +65,9 @@ func TestBuildPlanChecksVMNames(t *testing.T) {
 		vms  []string
 		want string
 	}{
-		{[]string{"team03-dc"}, "team03-dc is not in teams 1-2"},
-		{[]string{"dc.kilo.alpha"}, `"dc.kilo.alpha" is not a team VM name`},
-		{[]string{"team1-dc"}, `"team1-dc" is not a team VM name`},
+		{[]string{"team03-dc"}, "team03-dc is not in pods 1-2"},
+		{[]string{"dc.kilo.alpha"}, `"dc.kilo.alpha" is not a pod VM name`},
+		{[]string{"team1-dc"}, `"team1-dc" is not a pod VM name`},
 	} {
 		_, err := BuildPlan(bg, p, Inputs{Kind: pods.KindReset, Teams: "1-2", VMs: tc.vms})
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -209,7 +209,11 @@ func TestPropVMsNarrowWithinTeams(t *testing.T) {
 	p := narrowCluster()
 	kinds := []pods.Kind{pods.KindReset, pods.KindPower, pods.KindTeardown, pods.KindSnapshot, pods.KindDeploy}
 	inputs := func(kind pods.Kind, teams string, vms []string) Inputs {
-		return Inputs{Kind: kind, Teams: teams, VMs: vms, Action: "stop", Snapshot: "round2", Pattern: "dc.kilo.alpha"}
+		in := Inputs{Kind: kind, Teams: teams, VMs: vms, Action: "stop", Snapshot: "round2"}
+		if kind == pods.KindDeploy {
+			in.Pattern = "dc.kilo.alpha"
+		}
+		return in
 	}
 	for _, kind := range kinds {
 		for _, name := range narrowNames {

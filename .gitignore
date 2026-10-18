@@ -5,3 +5,4 @@ battleship.toml
 # rapid writes a failfile per failing property test
 **/testdata/rapid/
 /docs/
+/cmd/battleship/battleship

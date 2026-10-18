@@ -99,7 +99,7 @@ func TestPropValidateRefusesUnprintableText(t *testing.T) {
 		for i := range v.NumField() {
 			f := v.Field(i)
 			switch {
-			case f.Kind() == reflect.String && f.Type() == reflect.TypeFor[string]():
+			case f.Kind() == reflect.String && f.Type() != reflect.TypeFor[pods.Kind]():
 				fields = append(fields, f)
 			case f.Kind() == reflect.Slice:
 				if f.Len() == 0 {
@@ -142,6 +142,8 @@ var spoils = map[string][]spoil{
 	"VMs": {{[]string{"team01-dc"}, true}, {[]string(nil), true}, {[]string{""}, false}, {[]string{" "}, false}, {[]string{"team01-dc\n"}, false}},
 	"Pattern": {{"*.kilo.alpha", true}, {"*", true}, {"(", true}, {"[a-", true}, {`\`, true}, {"", false}, {" ", false}, {"\xff", false},
 		{"*\x00", false}},
+	"Set": {{"kilo.alpha", true}, {"", true}, {" Kilo.Alpha ", true}, {"alpha", true}, {"*.kilo.alpha", false}, {"*", false},
+		{"kilo.*", false}, {"kilo alpha", false}, {"kilo;alpha", false}, {"kilo,alpha", false}, {"\xff", false}, {"kilo\n", false}},
 	"Snapshot": {{"round2", true}, {"Ab", true}, {"a_b-c", true}, {strings.Repeat("a", 40), true}, {"", false}, {"a", false}, {"1abc", false},
 		{"a b", false}, {strings.Repeat("a", 41), false}, {"current", false}, {"PENDING", false}, {"r\u00e9union", false}, {"ab\n", false}},
 	"Description": {{"", true}, {"before round 2", true}, {strings.Repeat("\u00e9", 500), true}, {strings.Repeat("x", 501), false},
@@ -189,7 +191,7 @@ var spoils = map[string][]spoil{
 // reset's snapshot, an env-add's router.
 var readsFields = map[pods.Kind][]string{
 	pods.KindDeploy: {"Pattern", "Rebuild", "NoSnapshot"}, pods.KindPower: {"Action"}, pods.KindSnapshot: {"Snapshot", "Description", "VMState"},
-	pods.KindTeardown: {}, pods.KindReset: {},
+	pods.KindTeardown: {"Set"}, pods.KindReset: {},
 	pods.KindEnvCreate: {"Domain", "Slot", "Router", "EnvHosts", "EnvVMs"}, pods.KindEnvAdd: {"Domain", "EnvHosts", "EnvVMs"}, pods.KindEnvDNS: {"Domain", "DNS"},
 	pods.KindEnvTeardown:   {"Domain", "Slot"},
 	pods.KindImageRegister: {"VMID", "Family", "ImageKind", "Details"}, pods.KindImageEdit: {"Family"},
@@ -257,7 +259,7 @@ func setField(in *Inputs, field string, v any) {
 	if s, ok := v.([]string); ok {
 		v = slices.Clone(s)
 	}
-	f.Set(reflect.ValueOf(v))
+	f.Set(reflect.ValueOf(v).Convert(f.Type()))
 }
 
 // Validate is the gate: a valid job of any kind with one field spoilt is

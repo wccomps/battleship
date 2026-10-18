@@ -169,7 +169,7 @@ func TestInteractiveTeardownNeedsTheRange(t *testing.T) {
 	if len(e.api.Deleted) != 2 {
 		t.Errorf("deleted = %v", e.api.Deleted)
 	}
-	if !strings.Contains(e.stdout.String(), "Type the team range (1-2) to delete these VMs: ") {
+	if !strings.Contains(e.stdout.String(), "Type the pod range (1-2) to delete these VMs: ") {
 		t.Errorf("no range prompt:\n%s", e.stdout)
 	}
 
@@ -303,7 +303,7 @@ func TestPrintPlan(t *testing.T) {
 	})
 	out := buf.String()
 	for _, want := range []string{
-		"Plan: deploy, teams 01",
+		"Plan: deploy, pods 01",
 		"teak.x.tpl  9021  cedar        reuse",
 		"oak.x.tpl   9025  birch (GPU)  create",
 		"VMs (3, 1 runnable):",
@@ -337,7 +337,7 @@ func TestTeardownConfirmTrimsRange(t *testing.T) {
 	if code := e.run("teardown", "-teams", " 1-2 "); code != 0 || len(e.api.Deleted) != 2 {
 		t.Fatalf("code = %d, deleted = %v\n%s%s", code, e.api.Deleted, e.stdout, e.stderr)
 	}
-	if !strings.Contains(e.stdout.String(), "Type the team range (1-2) to delete") {
+	if !strings.Contains(e.stdout.String(), "Type the pod range (1-2) to delete") {
 		t.Errorf("prompt should show the trimmed range:\n%s", e.stdout)
 	}
 }
@@ -362,7 +362,7 @@ func TestNoHostMatchIsAnError(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("code = %d, want 1\n%s", code, e.stdout)
 	}
-	want := "No VMs matched -hosts dcc for teams 1; check the host names."
+	want := "No VMs matched -hosts dcc for pods 1; check the host names."
 	if !strings.Contains(e.stdout.String(), want) {
 		t.Errorf("missing %q:\n%s", want, e.stdout)
 	}
@@ -445,7 +445,7 @@ func TestVMsFlagChecksNames(t *testing.T) {
 	if code := e.run("teardown", "-teams", "1", "-vms", "team02-dc", "-yes"); code != 1 {
 		t.Fatalf("code = %d, want 1", code)
 	}
-	if !strings.Contains(e.stderr.String(), "team02-dc is not in teams 1") {
+	if !strings.Contains(e.stderr.String(), "team02-dc is not in pods 1") {
 		t.Errorf("stderr:\n%s", e.stderr)
 	}
 	if len(e.api.Deleted) != 0 {

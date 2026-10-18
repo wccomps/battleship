@@ -189,7 +189,7 @@ func TestTeardown(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
 	f.Add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil)
-	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
+	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func cancelTeardownDuringShutdown(t *testing.T, grace time.Duration, cause error
 	t.Helper()
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
-	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
+	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestCancelSendsNothingNew(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "stopped"}, nil)
 	f.Add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "cedar", Status: "stopped"}, nil)
-	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil)
+	plan, err := testPlanner(f).Teardown(context.Background(), []string{"01"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -938,7 +938,7 @@ func TestRebuildRefusedWhenTeamVMsAppearAfterPlanning(t *testing.T) {
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	err = res.Failed["team02-teak"]
-	if err == nil || !strings.Contains(err.Error(), "team VMs such as team01-teak still use this template") {
+	if err == nil || !strings.Contains(err.Error(), "pod VMs such as team01-teak still use this template") {
 		t.Errorf("result = %+v", res)
 	}
 	if f.VMs[9021] == nil || f.Called("delete:9021") != 0 {

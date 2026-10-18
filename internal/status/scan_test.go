@@ -48,7 +48,7 @@ func TestScanFindsDrift(t *testing.T) {
 	}
 	want := map[string][]Drift{
 		"01/dc":  nil,
-		"01/web": {{Kind: DriftNetwork, Reason: "network differs from team 01's: net1 should be virtio=BC:24:11:00:00:02,bridge=int01"}},
+		"01/web": {{Kind: DriftNetwork, Reason: "network differs from pod 01's: net1 should be virtio=BC:24:11:00:00:02,bridge=int01"}},
 		"02/dc":  {{Kind: DriftDiskLimits, Reason: "disk limits differ on scsi0 (want 300 MB/s read and 300 MB/s write)"}},
 		"02/web": {{Kind: DriftSnapshot, Reason: `no "initial" or fresh_clone_* baseline snapshot`}},
 	}
@@ -266,9 +266,9 @@ func TestScanOneNICAndCloudInitVMs(t *testing.T) {
 	g := h.p.Grid()
 	want := map[string][]Drift{
 		"01/dc":  nil,
-		"01/web": {{Kind: DriftNetwork, Reason: "network differs from team 01's: net0 should be virtio=BC:24:11:00:00:01,bridge=int01"}},
+		"01/web": {{Kind: DriftNetwork, Reason: "network differs from pod 01's: net0 should be virtio=BC:24:11:00:00:01,bridge=int01"}},
 		"02/dc":  nil,
-		"02/web": {{Kind: DriftNetwork, Reason: "network differs from team 02's: ipconfig0 should be ip=10.50.102.2/30,gw=10.50.102.1"}},
+		"02/web": {{Kind: DriftNetwork, Reason: "network differs from pod 02's: ipconfig0 should be ip=10.50.102.2/30,gw=10.50.102.1"}},
 	}
 	for key, drift := range want {
 		team, host, _ := strings.Cut(key, "/")

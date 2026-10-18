@@ -25,7 +25,7 @@ type operation struct {
 	// snapshot", not "Reset".
 	Label string
 	Icon  string // its icon (opIcon)
-	Noun  string // e.g. "reset", for the confirm's summary: "reset of team 01"
+	Noun  string // e.g. "reset", for the confirm's summary: "reset of pod 01"
 	Lead  string // the header button of deploy and teardown, which act on whole teams
 	// Section is the page an image or environment operation belongs to:
 	// its nav entry, and where its pages close to (listPage).
@@ -38,6 +38,9 @@ type operation struct {
 	// Machines is whether its form has machine rows (envForm); Formless,
 	// whether it has no form, and opens on its review.
 	Machines, Formless bool
+	// Pick is the field a two-step form's second step (stepTwo) chooses,
+	// once pods and hosts are chosen: a reset's snapshot, a teardown's set.
+	Pick string
 	// domain is the environment an operation on one (its Path has {domain})
 	// was opened for: see at.
 	domain string
@@ -52,10 +55,10 @@ const (
 // this order.
 var operations = []operation{
 	{Kind: pods.KindPower, Path: "/power", Title: "Power", Icon: "shutdown", Noun: "power action"},
-	{Kind: pods.KindReset, Path: "/reset", Title: "Reset", Label: "Reset to snapshot", Icon: "reset", Noun: "reset"},
+	{Kind: pods.KindReset, Path: "/reset", Title: "Reset", Label: "Reset to snapshot", Icon: "reset", Noun: "reset", Pick: fieldSnapshot},
 	{Kind: pods.KindSnapshot, Path: "/snapshot", Title: "Take snapshot", Icon: "snapshot", Noun: "snapshot"},
-	{Kind: pods.KindDeploy, Path: "/deploy", Title: "Deploy", Icon: "deploy", Noun: "deploy", Lead: "Deploy teams", Done: "Ready"},
-	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Icon: "teardown", Noun: "teardown", Lead: "Tear down teams", Done: "Deleted"},
+	{Kind: pods.KindDeploy, Path: "/deploy", Title: "Deploy", Icon: "deploy", Noun: "deploy", Lead: "Deploy pods", Done: "Ready"},
+	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Icon: "teardown", Noun: "teardown", Lead: "Tear down pods", Done: "Deleted", Pick: fieldSet},
 	{Kind: pods.KindEnvCreate, Path: "/environments/new", Title: "Create environment", Icon: "deploy", Noun: "environment",
 		Section: sectionEnvironments, Doing: "Creating an environment", Done: "Ready", Machines: true},
 	{Kind: pods.KindEnvAdd, Path: "/environments/{domain}/add", Title: "Add hosts", Icon: "deploy", Noun: "new hosts",
@@ -136,6 +139,7 @@ const (
 	fieldHosts       = "hosts"       // comma-separated
 	fieldVMs         = "vms"         // comma-separated exact VM names, e.g. a retry's
 	fieldPattern     = "pattern"     // deploy
+	fieldSet         = "set"         // teardown: its set, "" for everything
 	fieldRebuild     = "rebuild"     // deploy: "yes" rebuilds templates
 	fieldBaseline    = "baseline"    // deploy: "yes" takes the baseline snapshot
 	fieldSnapshot    = "snapshot"    // reset: the one to roll back to; snapshot: the new one's name
@@ -236,6 +240,8 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 		in.Pattern = strings.TrimSpace(form.Get(fieldPattern))
 		in.Rebuild = form.Get(fieldRebuild) == yes
 		in.NoSnapshot = form.Get(fieldBaseline) != yes
+	case pods.KindTeardown:
+		in.Set = pods.Set(strings.ToLower(strings.TrimSpace(form.Get(fieldSet))))
 	case pods.KindReset:
 		in.Snapshot = strings.TrimSpace(form.Get(fieldSnapshot))
 	case pods.KindSnapshot:
@@ -291,6 +297,9 @@ func inputFields(in jobs.Inputs) []field {
 		if !in.NoSnapshot {
 			fs = append(fs, field{fieldBaseline, yes})
 		}
+	case pods.KindTeardown:
+		// Always, "" too: a "Change" link then has everything chosen.
+		fs = append(fs, field{fieldSet, string(in.Set)})
 	case pods.KindReset:
 		if in.Snapshot != "" {
 			fs = append(fs, field{fieldSnapshot, in.Snapshot})

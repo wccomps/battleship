@@ -127,7 +127,7 @@ func describeInputs(raw json.RawMessage) string {
 	if in.Kind.Teamless() {
 		return strings.TrimSpace(cleanJoin([]string{in.Domain, in.Family, in.Image}, " "))
 	}
-	s := "teams " + clean(in.Teams)
+	s := "pods " + clean(in.Teams)
 	if len(in.Hosts) > 0 {
 		s += " hosts " + cleanJoin(in.Hosts, ",")
 	}
@@ -179,7 +179,7 @@ func showJob(ctx context.Context, d deps, st *store.Store, id int64) int {
 	fmt.Fprintf(w, "Created by %s at %s; started %s; finished %s\n", clean(j.CreatedBy), when(&j.CreatedAt), when(j.StartedAt), when(j.FinishedAt))
 	if j.Status == store.StatusPending {
 		if blockers, err := st.Blockers(ctx, id); err == nil && len(blockers) > 0 {
-			fmt.Fprintf(w, "Waiting for job(s) %s, which use the same teams or templates.\n", joinIDs(blockers))
+			fmt.Fprintf(w, "Waiting for job(s) %s, which use the same pods or templates.\n", joinIDs(blockers))
 		}
 	}
 	switch {

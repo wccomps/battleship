@@ -25,6 +25,7 @@
 <dt>Node</dt><dd><span class="vm">{{.Cell.Node}}</span></dd>
 <dt>VMID</dt><dd><span class="vm">{{.Cell.VMID}}</span></dd>
 <dt>Pool</dt><dd>{{if .Cell.Pool}}<span class="vm">{{.Cell.Pool}}</span>{{else}}<span class="muted" title="your Proxmox user can't read pools">unknown</span>{{end}}</dd>
+<dt>Set</dt><dd>{{if .SetKnown}}<span class="vm">{{.Set}}</span>{{else}}<span class="muted" title="a teardown of one set leaves it; only a teardown that names no set removes it">{{.Set}}</span>{{end}}</dd>
 </dl>
 <div class="sec">
 <h2 class="sub">Snapshots</h2>

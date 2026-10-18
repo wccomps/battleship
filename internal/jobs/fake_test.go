@@ -119,6 +119,10 @@ func (p *permsFake) PermissionsAt(ctx context.Context, path string) (map[string]
 	return p.view().PermissionsAt(ctx, path)
 }
 
+func (p *permsFake) TagAccess(ctx context.Context) (proxmox.TagAccess, error) {
+	return p.view().TagAccess(ctx)
+}
+
 // boundFake checks the credential of the calls below; the others go
 // straight to the fake.
 type boundFake struct {

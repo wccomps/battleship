@@ -70,7 +70,7 @@
 {{define "job-head" -}}
 <div class="sec" id="job-head">
 <div class="stline">{{with .Look}}<span class="st b {{.Class}}">{{if eq .Glyph "spin"}}<span class="spin" aria-hidden="true"></span>{{else}}{{icon .Glyph}}{{end}}{{.Label}}{{with $.Elapsed}} · <time{{if $.Since}} data-tick="{{$.Since}}"{{end}}>{{.}}</time>{{end}}</span>{{end}}
-<span class="meta"><span title="{{.By}}">{{.Who}}</span> · {{or .Role "command line"}} · <span title="{{.RanAt}}">{{.Ran}}</span>{{if not .Teamless}} · teams <span class="vm">{{.Teams}}</span>{{if ne .Hosts "all"}} · <span class="vm">{{.Hosts}}</span>{{end}}{{end}}
+<span class="meta"><span title="{{.By}}">{{.Who}}</span> · {{or .Role "command line"}} · <span title="{{.RanAt}}">{{.Ran}}</span>{{if not .Teamless}} · pods <span class="vm">{{.Teams}}</span>{{if ne .Hosts "all"}} · <span class="vm">{{.Hosts}}</span>{{end}}{{end}}
 {{- range .Asked}} · {{.Label}} <span class="vm">{{.Value}}</span>{{end}}
 {{- with .Waiting}} · after {{range $i, $id := .}}{{if $i}}, {{end}}<a href="/logs/{{$id}}">#{{$id}}</a>{{end}}{{else}}{{with .Queued}} · {{.}}{{end}}{{end}}
 {{- with .CancelNote}} · {{.}}{{end}}</span></div>

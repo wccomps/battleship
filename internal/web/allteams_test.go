@@ -28,7 +28,7 @@ func TestGridRowsAreTeamsWithVMs(t *testing.T) {
 	op := h.login(asOperator)
 	body := h.get(&op, "/").Body.String()
 	contains(t, "grid with team 00", body,
-		`<a class="hb" href="/?select=team:00" data-select="team:00" role="button" aria-pressed="false"><span class="sr">Select team </span>00</a>`,
+		`<a class="hb" href="/?select=team:00" data-select="team:00" role="button" aria-pressed="false"><span class="sr">Select pod </span>00</a>`,
 		`<input type="checkbox" name="vms" value="team00-dc" data-team="00" data-host="dc">`,
 		`<a class="hb" href="/?select=team:01" data-select="team:01"`)
 	// Four teams are one group: no gap.
@@ -50,7 +50,7 @@ func TestGridRowsAreTeamsWithVMs(t *testing.T) {
 	if fields.Get("teams") != "0" || fields.Get("vms") != "team00-dc" {
 		t.Errorf("confirm fields = %v, want team 0's VM", fields)
 	}
-	lacks(t, "power preview of team 00", preview, "covers every team")
+	lacks(t, "power preview of pod 00", preview, "covers every team")
 
 	// Live: tearing team 00 down drops its row from the stream.
 	ev := h.openSSE(&op, "/events/grid")
@@ -76,17 +76,17 @@ func TestAllTeamsIsTeamsWithVMs(t *testing.T) {
 	}
 
 	_, _, body := h.preview(&lead, "/teardown", url.Values{"teams": {"0-3"}})
-	contains(t, "teardown of 0-3", body, "This covers every team (00-03).")
+	contains(t, "teardown of 0-3", body, "This covers every pod (00-03).")
 
 	_, _, body = h.preview(&lead, "/teardown", url.Values{"teams": {"1-3"}})
-	lacks(t, "teardown of 1-3", body, "This covers every team", "counts as every team")
+	lacks(t, "teardown of 1-3", body, "This covers every pod", "counts as every pod")
 
 	// Without team 00's VMs, all teams are 01-03.
 	h.api.remove("team00-dc", "team00-web")
 	h.poll()
 	contains(t, "teardown form", h.get(&lead, "/teardown").Body.String(), `<span class="hint" id="teams-hint">1-3 · 3,7 · 12-14</span>`)
 	_, _, body = h.preview(&lead, "/teardown", url.Values{"teams": {"1-3"}})
-	contains(t, "teardown of 1-3", body, "This covers every team (01-03).")
+	contains(t, "teardown of 1-3", body, "This covers every pod (01-03).")
 
 	// With no team VMs on the grid, any range counts as every team, so the
 	// catch asks (here a VM was made since the grid's last read).
@@ -96,7 +96,7 @@ func TestAllTeamsIsTeamsWithVMs(t *testing.T) {
 	h.api.add(teamVM("01", "dc", 10101), cleanConfig("01"), "initial")
 	op := h.login(asOperator)
 	_, fields, body := h.preview(&op, "/power", url.Values{"teams": {"1"}, "action": {"start"}})
-	contains(t, "power of 1 with no team VMs on the grid", body, "No team has VMs on the grid, so this counts as every team.")
+	contains(t, "power of 1 with no team VMs on the grid", body, "No pod has VMs on the grid, so this counts as every pod.")
 	lacks(t, "power of 1 with no team VMs on the grid", body, `name="typed"`) // only a teardown is typed
 	if fields.Get("teams") != "1" {
 		t.Errorf("confirm fields = %v", fields)
@@ -127,7 +127,7 @@ func TestAllTeamsRuleCoversEveryTeamWithVMs(t *testing.T) {
 				form = url.Values{"teams": {tc.teams}, "snapshot": {"midday"}}
 			}
 			body := h.post(&op, "/"+kind+"/preview", form).Body.String()
-			if got := strings.Contains(body, "This covers every team"); got != tc.all {
+			if got := strings.Contains(body, "This covers every pod"); got != tc.all {
 				t.Errorf("%s of teams %s says it covers every team: %v, want %v", kind, tc.teams, got, tc.all)
 			}
 			lacks(t, kind+" of teams "+tc.teams, body, `name="typed"`)
@@ -135,9 +135,9 @@ func TestAllTeamsRuleCoversEveryTeamWithVMs(t *testing.T) {
 	}
 	// From the grid too: every team's VMs, or all but team 00's.
 	body := h.post(&op, "/power/preview", selection([]string{"team00-dc", "team01-dc", "team02-dc", "team03-dc"}, "action", "start")).Body.String()
-	contains(t, "grid power of teams 0-3", body, "This covers every team")
+	contains(t, "grid power of pods 0-3", body, "This covers every pod")
 	body = h.post(&op, "/power/preview", selection([]string{"team01-dc", "team02-dc", "team03-dc"}, "action", "start")).Body.String()
-	lacks(t, "grid power of teams 1-3 with team 00 deployed", body, "This covers every team")
+	lacks(t, "grid power of teams 1-3 with team 00 deployed", body, "This covers every pod")
 	h.noJobs("after previews")
 }
 

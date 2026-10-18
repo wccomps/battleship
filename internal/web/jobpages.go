@@ -80,7 +80,12 @@ func opLabelOf(kind string, in jobs.Inputs) opLabel {
 	case op.Kind == pods.KindReset, op.Kind == pods.KindSnapshot:
 		l.Detail = in.Snapshot
 	case op.Kind == pods.KindDeploy:
-		l.Detail = strings.TrimPrefix(in.Pattern, "*.")
+		l.Detail = in.Pattern
+		if set, ok := pods.SetOfPattern(in.Pattern); ok {
+			l.Detail = string(set)
+		}
+	case op.Kind == pods.KindTeardown:
+		l.Detail = string(in.Set)
 	case op.Kind == pods.KindEnvDNS:
 		l.Detail = in.Domain + " → " + in.DNS
 	case op.Section == sectionEnvironments:
@@ -429,6 +434,7 @@ var stepDoing = map[pods.Step]string{
 	pods.StepDiskLimits: "Setting disk limits",
 	pods.StepCDROM:      "Ejecting the install disc",
 	pods.StepNotes:      "Clearing the notes",
+	pods.StepSetTag:     "Recording the set",
 	pods.StepSnapshot:   "Taking the snapshot",
 	pods.StepStart:      "Starting",
 	pods.StepStop:       "Stopping",

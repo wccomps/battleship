@@ -50,7 +50,7 @@
 {{- end}}
 {{- else}}
 <div class="gscroll{{if .Tall}} tall{{end}}" role="region" aria-label="VM grid" tabindex="0">
-<div class="grid{{with .GridClass}} {{.}}{{end}}" id="grid-table" role="table" aria-label="VMs by team and host">
+<div class="grid{{with .GridClass}} {{.}}{{end}}" id="grid-table" role="table" aria-label="VMs by pod and host">
 <div class="gr hr" role="row"><div class="gh rh" role="columnheader"><label class="all"><input type="checkbox" data-select="all"><span class="sr">Select all VMs</span></label></div>
 {{- range .Hosts}}<div class="gh" role="columnheader"><a class="hb" href="/?select=host:{{.}}" data-select="host:{{.}}" role="button" aria-pressed="false"><span class="sr">Select every </span>{{.}}</a></div>{{end -}}
 </div>
@@ -94,7 +94,7 @@
 
 {{/* A row's header: it selects the team's VMs. */}}
 {{define "grid-row-head" -}}
-<div class="gh rh" role="rowheader"><a class="hb" href="/?select=team:{{.Team}}" data-select="team:{{.Team}}" role="button" aria-pressed="false"><span class="sr">Select team </span>{{.Team}}</a></div>
+<div class="gh rh" role="rowheader"><a class="hb" href="/?select=team:{{.Team}}" data-select="team:{{.Team}}" role="button" aria-pressed="false"><span class="sr">Select pod </span>{{.Team}}</a></div>
 {{- end}}
 
 {{define "grid-status" -}}
