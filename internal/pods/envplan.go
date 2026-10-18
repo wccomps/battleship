@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -27,9 +26,6 @@ type EnvRequest struct {
 func (p Planner) envPlanIn(kind Kind, slot Slot, domain string) *Plan {
 	return &Plan{Kind: kind, Config: ConfigHash(kind, p.Cfg), Slot: slot.Name, Locks: []string{slotLock(slot.Name), "domain:" + domain}}
 }
-
-// Gateway is the router's address on subnet, every environment's LAN.
-func Gateway(subnet string) string { return subnet + "." + strconv.Itoa(GatewayOctet) }
 
 // EnvCreate plans a new environment in req.Slot, or else the lowest free
 // slot. A chosen slot must be free, or hold req.Domain already: a create
@@ -76,7 +72,7 @@ func (p Planner) firstOpenSlot(ctx context.Context, envs []Environment, vms []pr
 		}
 		switch st {
 		case slotOpen:
-			return Environment{Slot: e.Slot, Domain: domain, Gateway: e.Gateway}, nil
+			return Environment{Slot: e.Slot, Domain: domain, LAN: e.LAN}, nil
 		case slotQueued:
 			queued = append(queued, e.Slot.Name)
 		case slotHidden:
@@ -247,7 +243,7 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 	dnsChoice := env.DNS()
 	dnsAddr, err := env.DNSAddress(dnsChoice)
 	if err != nil {
-		dnsChoice, dnsAddr = DNSRouter, env.Gateway // the chosen host is gone: fall back for new hosts
+		dnsChoice, dnsAddr = DNSRouter, env.Gateway() // the chosen host is gone: fall back for new hosts
 	}
 	plan := p.envPlanIn(kind, env.Slot, env.Domain)
 	problems := checkHosts(env, images, hosts, routerFirst)
@@ -330,22 +326,21 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 			ip.Steps = ip.Steps[1:]
 		}
 		if im.Kind == ImageWindows || im.Kind == ImageLinux {
-			octet := LastOctet(existing.Notes.IP)
+			addr := existing.Notes.IP
 			switch {
-			case resumed && octet != 0:
+			case resumed && addr.IsValid():
 			case h.Octet != 0: // checkHosts found it claimed by this host
-				octet = h.Octet
+				addr = env.LAN.Host(h.Octet)
 			default:
 				o, ok := PickOctet(env.Domain, h.Host, used)
 				if !ok {
 					ip.Blocked = "no free address left in " + env.Domain
 					continue
 				}
-				octet, used[o] = o, true
+				addr, used[o] = env.LAN.Host(o), true
 			}
-			addr := p.Cfg.Environments.Subnet + "." + strconv.Itoa(octet)
 			notes.IP, notes.OS = addr, im.Kind
-			ip.Guest = &Guest{OS: im.Kind, Hostname: h.Host, Domain: env.Domain, IP: addr, Prefix: HostPrefix, Gateway: env.Gateway, DNS: dnsAddr}
+			ip.Guest = &Guest{OS: im.Kind, Hostname: h.Host, Domain: env.Domain, IP: addr, Prefix: env.LAN.Bits(), Gateway: env.Gateway(), DNS: dnsAddr}
 			if err := ip.Guest.Check(); err != nil {
 				ip.Blocked = err.Error()
 				continue
@@ -409,8 +404,8 @@ func (p Planner) EnvDNS(ctx context.Context, req EnvRequest) (*Plan, error) {
 		was.Addr, _ = env.DNSAddress(was.Choice)
 		it := Item{Name: h.Name, Host: h.Host, VMID: h.VMID, Node: h.Node, Tags: h.Tags, Notes: &notes, DNSWas: was, Steps: []Step{StepLabel}}
 		if h.servesDNS() {
-			it.Guest = &Guest{OS: h.Notes.OS, Hostname: h.Host, Domain: env.Domain, IP: h.Notes.IP, Prefix: HostPrefix,
-				Gateway: env.Gateway, DNS: addr, DNSOnly: true}
+			it.Guest = &Guest{OS: h.Notes.OS, Hostname: h.Host, Domain: env.Domain, IP: h.Notes.IP, Prefix: env.LAN.Bits(),
+				Gateway: env.Gateway(), DNS: addr, DNSOnly: true}
 			if err := it.Guest.Check(); err != nil {
 				it.Blocked = err.Error()
 			}

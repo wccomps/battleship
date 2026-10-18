@@ -2,6 +2,7 @@ package pods
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -117,6 +118,22 @@ func safeMAC(s string) bool {
 	return true
 }
 
+// storedGuest is g with its addresses read from text, as a stored plan's
+// are; false if a plan with them can't be read.
+func storedGuest(t interface{ Fatalf(string, ...any) }, g Guest, ip, gateway, dns string) (Guest, bool) {
+	b, err := json.Marshal(map[string]string{"ip": ip, "gateway": gateway, "dns": dns})
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if json.Unmarshal(b, &g) != nil {
+		return Guest{}, false
+	}
+	if AddrText(g.IP) != ip || AddrText(g.Gateway) != gateway || AddrText(g.DNS) != dns {
+		t.Fatalf("read addresses %q, %q, %q as %+v", ip, gateway, dns, g)
+	}
+	return g, true
+}
+
 // checkGuest checks that GuestCommand either refuses g with mac or accepts
 // only safe values, quoted into the template, in a command that carries
 // exactly the script.
@@ -128,8 +145,9 @@ func checkGuest(t interface {
 	if err != nil {
 		return
 	}
+	ip, gw, dns := AddrText(g.IP), AddrText(g.Gateway), AddrText(g.DNS)
 	if (g.OS != ImageWindows && g.OS != ImageLinux) || !safeLabel(g.Hostname) || !safeDomain(g.Domain) || g.Prefix < 1 || g.Prefix > 32 ||
-		!safeIPv4(g.IP) || !safeIPv4(g.Gateway) || !safeIPv4(g.DNS) || !safeMAC(mac) {
+		!safeIPv4(ip) || !safeIPv4(gw) || !safeIPv4(dns) || !safeMAC(mac) {
 		t.Fatalf("accepted %+v with MAC %q", g, mac)
 	}
 	q := func(v string) string { return "'" + v + "'" }
@@ -137,14 +155,14 @@ func checkGuest(t interface {
 	var want string
 	switch {
 	case g.DNSOnly && g.OS == ImageWindows:
-		want = fmt.Sprintf(windowsDNSScript, winMAC, q(g.DNS), q(g.Domain))
+		want = fmt.Sprintf(windowsDNSScript, winMAC, q(dns), q(g.Domain))
 	case g.DNSOnly:
-		want = "MAC=" + linMAC + "\nDNS=" + q(g.DNS) + "\nDOMAIN=" + q(g.Domain) + "\n" + linuxFindIface + linuxDNSScript
+		want = "MAC=" + linMAC + "\nDNS=" + q(dns) + "\nDOMAIN=" + q(g.Domain) + "\n" + linuxFindIface + linuxDNSScript
 	case g.OS == ImageWindows:
-		want = fmt.Sprintf(windowsScript, winMAC, q(g.IP), g.Prefix, q(g.Gateway), q(g.DNS), q(g.Domain), q(g.Hostname), RebootMarker)
+		want = fmt.Sprintf(windowsScript, winMAC, q(ip), g.Prefix, q(gw), q(dns), q(g.Domain), q(g.Hostname), RebootMarker)
 	default:
-		want = "MAC=" + linMAC + "\nIP=" + q(g.IP) + "\nPREFIX=" + strconv.Itoa(g.Prefix) + "\nGW=" + q(g.Gateway) +
-			"\nDNS=" + q(g.DNS) + "\nHOST=" + q(g.Hostname) + "\nDOMAIN=" + q(g.Domain) + "\n" + linuxFindIface + linuxScript
+		want = "MAC=" + linMAC + "\nIP=" + q(ip) + "\nPREFIX=" + strconv.Itoa(g.Prefix) + "\nGW=" + q(gw) +
+			"\nDNS=" + q(dns) + "\nHOST=" + q(g.Hostname) + "\nDOMAIN=" + q(g.Domain) + "\n" + linuxFindIface + linuxScript
 	}
 	script, err := GuestScript(g, mac)
 	if err != nil || script != want {
@@ -176,19 +194,22 @@ func checkGuest(t interface {
 }
 
 // Every near miss and trick, alone, before or after a valid value or inside
-// it, in each field of a guest of either OS, is refused or safe.
+// it, in each field of a guest of either OS, is refused or safe. Addresses
+// come as a stored plan holds them.
 func TestGuestTricks(t *testing.T) {
 	for _, os := range []string{ImageWindows, ImageLinux} {
 		for _, field := range []string{"hostname", "domain", "ip", "gateway", "dns", "mac"} {
-			g := Guest{OS: os, Hostname: "teak", Domain: "kilo.alpha", IP: "192.168.100.10", Prefix: 24, Gateway: "192.168.100.2", DNS: "192.168.100.2"}
-			mac := "BC:24:11:00:00:01"
-			v := map[string]*string{"hostname": &g.Hostname, "domain": &g.Domain, "ip": &g.IP, "gateway": &g.Gateway, "dns": &g.DNS, "mac": &mac}[field]
+			g := Guest{OS: os, Hostname: "teak", Domain: "kilo.alpha", Prefix: 24}
+			ip, gw, dns, mac := "192.168.100.10", "192.168.100.2", "192.168.100.2", "BC:24:11:00:00:01"
+			v := map[string]*string{"hostname": &g.Hostname, "domain": &g.Domain, "ip": &ip, "gateway": &gw, "dns": &dns, "mac": &mac}[field]
 			valid := *v
 			for _, trick := range append(nearMisses(field, valid), scriptTricks...) {
 				half := len(valid) / 2
 				for _, placed := range []string{trick, trick + valid, valid + trick, valid[:half] + trick + valid[half:]} {
 					*v = placed
-					checkGuest(t, g, mac)
+					if h, ok := storedGuest(t, g, ip, gw, dns); ok {
+						checkGuest(t, h, mac)
+					}
 				}
 			}
 		}
@@ -198,6 +219,7 @@ func TestGuestTricks(t *testing.T) {
 // A guest script embeds only names and addresses, each in single quotes:
 // whatever the values, either GuestCommand refuses them or the script is the
 // template with safe values quoted in, and the command carries exactly it.
+// Addresses come as a stored plan holds them.
 func TestPropGuestScriptsAreInjectionFree(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		// Most draws spoil exactly one field; the rest must pass.
@@ -207,11 +229,13 @@ func TestPropGuestScriptsAreInjectionFree(t *testing.T) {
 			OS:       rapid.SampledFrom([]string{ImageWindows, ImageLinux}).Draw(t, "os"),
 			Hostname: guestValue(t, "hostname", bad("hostname"), "teak", "dc", "web-1", "a", strings.Repeat("z", 63)),
 			Domain:   guestValue(t, "domain", bad("domain"), "kilo.alpha", "a.b", "x-1.y.z"),
-			IP:       guestValue(t, "ip", bad("ip"), "192.168.100.10", "10.0.0.5", "0.0.0.0"),
 			Prefix:   rapid.IntRange(1, 32).Draw(t, "prefix"),
-			Gateway:  guestValue(t, "gateway", bad("gateway"), "192.168.100.2"),
-			DNS:      guestValue(t, "dns", bad("dns"), "192.168.100.2", "255.255.255.255"),
 			DNSOnly:  rapid.Bool().Draw(t, "dns only"),
+		}
+		g, ok := storedGuest(t, g, guestValue(t, "ip", bad("ip"), "192.168.100.10", "10.0.0.5", "0.0.0.0"),
+			guestValue(t, "gateway", bad("gateway"), "192.168.100.2"), guestValue(t, "dns", bad("dns"), "192.168.100.2", "255.255.255.255"))
+		if !ok {
+			return
 		}
 		if bad("os") {
 			g.OS = rapid.SampledFrom([]string{ImageOther, "", "Windows", "linux "}).Draw(t, "bad os")

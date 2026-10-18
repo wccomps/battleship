@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"slices"
 	"strings"
 	"time"
@@ -90,7 +91,7 @@ func (e *Executor) setupState(ctx context.Context, it *pods.Item, waited *time.D
 	}
 	for range probePolls {
 		var st proxmox.ExecStatus
-		if err := e.lim.Call(ctx, func() (err error) { st, err = e.api.AgentExecStatus(ctx, it.Node, it.VMID, pid); return }); err != nil {
+		if err := e.lim.Call(ctx, func() (err error) { st, err = e.api.AgentExecStatus(ctx, it.Node, it.VMID, pid, maxExecStatus); return }); err != nil {
 			return "", err
 		}
 		if st.Exited {
@@ -183,6 +184,12 @@ func (e *Executor) restart(ctx context.Context, it *pods.Item) error {
 	return e.taskOnce(ctx, func() (string, error) { return e.api.Power(ctx, it.Node, it.VMID, "start") })
 }
 
+// maxExecStatus bounds an answer to a status read of a guest command, which
+// carries its output. pods' guest commands print a few lines, or one error
+// record (their PowerShell stops at the first), and SetupStateCommand one
+// word; 1 MiB is hundreds of times that.
+const maxExecStatus = 1 << 20
+
 // exec runs a command through the agent and waits for it to exit 0.
 //
 // The agent can't stop a command, so one that outlasts execLimit keeps
@@ -204,7 +211,7 @@ func (e *Executor) exec(ctx context.Context, it *pods.Item, cmd []string, input 
 	}
 	for range int(execLimit / execPoll) {
 		var st proxmox.ExecStatus
-		if err := e.call(ctx, func() (err error) { st, err = e.api.AgentExecStatus(ctx, it.Node, it.VMID, pid); return }); err != nil {
+		if err := e.call(ctx, func() (err error) { st, err = e.api.AgentExecStatus(ctx, it.Node, it.VMID, pid, maxExecStatus); return }); err != nil {
 			if proxmox.IsExecGone(err) {
 				return "", fmt.Errorf("%w (%s)", errRestarted, proxmox.Describe(err))
 			}
@@ -236,6 +243,19 @@ func lastLines(s string, n int) string {
 	return strings.Join(lines[len(lines)-n:], " / ")
 }
 
+// addrList is ips, each written "address/prefix", or as its bare address
+// without a valid prefix.
+func addrList(ips []netip.Prefix) string {
+	s := make([]string, len(ips))
+	for i, p := range ips {
+		s[i] = p.Addr().String()
+		if p.IsValid() {
+			s[i] = p.String()
+		}
+	}
+	return strings.Join(s, ", ")
+}
+
 // verifyGuest checks, through the agent, that an interface with net0's MAC
 // has the address and the guest the host name.
 func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error) {
@@ -243,7 +263,7 @@ func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error)
 	if err != nil {
 		return false, err
 	}
-	want := it.Guest.IP + "/" + fmt.Sprint(it.Guest.Prefix)
+	want := netip.PrefixFrom(it.Guest.IP, it.Guest.Prefix)
 	saw := "nothing"
 	for range verifyTries {
 		nics, nerr := e.api.AgentInterfaces(ctx, it.Node, it.VMID)
@@ -254,7 +274,7 @@ func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error)
 		if nerr == nil && herr == nil {
 			// A VLAN subinterface (eth0.10) shares its parent's MAC; any
 			// interface with net0's MAC may hold the address.
-			var ips []string
+			var ips []netip.Prefix
 			for _, n := range nics {
 				if strings.EqualFold(n.MAC, mac) {
 					ips = append(ips, n.IPs...)
@@ -264,7 +284,7 @@ func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error)
 			if slices.Contains(ips, want) && strings.EqualFold(short, it.Guest.Hostname) {
 				return false, nil
 			}
-			saw = fmt.Sprintf("host name %q with %s", host, strings.Join(ips, ", "))
+			saw = fmt.Sprintf("host name %q with %s", host, addrList(ips))
 		} else {
 			if ctx.Err() != nil {
 				return false, ctx.Err()

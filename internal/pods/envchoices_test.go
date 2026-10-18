@@ -19,7 +19,7 @@ func TestPropDNSChoices(t *testing.T) {
 				Name:   names[i] + ".kilo.alpha",
 				Router: rapid.Bool().Draw(t, "router"),
 				Notes: Notes{
-					IP: rapid.SampledFrom([]string{"", "192.168.100.10"}).Draw(t, "ip"),
+					IP: parsedIP(rapid.SampledFrom([]string{"", "192.168.100.10"}).Draw(t, "ip")),
 					OS: rapid.SampledFrom([]string{"", ImageWindows, ImageLinux, ImageOther, "WINDOWS"}).Draw(t, "os"),
 				},
 			})

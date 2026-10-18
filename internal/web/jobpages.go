@@ -462,10 +462,10 @@ func doingOf(step pods.Step, it pods.Item) string {
 // addressOf is the address a plan item sets or keeps, if known.
 func addressOf(it pods.Item) string {
 	switch {
-	case it.Guest != nil && it.Guest.IP != "":
-		return it.Guest.IP
+	case it.Guest != nil && it.Guest.IP.IsValid():
+		return it.Guest.IP.String()
 	case it.Notes != nil:
-		return it.Notes.IP
+		return pods.AddrText(it.Notes.IP)
 	}
 	return ""
 }

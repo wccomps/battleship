@@ -688,3 +688,21 @@ func TestWhenRefusedCallsBackOn401(t *testing.T) {
 		t.Errorf("the view it came from called back: n = %d", n)
 	}
 }
+
+// The error text in a status line, which a guest agent's error can fill,
+// is kept up to maxMessage bytes; a header longer than maxHeader isn't read.
+func TestLongStatusLineIsCut(t *testing.T) {
+	f, c := newFake(t)
+	route := "GET /nodes/cedar/qemu/2501/agent/network-get-interfaces"
+	f.routes[route] = pveStatus(t, 500, "agent error: "+strings.Repeat("z", 32<<10))
+	_, err := c.AgentInterfaces(context.Background(), "cedar", 2501)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != 500 || len(apiErr.Message) != maxMessage || !strings.HasPrefix(apiErr.Message, "agent error: zzz") {
+		t.Fatalf("a 32 KiB status line: %d bytes, %.100v", len(err.Error()), err)
+	}
+	f.routes[route] = pveStatus(t, 500, strings.Repeat("z", 8<<20))
+	_, err = c.AgentInterfaces(context.Background(), "cedar", 2501)
+	if err == nil || len(err.Error()) > 1<<10 {
+		t.Fatalf("an 8 MiB status line: %d bytes, %.100v", len(fmt.Sprint(err)), err)
+	}
+}

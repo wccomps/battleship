@@ -83,6 +83,9 @@ func TestConfigHashFollowsClassification(t *testing.T) {
 func changedValue(t *testing.T, v reflect.Value) reflect.Value {
 	t.Helper()
 	out := reflect.New(v.Type()).Elem()
+	if v.Type() == reflect.TypeFor[config.LAN]() {
+		return reflect.ValueOf(lanOf("10.50.7"))
+	}
 	switch v.Kind() {
 	case reflect.String:
 		out.SetString(v.String() + "x")

@@ -2,6 +2,7 @@ package apply
 
 import (
 	"context"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -12,7 +13,8 @@ import (
 
 func guestItem(os string) pods.Item {
 	return pods.Item{Name: "oak.kilo.alpha", Host: "oak", VMID: 2101, Node: "alder",
-		Guest: &pods.Guest{OS: os, Hostname: "oak", Domain: "kilo.alpha", IP: "192.168.100.20", Prefix: 24, Gateway: "192.168.100.2", DNS: "192.168.100.2"},
+		Guest: &pods.Guest{OS: os, Hostname: "oak", Domain: "kilo.alpha", IP: netip.MustParseAddr("192.168.100.20"), Prefix: 24,
+			Gateway: netip.MustParseAddr("192.168.100.2"), DNS: netip.MustParseAddr("192.168.100.2")},
 		Steps: []pods.Step{pods.StepWaitAgent, pods.StepGuest, pods.StepVerify}}
 }
 
@@ -20,7 +22,7 @@ func guestFake(t *testing.T) *podstest.Fake {
 	f := podstest.New("alder")
 	f.Add(proxmox.VM{VMID: 2101, Name: "oak.kilo.alpha", Node: "alder", Status: "running"},
 		map[string]string{"net0": "virtio=BC:24:11:00:21:01,bridge=devint01"})
-	f.SetGuest(2101, podstest.Guest{Up: true, Hostname: "WIN-123", NICs: []proxmox.GuestNIC{{Name: "Ethernet", MAC: "bc:24:11:00:21:01", IPs: []string{"169.254.1.1/16"}}}})
+	f.SetGuest(2101, podstest.Guest{Up: true, Hostname: "WIN-123", NICs: []proxmox.GuestNIC{{Name: "Ethernet", MAC: "bc:24:11:00:21:01", IPs: podstest.IPs("169.254.1.1/16")}}})
 	return f
 }
 
@@ -29,7 +31,7 @@ func applied(f *podstest.Fake, out string) func(int, []string, string) (int, str
 	return func(vmid int, _ []string, _ string) (int, string, string) {
 		g := f.Guests[vmid]
 		g.Hostname = "oak"
-		g.NICs[0].IPs = []string{"192.168.100.20/24"}
+		g.NICs[0].IPs = podstest.IPs("192.168.100.20/24")
 		return 0, out, ""
 	}
 }
@@ -131,7 +133,7 @@ func TestVerifyStopsOnForbidden(t *testing.T) {
 func TestGuestWithABadValueFailsTheItem(t *testing.T) {
 	f := guestFake(t)
 	it := guestItem(pods.ImageWindows)
-	it.Guest.IP = "192.168.100.20'"
+	it.Guest.IP = netip.MustParseAddr("fe80::1%eth0'")
 	res := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindEnvDNS, Items: []pods.Item{it}})
 	if err := res.Failed["oak.kilo.alpha"]; err == nil || !strings.Contains(err.Error(), "IPv4") {
 		t.Errorf("failed = %v", err)

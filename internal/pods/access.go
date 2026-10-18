@@ -141,6 +141,10 @@ func one(path, priv string) need { return need{{path, priv}} }
 func VMPath(vmid int) string      { return "/vms/" + strconv.Itoa(vmid) }
 func PoolPath(pool string) string { return "/pool/" + pool }
 
+// LiveAddrsPrivilege is what reading a VM's addresses from its guest agent
+// (LiveAddrs) needs.
+const LiveAddrsPrivilege = "VM.GuestAgent.Audit"
+
 // offerPrivileges are, per operation, the privileges any of which makes it
 // worth offering: what its steps need (itemNeeds), or for deploy and
 // teardown, anywhere. Previews check exactly.

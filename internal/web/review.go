@@ -1,10 +1,12 @@
 package web
 
 import (
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
 )
@@ -84,21 +86,22 @@ var kindUses = map[string]string{
 }
 
 // review describes plan as an image or environment operation's review, or
-// is nil for a team operation. nothing, if set, is why nothing can run.
-func review(op operation, in jobs.Inputs, plan *pods.Plan, nothing string) *reviewView {
+// is nil for a team operation. nothing, if set, is why nothing can run; lan
+// is the environments' LAN.
+func review(op operation, in jobs.Inputs, plan *pods.Plan, nothing string, lan config.LAN) *reviewView {
 	var r *reviewView
 	switch {
 	case op.Machines:
-		r = envReview(op, in, plan)
+		r = envReview(op, in, plan, lan)
 	case op.Kind == pods.KindImageRegister:
 		if len(plan.Items) != 1 {
 			return nil
 		}
 		return registerReview(op, in, plan.Items[0])
 	case op.Kind == pods.KindEnvDNS:
-		r = dnsReview(in, plan)
+		r = dnsReview(in, plan, lan)
 	case op.Kind == pods.KindEnvTeardown:
-		r = teardownReview(in, plan)
+		r = teardownReview(in, plan, lan)
 	case op.Kind == pods.KindImageDetails:
 		if len(plan.Items) != 1 {
 			return nil
@@ -197,7 +200,7 @@ func detailsReview(it pods.Item) *reviewView {
 
 // envReview describes a create or add: a row per machine, and what the
 // guest agent sets on the Windows and Linux hosts.
-func envReview(op operation, in jobs.Inputs, plan *pods.Plan) *reviewView {
+func envReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
 	r := &reviewView{Verb: "Create", Subject: in.Domain, Image: true, Addr: true}
 	if op.Kind == pods.KindEnvAdd {
 		r.Verb = "Add hosts to"
@@ -210,7 +213,8 @@ func envReview(op operation, in jobs.Inputs, plan *pods.Plan) *reviewView {
 		}
 	}
 	var clones, resumes, guests []string
-	dns, windows, atRouter := "", false, false // the guests' DNS server, and whether it is their gateway
+	var dns netip.Addr                // the guests' DNS server
+	windows, atRouter := false, false // whether any is Windows, and whether dns is their gateway
 	for _, it := range plan.Items {
 		spec := specs[it.Host]
 		row := reviewRow{Name: it.Name, Router: router.Host != "" && it.Host == router.Host, Image: spec.Family,
@@ -222,7 +226,7 @@ func envReview(op operation, in jobs.Inputs, plan *pods.Plan) *reviewView {
 		case row.Router:
 			row.Addr = "." + strconv.Itoa(pods.GatewayOctet)
 		case it.Guest != nil:
-			row.Addr = "." + strconv.Itoa(pods.LastOctet(it.Guest.IP))
+			row.Addr = lanOctet(lan, it.Guest.IP)
 			row.Picked = spec.Octet == 0 && slices.Contains(it.Steps, pods.StepClone)
 		case spec.Octet != 0:
 			row.Addr = "." + strconv.Itoa(spec.Octet)
@@ -258,7 +262,7 @@ func envReview(op operation, in jobs.Inputs, plan *pods.Plan) *reviewView {
 	if len(guests) > 0 {
 		at := "the router"
 		if !atRouter {
-			at = "." + strconv.Itoa(pods.LastOctet(dns))
+			at = lanOctet(lan, dns)
 		}
 		say = append(say, "Then "+andList(guests)+byCount(len(guests), " gets its", " get their")+
 			" name, address, gateway ."+strconv.Itoa(pods.GatewayOctet)+" and DNS ("+at+") through the guest agent.")
@@ -273,7 +277,7 @@ func envReview(op operation, in jobs.Inputs, plan *pods.Plan) *reviewView {
 // teardownReview describes tearing an environment down: a row per item
 // (each VM it deletes or can't, with its image and address from its notes,
 // and the disks it frees), and the VMs on its networks it leaves alone.
-func teardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
+func teardownReview(in jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
 	r := &reviewView{Verb: "Tear down", Subject: in.Domain, Image: true, Addr: true, Deletes: true}
 	pool := poolOf(plan.Items)
 	deletes := 0
@@ -284,8 +288,8 @@ func teardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
 			Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}
 		if it.Notes != nil {
 			row.Image = it.Notes.Base
-			if o := pods.LastOctet(it.Notes.IP); o != 0 {
-				row.Addr = "." + strconv.Itoa(o)
+			if it.Notes.IP.IsValid() {
+				row.Addr = lanOctet(lan, it.Notes.IP)
 			}
 		}
 		if row.Router {
@@ -326,16 +330,17 @@ func teardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
 
 // dnsReview describes a Set DNS: each Windows and Linux host's DNS server
 // before (Item.DNSWas) and after. The others only record the choice.
-func dnsReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
+func dnsReview(in jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
 	r := &reviewView{Verb: "Set DNS for", Subject: in.Domain}
 	var changes []string
-	target, router := "", false
+	var target netip.Addr
+	router := false
 	for _, it := range plan.Items {
 		router = router || slices.Contains(pods.Tags(it.Tags), pods.ImageRouter)
 		if it.Guest == nil {
 			continue
 		}
-		row := dnsRow{Host: it.Host, Now: dnsWas(it.DNSWas), After: "." + strconv.Itoa(pods.LastOctet(it.Guest.DNS)),
+		row := dnsRow{Host: it.Host, Now: dnsWas(it.DNSWas, lan), After: lanOctet(lan, it.Guest.DNS),
 			Itself: it.Guest.DNS == it.Guest.IP, Blocked: it.Blocked}
 		r.DNS = append(r.DNS, row)
 		target = it.Guest.DNS
@@ -345,7 +350,7 @@ func dnsReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
 	}
 	at := "the router (." + strconv.Itoa(pods.GatewayOctet) + ")"
 	if choice := strings.TrimSpace(in.DNS); choice != "" && choice != pods.DNSRouter {
-		at = choice + " (." + strconv.Itoa(pods.LastOctet(target)) + ")"
+		at = choice + " (" + lanOctet(lan, target) + ")"
 	}
 	switch {
 	case len(changes) > 0:
@@ -361,16 +366,24 @@ func dnsReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
 	return r
 }
 
-// dnsWas is a host's DNS server before a Set DNS: its address's last
-// octet, or the host it names if that has none.
-func dnsWas(was *pods.DNSServer) string {
+// dnsWas is a host's DNS server before a Set DNS: its address (lanOctet),
+// or the host it names if that has none.
+func dnsWas(was *pods.DNSServer, lan config.LAN) string {
 	switch {
 	case was == nil:
 		return ""
-	case was.Addr == "":
+	case !was.Addr.IsValid():
 		return was.Choice
 	}
-	return "." + strconv.Itoa(pods.LastOctet(was.Addr))
+	return lanOctet(lan, was.Addr)
+}
+
+// lanOctet is ".N" for a, host N of lan, else a written out.
+func lanOctet(lan config.LAN, a netip.Addr) string {
+	if o, ok := lan.Octet(a); ok {
+		return "." + strconv.Itoa(o)
+	}
+	return pods.AddrText(a)
 }
 
 // imageReview describes opening a base image for editing, deprecating it

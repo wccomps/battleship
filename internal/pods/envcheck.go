@@ -115,7 +115,7 @@ func checkHosts(env Environment, images []BaseImage, hosts []HostSpec, routerFir
 		case im.Kind == ImageWindows && len(h.Host) > MaxWindowsHostname:
 			out[i] = EnvProblem{Field: FieldName, Why: fmt.Sprintf("Windows host names are at most %d characters", MaxWindowsHostname)}
 		case (im.Kind == ImageWindows || im.Kind == ImageLinux) && h.Octet != 0 && claimed[h.Octet] != h.Host &&
-			!(resumed && LastOctet(existing.Notes.IP) != 0):
+			!(resumed && existing.Notes.IP.IsValid()):
 			out[i] = EnvProblem{Field: FieldAddress, Why: fmt.Sprintf("address .%d is already taken in %s", h.Octet, env.Domain)}
 		}
 		seen[h.Host] = true
@@ -130,7 +130,7 @@ func checkHosts(env Environment, images []BaseImage, hosts []HostSpec, routerFir
 func claimOctets(env Environment, hosts []HostSpec) (used map[int]bool, claimed map[int]string) {
 	used, claimed = env.UsedOctets(), map[int]string{}
 	for _, h := range hosts {
-		if existing, ok := env.Host(h.Host + "." + env.Domain); ok && existing.Notes.IP != "" {
+		if existing, ok := env.Host(h.Host + "." + env.Domain); ok && existing.Notes.IP.IsValid() {
 			continue
 		}
 		if h.Octet != 0 && !used[h.Octet] && claimed[h.Octet] == "" {
@@ -160,7 +160,7 @@ func chosenEnv(envs []Environment, reserved map[string]bool, req EnvRequest) (en
 	if err := slotRefused(freeState(env, reserved), env.Slot); err != nil {
 		return Environment{}, false, err
 	}
-	return Environment{Slot: env.Slot, Domain: req.Domain, Gateway: env.Gateway}, false, nil
+	return Environment{Slot: env.Slot, Domain: req.Domain, LAN: env.LAN}, false, nil
 }
 
 // firstFreeEnv is a new environment for domain in the first slot of envs
@@ -170,7 +170,7 @@ func firstFreeEnv(envs []Environment, reserved map[string]bool, domain string) (
 		return Environment{}, domainElsewhere(domain, e)
 	}
 	if i := slices.IndexFunc(envs, func(e Environment) bool { return freeState(e, reserved) == slotOpen }); i >= 0 {
-		return Environment{Slot: envs[i].Slot, Domain: domain, Gateway: envs[i].Gateway}, nil
+		return Environment{Slot: envs[i].Slot, Domain: domain, LAN: envs[i].LAN}, nil
 	}
 	return Environment{}, nil
 }

@@ -3,6 +3,7 @@ package apply
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -60,7 +61,7 @@ func TestEnvHostIsWiredAndLabelled(t *testing.T) {
 	f.Add(proxmox.VM{VMID: 8001, Name: "deb-v1", Node: "alder", Template: true}, map[string]string{"tags": "base;linux", "net0": "virtio=BC:24:11:00:80:01,bridge=vmbr0"})
 	plan := &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{{
 		Name: "teak.kilo.alpha", Host: "teak", VMID: 2101, Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha",
-		Notes:  &pods.Notes{IP: "192.168.100.10", OS: "linux", Base: "deb-v1", DNS: "router"},
+		Notes:  &pods.Notes{IP: netip.MustParseAddr("192.168.100.10"), OS: "linux", Base: "deb-v1", DNS: "router"},
 		Source: &pods.Source{VMID: 8001, Node: "alder", Name: "deb-v1"}, NICs: map[string]string{"net0": "devint01"},
 		Steps: []pods.Step{pods.StepClone, pods.StepLabel, pods.StepNetwork, pods.StepStart}}}}
 	res := catalogExec(f).Run(context.Background(), plan)
@@ -243,7 +244,7 @@ func TestConfigWriteRetryRereadsAfterLostResponse(t *testing.T) {
 	e.Cfg.Retry.Attempts = 3
 	plan := &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{{
 		Name: "teak.kilo.alpha", Host: "teak", VMID: 2101, Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha",
-		Notes:  &pods.Notes{IP: "192.168.100.10", OS: "linux", Base: "deb-v1", DNS: "router"},
+		Notes:  &pods.Notes{IP: netip.MustParseAddr("192.168.100.10"), OS: "linux", Base: "deb-v1", DNS: "router"},
 		Source: &pods.Source{VMID: 8001, Node: "alder", Name: "deb-v1"}, NICs: map[string]string{"net0": "devint01"},
 		Steps: []pods.Step{pods.StepClone, pods.StepLabel, pods.StepNetwork, pods.StepStart},
 	}}}

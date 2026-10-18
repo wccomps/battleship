@@ -39,7 +39,7 @@ type catalogPage struct {
 // newCatalogPage reads environments and images as the user, without the
 // images' notes: only the pages that show them read them (withNotes).
 func (s *Server) newCatalogPage(ctx context.Context) catalogPage {
-	p := catalogPage{Subnet: s.cfg.Environments.Subnet}
+	p := catalogPage{Subnet: s.cfg.Environments.Subnet.String()}
 	envs, vms, err := s.planner(ctx).Environments(ctx)
 	if err != nil {
 		p.ReadErr = "Couldn't read the cluster: " + sentence(proxmox.Describe(err))
@@ -85,7 +85,8 @@ func (p *catalogPage) dnsForm() {
 	choices := e.DNSChoices()
 	for _, c := range choices {
 		card := dnsCard{Value: c, Current: c == cur, Checked: c == chosen}
-		card.Addr, _ = e.DNSAddress(c)
+		addr, _ := e.DNSAddress(c)
+		card.Addr = pods.AddrText(addr)
 		if c == pods.DNSRouter {
 			card.Router = true
 			if r, ok := e.Host(e.RouterName()); ok {

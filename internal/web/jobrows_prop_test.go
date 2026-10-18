@@ -93,9 +93,9 @@ func TestPropJobRowsEscapeAndTime(t *testing.T) {
 			}
 			switch rapid.IntRange(0, 2).Draw(t, "address") {
 			case 1:
-				pi.Guest = &pods.Guest{IP: hostile(t, "ip")}
+				pi.Guest = &pods.Guest{IP: hostileAddr(t, "ip")}
 			case 2:
-				pi.Notes = &pods.Notes{IP: hostile(t, "ip")}
+				pi.Notes = &pods.Notes{IP: hostileAddr(t, "ip")}
 			}
 			if rapid.Bool().Draw(t, "planned") {
 				plan.Items = append(plan.Items, pi)

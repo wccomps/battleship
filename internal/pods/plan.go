@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/netip"
 	"slices"
 	"sort"
 	"strconv"
@@ -204,11 +205,11 @@ type Item struct {
 }
 
 // DNSServer is a DNS choice as a host's notes record it (a host name, or
-// DNSRouter) and its address; Addr is "" when the choice names no host
-// that can serve DNS.
+// DNSRouter) and its address; Addr is the zero Addr when the choice names
+// no host that can serve DNS.
 type DNSServer struct {
-	Choice string `json:"choice"`
-	Addr   string `json:"addr,omitempty"`
+	Choice string     `json:"choice"`
+	Addr   netip.Addr `json:"addr,omitzero"`
 }
 
 // Plan is what an operation will do: the templates a deploy needs and one
@@ -318,7 +319,7 @@ func ConfigHash(kind Kind, c config.Config) string {
 	default:
 		return ""
 	}
-	b, _ := json.Marshal(v) // strings, ints, bools and a duration can't fail
+	b, _ := json.Marshal(v) // strings, ints, bools, a duration and a LAN's text can't fail
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
 }

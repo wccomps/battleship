@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -92,7 +93,7 @@ func TestEveryNotesWriteIsBoundAtPlan(t *testing.T) {
 			t.Errorf("%s: notes of %d characters: %v, blocked %q", name, len(long), err, it.Blocked)
 		}
 	}
-	it := Item{Name: "teak.kilo.alpha", Notes: &Notes{IP: "192.168.100.77"}, Steps: []Step{StepLabel}}
+	it := Item{Name: "teak.kilo.alpha", Notes: &Notes{IP: netip.MustParseAddr("192.168.100.77")}, Steps: []Step{StepLabel}}
 	if it.blockLongNotes(long + "\nbattleship: ip=192.168.100.77"); it.Blocked != "" {
 		t.Errorf("notes left as they are: blocked %q", it.Blocked)
 	}

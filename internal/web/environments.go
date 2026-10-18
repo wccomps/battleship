@@ -4,10 +4,10 @@ import (
 	"cmp"
 	"context"
 	"io"
-	"maps"
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -29,23 +29,30 @@ type envsView struct {
 	// lack.
 	MayCreate, MayAdd, MayDNS, MayTearDown bool
 	Lacks                                  []string
-	// MayLive says the user may read guest agents somewhere, so the page
-	// offers live addresses: LiveRead when it has them, else the script
-	// fills them in from envAddrsPath, and without it the page links to
-	// itself with ?live=1.
+	// MayLive says the page offers live addresses: there are hosts, and
+	// the user may read guest agents somewhere. LiveRead says it has them.
 	MayLive, LiveRead bool
 }
 
 // envAddrsPath serves the Environments page's address cells with live
-// addresses, as pieces for the script to swap in (environmentAddrs).
+// addresses, as pieces for the script to swap in (environmentAddrs);
+// catalog.html names it too.
 const envAddrsPath = envsPath + "/addresses"
 
-// agentAudit is the privilege reading a VM's addresses from its guest
-// agent needs.
-const agentAudit = "VM.GuestAgent.Audit"
+// The Environments page's guest agent reads, bounded so a hung agent
+// doesn't hold up the page.
+const (
+	addrReads       = 4
+	addrReadTimeout = 2 * time.Second
+	addrReadsWithin = 5 * time.Second
+)
 
-// piecesHeader marks a response of pieces, so the script can tell it from
-// anything else (e.g. the login page).
+// noLiveAddrs says why a user without pods.LiveAddrsPrivilege sees no live
+// addresses.
+const noLiveAddrs = "Showing live addresses needs " + pods.LiveAddrsPrivilege + ", which you don't have."
+
+// piecesHeader marks a response of pieces, so the script (app.js, which
+// names it too) can tell it from anything else (e.g. the login page).
 const piecesHeader = "X-Battleship-Pieces"
 
 // envBlock is a slot in use. Domain is set when its VMs share one: Add
@@ -87,6 +94,7 @@ type envHostRow struct {
 	Notes      string
 	Read       bool
 	pods.LiveAddrs
+	octet int // of Addr on its LAN; 0 without one
 }
 
 // environmentsPage is the Environments page with each host's assigned
@@ -95,7 +103,7 @@ type envHostRow struct {
 func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := envsView{MayCreate: s.mayRun(ctx, pods.KindEnvCreate), MayAdd: s.mayRun(ctx, pods.KindEnvAdd), MayDNS: s.mayRun(ctx, pods.KindEnvDNS),
-		MayTearDown: s.mayRun(ctx, pods.KindEnvTeardown), MayLive: s.mayAnywhere(ctx, agentAudit)}
+		MayTearDown: s.mayRun(ctx, pods.KindEnvTeardown), MayLive: s.mayAnywhere(ctx, pods.LiveAddrsPrivilege)}
 	planner := s.planner(ctx)
 	envs, vms, err := planner.Environments(ctx)
 	if err != nil {
@@ -121,7 +129,7 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 	if !slices.ContainsFunc(p.Envs, func(b envBlock) bool { return len(b.Hosts) > 0 }) {
 		p.MayLive = false // no address to show
 	} else if !p.MayLive {
-		p.Lacks = append(p.Lacks, "Showing live addresses needs "+agentAudit+", which you don't have.")
+		p.Lacks = append(p.Lacks, noLiveAddrs)
 	}
 	if slices.ContainsFunc(p.Envs, envBlock.Acts) {
 		if !p.MayAdd {
@@ -139,8 +147,13 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 
 // environmentAddrs serves the Environments page's address cells, and the
 // line above them, with live addresses, each in its own <template> (piece).
+// A user who may read no guest agent gets what the page says instead.
 func (s *Server) environmentAddrs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	if !s.mayAnywhere(ctx, pods.LiveAddrsPrivilege) {
+		http.Error(w, noLiveAddrs, http.StatusForbidden)
+		return
+	}
 	envs, _, err := s.planner(ctx).Environments(ctx)
 	if err != nil {
 		http.Error(w, "Couldn't read the cluster: "+sentence(proxmox.Describe(err)), http.StatusBadGateway)
@@ -175,17 +188,11 @@ func (s *Server) environmentAddrs(w http.ResponseWriter, r *http.Request) {
 }
 
 // liveAddrs are envs' hosts' live addresses by VMID, read through the
-// user's own credential if they may read guest agents anywhere.
+// user's own credential.
 func (s *Server) liveAddrs(ctx context.Context, envs []pods.Environment) map[int]pods.LiveAddrs {
-	var nics map[int][]proxmox.GuestNIC
-	if s.mayAnywhere(ctx, agentAudit) {
-		nics = s.planner(ctx).GuestNICs(ctx, envs, s.addrTimeout, s.addrWithin)
-	}
-	out := map[int]pods.LiveAddrs{}
-	for _, e := range envs {
-		maps.Copy(out, e.Addrs(nics))
-	}
-	return out
+	ctx, cancel := context.WithTimeout(ctx, s.addrWithin)
+	defer cancel()
+	return s.planner(ctx).LiveAddrs(ctx, envs, addrReads, s.addrTimeout)
 }
 
 // hostBases are, by name, the base images of envs's hosts whose own notes
@@ -231,7 +238,8 @@ func envBlocks(envs []pods.Environment, bases map[string]pods.BaseImage, addrs m
 			b.DNS = e.DNS()
 		}
 		for _, h := range e.Hosts {
-			row := envHostRow{VMID: h.VMID, Name: h.Name, Router: h.Router, Addr: h.Addr, Running: h.Status == "running",
+			octet, _ := e.LAN.Octet(h.Addr)
+			row := envHostRow{VMID: h.VMID, Name: h.Name, Router: h.Router, Addr: pods.AddrText(h.Addr), octet: octet, Running: h.Status == "running",
 				Status: cmp.Or(h.Status, "unknown"), Image: h.Notes.Base, Details: h.Details, Unreadable: h.Unreadable, Notes: h.UserNotes,
 				Read: addrs != nil, LiveAddrs: addrs[h.VMID]}
 			if base, ok := bases[h.Notes.Base]; ok && h.Details.Empty() && !h.Unreadable && !base.Unreadable {
@@ -257,7 +265,7 @@ func envBlocks(envs []pods.Environment, bases map[string]pods.BaseImage, addrs m
 // hostOrder is by address, the router's .2 first, then hosts without one,
 // by name.
 func hostOrder(a, b envHostRow) int {
-	oa, ob := pods.LastOctet(a.Addr), pods.LastOctet(b.Addr)
+	oa, ob := a.octet, b.octet
 	switch {
 	case (oa == 0) != (ob == 0):
 		if oa == 0 {

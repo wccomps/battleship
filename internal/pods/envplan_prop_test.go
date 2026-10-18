@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"pgregory.net/rapid"
 
+	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
@@ -23,11 +25,16 @@ var noteValues = []string{
 	"dc", "teak", "oak$(id)", "\u202eoak", "debian-12-v1", "", "=", "'",
 }
 
-// noteIP draws an address at or near the edge of subnet's host range,
-// sometimes spoilt the way a hand edit might.
+// noteIP draws an address at or near the edge of the host range of subnet,
+// or of a network beside it, sometimes spoilt the way a hand edit might.
 func noteIP(t *rapid.T, subnet string) string {
 	o := rapid.OneOf(rapid.IntRange(-1, 300), rapid.SampledFrom([]int{-1, 0, 3, FirstHostOctet, LastHostOctet, 255, 256})).Draw(t, "octet")
 	octet := strconv.Itoa(o)
+	if rapid.IntRange(0, 3).Draw(t, "beside") == 0 {
+		lan := lanOf(subnet).Host(0).As4()
+		lan[rapid.IntRange(0, 2).Draw(t, "which")]++
+		subnet = strings.TrimSuffix(netip.AddrFrom4(lan).String(), ".0")
+	}
 	return subnet + "." + rapid.SampledFrom([]string{octet, octet, octet, "0" + octet, "+" + octet, octet + " ", octet + "'", octet + ".1", "\u0661" + octet}).Draw(t, "spoilt octet")
 }
 
@@ -51,6 +58,15 @@ func drawNotes(t *rapid.T, subnet, label string) string {
 	return strings.Join(lines, "\n")
 }
 
+// lanOf is the LAN with three octets s.
+func lanOf(s string) config.LAN {
+	lan, err := config.ParseLAN(s)
+	if err != nil {
+		panic(err)
+	}
+	return lan
+}
+
 // inSubnet reports whether ip is a host address of subnet that scripts may
 // set: canonical, octet 4-254.
 func inSubnet(ip, subnet string) bool {
@@ -60,12 +76,18 @@ func inSubnet(ip, subnet string) bool {
 }
 
 // Checked keeps an address of the subnet exactly when its last octet is a
-// host octet.
+// host octet, and none of a network beside it.
 func TestCheckedNotesOctets(t *testing.T) {
+	lan := lanOf("192.168.100")
 	for o := -1; o <= 300; o++ {
 		ip := "192.168.100." + strconv.Itoa(o)
-		if got, want := (Notes{IP: ip}).Checked("192.168.100").IP != "", o >= 4 && o <= 254; got != want {
+		if got, want := (Notes{IP: parsedIP(ip)}).Checked(lan).IP.IsValid(), o >= 4 && o <= 254; got != want {
 			t.Errorf("Checked kept %s: %v, want %v", ip, got, want)
+		}
+		for _, beside := range []string{"193.168.100.", "192.169.100.", "192.168.101.", "::ffff:192.168.100."} {
+			if got := (Notes{IP: parsedIP(beside + strconv.Itoa(o))}).Checked(lan).IP; got.IsValid() {
+				t.Errorf("Checked kept %s", got)
+			}
 		}
 	}
 }
@@ -75,13 +97,14 @@ func TestCheckedNotesOctets(t *testing.T) {
 // nothing.
 func TestPropCheckedNotes(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		subnet := rapid.SampledFrom([]string{"192.168.100", "10.0.0", "172.16.5"}).Draw(t, "subnet")
+		subnet := rapid.SampledFrom([]string{"192.168.100", "10.50.7", "172.16.5"}).Draw(t, "subnet")
+		lan := lanOf(subnet)
 		n, _ := ParseNotes(drawNotes(t, subnet, "notes"))
 		if rapid.Bool().Draw(t, "near ip") {
-			n.IP = noteIP(t, subnet)
+			n.IP, _ = netip.ParseAddr(noteIP(t, subnet))
 		}
-		c := n.Checked(subnet)
-		if c.IP != "" && !inSubnet(c.IP, subnet) {
+		c := n.Checked(lan)
+		if c.IP.IsValid() && !inSubnet(c.IP.String(), subnet) {
 			t.Fatalf("kept address %q outside %s", c.IP, subnet)
 		}
 		if c.OS != "" && c.OS != ImageWindows && c.OS != ImageLinux {
@@ -90,8 +113,8 @@ func TestPropCheckedNotes(t *testing.T) {
 		if c.DNS != "" && c.DNS != DNSRouter && CheckHostname(c.DNS) != nil {
 			t.Fatalf("kept DNS %q", c.DNS)
 		}
-		if c.Checked(subnet) != c {
-			t.Fatalf("checking again changed %+v to %+v", c, c.Checked(subnet))
+		if c.Checked(lan) != c {
+			t.Fatalf("checking again changed %+v to %+v", c, c.Checked(lan))
 		}
 	})
 }
@@ -116,7 +139,7 @@ func checkEnvPlan(t interface{ Fatalf(string, ...any) }, plan *Plan, subnet stri
 		if g.OS == ImageWindows && !g.DNSOnly && len(g.Hostname) > MaxWindowsHostname {
 			t.Fatalf("%s: renames Windows to %q", it.Name, g.Hostname)
 		}
-		if !inSubnet(g.IP, subnet) {
+		if !inSubnet(AddrText(g.IP), subnet) {
 			t.Fatalf("%s: address %q outside %s", it.Name, g.IP, subnet)
 		}
 	}

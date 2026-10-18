@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"reflect"
 	"slices"
@@ -40,9 +41,28 @@ func hostile(t *rapid.T, label string) string {
 	return strings.Join(rapid.SliceOfN(piece, 1, 3).Draw(t, label), "")
 }
 
+// hostileAddr is no address, an IPv4 or IPv6 one, or an IPv6 one with a
+// hostile zone, the one place an address carries text.
+func hostileAddr(t *rapid.T, label string) netip.Addr {
+	b := [16]byte(rapid.SliceOfN(rapid.Byte(), 16, 16).Draw(t, label))
+	switch rapid.IntRange(0, 3).Draw(t, label+" kind") {
+	case 0:
+		return netip.Addr{}
+	case 1:
+		return netip.AddrFrom4([4]byte(b[:4]))
+	case 2:
+		return netip.AddrFrom16(b)
+	}
+	return netip.AddrFrom16(b).WithZone(hostile(t, label+" zone"))
+}
+
 // fillHostile recursively fills v with hostile strings and small values
 // (sizes derive from numbers); callers fix up fields the app always sets.
 func fillHostile(t *rapid.T, v reflect.Value, path string) {
+	if v.Type() == reflect.TypeFor[netip.Addr]() {
+		v.Set(reflect.ValueOf(hostileAddr(t, path)))
+		return
+	}
 	switch v.Kind() {
 	case reflect.String:
 		v.SetString(hostile(t, path))

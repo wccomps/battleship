@@ -3,7 +3,9 @@ package podstest
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -22,6 +24,26 @@ type Guest struct {
 	// Windows setup's Setup\State key) print an unfinished ImageState
 	// before they print IMAGE_STATE_COMPLETE.
 	SetupPending int
+}
+
+// IPs are GuestNIC.IPs as AgentInterfaces reads what an agent writes:
+// "address/prefix", or a bare address for one reported without a prefix.
+// It panics on one AgentInterfaces leaves out.
+func IPs(s ...string) []netip.Prefix {
+	out := make([]netip.Prefix, len(s))
+	for i, ip := range s {
+		addr, prefix, has := strings.Cut(ip, "/")
+		bits, err := strconv.Atoi(prefix)
+		if !has {
+			bits, err = -1, nil
+		}
+		p, ok := proxmox.GuestIP(addr, bits)
+		if err != nil || !ok {
+			panic("podstest.IPs: AgentInterfaces leaves out " + ip)
+		}
+		out[i] = p
+	}
+	return out
 }
 
 // Restart is a guest restarting under a command (see Fake.Restarts).
@@ -134,7 +156,11 @@ func (f *Fake) ExecRunning(pid int) bool {
 	return f.ExecRunsFor != nil && f.polls[pid] <= f.ExecRunsFor(pid)
 }
 
-func (f *Fake) AgentExecStatus(ctx context.Context, node string, vmid, pid int) (proxmox.ExecStatus, error) {
+// AgentExecStatus fails without a cap on the answer, as the client does.
+func (f *Fake) AgentExecStatus(ctx context.Context, node string, vmid, pid int, limit int64) (proxmox.ExecStatus, error) {
+	if limit <= 0 {
+		return proxmox.ExecStatus{}, fmt.Errorf("GET agent/exec-status: no cap on the answer")
+	}
 	var st proxmox.ExecStatus
 	err := f.agentCall(ctx, fmt.Sprintf("agent-status:%d", vmid), node, vmid, func(g *Guest) error {
 		if r, ok := f.Restarts[pid]; ok {

@@ -85,7 +85,7 @@ func Fingerprint(plan *pods.Plan) string {
 			NICs: it.NICs, Guest: it.Guest, Supersedes: sourceFP(it.Supersedes), Details: it.Details, Replaces: it.DetailsWas,
 		})
 	}
-	b, _ := json.Marshal(fp) // plain structs of strings, ints and bools can't fail
+	b, _ := json.Marshal(fp) // plain structs of strings, ints, bools and addresses can't fail
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }

@@ -3,6 +3,7 @@ package apply
 import (
 	"context"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -60,18 +61,35 @@ func TestPropLastLines(t *testing.T) {
 	})
 }
 
-// The guest agent's answer for verification: its interfaces and host name.
+// The guest agent's answer for verification: its interfaces, each with its
+// addresses as the agent writes them ("address/prefix"), and host name.
 type verifyNIC struct {
 	mac string
 	ips []string
 }
 
+// agentHas is whether the agent's s is ip with prefix length bits: an IPv4
+// address written as IPv6 ("::ffff:a.b.c.d") is that IPv4 address, its
+// length less 96.
+func agentHas(s, ip string, bits int) bool {
+	addr, prefix, _ := strings.Cut(s, "/")
+	n, err := strconv.Atoi(prefix)
+	if err != nil {
+		return false
+	}
+	if v4, ok := strings.CutPrefix(strings.ToLower(addr), "::ffff:"); ok && strings.Contains(v4, ".") {
+		addr, n = v4, n-96
+	}
+	return addr == ip && n == bits
+}
+
 // verifyModel is whether verification should pass: some interface with
-// net0's MAC, ignoring case, has the address and prefix, and the host
-// name's first label is the host, ignoring case.
-func verifyModel(nics []verifyNIC, hostname, mac, ip, host string) bool {
+// net0's MAC, ignoring case, has 192.168.100.20/24, and the host name's
+// first label is the host, ignoring case.
+func verifyModel(nics []verifyNIC, hostname, mac, host string) bool {
 	onNet0 := slices.ContainsFunc(nics, func(n verifyNIC) bool {
-		return strings.ToLower(n.mac) == strings.ToLower(mac) && slices.Contains(n.ips, ip)
+		return strings.ToLower(n.mac) == strings.ToLower(mac) &&
+			slices.ContainsFunc(n.ips, func(s string) bool { return agentHas(s, "192.168.100.20", 24) })
 	})
 	label := hostname
 	if i := strings.IndexByte(label, '.'); i >= 0 {
@@ -86,17 +104,18 @@ func TestPropVerifyGuest(t *testing.T) {
 	const mac = "bc:24:11:00:21:01"
 	hostnames := []string{"oak", "OAK", "Oak.kilo.alpha", "oak.", "oak.x.y", "oakx", "oa", "", ".oak", "WIN-123", "xoak", "oak-1.kilo", "oak kilo", "oak\n"}
 	macs := []string{mac, mac, mac, "bc:24:11:00:21:02", "bc:24:11:00:21:00", "bc-24-11-00-21-01", "", "BC:24:11:00:21:01"}
-	ips := []string{"192.168.100.20/24", "192.168.100.20/24", "192.168.100.20/25", "192.168.100.20/240", "192.168.100.200/24", "192.168.100.2/24",
-		"192.168.100.21/24", "192.168.100.20", "192.168.100.20/", "92.168.100.20/24", "fe80::1/64", "169.254.1.1/16", " 192.168.100.20/24"}
+	ips := []string{"192.168.100.20/24", "192.168.100.20/24", "192.168.100.20/25", "192.168.100.20", "192.168.100.200/24", "192.168.100.2/24",
+		"192.168.100.21/24", "92.168.100.20/24", "fe80::1/64", "169.254.1.1/16", "::ffff:192.168.100.20/120", "::FFFF:192.168.100.20/120",
+		"::ffff:192.168.100.20/64", "::ffff:192.168.100.21/120", "192.168.100.0/24"}
 	check := func(t interface{ Fatalf(string, ...any) }, nics []verifyNIC, hostname string) {
-		want := verifyModel(nics, hostname, mac, "192.168.100.20/24", "oak")
+		want := verifyModel(nics, hostname, mac, "oak")
 
 		f := podstest.New("alder")
 		f.Add(proxmox.VM{VMID: 2101, Name: "oak.kilo.alpha", Node: "alder", Status: "running"},
 			map[string]string{"net0": "virtio=BC:24:11:00:21:01,bridge=devint01"})
 		var gn []proxmox.GuestNIC
 		for i, n := range nics {
-			gn = append(gn, proxmox.GuestNIC{Name: []string{"eth0", "eth0.10", "eth1"}[i], MAC: n.mac, IPs: n.ips})
+			gn = append(gn, proxmox.GuestNIC{Name: []string{"eth0", "eth0.10", "eth1"}[i], MAC: n.mac, IPs: podstest.IPs(n.ips...)})
 		}
 		f.SetGuest(2101, podstest.Guest{Up: true, Hostname: hostname, NICs: gn})
 		it := guestItem(pods.ImageLinux)
@@ -113,13 +132,15 @@ func TestPropVerifyGuest(t *testing.T) {
 		nics []verifyNIC
 		want bool
 	}{
-		{"VLAN subinterface after eth0", []verifyNIC{{mac, []string{ok}}, {mac, []string{"10.0.10.5/24"}}}, true},
+		{"VLAN subinterface after eth0", []verifyNIC{{mac, []string{ok}}, {mac, []string{"10.50.10.5/24"}}}, true},
 		{"address only on the VLAN subinterface", []verifyNIC{{mac, []string{other}}, {mac, []string{ok}}}, true},
 		{"MAC in upper case", []verifyNIC{{upper, []string{ok}}}, true},
 		{"MAC case differs between eth0 and its VLAN", []verifyNIC{{upper, nil}, {mac, []string{ok}}}, true},
 		{"MAC absent", []verifyNIC{{"bc:24:11:00:21:02", []string{ok}}}, false},
+		{"IPv4 written as IPv6", []verifyNIC{{mac, []string{"::ffff:192.168.100.20/120"}}}, true},
+		{"IPv4 written as IPv6, other prefix", []verifyNIC{{mac, []string{"::ffff:192.168.100.20/112"}}}, false},
 	} {
-		if got := verifyModel(tc.nics, "oak", mac, ok, "oak"); got != tc.want {
+		if got := verifyModel(tc.nics, "oak", mac, "oak"); got != tc.want {
 			t.Fatalf("%s: model says %v", tc.name, got)
 		}
 		check(t, tc.nics, "oak")
