@@ -200,7 +200,7 @@ func TestEnvironmentsLiveAddressesWithoutRouter(t *testing.T) {
 	lacks(t, "the pieces", pieces, "10.50.12", "fe80", "169.254", "external")
 	contains(t, "the stopped router", addrCell(t, pieces, 2100), `<span class="al"><span class="meta">no address</span></span>`)
 	lacks(t, "the stopped router", addrCell(t, pieces, 2100), "192.168.100.2", "no guest agent")
-	contains(t, "teak", addrCell(t, pieces, 2101), `<span class="chip differs">no live address</span>`, `assigned 192.168.100.10`)
+	contains(t, "teak", addrCell(t, pieces, 2101), `<span class="meta">no live address</span>`, `assigned 192.168.100.10`)
 	contains(t, "yew", addrCell(t, pieces, 2102), `<code>192.168.100.5</code> <span class="meta">· no guest agent</span>`)
 
 	// A running router whose guest agent isn't running says no guest agent,

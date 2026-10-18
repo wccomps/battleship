@@ -147,7 +147,7 @@ func TestImageRegisterWarnings(t *testing.T) {
 		"agent": "0",
 		"ide2":  "local:iso/pfsense.iso,media=cdrom",
 	})
-	plan, err := NewPlanner(f, cfg).ImageRegister(context.Background(), ImageRequest{VMID: 160, Family: "gw", Kind: ImageRouter})
+	plan, err := NewPlanner(f, cfg).ImageRegister(context.Background(), ImageRequest{VMID: 160, Family: "gw", ImageKind: ImageRouter})
 	if err != nil {
 		t.Fatal(err)
 	}

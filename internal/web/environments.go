@@ -24,11 +24,11 @@ type envsView struct {
 	Create  string
 	Queued  string
 	FreeErr string // why the queued jobs couldn't be read
-	// MayCreate, MayAdd, MayDNS and MayTearDown say whether the user holds
+	// MayCreate, MayAdd and MayTearDown say whether the user holds
 	// each action's privilege anywhere; Lacks says, a line each, what they
 	// lack.
-	MayCreate, MayAdd, MayDNS, MayTearDown bool
-	Lacks                                  []string
+	MayCreate, MayAdd, MayTearDown bool
+	Lacks                          []string
 	// MayLive says the page offers live addresses: there are hosts, and
 	// the user may read guest agents somewhere. LiveRead says it has them.
 	MayLive, LiveRead bool
@@ -56,14 +56,13 @@ const noLiveAddrs = "Showing live addresses needs " + pods.LiveAddrsPrivilege + 
 const piecesHeader = "X-Battleship-Pieces"
 
 // envBlock is a slot in use. Domain is set when its VMs share one: Add
-// hosts, Set DNS and Tear down then act on it (Acts), unless Twin names the
+// hosts and Tear down then act on it (Acts), unless Twin names the
 // slot with the same domain that they act on instead (pods.EnvByDomain).
 type envBlock struct {
 	ID     string // its anchor: the domain, or slot-NN
 	Domain string
 	Slot   string // its pool, e.g. dev-01
 	Router string
-	DNS    string
 	Hosts  []envHostRow
 	// Users are VMs outside its pool with a NIC on its networks.
 	Users []string
@@ -71,7 +70,7 @@ type envBlock struct {
 	Twin  string
 }
 
-// Acts reports whether the block offers Add hosts, Set DNS and Tear down.
+// Acts reports whether the block offers Add hosts and Tear down.
 func (b envBlock) Acts() bool { return b.Domain != "" && b.Twin == "" }
 
 // envHostRow is a VM in a slot: its name (the host part, or the whole VM
@@ -104,7 +103,7 @@ type envHostRow struct {
 // fills in after the page loads (environmentAddrs).
 func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	p := envsView{MayCreate: s.mayRun(ctx, pods.KindEnvCreate), MayAdd: s.mayRun(ctx, pods.KindEnvAdd), MayDNS: s.mayRun(ctx, pods.KindEnvDNS),
+	p := envsView{MayCreate: s.mayRun(ctx, pods.KindEnvCreate), MayAdd: s.mayRun(ctx, pods.KindEnvAdd),
 		MayTearDown: s.mayRun(ctx, pods.KindEnvTeardown), MayLive: s.mayAnywhere(ctx, pods.LiveAddrsPrivilege)}
 	planner := s.planner(ctx)
 	envs, vms, err := planner.Environments(ctx)
@@ -136,9 +135,6 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 	if slices.ContainsFunc(p.Envs, envBlock.Acts) {
 		if !p.MayAdd {
 			p.Lacks = append(p.Lacks, lacksOf(pods.KindEnvAdd, ""))
-		}
-		if !p.MayDNS {
-			p.Lacks = append(p.Lacks, lacksOf(pods.KindEnvDNS, ""))
 		}
 		if !p.MayTearDown {
 			p.Lacks = append(p.Lacks, lacksOf(pods.KindEnvTeardown, ""))
@@ -237,7 +233,6 @@ func envBlocks(envs []pods.Environment, bases map[string]pods.BaseImage, addrs m
 			} else {
 				b.ID = e.Domain
 			}
-			b.DNS = e.DNS()
 		}
 		gw := pods.AddrText(e.Gateway())
 		for _, h := range e.Hosts {

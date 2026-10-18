@@ -262,7 +262,6 @@ func TestCreateReview(t *testing.T) {
 		`<tr><td><span class="vm">gw.kilo.bravo</span> <span class="chip">router</span></td><td class="wide"><code>gw-v1</code></td><td class="c2"><code>.2</code></td><td class="r wide meta">2100 · n1</td></tr>`,
 		`<tr><td><span class="vm">dc.kilo.bravo</span></td><td class="wide"><code>win2022-v3</code></td><td class="c2"><code>.10</code></td><td class="r wide meta">2101 · n1</td></tr>`,
 		`<tr><td><span class="vm">app.kilo.bravo</span></td><td class="wide"><code>appliance-v2</code></td><td class="c2">—</td><td class="r wide meta">2103 · n1</td></tr>`,
-		`<p class="meta">Once a domain controller is up, use Set DNS on <span class="name">kilo.bravo</span> to point the hosts at it.</p>`,
 		`<a class="btn ghost sq" href="/environments" data-close aria-label="Close">`,
 		`<a class="btn first" href="/environments/new?domain=kilo.bravo&amp;env_hosts=dc%3Dwin2022%3A10%0Aweb%3Ddebian-12%0Aapp%3Dappliance&amp;router=gw%3Dgw" data-panel-link>Back</a>`,
 		"Create 4 VMs</button>")
