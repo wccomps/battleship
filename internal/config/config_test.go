@@ -633,7 +633,6 @@ func TestEnvironmentAndImageValidation(t *testing.T) {
 		"environments.ext_bridge":    func(c *Config) { c.Environments.ExtBridge = "devext" },
 		"environments.sdn_zone":      func(c *Config) { c.Environments.SDNZone = "" },
 		"environments.vmid_base":     func(c *Config) { c.Environments.VMIDBase = 7000 }, // slot 10 reaches 8099, inside images
-		"environments.subnet":        func(c *Config) { c.Environments.Subnet = LAN{} },
 		"environments.agent_timeout": func(c *Config) { c.Environments.AgentTimeout = 10 * time.Second },
 	}
 	for key, mut := range cases {

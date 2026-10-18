@@ -13,13 +13,26 @@ type LAN struct{ p netip.Prefix }
 // ParseLAN reads a LAN's three octets.
 func ParseLAN(s string) (LAN, error) {
 	a, err := netip.ParseAddr(s + ".0")
-	if err != nil || !a.Is4() {
+	l, ok := LANOf(netip.PrefixFrom(a, 24))
+	if err != nil || !ok {
 		return LAN{}, fmt.Errorf("%q isn't three octets in decimal without leading zeros, e.g. 192.168.100", s)
 	}
-	return LAN{netip.PrefixFrom(a, 24)}, nil
+	return l, nil
+}
+
+// LANOf is the /24 network p is in, if p is an IPv4 address with prefix
+// length 24.
+func LANOf(p netip.Prefix) (LAN, bool) {
+	if !p.Addr().Is4() || p.Bits() != 24 {
+		return LAN{}, false
+	}
+	return LAN{p.Masked()}, true
 }
 
 func (l LAN) IsValid() bool { return l.p.IsValid() }
+
+// Bits is l's prefix length, or -1 for the zero LAN.
+func (l LAN) Bits() int { return l.p.Bits() }
 
 // String is l's three octets, or "" for the zero LAN.
 func (l LAN) String() string {
@@ -31,7 +44,7 @@ func (l LAN) String() string {
 }
 
 // Host is l's address with last octet octet, or the zero Addr if octet
-// isn't 0 to 255.
+// isn't 0 to 255 or l is the zero LAN.
 func (l LAN) Host(octet int) netip.Addr {
 	if !l.IsValid() || octet < 0 || octet > 255 {
 		return netip.Addr{}

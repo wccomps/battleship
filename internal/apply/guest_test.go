@@ -2,6 +2,7 @@ package apply
 
 import (
 	"context"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -12,7 +13,8 @@ import (
 
 func guestItem(os string) pods.Item {
 	return pods.Item{Name: "oak.kilo.alpha", Host: "oak", VMID: 2101, Node: "alder",
-		Guest: &pods.Guest{OS: os, Hostname: "oak", Domain: "kilo.alpha", IP: "192.168.100.20", Prefix: 24, Gateway: "192.168.100.2", DNS: "192.168.100.2"},
+		Guest: &pods.Guest{OS: os, Hostname: "oak", Domain: "kilo.alpha", IP: netip.MustParseAddr("192.168.100.20"), Prefix: 24,
+			Gateway: netip.MustParseAddr("192.168.100.2"), DNS: netip.MustParseAddr("192.168.100.2")},
 		Steps: []pods.Step{pods.StepWaitAgent, pods.StepGuest, pods.StepVerify}}
 }
 
@@ -131,7 +133,7 @@ func TestVerifyStopsOnForbidden(t *testing.T) {
 func TestGuestWithABadValueFailsTheItem(t *testing.T) {
 	f := guestFake(t)
 	it := guestItem(pods.ImageWindows)
-	it.Guest.IP = "192.168.100.20'"
+	it.Guest.IP = netip.MustParseAddr("fe80::1%eth0'")
 	res := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindEnvDNS, Items: []pods.Item{it}})
 	if err := res.Failed["oak.kilo.alpha"]; err == nil || !strings.Contains(err.Error(), "IPv4") {
 		t.Errorf("failed = %v", err)

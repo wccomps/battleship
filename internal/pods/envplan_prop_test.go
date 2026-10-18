@@ -81,11 +81,11 @@ func TestCheckedNotesOctets(t *testing.T) {
 	lan := lanOf("192.168.100")
 	for o := -1; o <= 300; o++ {
 		ip := "192.168.100." + strconv.Itoa(o)
-		if got, want := (Notes{IP: ip}).Checked(lan).IP != "", o >= 4 && o <= 254; got != want {
+		if got, want := (Notes{IP: parsedIP(ip)}).Checked(lan).IP.IsValid(), o >= 4 && o <= 254; got != want {
 			t.Errorf("Checked kept %s: %v, want %v", ip, got, want)
 		}
 		for _, beside := range []string{"193.168.100.", "192.169.100.", "192.168.101.", "::ffff:192.168.100."} {
-			if got := (Notes{IP: beside + strconv.Itoa(o)}).Checked(lan).IP; got != "" {
+			if got := (Notes{IP: parsedIP(beside + strconv.Itoa(o))}).Checked(lan).IP; got.IsValid() {
 				t.Errorf("Checked kept %s", got)
 			}
 		}
@@ -101,10 +101,10 @@ func TestPropCheckedNotes(t *testing.T) {
 		lan := lanOf(subnet)
 		n, _ := ParseNotes(drawNotes(t, subnet, "notes"))
 		if rapid.Bool().Draw(t, "near ip") {
-			n.IP = noteIP(t, subnet)
+			n.IP, _ = netip.ParseAddr(noteIP(t, subnet))
 		}
 		c := n.Checked(lan)
-		if c.IP != "" && !inSubnet(c.IP, subnet) {
+		if c.IP.IsValid() && !inSubnet(c.IP.String(), subnet) {
 			t.Fatalf("kept address %q outside %s", c.IP, subnet)
 		}
 		if c.OS != "" && c.OS != ImageWindows && c.OS != ImageLinux {
@@ -139,7 +139,7 @@ func checkEnvPlan(t interface{ Fatalf(string, ...any) }, plan *Plan, subnet stri
 		if g.OS == ImageWindows && !g.DNSOnly && len(g.Hostname) > MaxWindowsHostname {
 			t.Fatalf("%s: renames Windows to %q", it.Name, g.Hostname)
 		}
-		if !inSubnet(g.IP, subnet) {
+		if !inSubnet(AddrText(g.IP), subnet) {
 			t.Fatalf("%s: address %q outside %s", it.Name, g.IP, subnet)
 		}
 	}

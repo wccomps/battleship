@@ -1,6 +1,7 @@
 package pods
 
 import (
+	"net/netip"
 	"strconv"
 	"strings"
 	"testing"
@@ -42,10 +43,17 @@ func TestCheckDomain(t *testing.T) {
 	}
 }
 
+// parsedIP is s as ParseNotes reads an ip= value: the zero Addr if it
+// isn't an address.
+func parsedIP(s string) netip.Addr {
+	a, _ := netip.ParseAddr(s)
+	return a
+}
+
 func TestNotesLine(t *testing.T) {
 	desc := "Domain controller.\nbattleship: ip=192.168.100.10 os=windows base=win2022-v3 dns=router\nkeep me"
 	n, ok := ParseNotes(desc)
-	if !ok || n != (Notes{IP: "192.168.100.10", OS: "windows", Base: "win2022-v3", DNS: "router"}) {
+	if !ok || n != (Notes{IP: netip.MustParseAddr("192.168.100.10"), OS: "windows", Base: "win2022-v3", DNS: "router"}) {
 		t.Fatalf("ParseNotes = %+v, %v", n, ok)
 	}
 	n.DNS = "teak"
@@ -249,7 +257,7 @@ func oneLine(s string) bool { return strings.Join(strings.Fields(s), " ") == s }
 // The battleship line written into any description reads back the same,
 // writing it twice changes nothing, and people's notes around it are kept.
 func TestPropNotesLineRoundTrip(t *testing.T) {
-	n := Notes{IP: "192.168.100.10", OS: "linux", Base: "a=b", DNS: "router"}
+	n := Notes{IP: netip.MustParseAddr("192.168.100.10"), OS: "linux", Base: "a=b", DNS: "router"}
 	for _, a := range notesPieces {
 		for _, b := range notesPieces {
 			with := WithNotes(a+b, n)
@@ -265,10 +273,10 @@ func TestPropNotesLineRoundTrip(t *testing.T) {
 		if old, ok := ParseNotes(desc); ok && !oneLine(old.String()) {
 			t.Fatalf("ParseNotes(%q) = %+v, written %q", desc, old, old.String())
 		}
-		if c := (Notes{IP: editedNoteValue(t), OS: editedNoteValue(t), Base: value.Draw(t, "base"), DNS: editedNoteValue(t)}).Checked(lanOf("192.168.100")); !oneLine(c.String()) {
+		if c := (Notes{IP: parsedIP(editedNoteValue(t)), OS: editedNoteValue(t), Base: value.Draw(t, "base"), DNS: editedNoteValue(t)}).Checked(lanOf("192.168.100")); !oneLine(c.String()) {
 			t.Fatalf("Checked notes written %q", c.String())
 		}
-		n := Notes{IP: value.Draw(t, "ip"), OS: value.Draw(t, "os"), Base: value.Draw(t, "base"), DNS: value.Draw(t, "dns")}
+		n := Notes{IP: parsedIP(value.Draw(t, "ip")), OS: value.Draw(t, "os"), Base: value.Draw(t, "base"), DNS: value.Draw(t, "dns")}
 		with := WithNotes(desc, n)
 		if got, ok := ParseNotes(with); !ok || got != n {
 			t.Fatalf("ParseNotes(WithNotes(%q, %+v)) = %+v, %v", desc, n, got, ok)

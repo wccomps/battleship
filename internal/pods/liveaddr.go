@@ -54,12 +54,11 @@ func isHostAddr(a netip.Addr) bool {
 // NAT of LAN .N to WAN /24 .N, which battleship neither configures nor
 // checks, so there is none unless wan is an IPv4 /24 and octet 1 to 254.
 func externalAddr(wan netip.Prefix, octet int) string {
-	if !wan.Addr().Is4() || wan.Bits() != 24 || octet < 1 || octet > 254 {
+	l, ok := config.LANOf(wan)
+	if !ok || octet < 1 || octet > 254 {
 		return ""
 	}
-	b := wan.Addr().As4()
-	b[3] = byte(octet)
-	return netip.AddrFrom4(b).String()
+	return l.Host(octet).String()
 }
 
 // LiveAddrs are a VM's addresses as its guest agent reports them.
@@ -72,9 +71,7 @@ type LiveAddrs struct {
 	Differs bool
 	WAN     string // the router's, on its WAN NIC (net0)
 	// External is a host's address from outside, through the router's NAT
-	// (externalAddr): by its live LAN octet, else its assigned one. It is
-	// "" without the router's WAN address, and for a live LAN address
-	// outside the environment's subnet, which the NAT doesn't map.
+	// (externalAddr): by its live LAN octet, else its assigned one.
 	External string
 }
 
@@ -82,9 +79,8 @@ type LiveAddrs struct {
 type agentAddrs struct{ lan, wan netip.Prefix }
 
 // addrs are e's hosts' addresses, by VMID, from what their agents reported
-// (readAgents); a host missing from read isn't live. lan is the
-// environments' LAN.
-func (e Environment) addrs(read map[int]agentAddrs, lan config.LAN) map[int]LiveAddrs {
+// (readAgents); a host missing from read isn't live.
+func (e Environment) addrs(read map[int]agentAddrs) map[int]LiveAddrs {
 	out := map[int]LiveAddrs{}
 	var wan netip.Prefix
 	for _, h := range e.Hosts {
@@ -94,7 +90,7 @@ func (e Environment) addrs(read map[int]agentAddrs, lan config.LAN) map[int]Live
 			if got.lan.Addr().IsValid() {
 				a.LAN = got.lan.Addr().String()
 			}
-			a.Differs = h.Addr != "" && a.LAN != h.Addr
+			a.Differs = h.Addr.IsValid() && got.lan.Addr() != h.Addr
 			if h.Router && got.wan.Addr().IsValid() {
 				a.WAN = got.wan.Addr().String()
 				if !wan.Addr().IsValid() {
@@ -109,9 +105,9 @@ func (e Environment) addrs(read map[int]agentAddrs, lan config.LAN) map[int]Live
 		if h.Router || !wan.Addr().IsValid() {
 			continue
 		}
-		octet := LastOctet(h.Addr)
+		octet, _ := e.LAN.Octet(h.Addr)
 		if lanAddr := read[h.VMID].lan.Addr(); lanAddr.Is4() {
-			octet, _ = lan.Octet(lanAddr)
+			octet, _ = e.LAN.Octet(lanAddr)
 		}
 		a.External = externalAddr(wan, octet)
 		out[h.VMID] = a
@@ -133,7 +129,7 @@ func (p Planner) LiveAddrs(ctx context.Context, envs []Environment, reads int, t
 	read := p.readAgents(ctx, envs, reads, timeout)
 	out := map[int]LiveAddrs{}
 	for _, e := range envs {
-		maps.Copy(out, e.addrs(read, p.Cfg.Environments.Subnet))
+		maps.Copy(out, e.addrs(read))
 	}
 	return out
 }

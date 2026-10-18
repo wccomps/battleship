@@ -83,7 +83,8 @@ func (p *catalogPage) dnsForm() {
 	choices := e.DNSChoices()
 	for _, c := range choices {
 		card := dnsCard{Value: c, Current: c == cur, Checked: c == chosen}
-		card.Addr, _ = e.DNSAddress(c)
+		addr, _ := e.DNSAddress(c)
+		card.Addr = pods.AddrText(addr)
 		if c == pods.DNSRouter {
 			card.Router = true
 			if r, ok := e.Host(e.RouterName()); ok {

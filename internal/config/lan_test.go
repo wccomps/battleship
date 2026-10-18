@@ -86,3 +86,33 @@ func TestLoadRefusesLeadingZeroSubnet(t *testing.T) {
 		t.Fatalf("default subnet %q", got)
 	}
 }
+
+// The LAN of an address and prefix length is its /24, only for an IPv4
+// address with length 24: its first three octets, 24 bits long, the same
+// for every address on it.
+func TestPropLANOf(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		b := [4]byte(rapid.SliceOfN(rapid.Byte(), 4, 4).Draw(t, "addr"))
+		bits := rapid.IntRange(-1, 33).Draw(t, "bits")
+		lan, ok := LANOf(netip.PrefixFrom(netip.AddrFrom4(b), bits))
+		if ok != (bits == 24) || lan.IsValid() != ok {
+			t.Fatalf("LANOf(%v/%d) = %v, %v", b, bits, lan, ok)
+		}
+		if want := strconv.Itoa(int(b[0])) + "." + strconv.Itoa(int(b[1])) + "." + strconv.Itoa(int(b[2])); ok && (lan.String() != want || lan.Bits() != 24) {
+			t.Fatalf("LANOf(%v/24) = %q /%d, want %q /24", b, lan, lan.Bits(), want)
+		}
+		net := b
+		net[3] = 0
+		if want, _ := LANOf(netip.PrefixFrom(netip.AddrFrom4(net), 24)); ok && lan != want {
+			t.Fatalf("LANOf(%v/24) = %v, not the LAN of its network %v", b, lan, want)
+		}
+		for _, bits := range []int{24, bits + 96} {
+			if _, ok := LANOf(netip.PrefixFrom(netip.AddrFrom16(netip.AddrFrom4(b).As16()), bits)); ok {
+				t.Fatalf("LANOf took %v/%d written as IPv6", b, bits)
+			}
+		}
+	})
+	if (LAN{}).Bits() != -1 {
+		t.Fatal("the zero LAN has a length")
+	}
+}

@@ -606,9 +606,6 @@ func (c Config) validateCatalog() []error {
 	if strings.TrimSpace(c.Environments.SDNZone) == "" {
 		errs = append(errs, errors.New("environments.sdn_zone is required (the SDN zone of the slot bridges)"))
 	}
-	if !c.Environments.Subnet.IsValid() {
-		errs = append(errs, errors.New("environments.subnet must be three octets, e.g. 192.168.100"))
-	}
 	if c.Environments.AgentTimeout < time.Minute {
 		errs = append(errs, errors.New("environments.agent_timeout must be at least 1m (Windows takes minutes to boot after sysprep)"))
 	}

@@ -94,6 +94,7 @@ type envHostRow struct {
 	Notes      string
 	Read       bool
 	pods.LiveAddrs
+	octet int // of Addr on its LAN; 0 without one
 }
 
 // environmentsPage is the Environments page with each host's assigned
@@ -237,7 +238,8 @@ func envBlocks(envs []pods.Environment, bases map[string]pods.BaseImage, addrs m
 			b.DNS = e.DNS()
 		}
 		for _, h := range e.Hosts {
-			row := envHostRow{VMID: h.VMID, Name: h.Name, Router: h.Router, Addr: h.Addr, Running: h.Status == "running",
+			octet, _ := e.LAN.Octet(h.Addr)
+			row := envHostRow{VMID: h.VMID, Name: h.Name, Router: h.Router, Addr: pods.AddrText(h.Addr), octet: octet, Running: h.Status == "running",
 				Status: cmp.Or(h.Status, "unknown"), Image: h.Notes.Base, Details: h.Details, Unreadable: h.Unreadable, Notes: h.UserNotes,
 				Read: addrs != nil, LiveAddrs: addrs[h.VMID]}
 			if base, ok := bases[h.Notes.Base]; ok && h.Details.Empty() && !h.Unreadable && !base.Unreadable {
@@ -263,7 +265,7 @@ func envBlocks(envs []pods.Environment, bases map[string]pods.BaseImage, addrs m
 // hostOrder is by address, the router's .2 first, then hosts without one,
 // by name.
 func hostOrder(a, b envHostRow) int {
-	oa, ob := pods.LastOctet(a.Addr), pods.LastOctet(b.Addr)
+	oa, ob := a.octet, b.octet
 	switch {
 	case (oa == 0) != (ob == 0):
 		if oa == 0 {

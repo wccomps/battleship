@@ -208,8 +208,8 @@ func TestPropGuestAddr(t *testing.T) {
 // kiloAlpha is kilo.alpha in dev-01: a router whose WAN is net0 and LAN
 // net1, and hosts on its LAN.
 func kiloAlpha(hosts ...EnvHost) Environment {
-	e := Environment{Slot: Slots(envConfig().Environments)[0], Domain: "kilo.alpha", Gateway: "192.168.100.2"}
-	e.Hosts = append([]EnvHost{{Name: "gw.kilo.alpha", VMID: 2100, Router: true, Addr: "192.168.100.2", WANMAC: wanMAC, LANMAC: lanMAC}}, hosts...)
+	e := Environment{Slot: Slots(envConfig().Environments)[0], Domain: "kilo.alpha", LAN: kiloLAN}
+	e.Hosts = append([]EnvHost{{Name: "gw.kilo.alpha", VMID: 2100, Router: true, Addr: e.Gateway(), WANMAC: wanMAC, LANMAC: lanMAC}}, hosts...)
 	return e
 }
 
@@ -230,7 +230,7 @@ func readOf(e Environment, nics map[int][]proxmox.GuestNIC) map[int]agentAddrs {
 
 func TestEnvironmentAddrs(t *testing.T) {
 	host := func(vmid int, addr string) EnvHost {
-		return EnvHost{Name: fmt.Sprint(vmid), VMID: vmid, Addr: addr, LANMAC: fmt.Sprintf("bc:24:11:00:00:%02d", vmid%100)}
+		return EnvHost{Name: fmt.Sprint(vmid), VMID: vmid, Addr: parsedIP(addr), LANMAC: fmt.Sprintf("bc:24:11:00:00:%02d", vmid%100)}
 	}
 	answer := func(vmid int, ips ...string) []proxmox.GuestNIC {
 		return []proxmox.GuestNIC{{Name: "lo", MAC: "00:00:00:00:00:00", IPs: podstest.IPs("127.0.0.1/8")},
@@ -250,7 +250,7 @@ func TestEnvironmentAddrs(t *testing.T) {
 		2114: answer(2114, "192.168.100.30/24"),            // none assigned
 		2115: answer(2115, "fe80::9/64", "2001:db8::9/64"), // no IPv4
 	}
-	got := e.addrs(readOf(e, nics), kiloLAN)
+	got := e.addrs(readOf(e, nics))
 	for vmid, want := range map[int]LiveAddrs{
 		2100: {Live: true, LAN: "192.168.100.2", WAN: "10.50.12.133"},
 		2110: {Live: true, LAN: "192.168.100.10", External: "10.50.12.10"},
@@ -267,20 +267,20 @@ func TestEnvironmentAddrs(t *testing.T) {
 
 	// Without the router's WAN address, no host has an external one.
 	delete(nics, 2100)
-	for vmid, a := range e.addrs(readOf(e, nics), kiloLAN) {
+	for vmid, a := range e.addrs(readOf(e, nics)) {
 		if a.External != "" || a.WAN != "" {
 			t.Errorf("%d: %+v without the router's answer", vmid, a)
 		}
 	}
 	// A router reporting no WAN address is live, but gives none.
 	nics[2100] = router[:1]
-	if a := e.addrs(readOf(e, nics), kiloLAN)[2100]; !a.Live || a.WAN != "" || a.LAN != "192.168.100.2" || a.Differs {
+	if a := e.addrs(readOf(e, nics))[2100]; !a.Live || a.WAN != "" || a.LAN != "192.168.100.2" || a.Differs {
 		t.Errorf("router without WAN: %+v", a)
 	}
 	// On a WAN network other than a /24, the router's WAN address shows,
 	// but the NAT gives no host one address, so none has an external one.
 	nics[2100] = []proxmox.GuestNIC{router[0], {MAC: wanMAC, IPs: podstest.IPs("10.50.12.133/16")}}
-	for vmid, a := range e.addrs(readOf(e, nics), kiloLAN) {
+	for vmid, a := range e.addrs(readOf(e, nics)) {
 		if a.External != "" || (vmid == 2100) != (a.WAN == "10.50.12.133") {
 			t.Errorf("%d: %+v with a /16 WAN network", vmid, a)
 		}
@@ -316,7 +316,7 @@ func TestPropEnvironmentAddrs(t *testing.T) {
 			assigned := rapid.IntRange(0, 255).Draw(t, "assigned")
 			h := EnvHost{VMID: vmid, LANMAC: mac}
 			if assigned != 0 {
-				h.Addr = fmt.Sprintf("192.168.100.%d", assigned)
+				h.Addr = kiloLAN.Host(assigned)
 			}
 			e.Hosts = append(e.Hosts, h)
 			octet := assigned
@@ -340,7 +340,7 @@ func TestPropEnvironmentAddrs(t *testing.T) {
 				want[vmid] = fmt.Sprintf("%d.%d.%d.%d", wan[0], wan[1], wan[2], octet)
 			}
 		}
-		got := e.addrs(readOf(e, nics), kiloLAN)
+		got := e.addrs(readOf(e, nics))
 		if got[2100].External != "" {
 			t.Fatalf("the router has external address %q", got[2100].External)
 		}

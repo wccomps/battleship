@@ -17,7 +17,6 @@ const (
 	GatewayOctet   = 2
 	FirstHostOctet = 4
 	LastHostOctet  = 254
-	HostPrefix     = 24
 	// DNSRouter is the DNS choice that points hosts at the router.
 	DNSRouter = "router"
 	// MaxWindowsHostname is the NetBIOS name limit Rename-Computer enforces.
@@ -96,10 +95,10 @@ func (h HostSpec) String() string {
 // Battleship knows about it while it is stopped, and after its base image
 // is gone.
 type Notes struct {
-	IP   string `json:"ip,omitempty"`
-	OS   string `json:"os,omitempty"` // windows or linux: hosts configured through the agent
-	Base string `json:"base,omitempty"`
-	DNS  string `json:"dns,omitempty"` // DNSRouter or a host name
+	IP   netip.Addr `json:"ip,omitzero"`
+	OS   string     `json:"os,omitempty"` // windows or linux: hosts configured through the agent
+	Base string     `json:"base,omitempty"`
+	DNS  string     `json:"dns,omitempty"` // DNSRouter or a host name
 	// Source is the VMID a base image was registered from, for registering
 	// its next version from the same VM.
 	Source string `json:"source,omitempty"`
@@ -119,7 +118,7 @@ func ParseNotes(desc string) (Notes, bool) {
 			k, v, _ := strings.Cut(f, "=")
 			switch k {
 			case "ip":
-				n.IP = v
+				n.IP, _ = netip.ParseAddr(v)
 			case "os":
 				n.OS = v
 			case "base":
@@ -161,10 +160,8 @@ func UserNotes(desc string) string {
 // and IP reaches scripts that run as root or SYSTEM: it must be a host
 // address of lan, or the host is treated as having none.
 func (n Notes) Checked(lan config.LAN) Notes {
-	a, err := netip.ParseAddr(n.IP)
-	o, ok := lan.Octet(a)
-	if err != nil || !ok || o < FirstHostOctet || o > LastHostOctet {
-		n.IP = ""
+	if o, ok := lan.Octet(n.IP); !ok || o < FirstHostOctet || o > LastHostOctet {
+		n.IP = netip.Addr{}
 	}
 	if n.OS != ImageWindows && n.OS != ImageLinux {
 		n.OS = ""
@@ -177,7 +174,7 @@ func (n Notes) Checked(lan config.LAN) Notes {
 
 func (n Notes) String() string {
 	parts := []string{notesPrefix}
-	for _, kv := range [][2]string{{"ip", n.IP}, {"os", n.OS}, {"base", n.Base}, {"dns", n.DNS}, {"source", n.Source}} {
+	for _, kv := range [][2]string{{"ip", AddrText(n.IP)}, {"os", n.OS}, {"base", n.Base}, {"dns", n.DNS}, {"source", n.Source}} {
 		if kv[1] != "" {
 			parts = append(parts, kv[0]+"="+kv[1])
 		}
@@ -217,12 +214,10 @@ func PickOctet(domain, host string, used map[int]bool) (int, bool) {
 	return 0, false
 }
 
-// LastOctet is the last octet of an IPv4 address, or 0.
-func LastOctet(ip string) int {
-	i := strings.LastIndex(ip, ".")
-	if i < 0 {
-		return 0
+// AddrText is a as text, or "" for the zero Addr.
+func AddrText(a netip.Addr) string {
+	if !a.IsValid() {
+		return ""
 	}
-	n, _ := strconv.Atoi(ip[i+1:])
-	return n
+	return a.String()
 }

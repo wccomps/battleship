@@ -3,6 +3,7 @@ package pods
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"slices"
 	"sort"
 	"strconv"
@@ -99,7 +100,7 @@ type EnvHost struct {
 	Details    ImageDetails
 	Unreadable bool
 	// Addr is its address: the gateway for the router, else its notes'.
-	Addr string
+	Addr netip.Addr
 	// LANMAC and WANMAC are its NICs' MACs: a host's LAN NIC is net0; the
 	// router's WAN NIC is net0 and its LAN NIC net1.
 	LANMAC, WANMAC string
@@ -112,9 +113,9 @@ type Environment struct {
 	Domain string    // the domain its VMs share; "" when free or Mixed
 	Hosts  []EnvHost // the VMs in its pool, by name
 	// Users are VMs outside its pool with a NIC on one of its bridges.
-	Users   []string
-	Mixed   bool // its VMs don't all share one domain
-	Gateway string
+	Users []string
+	Mixed bool // its VMs don't all share one domain
+	LAN   config.LAN
 	// HalfDeleted are VMs, in its pool or else its VMIDs, that a failed
 	// destroy left locked as destroyed, without their names. Only tearing it
 	// down acts on them; they aren't Hosts.
@@ -140,6 +141,9 @@ func slotN(envs []Environment, n int) (Environment, error) {
 	return envs[i], nil
 }
 
+// Gateway is its router's address on its LAN.
+func (e Environment) Gateway() netip.Addr { return e.LAN.Host(GatewayOctet) }
+
 func (e Environment) Free() bool {
 	return len(e.Hosts) == 0 && len(e.Users) == 0 && len(e.HalfDeleted) == 0
 }
@@ -159,7 +163,7 @@ func (e Environment) RouterName() string {
 // servesDNS is whether the host is one the guest agent configures (Windows
 // or Linux) with an address: one its environment's DNS can point at.
 func (h EnvHost) servesDNS() bool {
-	return h.Notes.IP != "" && (h.Notes.OS == ImageWindows || h.Notes.OS == ImageLinux)
+	return h.Notes.IP.IsValid() && (h.Notes.OS == ImageWindows || h.Notes.OS == ImageLinux)
 }
 
 // dnsHost is the host a DNS choice other than DNSRouter names, if it can
@@ -174,13 +178,13 @@ func (e Environment) dnsHost(choice string) (EnvHost, bool) {
 
 // DNSAddress is the address its hosts use for DNS choice: the gateway for
 // DNSRouter (or ""), else the address of the host dnsHost accepts.
-func (e Environment) DNSAddress(choice string) (string, error) {
+func (e Environment) DNSAddress(choice string) (netip.Addr, error) {
 	if choice == "" || choice == DNSRouter {
-		return e.Gateway, nil
+		return e.Gateway(), nil
 	}
 	h, ok := e.dnsHost(choice)
 	if !ok {
-		return "", fmt.Errorf("%s isn't a Windows or Linux host of %s with an address; choose router or one of those", choice, e.Domain)
+		return netip.Addr{}, fmt.Errorf("%s isn't a Windows or Linux host of %s with an address; choose router or one of those", choice, e.Domain)
 	}
 	return h.Addr, nil
 }
@@ -212,7 +216,7 @@ func (e Environment) Host(name string) (EnvHost, bool) {
 func (e Environment) UsedOctets() map[int]bool {
 	used := map[int]bool{}
 	for _, h := range e.Hosts {
-		if o := LastOctet(h.Notes.IP); o != 0 {
+		if o, ok := e.LAN.Octet(h.Notes.IP); ok {
 			used[o] = true
 		}
 	}
@@ -248,7 +252,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 	bridgeSlot := map[string]int{}
 	envs := make([]Environment, len(slots))
 	for i, s := range slots {
-		envs[i].Slot, envs[i].Gateway = s, p.Cfg.Environments.Subnet.Host(GatewayOctet).String()
+		envs[i].Slot, envs[i].LAN = s, p.Cfg.Environments.Subnet
 		byPool[s.Pool] = i
 		bridgeSlot[s.IntBridge], bridgeSlot[s.ExtBridge] = i, i
 	}
@@ -302,7 +306,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			h.Unreadable = derr != nil
 			h.LANMAC, _ = NICMAC(cfg["net0"])
 			if h.Router {
-				h.Addr = envs[si].Gateway
+				h.Addr = envs[si].Gateway()
 				h.WANMAC = h.LANMAC
 				h.LANMAC, _ = NICMAC(cfg["net1"])
 			}

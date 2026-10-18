@@ -263,11 +263,7 @@ func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error)
 	if err != nil {
 		return false, err
 	}
-	ip, err := netip.ParseAddr(it.Guest.IP)
-	if err != nil {
-		return false, fmt.Errorf("the address to verify: %w", err)
-	}
-	want := netip.PrefixFrom(ip, it.Guest.Prefix)
+	want := netip.PrefixFrom(it.Guest.IP, it.Guest.Prefix)
 	saw := "nothing"
 	for range verifyTries {
 		nics, nerr := e.api.AgentInterfaces(ctx, it.Node, it.VMID)
