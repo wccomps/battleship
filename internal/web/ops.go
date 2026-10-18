@@ -333,18 +333,15 @@ func Normalize(in jobs.Inputs) jobs.Inputs {
 	return formInputs(in.Kind, form)
 }
 
-// detailsFields are notes as the form fields formInputs reads: the
-// details set, the free text if any, and fieldDetails, which says details
-// were given even when none is set.
+// detailsFields are details as the form fields formInputs reads, for
+// register's "Edit details" post-back, and fieldDetails, which says
+// details were given even when none is set.
 func detailsFields(d *pods.ImageNotes) []field {
 	if d == nil {
 		return nil
 	}
 	fs := []field{{fieldDetails, yes}}
-	if d.Free != nil {
-		fs = []field{{fieldDetails, detailsWithNotes}, {fieldNotes, *d.Free}}
-	}
-	for _, f := range []field{{fieldNotesFrom, d.From}, {fieldOS, d.OS}, {fieldUser, d.User}, {fieldPassword, d.Password}, {fieldBuilt, d.Built},
+	for _, f := range []field{{fieldOS, d.OS}, {fieldUser, d.User}, {fieldPassword, d.Password}, {fieldBuilt, d.Built},
 		{fieldGeneralized, d.Generalized}, {fieldInstalled, d.Installed}, {fieldLicence, d.Licence}} {
 		if f.Value != "" {
 			fs = append(fs, f)

@@ -15,14 +15,14 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// opConfirm submits a previewed plan as a job. It trusts nothing the form says
-// about the plan: it re-plans the posted inputs as the user and submits only if:
+// opConfirm submits a previewed plan as a job. It reads the inputs from the
+// stored preview, not from the form, re-plans them as the user and submits
+// only if:
 //
-//   - the nonce names an unsubmitted preview of this session;
-//   - the posted inputs and fingerprint match that preview's (no edited forms);
+//   - the nonce names an unsubmitted preview of this session and operation;
 //   - the new plan's fingerprint matches, so the cluster hasn't changed; else,
 //     or past previewTTL, the new plan is shown for re-checking;
-//   - the team range or domain was typed, where required.
+//   - the pod range or domain was typed, where required.
 //
 // The job consumes the preview in the transaction that stores it, so a
 // double-clicked confirm makes one job.
@@ -31,19 +31,6 @@ func (s *Server) opConfirm(op operation) http.Handler {
 		ctx := r.Context()
 		u, _ := auth.UserFrom(ctx)
 		form := postedForm(r)
-		in := op.scope(formInputs(op.Kind, form))
-		if err := in.Validate(); err != nil {
-			s.refuseConfirm(w, r, op, "the inputs are invalid: "+err.Error())
-			return
-		}
-		plan, err := jobs.BuildPlan(ctx, s.planner(r.Context()), in)
-		if err != nil {
-			s.errorPage(w, r, http.StatusConflict, "Couldn't check the plan again",
-				"Battleship couldn't plan this again, so nothing was submitted: "+sentence(proxmox.Describe(err)),
-				formQuery(op, in), "Back to "+op.Title)
-			return
-		}
-		allTeams := !op.Kind.Teamless() && s.coversAllTeams(ctx, plan.Teams)
 
 		// A re-shown retry preview still names the job it retries (display only).
 		var retryOf int64
@@ -61,7 +48,7 @@ func (s *Server) opConfirm(op operation) http.Handler {
 			s.logf("web: confirm refused: subject=%q kind=%s: no such preview in this session", u.Subject, op.Kind)
 			s.errorPage(w, r, http.StatusConflict, "Preview it again",
 				"This confirm doesn't match a preview you made in this login (you may have logged in again since), so nothing was submitted. Preview it again, check it, then confirm.",
-				formQuery(op, in), "Back to "+op.Title)
+				op.Path, "Back to "+op.Title)
 			return
 		case err != nil:
 			s.serverError(w, r, "reading a preview", err)
@@ -70,10 +57,23 @@ func (s *Server) opConfirm(op operation) http.Handler {
 			s.alreadySubmitted(w, r, prev.JobID)
 			return
 		}
-		if problem := s.differsFromPreview(prev, op, in, form.Get(fieldFingerprint)); problem != "" {
-			s.refuseConfirm(w, r, op, problem)
+		var in jobs.Inputs
+		if err := json.Unmarshal(prev.Inputs, &in); err != nil {
+			s.refuseConfirm(w, r, op, "the stored preview can't be read")
 			return
 		}
+		if prev.Kind != string(op.Kind) || in.Kind != op.Kind || (op.domain != "" && in.Domain != op.domain) {
+			s.refuseConfirm(w, r, op, fmt.Sprintf("the preview was of a %s, not a %s", prev.Kind, op.Kind))
+			return
+		}
+		plan, err := jobs.BuildPlan(ctx, s.planner(r.Context()), in)
+		if err != nil {
+			s.errorPage(w, r, http.StatusConflict, "Couldn't check the plan again",
+				"Battleship couldn't plan this again, so nothing was submitted: "+sentence(proxmox.Describe(err)),
+				formQuery(op, in), "Back to "+op.Title)
+			return
+		}
+		allTeams := !op.Kind.Teamless() && s.coversAllTeams(ctx, plan.Teams)
 
 		// expired re-shows the plan as a new preview when the preview expired, here
 		// or in the store.
@@ -144,27 +144,6 @@ func (s *Server) opConfirm(op operation) http.Handler {
 		s.setFlash(w, flashSuccess, fmt.Sprintf("Job %d submitted: %s. It starts as soon as a worker is free.", id, summaryOf(op, in, plan)))
 		http.Redirect(w, r, logHref(id), http.StatusSeeOther)
 	})
-}
-
-// differsFromPreview says how a confirm differs from its preview (operation,
-// inputs, fingerprint), or "".
-func (s *Server) differsFromPreview(prev store.Preview, op operation, in jobs.Inputs, fingerprint string) string {
-	if prev.Kind != string(op.Kind) {
-		return fmt.Sprintf("the preview was of a %s, not a %s", prev.Kind, op.Kind)
-	}
-	var was jobs.Inputs
-	if err := json.Unmarshal(prev.Inputs, &was); err != nil {
-		return "the stored preview can't be read"
-	}
-	a, _ := json.Marshal(was) // plain struct: can't fail
-	b, _ := json.Marshal(in)
-	if string(a) != string(b) {
-		return "the inputs differ from the preview's"
-	}
-	if fingerprint != prev.Fingerprint {
-		return "the fingerprint differs from the preview's"
-	}
-	return ""
 }
 
 // refuseConfirm answers a confirm that doesn't match its preview (edited or

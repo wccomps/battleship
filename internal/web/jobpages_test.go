@@ -415,26 +415,9 @@ func TestRetryFailed(t *testing.T) {
 		t.Errorf("retry confirm = %s %v", action, form)
 	}
 
-	// The VM list is bound to the preview: a confirm that changes it is
-	// refused.
-	for _, vms := range []string{"team01-dc,team01-web,team02-dc,team02-web", ""} {
-		f := url.Values{}
-		for k, v := range form {
-			f[k] = v
-		}
-		f.Set("vms", vms)
-		if vms == "" {
-			f.Del("vms")
-		}
-		if rec := h.post(&op, action, f); rec.Code != http.StatusBadRequest {
-			t.Errorf("confirm with vms %q = %d, want 400", vms, rec.Code)
-		}
-	}
-	if n := len(h.jobsInStore()); n != 1 {
-		t.Fatalf("jobs after tampered confirms = %d, want 1", n)
-	}
-
-	// Confirming it is an ordinary confirm, and the job has just those VMs.
+	// The VM list is read from the stored preview: a confirm that changes
+	// the form's vms field still submits just the preview's VMs.
+	form.Set("vms", "team01-dc,team01-web,team02-dc,team02-web")
 	if rec := h.post(&op, action, form); rec.Code != http.StatusSeeOther {
 		t.Fatalf("retry confirm = %d\n%s", rec.Code, rec.Body)
 	}

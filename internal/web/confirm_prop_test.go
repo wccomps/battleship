@@ -15,6 +15,7 @@ import (
 	"github.com/wccomps/battleship/internal/auth/authtest"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
+	"github.com/wccomps/battleship/internal/store"
 )
 
 // confirmPreviews are a valid preview form of each operation.
@@ -56,19 +57,19 @@ func cloneForm(f url.Values) url.Values {
 	return out
 }
 
-// sameConfirm reports whether a confirm of b is the confirm a: the inputs
-// formInputs reads (an environment's domain is its path's), the nonce and
-// fingerprint, and a teardown's typed range or domain.
+// sameConfirm reports whether a confirm of b matches the preview a: the
+// nonce, and a teardown's typed range or domain. Hidden input fields on b
+// are ignored in favour of the stored preview's inputs.
 func sameConfirm(kind pods.Kind, a, b url.Values) bool {
 	op := operationOf(kind)
 	in := op.scope(formInputs(kind, a))
-	return reflect.DeepEqual(in, op.scope(formInputs(kind, b))) && a.Get(fieldNonce) == b.Get(fieldNonce) &&
-		a.Get(fieldFingerprint) == b.Get(fieldFingerprint) &&
+	return a.Get(fieldNonce) == b.Get(fieldNonce) &&
 		(!kind.TypedConfirm() || strings.TrimSpace(b.Get(fieldTyped)) == in.Typed())
 }
 
-// confirmFieldsOf are the fields a confirm of kind reads: formInputs's, the
-// nonce and fingerprint, and a teardown's typed range or domain.
+// confirmFieldsOf are the fields a confirm form of kind carries:
+// inputFields's, the nonce and fingerprint, and a teardown's typed range
+// or domain.
 func confirmFieldsOf(kind pods.Kind) []string {
 	fs := []string{fieldNonce, fieldFingerprint}
 	if kind.TypedConfirm() {
@@ -127,32 +128,33 @@ func (c *confirmTest) preview(kind pods.Kind) (string, url.Values) {
 	return action, form
 }
 
-// settle counts the jobs stored since the last settle, cancelling them so
+// settle returns the jobs stored since the last settle, cancelling them so
 // their VMs aren't busy for the next preview.
-func (c *confirmTest) settle() int {
+func (c *confirmTest) settle() []store.Job {
 	ctx := context.Background()
 	js, err := c.h.st.Jobs(ctx, 10)
 	if err != nil {
 		c.h.t.Fatal(err)
 	}
-	n := 0
+	var out []store.Job
 	for _, j := range js {
 		if j.ID > c.last {
 			if err := c.h.st.RequestCancel(ctx, j.ID, "test"); err != nil {
 				c.h.t.Fatal(err)
 			}
-			n++
+			out = append(out, j)
 		}
 	}
 	if len(js) > 0 {
 		c.last = max(c.last, js[0].ID)
 	}
-	return n
+	return out
 }
 
 // confirm posts form to target as a confirm of the preview (action,
-// previewed) of kind, and checks it made a job exactly when it says what was
-// previewed. It reports whether it made one.
+// previewed) of kind, and checks it made a job with the preview's stored
+// inputs and fingerprint (ignoring hidden input field edits) exactly when
+// the nonce, operation and typed confirmation match.
 func (c *confirmTest) confirm(t interface{ Fatalf(string, ...any) }, kind pods.Kind, action string, previewed url.Values, target string, form url.Values) bool {
 	same := target == action && sameConfirm(kind, previewed, form)
 	rec := c.h.post(&c.lead, target, form)
@@ -161,16 +163,24 @@ func (c *confirmTest) confirm(t interface{ Fatalf(string, ...any) }, kind pods.K
 	}
 	made := c.settle()
 	switch {
-	case same && (made != 1 || rec.Code != http.StatusSeeOther):
-		t.Fatalf("an unchanged confirm (%v) = %d and made %d jobs\n%s", form, rec.Code, made, rec.Body)
-	case !same && made != 0:
-		t.Fatalf("an edited confirm made %d jobs: %v to %s, previewed %v", made, form, target, previewed)
+	case same && (len(made) != 1 || rec.Code != http.StatusSeeOther):
+		t.Fatalf("a matching confirm (%v) = %d and made %d jobs\n%s", form, rec.Code, len(made), rec.Body)
+	case !same && len(made) != 0:
+		t.Fatalf("a mismatched confirm made %d jobs: %v to %s, previewed %v", len(made), form, target, previewed)
 	}
-	return made == 1
+	if same {
+		op := operationOf(kind)
+		want := op.scope(formInputs(kind, previewed))
+		if got := readInputs(made[0]); !reflect.DeepEqual(got, want) || made[0].Fingerprint != previewed.Get(fieldFingerprint) {
+			t.Fatalf("confirm stored %#v (fp %s), want preview's %#v (fp %s)", got, made[0].Fingerprint, want, previewed.Get(fieldFingerprint))
+		}
+	}
+	return len(made) == 1
 }
 
-// Every field a confirm reads, changed, deleted, blanked or repeated, stores
-// a job only if the confirm still says exactly what was previewed.
+// Every field on a confirm form, changed, deleted, blanked or repeated,
+// stores a job with the stored preview's inputs when the nonce and typed
+// confirmation match, and no job otherwise.
 func TestConfirmFieldEdits(t *testing.T) {
 	c := newConfirmTest(t)
 	for _, kind := range c.kinds {
@@ -201,8 +211,9 @@ func TestConfirmFieldEdits(t *testing.T) {
 }
 
 // A confirm edited in any one field, or sent to another operation, stores a
-// job only if it still says exactly what was previewed; either way the
-// untouched confirm then makes exactly one job.
+// job with the stored preview's inputs when the nonce, operation and typed
+// confirmation match; either way the untouched confirm then leaves exactly
+// one job stored.
 func TestPropConfirmMatchesItsPreview(t *testing.T) {
 	c := newConfirmTest(t)
 	rapid.Check(t, func(t *rapid.T) {
@@ -243,7 +254,7 @@ func TestPropConfirmMatchesItsPreview(t *testing.T) {
 		if rec := c.h.post(&c.lead, action, form); rec.Code != http.StatusSeeOther {
 			t.Fatalf("the untouched confirm = %d\n%s", rec.Code, rec.Body)
 		}
-		if n := c.settle(); made && n != 0 || !made && n != 1 {
+		if n := len(c.settle()); made && n != 0 || !made && n != 1 {
 			t.Fatalf("the untouched confirm made %d jobs, after the edited one made %v", n, made)
 		}
 	})

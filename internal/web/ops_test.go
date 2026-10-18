@@ -500,8 +500,8 @@ func TestConfirmOfAPreviewExpiringDuringSubmit(t *testing.T) {
 	h.noJobs("after a preview expired during its submit")
 }
 
-// The confirm's hidden fields only copy the stored preview; any edit is
-// refused.
+// A confirm needs its session's preview nonce on the previewed operation,
+// and ignores edits to the form's hidden input fields.
 func TestConfirmRefusesEditedForms(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -523,11 +523,6 @@ func TestConfirmRefusesEditedForms(t *testing.T) {
 		code int
 		want string
 	}{
-		{"teams widened to every team", edit(func(f url.Values) { f.Set("teams", "1-3") }), http.StatusBadRequest, "Confirm refused"},
-		{"teams widened to 1-32", edit(func(f url.Values) { f.Set("teams", "1-32") }), http.StatusBadRequest, "Confirm refused"},
-		{"hosts dropped", edit(func(f url.Values) { f.Del("hosts") }), http.StatusBadRequest, "Confirm refused"},
-		{"snapshot changed", edit(func(f url.Values) { f.Set("snapshot", "before-scoring") }), http.StatusBadRequest, "Confirm refused"},
-		{"fingerprint changed", edit(func(f url.Values) { f.Set("fingerprint", strings.Repeat("0", 64)) }), http.StatusBadRequest, "Confirm refused"},
 		{"no nonce", edit(func(f url.Values) { f.Del("nonce") }), http.StatusConflict, "Preview it again"},
 		{"made-up nonce", edit(func(f url.Values) { f.Set("nonce", strings.Repeat("A", 43)) }), http.StatusConflict, "Preview it again"},
 	} {
@@ -545,32 +540,47 @@ func TestConfirmRefusesEditedForms(t *testing.T) {
 	if rec := h.post(&op, "/power/confirm", edit(func(f url.Values) { f.Set("action", "stop") })); rec.Code != http.StatusBadRequest {
 		t.Errorf("reset preview sent to power confirm = %d, want 400", rec.Code)
 	}
-	h.noJobs("after edited confirms")
+	h.noJobs("after refused confirms")
 	if !strings.Contains(h.logs.String(), "confirm refused") {
 		t.Errorf("refusals aren't logged:\n%s", h.logs)
 	}
 
-	// The untouched form still works.
-	if rec := h.post(&op, action, form); rec.Code != http.StatusSeeOther {
-		t.Errorf("untouched confirm = %d, want 303", rec.Code)
+	// Editing the hidden input fields on the confirm POST has no effect:
+	// the job runs the stored preview's inputs and fingerprint.
+	tampered := edit(func(f url.Values) {
+		f.Set("teams", "1-32")
+		f.Del("hosts")
+		f.Set("snapshot", "before-scoring")
+		f.Set("fingerprint", strings.Repeat("0", 64))
+	})
+	if rec := h.post(&op, action, tampered); rec.Code != http.StatusSeeOther {
+		t.Fatalf("tampered confirm = %d, want 303", rec.Code)
+	}
+	j := h.jobsInStore()[0]
+	want := jobs.Inputs{Kind: pods.KindReset, Teams: "1", Hosts: []string{"dc"}}
+	if got := readInputs(j); !reflect.DeepEqual(got, want) || j.Fingerprint != form.Get("fingerprint") {
+		t.Errorf("job inputs = %#v (fp %s), want %#v (fp %s)", got, j.Fingerprint, want, form.Get("fingerprint"))
 	}
 }
 
-// Someone who previews power on one team and edits the confirm form to
-// cover every team is refused: the confirm must match its preview.
+// Someone who previews power on one pod and edits the confirm form to cover
+// every pod runs only the previewed pod: confirm reads the stored preview.
 func TestConfirmRefusesEditedTeams(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
 	op := h.login(asOperator)
 	action, form, _ := h.preview(&op, "/power", url.Values{"teams": {"1"}, "action": {"stop"}})
 	form.Set("teams", "1-3")
+	form.Set("action", "start")
 	form.Set("typed", "1-3")
 	rec := h.post(&op, action, form)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("widened confirm = %d, want 400", rec.Code)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("widened confirm = %d, want 303", rec.Code)
 	}
-	contains(t, "widened confirm", rec.Body.String(), "Confirm refused")
-	h.noJobs("after a widened confirm")
+	want := jobs.Inputs{Kind: pods.KindPower, Teams: "1", Action: "stop"}
+	if got := readInputs(h.jobsInStore()[0]); !reflect.DeepEqual(got, want) {
+		t.Errorf("job inputs = %#v, want %#v", got, want)
+	}
 }
 
 func TestOperatorCannotRunWhatTheyLackPrivilegesFor(t *testing.T) {
@@ -738,13 +748,17 @@ func drawFormValues(t *rapid.T) url.Values {
 }
 
 // Inputs read from any form, of any kind, read back the same from the
-// confirm's hidden fields and from the "change" link.
+// preview's hidden fields (except an Edit notes form's free text and
+// opening mark, which only its preview stores) and from the "change" link.
 func TestInputFieldsRoundTrip(t *testing.T) {
 	roundTrip := func(t interface{ Fatalf(string, ...any) }, kind pods.Kind, form url.Values) {
 		in := formInputs(kind, form)
 		hidden := url.Values{}
 		for _, f := range inputFields(in) {
 			hidden.Add(f.Name, f.Value)
+		}
+		if in.Details != nil {
+			in.Details = &pods.ImageNotes{ImageDetails: in.Details.ImageDetails}
 		}
 		if got := formInputs(kind, hidden); !reflect.DeepEqual(got, in) {
 			t.Fatalf("%s: formInputs(inputFields(%#v)) = %#v", kind, in, got)
@@ -797,7 +811,8 @@ func addMasters(h *harness) {
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
-// Every confirm input is bound to the preview: an edit is refused.
+// Every confirm runs the stored preview's inputs, ignoring edits to the
+// form's hidden input fields.
 func TestConfirmRefusesEditedPowerAndDeployForms(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -821,18 +836,22 @@ func TestConfirmRefusesEditedPowerAndDeployForms(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			action, form, _ := h.preview(&lead, tc.path, tc.preview)
-			if tc.path == "/deploy" {
-				form.Set("typed", "1")
-			}
+			op, _ := operationFor(pods.Kind(strings.TrimPrefix(tc.path, "/")))
+			want := op.scope(formInputs(op.Kind, form))
 			tc.mut(form)
 			rec := h.post(&lead, action, form)
-			if rec.Code != http.StatusBadRequest {
-				t.Errorf("confirm = %d, want 400", rec.Code)
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("confirm = %d, want 303", rec.Code)
 			}
-			contains(t, tc.name, rec.Body.String(), "Confirm refused")
+			j := h.jobsInStore()[0]
+			if got := readInputs(j); !reflect.DeepEqual(got, want) {
+				t.Errorf("job inputs = %#v, want %#v", got, want)
+			}
+			if err := h.st.RequestCancel(context.Background(), j.ID, "test"); err != nil {
+				t.Fatal(err)
+			}
 		})
 	}
-	h.noJobs("after edited confirms")
 }
 
 // A user with no Proxmox privileges (a competitor, or anyone else Authentik

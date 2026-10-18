@@ -305,8 +305,8 @@ func TestEditNotesJob(t *testing.T) {
 		`<div class="meta">After</div><div class="notes box">Patched monthly.`+"\n"+`Rebooted after &lt;KB5034439&gt; &amp; checked.</div>`,
 		`<a class="btn first" href="/images/family/win2022" data-panel-link>Back</a>`, "Save notes of win2022-v1</button>")
 	lacks(t, "the review", body, "battleship:", "<KB5034439>")
-	if action != "/images/details/confirm" || fields.Get(fieldPassword) != "Template-Password-2" || fields.Get(fieldDetails) != detailsWithNotes ||
-		fields.Has(fieldInstalled) || fields.Get(fieldNotes) != notes {
+	if action != "/images/details/confirm" || fields.Get(fieldPassword) != "Template-Password-2" || fields.Get(fieldDetails) != yes ||
+		fields.Has(fieldInstalled) || fields.Has(fieldNotes) {
 		t.Fatalf("confirm %s with %v", action, fields)
 	}
 	if rec := h.post(&sess, action, fields); rec.Code != http.StatusSeeOther {
