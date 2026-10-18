@@ -103,7 +103,8 @@ type EnvHost struct {
 	// LANMAC and WANMAC are its NICs' MACs: a host's LAN NIC is net0; the
 	// router's WAN NIC is net0 and its LAN NIC net1.
 	LANMAC, WANMAC string
-	Agent          bool // its config enables the guest agent
+	Agent          bool   // its config enables the guest agent
+	desc           string // its notes, for the plans that write them
 }
 
 // Environment is what a slot holds.
@@ -296,7 +297,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			n, has := ParseNotes(cfg["description"])
 			n = n.Checked(p.Cfg.Environments.Subnet)
 			h := EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node, Status: vm.Status, Tags: vm.Tags,
-				Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has, Addr: n.IP}
+				Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has, Addr: n.IP, desc: cfg["description"]}
 			var derr error
 			h.Details, h.UserNotes, derr = ParseDetails(cfg["description"])
 			h.Unreadable = derr != nil

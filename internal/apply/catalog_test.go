@@ -2,6 +2,7 @@ package apply
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -110,8 +111,7 @@ func TestRegisterKeepsConvertedImageWhenRetireFails(t *testing.T) {
 
 // The details step rewrites only the notes' details block, or with free
 // text the notes less their battleship lines. It refuses details or text
-// that would break them, and notes longer than Proxmox keeps, however the
-// plan came by them.
+// that would break them, however the plan came by them.
 func TestDetailsStepWritesTheBlock(t *testing.T) {
 	const desc = "Patched monthly.\nbattleship: source=150"
 	f := podstest.New("alder")
@@ -120,9 +120,8 @@ func TestDetailsStepWritesTheBlock(t *testing.T) {
 		return &pods.Plan{Kind: pods.KindImageDetails, Items: []pods.Item{{Name: "deb-v1", VMID: 8000, Node: "alder",
 			Steps: []pods.Step{pods.StepDetails}, Details: &pods.ImageNotes{ImageDetails: d, Free: free}}}}
 	}
-	forged, long := "x\nbattleship: ip=10.50.0.9", strings.Repeat("é", pods.MaxFreeNotes)
-	for _, bad := range []*pods.Plan{plan(pods.ImageDetails{OS: "a\nbattleship: ip=10.50.0.1"}, nil), plan(pods.ImageDetails{OS: "Debian 12"}, &forged),
-		plan(pods.ImageDetails{OS: strings.Repeat("x", pods.MaxDetail)}, &long)} {
+	forged := "x\nbattleship: ip=10.50.0.9"
+	for _, bad := range []*pods.Plan{plan(pods.ImageDetails{OS: "a\nbattleship: ip=10.50.0.1"}, nil), plan(pods.ImageDetails{OS: "Debian 12"}, &forged)} {
 		res := catalogExec(f).Run(context.Background(), bad)
 		if len(res.Failed) != 1 || f.VMs[8000].Config["description"] != desc {
 			t.Errorf("bad notes: result %+v, notes %q", res, f.VMs[8000].Config["description"])
@@ -136,5 +135,51 @@ func TestDetailsStepWritesTheBlock(t *testing.T) {
 	res = catalogExec(f).Run(context.Background(), plan(pods.ImageDetails{OS: "Debian 12"}, &free))
 	if want := "**Details**\n- OS: Debian 12\n\nRebooted.\n\nbattleship: source=150"; len(res.Succeeded) != 1 || f.VMs[8000].Config["description"] != want {
 		t.Errorf("result %+v, notes %q, want %q", res, f.VMs[8000].Config["description"], want)
+	}
+}
+
+// Every step that writes a VM's notes holds them, as it runs, to what
+// Proxmox keeps, counted in characters, however the plan came by them:
+// notes of 4100 two-byte characters (8200 bytes) are written, and longer
+// ones fail the item with nothing written.
+func TestNotesAreBoundAtRun(t *testing.T) {
+	fits, long := strings.Repeat("\u00e9", 4100), strings.Repeat("x", 8190)
+	for name, it := range map[string]pods.Item{
+		"label":   {Name: "deb-v1", VMID: 8000, Node: "alder", Tags: "base;linux", Notes: &pods.Notes{Source: "150"}, Steps: []pods.Step{pods.StepLabel}},
+		"details": {Name: "deb-v1", VMID: 8000, Node: "alder", Details: &pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: "Debian 12"}}, Steps: []pods.Step{pods.StepDetails}},
+	} {
+		for desc, ok := range map[string]bool{fits: true, long: false} {
+			f := podstest.New("alder")
+			f.Add(proxmox.VM{VMID: 8000, Name: "deb-v1", Node: "alder", Template: true, Tags: "base;linux"}, map[string]string{"description": desc})
+			res := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindImageDetails, Items: []pods.Item{it}})
+			got := f.VMs[8000].Config["description"]
+			switch {
+			case ok && (len(res.Succeeded) != 1 || got == desc):
+				t.Errorf("%s over %d characters: result %+v, notes unchanged %v", name, len([]rune(desc)), res, got == desc)
+			case !ok && (len(res.Failed) != 1 || got != desc || !strings.Contains(fmt.Sprint(res.Failed["deb-v1"]), "characters; Proxmox keeps at most 8192")):
+				t.Errorf("%s over %d characters: result %+v, notes changed %v", name, len(desc), res, got != desc)
+			}
+		}
+	}
+}
+
+// A register of a VM whose notes are 4100 two-byte characters (8200
+// bytes, under the 8192 characters Proxmox keeps) plans clean and runs,
+// its details written over the notes it copied.
+func TestRegisterKeepsLongNotesProxmoxKeeps(t *testing.T) {
+	desc := strings.Repeat("é", 4100)
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 150, Name: "fresh", Node: "alder", Status: "stopped"}, map[string]string{"description": desc, "agent": "1",
+		"scsi0": "competitions:150/vm-150-disk-0.qcow2"})
+	e := catalogExec(f)
+	plan, err := pods.NewPlanner(f, e.Cfg).ImageRegister(context.Background(), pods.ImageRequest{VMID: 150, Family: "deb", Kind: "linux",
+		Details: &pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: "Debian 12"}}})
+	if err != nil || plan.Items[0].Blocked != "" {
+		t.Fatalf("plan = %+v, %v", plan, err)
+	}
+	res := e.Run(context.Background(), plan)
+	got := f.VMs[plan.Items[0].VMID].Config["description"]
+	if want := "**Details**\n- OS: Debian 12\n\n" + desc + "\nbattleship: source=150"; len(res.Succeeded) != 1 || got != want {
+		t.Errorf("result %+v, notes %.40q (%d bytes)", res, got, len(got))
 	}
 }

@@ -384,6 +384,11 @@ func (e *Executor) applyConfig(ctx context.Context, it *pods.Item, cloudInit boo
 	if err != nil {
 		return false, err
 	}
+	if desc, ok := ch["description"]; ok {
+		if err := pods.CheckDescription(desc); err != nil {
+			return false, fmt.Errorf("the notes %w", err)
+		}
+	}
 	changed := len(ch) > 0
 	if changed {
 		if err := e.call(ctx, func() error { return e.api.SetVMConfig(ctx, it.Node, it.VMID, ch) }); err != nil {

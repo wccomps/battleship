@@ -328,26 +328,21 @@ func (n ImageNotes) check() error {
 	return err
 }
 
-// apply is notes desc with n written into them, or desc and why n is
-// refused (check, notesTooLong).
+// apply is notes desc with n written into them, or desc and why check
+// refuses n.
 func (n ImageNotes) apply(desc string) (string, error) {
 	if err := n.check(); err != nil {
 		return desc, err
 	}
-	var out string
 	if n.Free != nil {
-		out = withFreeNotes(desc, n.ImageDetails, *n.Free)
-	} else {
-		out = withDetails(desc, n.ImageDetails)
+		return withFreeNotes(desc, n.ImageDetails, *n.Free), nil
 	}
-	if len(out) > maxNotesBytes {
-		return desc, notesTooLong(len(out))
-	}
-	return out, nil
+	return withDetails(desc, n.ImageDetails), nil
 }
 
 // Changes is the config change that gives a VM whose config is cur notes
-// n; nil if there is none.
+// n; nil if there is none. Like every description written, it must pass
+// CheckDescription, which the executor checks.
 func (n ImageNotes) Changes(cur map[string]string) (map[string]string, error) {
 	desc, err := n.apply(cur["description"])
 	if err != nil || desc == cur["description"] {
@@ -398,18 +393,59 @@ const (
 	// MaxFreeNotes is the longest free text Edit notes writes, in
 	// characters: as much as pages show (UserNotes).
 	MaxFreeNotes = maxUserNotes
-	// maxNotesBytes bounds a VM's notes. Proxmox refuses a description
-	// over 8 KiB (qemu-server's maxLength 1024 * 8), which it counts in
-	// characters (Perl's length()); a count of bytes is never less, so it
-	// keeps under that whatever the text.
-	maxNotesBytes = 8192
+	// maxDescription is the longest description Proxmox keeps:
+	// qemu-server's maxLength 1024 * 8, which its schema check counts in
+	// characters (Perl's length() of the decoded text).
+	maxDescription = 8 * 1024
 )
 
-// notesTooLong is apply's refusal of notes of this many bytes.
+// notesTooLong is CheckDescription's refusal of notes of this many
+// characters.
 type notesTooLong int
 
 func (n notesTooLong) Error() string {
-	return fmt.Sprintf("would be %d bytes; Proxmox keeps at most %d", int(n), maxNotesBytes)
+	return fmt.Sprintf("would be %d characters; Proxmox keeps at most %d", int(n), maxDescription)
+}
+
+// CheckDescription checks a VM description before it is written: at most
+// maxDescription characters, counted as Proxmox counts them.
+func CheckDescription(desc string) error {
+	if n := utf8.RuneCountInString(desc); n > maxDescription {
+		return notesTooLong(n)
+	}
+	return nil
+}
+
+// notesAfter is notes desc as its steps write them: its notes line
+// (StepLabel), then its details (StepDetails); an error if its details
+// can't be written.
+func (it Item) notesAfter(desc string) (string, error) {
+	for _, s := range it.Steps {
+		switch {
+		case s == StepLabel && it.Notes != nil:
+			desc = WithNotes(desc, *it.Notes)
+		case s == StepDetails && it.Details != nil:
+			var err error
+			if desc, err = it.Details.apply(desc); err != nil {
+				return "", err
+			}
+		}
+	}
+	return desc, nil
+}
+
+// blockLongNotes blocks it, unless it is already, when its steps would
+// write notes over desc that are more than Proxmox keeps
+// (CheckDescription); the error is notesAfter's.
+func (it *Item) blockLongNotes(desc string) error {
+	out, err := it.notesAfter(desc)
+	if err != nil {
+		return err
+	}
+	if err := CheckDescription(out); err != nil && out != desc && it.Blocked == "" {
+		it.Blocked = "the notes of " + it.Name + " " + err.Error()
+	}
+	return nil
 }
 
 // freeSpaces are what CleanFreeNotes turns into plain text: line breaks

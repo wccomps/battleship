@@ -3,6 +3,7 @@ package pods
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -282,10 +283,15 @@ func TestImageSetNotes(t *testing.T) {
 	if want := "**Details**\n- OS: Debian 12\n\nPatched.\nbattleship: source=150"; ch["description"] != want {
 		t.Errorf("without notes, writes %q", ch["description"])
 	}
-	big := strings.Repeat("é", MaxFreeNotes) // 8000 bytes
+	big := strings.Repeat("\u00e9", MaxFreeNotes) // 8000 bytes, but 4000 characters, as Proxmox counts them
 	plan, _ = p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{ImageDetails: winDetails, Free: &big}})
-	if !strings.Contains(plan.Items[0].Blocked, "Proxmox keeps at most 8192") {
-		t.Errorf("notes too big for Proxmox: %+v", plan.Items[0].Blocked)
+	if plan.Items[0].Blocked != "" {
+		t.Errorf("notes Proxmox keeps: blocked %q", plan.Items[0].Blocked)
+	}
+	f.VMs[8001].Config["description"] = "Patched.\n" + strings.Repeat("\u00e9", maxDescription-20) + "\nbattleship: source=150"
+	plan, _ = p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{ImageDetails: winDetails}})
+	if !strings.Contains(plan.Items[0].Blocked, "characters; Proxmox keeps at most 8192") {
+		t.Errorf("notes too long for Proxmox: %+v", plan.Items[0].Blocked)
 	}
 	bad := "x\nbattleship: ip=10.50.0.1"
 	if _, err := p.ImageSetDetails(ctx, ImageRequest{Family: "debian-12", Details: &ImageNotes{ImageDetails: winDetails, Free: &bad}}); err == nil {
@@ -357,17 +363,22 @@ func TestPropImageNotesJSON(t *testing.T) {
 	})
 }
 
-// Every write of notes is held to what Proxmox keeps, so the details step
-// fails rather than send a description Proxmox refuses, whatever planned
-// it: a register's copy of long notes, too.
-func TestApplyRefusesNotesTooLong(t *testing.T) {
-	desc := strings.Repeat("x", maxNotesBytes-10)
-	n := ImageNotes{ImageDetails: ImageDetails{OS: "Debian 12"}}
-	if ch, err := n.Changes(map[string]string{"description": desc}); err == nil || ch != nil || !strings.Contains(err.Error(), "at most 8192") {
-		t.Errorf("Changes = %v, %v", ch, err)
-	}
-	if out, err := n.apply(""); err != nil || len(out) > maxNotesBytes {
-		t.Errorf("Apply = %q, %v", out, err)
+// A description is held to what Proxmox keeps, counted in characters as
+// Proxmox counts them, not bytes.
+func TestCheckDescriptionCountsCharacters(t *testing.T) {
+	for desc, ok := range map[string]bool{
+		strings.Repeat("x", maxDescription):            true,
+		strings.Repeat("x", maxDescription+1):          false,
+		strings.Repeat("\u00e9", maxDescription):       true,
+		strings.Repeat("\U0001F468", maxDescription):   true,
+		strings.Repeat("\u00e9", maxDescription+1):     false,
+		strings.Repeat("\U0001F468", maxDescription+1): false,
+	} {
+		if err := CheckDescription(desc); (err == nil) != ok {
+			t.Errorf("CheckDescription(%d bytes, %d characters) = %v", len(desc), utf8.RuneCountInString(desc), err)
+		} else if err != nil && !strings.Contains(err.Error(), fmt.Sprintf("would be %d characters", maxDescription+1)) {
+			t.Errorf("CheckDescription = %v", err)
+		}
 	}
 }
 

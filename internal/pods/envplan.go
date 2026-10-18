@@ -353,6 +353,13 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 			ip.Steps = append(ip.Steps, StepWaitAgent, StepGuest, StepVerify)
 		}
 		ip.Notes = &notes
+		desc := cfg["description"]
+		if resumed {
+			desc = existing.desc
+		}
+		if err := ip.blockLongNotes(desc); err != nil {
+			return nil, err
+		}
 	}
 	return plan, nil
 }
@@ -413,6 +420,9 @@ func (p Planner) EnvDNS(ctx context.Context, req EnvRequest) (*Plan, error) {
 			if it.Blocked == "" && h.Status != "running" {
 				it.Blocked = h.Name + " is " + h.Status + "; start it first so its DNS can be set"
 			}
+		}
+		if err := it.blockLongNotes(h.desc); err != nil {
+			return nil, err
 		}
 		plan.Items = append(plan.Items, it)
 	}
