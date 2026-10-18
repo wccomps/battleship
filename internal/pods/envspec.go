@@ -3,9 +3,12 @@ package pods
 import (
 	"fmt"
 	"hash/fnv"
+	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/wccomps/battleship/internal/config"
 )
 
 // Every environment's LAN: the router is .2, .3 is the team VPN endpoint,
@@ -156,11 +159,11 @@ func UserNotes(desc string) string {
 
 // Checked drops the values a guest script can't take. Users can edit notes,
 // and IP reaches scripts that run as root or SYSTEM: it must be a host
-// address of subnet, or the host is treated as having none.
-func (n Notes) Checked(subnet string) Notes {
-	rest, ok := strings.CutPrefix(n.IP, subnet+".")
-	o, err := strconv.Atoi(rest)
-	if !ok || err != nil || strconv.Itoa(o) != rest || o < FirstHostOctet || o > LastHostOctet {
+// address of lan, or the host is treated as having none.
+func (n Notes) Checked(lan config.LAN) Notes {
+	a, err := netip.ParseAddr(n.IP)
+	o, ok := lan.Octet(a)
+	if err != nil || !ok || o < FirstHostOctet || o > LastHostOctet {
 		n.IP = ""
 	}
 	if n.OS != ImageWindows && n.OS != ImageLinux {

@@ -248,7 +248,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 	bridgeSlot := map[string]int{}
 	envs := make([]Environment, len(slots))
 	for i, s := range slots {
-		envs[i].Slot, envs[i].Gateway = s, Gateway(p.Cfg.Environments.Subnet)
+		envs[i].Slot, envs[i].Gateway = s, p.Cfg.Environments.Subnet.Host(GatewayOctet).String()
 		byPool[s.Pool] = i
 		bridgeSlot[s.IntBridge], bridgeSlot[s.ExtBridge] = i, i
 	}

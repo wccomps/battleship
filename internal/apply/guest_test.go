@@ -20,7 +20,7 @@ func guestFake(t *testing.T) *podstest.Fake {
 	f := podstest.New("alder")
 	f.Add(proxmox.VM{VMID: 2101, Name: "oak.kilo.alpha", Node: "alder", Status: "running"},
 		map[string]string{"net0": "virtio=BC:24:11:00:21:01,bridge=devint01"})
-	f.SetGuest(2101, podstest.Guest{Up: true, Hostname: "WIN-123", NICs: []proxmox.GuestNIC{{Name: "Ethernet", MAC: "bc:24:11:00:21:01", IPs: []string{"169.254.1.1/16"}}}})
+	f.SetGuest(2101, podstest.Guest{Up: true, Hostname: "WIN-123", NICs: []proxmox.GuestNIC{{Name: "Ethernet", MAC: "bc:24:11:00:21:01", IPs: podstest.IPs("169.254.1.1/16")}}})
 	return f
 }
 
@@ -29,7 +29,7 @@ func applied(f *podstest.Fake, out string) func(int, []string, string) (int, str
 	return func(vmid int, _ []string, _ string) (int, string, string) {
 		g := f.Guests[vmid]
 		g.Hostname = "oak"
-		g.NICs[0].IPs = []string{"192.168.100.20/24"}
+		g.NICs[0].IPs = podstest.IPs("192.168.100.20/24")
 		return 0, out, ""
 	}
 }

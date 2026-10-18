@@ -3,6 +3,7 @@ package podstest
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"slices"
 	"strings"
 
@@ -22,6 +23,20 @@ type Guest struct {
 	// Windows setup's Setup\State key) print an unfinished ImageState
 	// before they print IMAGE_STATE_COMPLETE.
 	SetupPending int
+}
+
+// IPs are GuestNIC.IPs from "address/prefix", or a bare address for one
+// reported without a valid prefix.
+func IPs(s ...string) []netip.Prefix {
+	out := make([]netip.Prefix, len(s))
+	for i, ip := range s {
+		if strings.Contains(ip, "/") {
+			out[i] = netip.MustParsePrefix(ip)
+		} else {
+			out[i] = netip.PrefixFrom(netip.MustParseAddr(ip), -1)
+		}
+	}
+	return out
 }
 
 // Restart is a guest restarting under a command (see Fake.Restarts).

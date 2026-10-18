@@ -107,7 +107,11 @@ func selectOf(t *testing.T, body, name string) string {
 // four empty host rows whose images are grouped by kind, each family's
 // newest usable version. Enter reviews: the first submit button does.
 func TestCreateEnvironmentForm(t *testing.T) {
-	h := newHarness(t, func(c *config.Config) { c.Environments.Subnet = "10.50.7" })
+	lan, err := config.ParseLAN("10.50.7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t, func(c *config.Config) { c.Environments.Subnet = lan })
 	addFormImages(h)
 	addEnv(h, true) // dev-01
 	h.submitJob(jobs.Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.bravo", Router: "gw=gw"}, byLead)

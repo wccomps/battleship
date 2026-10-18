@@ -265,7 +265,7 @@ func TestPropNotesLineRoundTrip(t *testing.T) {
 		if old, ok := ParseNotes(desc); ok && !oneLine(old.String()) {
 			t.Fatalf("ParseNotes(%q) = %+v, written %q", desc, old, old.String())
 		}
-		if c := (Notes{IP: editedNoteValue(t), OS: editedNoteValue(t), Base: value.Draw(t, "base"), DNS: editedNoteValue(t)}).Checked("192.168.100"); !oneLine(c.String()) {
+		if c := (Notes{IP: editedNoteValue(t), OS: editedNoteValue(t), Base: value.Draw(t, "base"), DNS: editedNoteValue(t)}).Checked(lanOf("192.168.100")); !oneLine(c.String()) {
 			t.Fatalf("Checked notes written %q", c.String())
 		}
 		n := Notes{IP: value.Draw(t, "ip"), OS: value.Draw(t, "os"), Base: value.Draw(t, "base"), DNS: value.Draw(t, "dns")}

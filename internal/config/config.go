@@ -8,10 +8,10 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"path"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -125,9 +125,8 @@ type Environments struct {
 	ExtBridge string `toml:"ext_bridge"`
 	SDNZone   string `toml:"sdn_zone"` // the zone of the slot bridges
 	// VMIDBase: slot NN's VMs get VMIDs VMIDBase+NN*100 to +99.
-	VMIDBase int `toml:"vmid_base"`
-	// Subnet is the first three octets of every environment's LAN.
-	Subnet       string        `toml:"subnet"`
+	VMIDBase     int           `toml:"vmid_base"`
+	Subnet       LAN           `toml:"subnet"`
 	AgentTimeout time.Duration `toml:"agent_timeout"`
 }
 
@@ -253,7 +252,7 @@ func Default() Config {
 		Images: Images{Pool: "dev-templates", VMIDRange: "8000-8999", EditBridge: "vmbr0"},
 		Environments: Environments{
 			Slots: "1-10", Pool: "dev-{slot}", IntBridge: "devint{slot}", ExtBridge: "devext{slot}",
-			SDNZone: "devnet", VMIDBase: 2000, Subnet: "192.168.100", AgentTimeout: 15 * time.Minute,
+			SDNZone: "devnet", VMIDBase: 2000, Subnet: LAN{netip.MustParsePrefix("192.168.100.0/24")}, AgentTimeout: 15 * time.Minute,
 		},
 		Concurrency: Concurrency{Workers: 20, ConfigCalls: 5, TemplateBuilds: 4, Deletes: 4},
 		Teardown:    Teardown{ShutdownTimeout: 60 * time.Second},
@@ -607,7 +606,7 @@ func (c Config) validateCatalog() []error {
 	if strings.TrimSpace(c.Environments.SDNZone) == "" {
 		errs = append(errs, errors.New("environments.sdn_zone is required (the SDN zone of the slot bridges)"))
 	}
-	if !subnetRE.MatchString(c.Environments.Subnet) {
+	if !c.Environments.Subnet.IsValid() {
 		errs = append(errs, errors.New("environments.subnet must be three octets, e.g. 192.168.100"))
 	}
 	if c.Environments.AgentTimeout < time.Minute {
@@ -631,8 +630,6 @@ func (c Config) validateCatalog() []error {
 }
 
 func overlapsRange(a, b, x, y int) bool { return a <= y && x <= b }
-
-var subnetRE = regexp.MustCompile(`^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){2}$`)
 
 // httpURL reports whether raw is an http(s) URL with a host and no path;
 // the client adds /api2/json itself.

@@ -34,22 +34,13 @@ type envsView struct {
 	MayLive, LiveRead bool
 }
 
-// FillPath is where the script reads the live addresses (environmentAddrs);
-// LivePath, the page with them.
-func (envsView) FillPath() string { return envAddrsPath }
-func (envsView) LivePath() string { return envsPath + "?" + liveParam + "=1" }
-
 // envAddrsPath serves the Environments page's address cells with live
-// addresses, as pieces for the script to swap in (environmentAddrs).
+// addresses, as pieces for the script to swap in (environmentAddrs);
+// catalog.html names it too.
 const envAddrsPath = envsPath + "/addresses"
 
-// liveParam=1 shows the Environments page with live addresses.
-const liveParam = "live"
-
-// The Environments page's guest agent reads: addrReads at once, each
-// bounded by addrReadTimeout so that an agent that doesn't answer at once
-// goes without its live address rather than holding up the page, and all
-// of them by addrReadsWithin.
+// The Environments page's guest agent reads, bounded so a hung agent
+// doesn't hold up the page.
 const (
 	addrReads       = 4
 	addrReadTimeout = 2 * time.Second
@@ -118,7 +109,7 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 		p.ReadErr = "Couldn't read the cluster: " + sentence(proxmox.Describe(err))
 	} else {
 		var addrs map[int]pods.LiveAddrs
-		if p.MayLive && r.URL.Query().Get(liveParam) == "1" {
+		if p.MayLive && r.URL.Query().Get("live") == "1" {
 			addrs, p.LiveRead = s.liveAddrs(ctx, envs), true
 		}
 		p.Envs = envBlocks(envs, s.hostBases(ctx, envs, vms), addrs)
@@ -198,7 +189,9 @@ func (s *Server) environmentAddrs(w http.ResponseWriter, r *http.Request) {
 // liveAddrs are envs' hosts' live addresses by VMID, read through the
 // user's own credential.
 func (s *Server) liveAddrs(ctx context.Context, envs []pods.Environment) map[int]pods.LiveAddrs {
-	return s.planner(ctx).LiveAddrs(ctx, envs, addrReads, s.addrTimeout, s.addrWithin)
+	ctx, cancel := context.WithTimeout(ctx, s.addrWithin)
+	defer cancel()
+	return s.planner(ctx).LiveAddrs(ctx, envs, addrReads, s.addrTimeout)
 }
 
 // hostBases are, by name, the base images of envs's hosts whose own notes

@@ -23,7 +23,7 @@ const (
 
 func TestGuestAddr(t *testing.T) {
 	nic := func(mac string, ips ...string) proxmox.GuestNIC {
-		return proxmox.GuestNIC{Name: "x", MAC: mac, IPs: ips}
+		return proxmox.GuestNIC{Name: "x", MAC: mac, IPs: podstest.IPs(ips...)}
 	}
 	for _, c := range []struct {
 		name string
@@ -32,20 +32,17 @@ func TestGuestAddr(t *testing.T) {
 		want string // address/prefix, the prefix -1 without a valid one
 	}{
 		{"by MAC, not name", []proxmox.GuestNIC{
-			{Name: "wan", MAC: lanMAC, IPs: []string{"192.168.100.2/24"}},
-			{Name: "lan", MAC: wanMAC, IPs: []string{"10.50.12.133/24"}},
+			{Name: "wan", MAC: lanMAC, IPs: podstest.IPs("192.168.100.2/24")},
+			{Name: "lan", MAC: wanMAC, IPs: podstest.IPs("10.50.12.133/24")},
 		}, wanMAC, "10.50.12.133/24"},
 		{"MAC in any case", []proxmox.GuestNIC{nic(lanMAC, "192.168.100.2/24")}, strings.ToUpper(lanMAC), "192.168.100.2/24"},
 		{"IPv4 over an earlier IPv6", []proxmox.GuestNIC{nic(wanMAC, "2001:db8::5/64", "10.50.12.133/16")}, wanMAC, "10.50.12.133/16"},
 		{"IPv6 when there is no IPv4", []proxmox.GuestNIC{nic(wanMAC, "fe80::1/64", "2001:DB8::5/64")}, wanMAC, "2001:db8::5/64"},
 		{"no link-local, loopback or unspecified", []proxmox.GuestNIC{nic(wanMAC, "169.254.3.4/16", "127.0.0.1/8", "::1/128", "0.0.0.0/0", "fe80::1/64", "224.0.0.1/4", "255.255.255.255/32")}, wanMAC, ""},
-		{"a zone is no host's address", []proxmox.GuestNIC{nic(wanMAC, "2001:db8::5%eth0/64")}, wanMAC, ""},
 		{"IPv4 written as IPv6", []proxmox.GuestNIC{nic(wanMAC, "::ffff:10.50.12.133/120")}, wanMAC, "10.50.12.133/24"},
 		{"IPv4 written as IPv6, prefix too short", []proxmox.GuestNIC{nic(wanMAC, "::ffff:10.50.12.133/64")}, wanMAC, "10.50.12.133/-1"},
+		{"IPv4 written as IPv6, no prefix", []proxmox.GuestNIC{nic(wanMAC, "::ffff:10.50.12.133")}, wanMAC, "10.50.12.133/-1"},
 		{"no prefix", []proxmox.GuestNIC{nic(wanMAC, "10.50.12.133")}, wanMAC, "10.50.12.133/-1"},
-		{"a prefix too long", []proxmox.GuestNIC{nic(wanMAC, "10.50.12.133/33")}, wanMAC, "10.50.12.133/-1"},
-		{"a prefix that isn't a number", []proxmox.GuestNIC{nic(wanMAC, "10.50.12.133/2.4e1")}, wanMAC, "10.50.12.133/-1"},
-		{"not an address", []proxmox.GuestNIC{nic(wanMAC, "<b>10.50.12.133</b>", "10.50.12.133 ", "010.050.012.133/24", "")}, wanMAC, ""},
 		{"no NIC with the MAC", []proxmox.GuestNIC{nic(lanMAC, "192.168.100.2/24")}, wanMAC, ""},
 		{"no MAC to look for", []proxmox.GuestNIC{nic("", "192.168.100.2/24")}, "", ""},
 		{"a later NIC with the MAC", []proxmox.GuestNIC{nic(wanMAC), nic(wanMAC, "10.50.12.133/24")}, wanMAC, "10.50.12.133/24"},
@@ -116,12 +113,11 @@ func TestPropExternalAddr(t *testing.T) {
 	})
 }
 
-// reported is an address as an agent might report it: the text the guest
-// wrote, and, from the rule, what guestAddr reads in it: whether it is a
-// host's own, IPv4, in canonical form, with its prefix length (-1 if none
-// valid).
+// reported is an address as GuestNIC.IPs might hold it and, from the rule,
+// what guestAddr reads in it: whether it is a host's own, IPv4, with its
+// prefix length (-1 if none valid).
 type reported struct {
-	text string
+	ip   netip.Prefix
 	host bool
 	v4   bool
 	want string // address/bits
@@ -136,53 +132,42 @@ var reports = rapid.OneOf(
 		}
 		a := netip.AddrFrom4(b)
 		host := !a.IsLoopback() && !a.IsLinkLocalUnicast() && !a.IsMulticast() && !a.IsUnspecified() && b != [4]byte{255, 255, 255, 255}
-		text, bits := a.String(), -1
-		mapped := rapid.Bool().Draw(t, "as IPv6")
+		as, mapped := a, rapid.Bool().Draw(t, "as IPv6")
 		if mapped {
-			text = "::ffff:" + text
+			as = netip.AddrFrom16(a.As16())
 		}
-		switch p := rapid.IntRange(-2, 140).Draw(t, "prefix"); {
-		case p == -2:
-			text += "/x"
-		case p == -1: // none
-		default:
-			text += "/" + strconv.Itoa(p)
-			if mapped && p >= 96 && p <= 128 {
-				bits = p - 96
-			} else if !mapped && p <= 32 {
-				bits = p
-			}
+		p, bits := rapid.IntRange(-1, 140).Draw(t, "prefix"), -1
+		if mapped && p >= 96 && p <= 128 {
+			bits = p - 96
+		} else if !mapped && p >= 0 && p <= 32 {
+			bits = p
 		}
-		return reported{text: text, host: host, v4: true, want: a.String() + "/" + strconv.Itoa(bits)}
+		return reported{ip: netip.PrefixFrom(as, p), host: host, v4: true, want: a.String() + "/" + strconv.Itoa(bits)}
 	}),
-	// A global IPv6 address, in any case.
+	// A global IPv6 address.
 	rapid.Custom(func(t *rapid.T) reported {
 		b := [16]byte{0x20, 0x01, 0x0d, 0xb8}
 		for i := 4; i < 16; i++ {
 			b[i] = rapid.Byte().Draw(t, "byte")
 		}
 		a := netip.AddrFrom16(b)
-		p := rapid.IntRange(0, 130).Draw(t, "prefix")
+		p := rapid.IntRange(-1, 130).Draw(t, "prefix")
 		bits := p
 		if p > 128 {
 			bits = -1
 		}
-		text := a.String()
-		if rapid.Bool().Draw(t, "upper") {
-			text = strings.ToUpper(text)
-		}
-		return reported{text: text + "/" + strconv.Itoa(p), host: true, want: a.String() + "/" + strconv.Itoa(bits)}
+		return reported{ip: netip.PrefixFrom(a, p), host: true, want: a.String() + "/" + strconv.Itoa(bits)}
 	}),
-	// Addresses that aren't a host's own, and text that isn't an address.
+	// Addresses that aren't a host's own.
 	rapid.Map(rapid.SampledFrom([]string{"127.0.0.1/8", "169.254.1.1/16", "fe80::1/64", "::1/128", "0.0.0.0/0",
-		"2001:db8::5%eth0/64", "224.0.0.1/4", "ff02::1/64", "<script>alert(1)</script>", "10.50.12.133\u202e/24",
-		"10.50.12.133\u200b", "010.050.012.133/24", ""}), func(s string) reported { return reported{text: s} }),
-	rapid.Map(rapid.String(), func(s string) reported { return reported{text: "x" + s} }),
+		"224.0.0.1/4", "ff02::1/64", "255.255.255.255/32", "::ffff:127.0.0.1/104", "::/0"}), func(s string) reported {
+		return reported{ip: netip.MustParsePrefix(s)}
+	}),
 )
 
 // From any agent answer, the address read is that of the first IPv4 host
-// address the NIC with the MAC reports, else of its first IPv6 one, in
-// canonical form with its prefix length.
+// address the NIC with the MAC reports, else of its first IPv6 one, with its
+// prefix length.
 func TestPropGuestAddr(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		macs := rapid.SampledFrom([]string{wanMAC, lanMAC, strings.ToUpper(wanMAC), "", "<b>"})
@@ -199,7 +184,7 @@ func TestPropGuestAddr(t *testing.T) {
 		for _, n := range nics {
 			g := proxmox.GuestNIC{Name: rapid.String().Draw(t, "name"), MAC: n.mac}
 			for _, r := range n.ips {
-				g.IPs = append(g.IPs, r.text)
+				g.IPs = append(g.IPs, r.ip)
 				switch {
 				case mac == "" || strings.ToLower(n.mac) != strings.ToLower(mac) || !r.host:
 				case r.v4:
@@ -236,8 +221,8 @@ func kiloAlpha(hosts ...EnvHost) Environment {
 	return e
 }
 
-// kiloLAN is kilo.alpha's LAN network.
-var kiloLAN = netip.MustParsePrefix("192.168.100.0/24")
+// kiloLAN is kilo.alpha's LAN.
+var kiloLAN = envConfig().Environments.Subnet
 
 // readOf is what e's hosts' agents reported, as readAgents keeps it, from
 // their answers.
@@ -245,7 +230,7 @@ func readOf(e Environment, nics map[int][]proxmox.GuestNIC) map[int]agentAddrs {
 	out := map[int]agentAddrs{}
 	for _, h := range e.Hosts {
 		if n, ok := nics[h.VMID]; ok {
-			out[h.VMID] = agentAddrsOf(h, n)
+			out[h.VMID] = agentAddrs{lan: guestAddr(n, h.LANMAC), wan: guestAddr(n, h.WANMAC)}
 		}
 	}
 	return out
@@ -256,12 +241,12 @@ func TestEnvironmentAddrs(t *testing.T) {
 		return EnvHost{Name: fmt.Sprint(vmid), VMID: vmid, Addr: addr, LANMAC: fmt.Sprintf("bc:24:11:00:00:%02d", vmid%100)}
 	}
 	answer := func(vmid int, ips ...string) []proxmox.GuestNIC {
-		return []proxmox.GuestNIC{{Name: "lo", MAC: "00:00:00:00:00:00", IPs: []string{"127.0.0.1/8"}},
-			{Name: "eth0", MAC: fmt.Sprintf("BC:24:11:00:00:%02d", vmid%100), IPs: ips}}
+		return []proxmox.GuestNIC{{Name: "lo", MAC: "00:00:00:00:00:00", IPs: podstest.IPs("127.0.0.1/8")},
+			{Name: "eth0", MAC: fmt.Sprintf("BC:24:11:00:00:%02d", vmid%100), IPs: podstest.IPs(ips...)}}
 	}
 	router := []proxmox.GuestNIC{
-		{Name: "vtnet1", MAC: lanMAC, IPs: []string{"fe80::2/64", "192.168.100.2/24"}},
-		{Name: "vtnet0", MAC: wanMAC, IPs: []string{"fe80::1/64", "10.50.12.133/24"}},
+		{Name: "vtnet1", MAC: lanMAC, IPs: podstest.IPs("fe80::2/64", "192.168.100.2/24")},
+		{Name: "vtnet0", MAC: wanMAC, IPs: podstest.IPs("fe80::1/64", "10.50.12.133/24")},
 	}
 	e := kiloAlpha(host(2110, "192.168.100.10"), host(2111, "192.168.100.11"), host(2112, "192.168.100.12"),
 		host(2113, "192.168.100.13"), host(2114, ""), host(2115, "192.168.100.15"))
@@ -280,7 +265,7 @@ func TestEnvironmentAddrs(t *testing.T) {
 		2111: {Live: true, LAN: "192.168.100.21", Differs: true, External: "10.50.12.21"},
 		2112: {External: "10.50.12.12"},
 		2113: {Live: true, LAN: "10.50.99.4", Differs: true},
-		2114: {Live: true, LAN: "192.168.100.30", Differs: true, External: "10.50.12.30"},
+		2114: {Live: true, LAN: "192.168.100.30", External: "10.50.12.30"},
 		2115: {Live: true, LAN: "2001:db8::9", Differs: true, External: "10.50.12.15"},
 	} {
 		if got[vmid] != want {
@@ -302,7 +287,7 @@ func TestEnvironmentAddrs(t *testing.T) {
 	}
 	// On a WAN network other than a /24, the router's WAN address shows,
 	// but the NAT gives no host one address, so none has an external one.
-	nics[2100] = []proxmox.GuestNIC{router[0], {MAC: wanMAC, IPs: []string{"10.50.12.133/16"}}}
+	nics[2100] = []proxmox.GuestNIC{router[0], {MAC: wanMAC, IPs: podstest.IPs("10.50.12.133/16")}}
 	for vmid, a := range e.addrs(readOf(e, nics), kiloLAN) {
 		if a.External != "" || (vmid == 2100) != (a.WAN == "10.50.12.133") {
 			t.Errorf("%d: %+v with a /16 WAN network", vmid, a)
@@ -313,7 +298,8 @@ func TestEnvironmentAddrs(t *testing.T) {
 // For any answers from a router and its hosts, a host's external address
 // is the WAN /24's .N, N its live IPv4 address's last octet if it has one
 // on the LAN, else (not live, or live without IPv4) its assigned one; and
-// none without a /24 WAN address or with a live IPv4 one off the LAN.
+// none without a /24 WAN address or with a live IPv4 one off the LAN. A
+// live host's address differs only from an assigned one other than it.
 func TestPropEnvironmentAddrs(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		e := kiloAlpha()
@@ -326,11 +312,12 @@ func TestPropEnvironmentAddrs(t *testing.T) {
 		bits := rapid.IntRange(0, 32).Draw(t, "bits")
 		routerLive := rapid.Bool().Draw(t, "router live")
 		if routerLive {
-			nics[2100] = []proxmox.GuestNIC{{MAC: wanMAC, IPs: []string{fmt.Sprintf("%d.%d.%d.%d/%d", wan[0], wan[1], wan[2], wan[3], bits)}}}
+			nics[2100] = []proxmox.GuestNIC{{MAC: wanMAC, IPs: []netip.Prefix{netip.PrefixFrom(netip.AddrFrom4(wan), bits)}}}
 		}
 		// A host's own: not loopback, link-local, multicast or broadcast.
 		wanHost := routerLive && wan[0] != 127 && !(wan[0] == 169 && wan[1] == 254) && !(wan[0] >= 224 && wan[0] <= 239) && wan != [4]byte{255, 255, 255, 255}
 		want := map[int]string{}
+		differs := map[int]bool{}
 		for i := range rapid.IntRange(0, 6).Draw(t, "hosts") {
 			vmid := 2101 + i
 			mac := fmt.Sprintf("bc:24:11:00:00:%02d", i)
@@ -344,14 +331,18 @@ func TestPropEnvironmentAddrs(t *testing.T) {
 			switch rapid.IntRange(0, 3).Draw(t, "live") {
 			case 0: // not live
 			case 1: // live on the LAN
-				n := rapid.IntRange(1, 254).Draw(t, "lan")
-				nics[vmid] = []proxmox.GuestNIC{{MAC: mac, IPs: []string{fmt.Sprintf("192.168.100.%d/24", n)}}}
+				n := rapid.SampledFrom([]int{assigned, rapid.IntRange(1, 254).Draw(t, "n")}).Draw(t, "lan")
+				n = max(n, 1)
+				differs[vmid] = assigned != 0 && n != assigned
+				nics[vmid] = []proxmox.GuestNIC{{MAC: mac, IPs: podstest.IPs(fmt.Sprintf("192.168.100.%d/24", n))}}
 				octet = n
 			case 2: // live off the LAN
-				nics[vmid] = []proxmox.GuestNIC{{MAC: mac, IPs: []string{fmt.Sprintf("10.50.%d.%d/24", rapid.IntRange(0, 255).Draw(t, "c"), rapid.IntRange(1, 254).Draw(t, "d"))}}}
+				nics[vmid] = []proxmox.GuestNIC{{MAC: mac, IPs: podstest.IPs(fmt.Sprintf("10.50.%d.%d/24", rapid.IntRange(0, 255).Draw(t, "c"), rapid.IntRange(1, 254).Draw(t, "d")))}}
 				octet = 0
+				differs[vmid] = assigned != 0
 			case 3: // live without IPv4
-				nics[vmid] = []proxmox.GuestNIC{{MAC: mac, IPs: []string{"2001:db8::7/64"}}}
+				differs[vmid] = assigned != 0
+				nics[vmid] = []proxmox.GuestNIC{{MAC: mac, IPs: podstest.IPs("2001:db8::7/64")}}
 			}
 			if wanHost && bits == 24 && octet >= 1 && octet <= 254 {
 				want[vmid] = fmt.Sprintf("%d.%d.%d.%d", wan[0], wan[1], wan[2], octet)
@@ -364,6 +355,9 @@ func TestPropEnvironmentAddrs(t *testing.T) {
 		for _, h := range e.Hosts[1:] {
 			if got[h.VMID].External != want[h.VMID] {
 				t.Fatalf("%d: external %q, want %q", h.VMID, got[h.VMID].External, want[h.VMID])
+			}
+			if got[h.VMID].Differs != differs[h.VMID] {
+				t.Fatalf("%d assigned %q: %+v, differs want %v", h.VMID, h.Addr, got[h.VMID], differs[h.VMID])
 			}
 		}
 	})
@@ -389,9 +383,9 @@ func TestEnvironmentsReadsNICs(t *testing.T) {
 	}
 }
 
-// LiveAddrs asks only running VMs with an agent enabled, reads at a time,
-// and leaves out one that doesn't answer in time without waiting for
-// Proxmox's own timeout.
+// LiveAddrs asks only running VMs with an agent enabled and a NIC to look
+// on, reads at a time; one whose agent doesn't answer within the read
+// timeout isn't live, and the rest are.
 func TestLiveAddrs(t *testing.T) {
 	f := podstest.New("alder")
 	var hosts []EnvHost
@@ -399,7 +393,7 @@ func TestLiveAddrs(t *testing.T) {
 		vmid := 2110 + i
 		mac := fmt.Sprintf("bc:24:11:00:00:%02d", i)
 		f.Add(proxmox.VM{VMID: vmid, Name: fmt.Sprint(vmid), Node: "alder", Status: "running"}, nil)
-		f.SetGuest(vmid, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{{MAC: mac, IPs: []string{fmt.Sprintf("192.168.100.%d/24", 10+i)}}}})
+		f.SetGuest(vmid, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{{MAC: mac, IPs: podstest.IPs(fmt.Sprintf("192.168.100.%d/24", 10+i))}}})
 		hosts = append(hosts, EnvHost{VMID: vmid, Node: "alder", Status: "running", Agent: true, LANMAC: mac})
 	}
 	hosts[0].Status = "stopped"
@@ -426,7 +420,7 @@ func TestLiveAddrs(t *testing.T) {
 	}
 	envs := []Environment{{Hosts: hosts[:6]}, {Hosts: hosts[6:]}}
 	start := time.Now()
-	got := NewPlanner(f, envConfig()).LiveAddrs(context.Background(), envs, reads, 100*time.Millisecond, time.Minute)
+	got := NewPlanner(f, envConfig()).LiveAddrs(context.Background(), envs, reads, 100*time.Millisecond)
 	if took := time.Since(start); took > 2*time.Second {
 		t.Errorf("took %v with one agent hung", took)
 	}
@@ -445,18 +439,40 @@ func TestLiveAddrs(t *testing.T) {
 		t.Errorf("2120: %+v", got[2120])
 	}
 
-	// All the reads are bounded together too.
+	// All the reads are bounded together by ctx.
 	start = time.Now()
 	f.Gate = func(ctx context.Context, key string) (func(), error) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	for vmid, a := range NewPlanner(f, envConfig()).LiveAddrs(context.Background(), envs, reads, time.Minute, 100*time.Millisecond) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	for vmid, a := range NewPlanner(f, envConfig()).LiveAddrs(ctx, envs, reads, time.Minute) {
 		if a.Live {
 			t.Errorf("%d live from a hung agent", vmid)
 		}
 	}
 	if took := time.Since(start); took > 2*time.Second {
 		t.Errorf("took %v with every agent hung", took)
+	}
+}
+
+// Fewer than one read at a time is one.
+func TestLiveAddrsReadsAtLeastOne(t *testing.T) {
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 2110, Name: "2110", Node: "alder", Status: "running"}, nil)
+	f.SetGuest(2110, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{{MAC: lanMAC, IPs: podstest.IPs("192.168.100.10/24")}}})
+	envs := []Environment{{Hosts: []EnvHost{{VMID: 2110, Node: "alder", Status: "running", Agent: true, LANMAC: lanMAC}}}}
+	for _, reads := range []int{0, -1} {
+		done := make(chan map[int]LiveAddrs, 1)
+		go func() { done <- NewPlanner(f, envConfig()).LiveAddrs(context.Background(), envs, reads, time.Second) }()
+		select {
+		case got := <-done:
+			if got[2110].LAN != "192.168.100.10" {
+				t.Errorf("%d reads at a time: %+v", reads, got[2110])
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%d reads at a time never finished", reads)
+		}
 	}
 }

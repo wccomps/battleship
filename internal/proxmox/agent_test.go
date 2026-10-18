@@ -4,7 +4,10 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/netip"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -47,8 +50,8 @@ func TestAgentInterfacesAndHostname(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []GuestNIC{{Name: "lo", MAC: "00:00:00:00:00:00", IPs: []string{"127.0.0.1/8"}},
-		{Name: "ens18", MAC: "bc:24:11:00:00:01", IPs: []string{"192.168.100.10/24"}}}
+	want := []GuestNIC{{Name: "lo", MAC: "00:00:00:00:00:00", IPs: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/8")}},
+		{Name: "ens18", MAC: "bc:24:11:00:00:01", IPs: []netip.Prefix{netip.MustParsePrefix("192.168.100.10/24")}}}
 	if !reflect.DeepEqual(nics, want) {
 		t.Errorf("nics = %+v", nics)
 	}
@@ -58,20 +61,68 @@ func TestAgentInterfacesAndHostname(t *testing.T) {
 	}
 }
 
-// nicsAnswer is an answer to AgentInterfaces of exactly n bytes, its NIC's
-// name n-nicsAnswerMin bytes long.
-func nicsAnswer(n int) string { return nicsHead + strings.Repeat("x", n-nicsAnswerMin) + nicsTail }
+// agentCall is an Agent call with its cap, and an answer to it of n bytes
+// (at least min) that it reads whole if it fits.
+type agentCall struct {
+	name, route string
+	limit       int
+	head, tail  string // the answer around its padding
+	call        func(*Client) error
+}
 
-const (
-	nicsHead      = `{"data":{"result":[{"name":"`
-	nicsTail      = `","hardware-address":"BC:24:11:00:00:01","ip-addresses":[{"ip-address":"192.168.100.10","prefix":24}]}]}}`
-	nicsAnswerMin = len(nicsHead) + len(nicsTail)
-)
+func (a agentCall) min() int            { return len(a.head) + len(a.tail) }
+func (a agentCall) answer(n int) string { return a.head + strings.Repeat("x", n-a.min()) + a.tail }
 
-// An answer to AgentInterfaces, which the guest writes, is read only up to
-// maxNICsAnswer bytes: one that fits is read whole, a longer one refused.
-// Other calls still read longer answers.
-func TestPropAgentInterfacesCapped(t *testing.T) {
+var agentCalls = []agentCall{
+	{"AgentPing", "POST /nodes/cedar/qemu/2501/agent/ping", maxSmallAnswer, `{"data":{"result":{},"x":"`, `"}}`,
+		func(c *Client) error { return c.AgentPing(context.Background(), "cedar", 2501) }},
+	{"AgentExec", "POST /nodes/cedar/qemu/2501/agent/exec", maxSmallAnswer, `{"data":{"pid":7,"x":"`, `"}}`,
+		func(c *Client) error {
+			_, err := c.AgentExec(context.Background(), "cedar", 2501, []string{"true"}, "")
+			return err
+		}},
+	{"AgentExecStatus", "GET /nodes/cedar/qemu/2501/agent/exec-status", maxExecAnswer, `{"data":{"exited":1,"exitcode":0,"out-data":"`, `"}}`,
+		func(c *Client) error { _, err := c.AgentExecStatus(context.Background(), "cedar", 2501, 7); return err }},
+	{"AgentHostname", "GET /nodes/cedar/qemu/2501/agent/get-host-name", maxSmallAnswer, `{"data":{"result":{"host-name":"`, `"}}}`,
+		func(c *Client) error { _, err := c.AgentHostname(context.Background(), "cedar", 2501); return err }},
+	{"AgentInterfaces", "GET /nodes/cedar/qemu/2501/agent/network-get-interfaces", maxNICsAnswer, nicsHead, nicsTail,
+		func(c *Client) error { _, err := c.AgentInterfaces(context.Background(), "cedar", 2501); return err }},
+}
+
+// Every answer to an Agent call, which the guest writes, is read only up to
+// that call's cap: one that fits is read, a longer one refused.
+func TestPropAgentAnswersCapped(t *testing.T) {
+	f, c := newFake(t)
+	var mu sync.Mutex
+	answer := ""
+	serve := func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		_, _ = io.WriteString(w, answer)
+	}
+	for _, a := range agentCalls {
+		f.routes[a.route] = serve
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		a := rapid.SampledFrom(agentCalls).Draw(t, "call")
+		n := rapid.OneOf(rapid.IntRange(a.limit-64, a.limit+64), rapid.IntRange(a.min(), 4*a.limit)).Draw(t, "bytes")
+		mu.Lock()
+		answer = a.answer(n)
+		mu.Unlock()
+		err := a.call(c)
+		if fits := n <= a.limit; fits != (err == nil) {
+			t.Fatalf("%s, an answer of %d bytes: %v", a.name, n, err)
+		}
+		if err != nil && !strings.Contains(err.Error(), "answer over "+strconv.Itoa(a.limit)+" bytes") {
+			t.Fatalf("%s, an answer of %d bytes: %v", a.name, n, err)
+		}
+	})
+}
+
+// What the agent writes for an address reads back as that address, with
+// the prefix length it wrote if that is a whole number the address can
+// have, else -1. An address that doesn't parse, or has a zone, is left out.
+func TestPropAgentInterfacesAddrs(t *testing.T) {
 	f, c := newFake(t)
 	var mu sync.Mutex
 	answer := ""
@@ -81,23 +132,75 @@ func TestPropAgentInterfacesCapped(t *testing.T) {
 		_, _ = io.WriteString(w, answer)
 	}
 	rapid.Check(t, func(t *rapid.T) {
-		n := rapid.OneOf(rapid.IntRange(maxNICsAnswer-64, maxNICsAnswer+64), rapid.IntRange(nicsAnswerMin, 4*maxNICsAnswer)).Draw(t, "bytes")
+		type wrote struct {
+			addr, prefix string // as written; prefix "" for none
+			want         netip.Prefix
+			kept         bool
+		}
+		ips := rapid.SliceOfN(rapid.Custom(func(t *rapid.T) wrote {
+			var a netip.Addr
+			switch rapid.IntRange(0, 2).Draw(t, "family") {
+			case 0:
+				a = netip.AddrFrom4([4]byte(rapid.SliceOfN(rapid.Byte(), 4, 4).Draw(t, "v4")))
+			case 1:
+				a = netip.AddrFrom16([16]byte(rapid.SliceOfN(rapid.Byte(), 16, 16).Draw(t, "v6")))
+			default:
+				a = netip.AddrFrom16(netip.AddrFrom4([4]byte(rapid.SliceOfN(rapid.Byte(), 4, 4).Draw(t, "v4 in v6"))).As16())
+			}
+			text := a.String()
+			if rapid.Bool().Draw(t, "upper") {
+				text = strings.ToUpper(text)
+			}
+			w := wrote{addr: text, kept: true}
+			bits := -1
+			switch rapid.IntRange(0, 3).Draw(t, "prefix") {
+			case 0: // none
+			case 1:
+				p := rapid.IntRange(-200, 200).Draw(t, "bits")
+				w.prefix = strconv.Itoa(p)
+				if p >= 0 && p <= a.BitLen() {
+					bits = p
+				}
+			case 2:
+				w.prefix = rapid.SampledFrom([]string{"24.0", "2.4e1", "1e400", "99999999999999999999", `"24"`, "null"}).Draw(t, "odd")
+				if w.prefix == `"24"` && a.BitLen() >= 24 {
+					bits = 24
+				}
+			default:
+				w.addr = rapid.SampledFrom([]string{"", "x", text + "%eth0", text + " ", "<b>" + text + "</b>", text + "\u200b", "010.050.012.133"}).Draw(t, "unread")
+				w.kept = false
+			}
+			w.want = netip.PrefixFrom(a, bits)
+			return w
+		}), 0, 8).Draw(t, "ips")
+		var parts []string
+		var want []netip.Prefix
+		for _, ip := range ips {
+			part := `{"ip-address":"` + ip.addr + `"`
+			if ip.prefix != "" {
+				part += `,"prefix":` + ip.prefix
+			}
+			parts = append(parts, part+"}")
+			if ip.kept {
+				want = append(want, ip.want)
+			}
+		}
 		mu.Lock()
-		answer = nicsAnswer(n)
+		answer = `{"data":{"result":[{"name":"eth0","hardware-address":"BC:24:11:00:00:01","ip-addresses":[` + strings.Join(parts, ",") + `]}]}}`
 		mu.Unlock()
 		nics, err := c.AgentInterfaces(context.Background(), "cedar", 2501)
-		if fits := n <= maxNICsAnswer; fits != (err == nil) {
-			t.Fatalf("an answer of %d bytes: %v", n, err)
+		if err != nil || len(nics) != 1 {
+			t.Fatalf("%d NICs, %v", len(nics), err)
 		}
-		if err == nil && (len(nics) != 1 || len(nics[0].Name) != n-nicsAnswerMin || nics[0].IPs[0] != "192.168.100.10/24") {
-			t.Fatalf("an answer of %d bytes read as %d NICs", n, len(nics))
-		}
-		if err != nil && !strings.Contains(err.Error(), "answer over 1048576 bytes") {
-			t.Fatalf("an answer of %d bytes: %v", n, err)
+		if !slices.Equal(nics[0].IPs, want) {
+			t.Fatalf("addresses %v, want %v", nics[0].IPs, want)
 		}
 	})
-	f.routes["GET /nodes/cedar/qemu/2501/agent/get-host-name"] = jsonData(`{"result":{"host-name":"` + strings.Repeat("x", 2*maxNICsAnswer) + `"}}`)
-	if h, err := c.AgentHostname(context.Background(), "cedar", 2501); err != nil || len(h) != 2*maxNICsAnswer {
-		t.Errorf("a %d-byte host name: %d bytes, %v", 2*maxNICsAnswer, len(h), err)
-	}
 }
+
+// nicsHead and nicsTail are an answer to AgentInterfaces around its NIC's
+// name.
+const (
+	nicsHead = `{"data":{"result":[{"name":"`
+	nicsTail = `","hardware-address":"BC:24:11:00:00:01","ip-addresses":[{"ip-address":"192.168.100.10","prefix":24}]}]}}`
+)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -27,9 +26,6 @@ type EnvRequest struct {
 func (p Planner) envPlanIn(kind Kind, slot Slot, domain string) *Plan {
 	return &Plan{Kind: kind, Config: ConfigHash(kind, p.Cfg), Slot: slot.Name, Locks: []string{slotLock(slot.Name), "domain:" + domain}}
 }
-
-// Gateway is the router's address on subnet, every environment's LAN.
-func Gateway(subnet string) string { return subnet + "." + strconv.Itoa(GatewayOctet) }
 
 // EnvCreate plans a new environment in req.Slot, or else the lowest free
 // slot. A chosen slot must be free, or hold req.Domain already: a create
@@ -343,7 +339,7 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 				}
 				octet, used[o] = o, true
 			}
-			addr := p.Cfg.Environments.Subnet + "." + strconv.Itoa(octet)
+			addr := p.Cfg.Environments.Subnet.Host(octet).String()
 			notes.IP, notes.OS = addr, im.Kind
 			ip.Guest = &Guest{OS: im.Kind, Hostname: h.Host, Domain: env.Domain, IP: addr, Prefix: HostPrefix, Gateway: env.Gateway, DNS: dnsAddr}
 			if err := ip.Guest.Check(); err != nil {

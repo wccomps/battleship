@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"slices"
 	"strings"
 	"time"
@@ -236,6 +237,19 @@ func lastLines(s string, n int) string {
 	return strings.Join(lines[len(lines)-n:], " / ")
 }
 
+// addrList is ips, each written "address/prefix", or as its bare address
+// without a valid prefix.
+func addrList(ips []netip.Prefix) string {
+	s := make([]string, len(ips))
+	for i, p := range ips {
+		s[i] = p.Addr().String()
+		if p.IsValid() {
+			s[i] = p.String()
+		}
+	}
+	return strings.Join(s, ", ")
+}
+
 // verifyGuest checks, through the agent, that an interface with net0's MAC
 // has the address and the guest the host name.
 func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error) {
@@ -243,7 +257,11 @@ func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error)
 	if err != nil {
 		return false, err
 	}
-	want := it.Guest.IP + "/" + fmt.Sprint(it.Guest.Prefix)
+	ip, err := netip.ParseAddr(it.Guest.IP)
+	if err != nil {
+		return false, fmt.Errorf("the address to verify: %w", err)
+	}
+	want := netip.PrefixFrom(ip, it.Guest.Prefix)
 	saw := "nothing"
 	for range verifyTries {
 		nics, nerr := e.api.AgentInterfaces(ctx, it.Node, it.VMID)
@@ -254,7 +272,7 @@ func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error)
 		if nerr == nil && herr == nil {
 			// A VLAN subinterface (eth0.10) shares its parent's MAC; any
 			// interface with net0's MAC may hold the address.
-			var ips []string
+			var ips []netip.Prefix
 			for _, n := range nics {
 				if strings.EqualFold(n.MAC, mac) {
 					ips = append(ips, n.IPs...)
@@ -264,7 +282,7 @@ func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error)
 			if slices.Contains(ips, want) && strings.EqualFold(short, it.Guest.Hostname) {
 				return false, nil
 			}
-			saw = fmt.Sprintf("host name %q with %s", host, strings.Join(ips, ", "))
+			saw = fmt.Sprintf("host name %q with %s", host, addrList(ips))
 		} else {
 			if ctx.Err() != nil {
 				return false, ctx.Err()

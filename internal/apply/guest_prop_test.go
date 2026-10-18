@@ -2,6 +2,7 @@ package apply
 
 import (
 	"context"
+	"net/netip"
 	"slices"
 	"strings"
 	"testing"
@@ -63,13 +64,13 @@ func TestPropLastLines(t *testing.T) {
 // The guest agent's answer for verification: its interfaces and host name.
 type verifyNIC struct {
 	mac string
-	ips []string
+	ips []netip.Prefix
 }
 
 // verifyModel is whether verification should pass: some interface with
 // net0's MAC, ignoring case, has the address and prefix, and the host
 // name's first label is the host, ignoring case.
-func verifyModel(nics []verifyNIC, hostname, mac, ip, host string) bool {
+func verifyModel(nics []verifyNIC, hostname, mac string, ip netip.Prefix, host string) bool {
 	onNet0 := slices.ContainsFunc(nics, func(n verifyNIC) bool {
 		return strings.ToLower(n.mac) == strings.ToLower(mac) && slices.Contains(n.ips, ip)
 	})
@@ -86,10 +87,10 @@ func TestPropVerifyGuest(t *testing.T) {
 	const mac = "bc:24:11:00:21:01"
 	hostnames := []string{"oak", "OAK", "Oak.kilo.alpha", "oak.", "oak.x.y", "oakx", "oa", "", ".oak", "WIN-123", "xoak", "oak-1.kilo", "oak kilo", "oak\n"}
 	macs := []string{mac, mac, mac, "bc:24:11:00:21:02", "bc:24:11:00:21:00", "bc-24-11-00-21-01", "", "BC:24:11:00:21:01"}
-	ips := []string{"192.168.100.20/24", "192.168.100.20/24", "192.168.100.20/25", "192.168.100.20/240", "192.168.100.200/24", "192.168.100.2/24",
-		"192.168.100.21/24", "192.168.100.20", "192.168.100.20/", "92.168.100.20/24", "fe80::1/64", "169.254.1.1/16", " 192.168.100.20/24"}
+	ips := podstest.IPs("192.168.100.20/24", "192.168.100.20/24", "192.168.100.20/25", "192.168.100.20", "192.168.100.200/24", "192.168.100.2/24",
+		"192.168.100.21/24", "92.168.100.20/24", "fe80::1/64", "169.254.1.1/16", "::ffff:192.168.100.20/120", "192.168.100.0/24")
 	check := func(t interface{ Fatalf(string, ...any) }, nics []verifyNIC, hostname string) {
-		want := verifyModel(nics, hostname, mac, "192.168.100.20/24", "oak")
+		want := verifyModel(nics, hostname, mac, netip.MustParsePrefix("192.168.100.20/24"), "oak")
 
 		f := podstest.New("alder")
 		f.Add(proxmox.VM{VMID: 2101, Name: "oak.kilo.alpha", Node: "alder", Status: "running"},
@@ -106,18 +107,18 @@ func TestPropVerifyGuest(t *testing.T) {
 			t.Fatalf("verify of hostname %q with %+v: passed = %v, want %v (result %+v)", hostname, nics, got, want, res)
 		}
 	}
-	ok, other := "192.168.100.20/24", "192.168.100.21/24"
+	ok, other := netip.MustParsePrefix("192.168.100.20/24"), netip.MustParsePrefix("192.168.100.21/24")
 	upper := strings.ToUpper(mac)
 	for _, tc := range []struct {
 		name string
 		nics []verifyNIC
 		want bool
 	}{
-		{"VLAN subinterface after eth0", []verifyNIC{{mac, []string{ok}}, {mac, []string{"10.0.10.5/24"}}}, true},
-		{"address only on the VLAN subinterface", []verifyNIC{{mac, []string{other}}, {mac, []string{ok}}}, true},
-		{"MAC in upper case", []verifyNIC{{upper, []string{ok}}}, true},
-		{"MAC case differs between eth0 and its VLAN", []verifyNIC{{upper, nil}, {mac, []string{ok}}}, true},
-		{"MAC absent", []verifyNIC{{"bc:24:11:00:21:02", []string{ok}}}, false},
+		{"VLAN subinterface after eth0", []verifyNIC{{mac, []netip.Prefix{ok}}, {mac, podstest.IPs("10.50.10.5/24")}}, true},
+		{"address only on the VLAN subinterface", []verifyNIC{{mac, []netip.Prefix{other}}, {mac, []netip.Prefix{ok}}}, true},
+		{"MAC in upper case", []verifyNIC{{upper, []netip.Prefix{ok}}}, true},
+		{"MAC case differs between eth0 and its VLAN", []verifyNIC{{upper, nil}, {mac, []netip.Prefix{ok}}}, true},
+		{"MAC absent", []verifyNIC{{"bc:24:11:00:21:02", []netip.Prefix{ok}}}, false},
 	} {
 		if got := verifyModel(tc.nics, "oak", mac, ok, "oak"); got != tc.want {
 			t.Fatalf("%s: model says %v", tc.name, got)
@@ -126,8 +127,8 @@ func TestPropVerifyGuest(t *testing.T) {
 	}
 	// Two interfaces with net0's MAC, and other interfaces' addresses.
 	for _, nics := range [][]verifyNIC{
-		{{mac, []string{ok}}, {mac, nil}}, {{mac, nil}, {mac, []string{ok}}}, {{mac, []string{other}}, {mac, []string{ok}}}, {{mac, []string{ok}}, {mac, []string{other}}},
-		{{"bc:24:11:00:21:02", []string{ok}}, {mac, []string{other}}}, {{mac, []string{other}}, {"bc:24:11:00:21:02", []string{ok}}}, {{mac, []string{ok}}},
+		{{mac, []netip.Prefix{ok}}, {mac, nil}}, {{mac, nil}, {mac, []netip.Prefix{ok}}}, {{mac, []netip.Prefix{other}}, {mac, []netip.Prefix{ok}}}, {{mac, []netip.Prefix{ok}}, {mac, []netip.Prefix{other}}},
+		{{"bc:24:11:00:21:02", []netip.Prefix{ok}}, {mac, []netip.Prefix{other}}}, {{mac, []netip.Prefix{other}}, {"bc:24:11:00:21:02", []netip.Prefix{ok}}}, {{mac, []netip.Prefix{ok}}},
 	} {
 		for _, h := range []string{"oak", "OAK.kilo", "oakx"} {
 			check(t, nics, h)

@@ -33,9 +33,7 @@ type Client struct {
 	anon bool // the call needs no credential (logins and renewals)
 	// refused is called on each 401; see WhenRefused.
 	refused func()
-	// limit, if set, is the most bytes of an answer a call reads (capped);
-	// else maxAnswer.
-	limit int64
+	limit   int64 // 0 means maxAnswer (capped)
 }
 
 // conn is what every view of a client shares.
@@ -93,6 +91,15 @@ type Options struct {
 // maxAnswer is the most bytes of an answer a call reads, unless capped.
 const maxAnswer = 32 << 20
 
+// maxHeader is the most bytes of an answer's header a call reads; Proxmox
+// sends well under 1 KiB.
+const maxHeader = 64 << 10
+
+// maxMessage is the most of the status line an APIError keeps. Proxmox puts
+// its error text there, which a guest agent's error can fill, and a
+// command's failure can run to several hundred bytes with its arguments.
+const maxMessage = 4 << 10
+
 // requestTimeout bounds each request.
 const requestTimeout = 60 * time.Second
 
@@ -102,6 +109,7 @@ func New(o Options) *Client {
 	// (proxmox.ca_file); config refuses ca_file with insecure_skip_verify.
 	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: o.InsecureSkipVerify, RootCAs: o.RootCAs} //nolint:gosec // see above
 	tr.MaxIdleConnsPerHost = 32                                                                    // the executor runs many calls in parallel
+	tr.MaxResponseHeaderBytes = maxHeader
 	c := &Client{conn: &conn{http: &http.Client{Transport: tr, Timeout: requestTimeout}}}
 	for _, raw := range o.URLs {
 		raw = strings.TrimRight(raw, "/")
@@ -160,7 +168,6 @@ func (c *Client) doAt(ctx context.Context, cred Credential, base, method, path s
 		return true, err
 	}
 	over := int64(len(raw)) > limit
-	raw = raw[:min(int64(len(raw)), limit)]
 	var envelope struct {
 		Data   json.RawMessage   `json:"data"`
 		Errors map[string]string `json:"errors"`
@@ -168,16 +175,13 @@ func (c *Client) doAt(ctx context.Context, cred Credential, base, method, path s
 	unmarshalErr := json.Unmarshal(raw, &envelope)
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		// Proxmox puts the error text in the status line.
-		msg := strings.TrimSpace(strings.TrimPrefix(resp.Status, strconv.Itoa(resp.StatusCode)))
+		msg := cut(strings.TrimSpace(strings.TrimPrefix(resp.Status, strconv.Itoa(resp.StatusCode))), maxMessage)
 		// Go's net/http server (httptest, or a proxy written in Go) writes
 		// "status code NNN" for codes it has no text for; treat as empty.
 		if msg == "" || msg == "status code "+strconv.Itoa(resp.StatusCode) {
 			// Show a non-Proxmox body (a proxy's error page) on one line, cut.
 			if unmarshalErr != nil {
-				msg = strings.Join(strings.Fields(string(raw)), " ")
-				if len(msg) > 200 {
-					msg = strings.ToValidUTF8(msg[:200], "")
-				}
+				msg = cut(strings.Join(strings.Fields(string(raw)), " "), 200)
 			}
 			if msg == "" {
 				msg = http.StatusText(resp.StatusCode)
@@ -202,6 +206,14 @@ func (c *Client) doAt(ctx context.Context, cred Credential, base, method, path s
 	dec := json.NewDecoder(bytes.NewReader(envelope.Data))
 	dec.UseNumber()
 	return false, dec.Decode(out)
+}
+
+// cut is s cut to n bytes, as valid UTF-8.
+func cut(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "")
 }
 
 func vmPath(node string, vmid int) string {

@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,18 +32,18 @@ func addLiveEnv(h *harness, hang bool) {
 		name, tags, desc string
 		status           string
 		agent            string
-		ips              []string
+		ips              []netip.Prefix
 	}{
-		{2101, "teak.kilo.alpha", "dev;kilo.alpha;linux", "battleship: ip=192.168.100.10 os=linux base=debian-12-v2", "running", "1", []string{"192.168.100.10/24", "fe80::10/64"}},
-		{2102, "yew.kilo.alpha", "dev;kilo.alpha;linux", "battleship: ip=192.168.100.5 os=linux base=debian-12-v2", "running", "enabled=1", []string{"192.168.100.7/24"}},
-		{2103, "elm.kilo.alpha", "dev;kilo.alpha;windows", "battleship: ip=192.168.100.20 os=windows base=win10-v1", "stopped", "1", []string{"192.168.100.20/24"}},
-		{2104, "oak.kilo.alpha", "dev;kilo.alpha", "battleship: ip=192.168.100.30 base=plain-v1", "running", "0", []string{"192.168.100.30/24"}},
-		{2105, "ash.kilo.alpha", "dev;kilo.alpha;linux", "battleship: ip=192.168.100.40 os=linux base=debian-12-v2", "running", "1", []string{"192.168.100.40/24"}},
+		{2101, "teak.kilo.alpha", "dev;kilo.alpha;linux", "battleship: ip=192.168.100.10 os=linux base=debian-12-v2", "running", "1", podstest.IPs("192.168.100.10/24", "fe80::10/64")},
+		{2102, "yew.kilo.alpha", "dev;kilo.alpha;linux", "battleship: ip=192.168.100.5 os=linux base=debian-12-v2", "running", "enabled=1", podstest.IPs("192.168.100.7/24")},
+		{2103, "elm.kilo.alpha", "dev;kilo.alpha;windows", "battleship: ip=192.168.100.20 os=windows base=win10-v1", "stopped", "1", podstest.IPs("192.168.100.20/24")},
+		{2104, "oak.kilo.alpha", "dev;kilo.alpha", "battleship: ip=192.168.100.30 base=plain-v1", "running", "0", podstest.IPs("192.168.100.30/24")},
+		{2105, "ash.kilo.alpha", "dev;kilo.alpha;linux", "battleship: ip=192.168.100.40 os=linux base=debian-12-v2", "running", "1", podstest.IPs("192.168.100.40/24")},
 	} {
 		h.api.Add(proxmox.VM{VMID: vm.vmid, Name: vm.name, Node: "n1", Pool: "dev-01", Tags: vm.tags, Status: vm.status},
 			map[string]string{"description": vm.desc, "agent": vm.agent, "net0": "virtio=" + mac(vm.vmid) + ",bridge=devint01"})
 		h.api.SetGuest(vm.vmid, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{
-			{Name: "lo", MAC: "00:00:00:00:00:00", IPs: []string{"127.0.0.1/8", "::1/128"}},
+			{Name: "lo", MAC: "00:00:00:00:00:00", IPs: podstest.IPs("127.0.0.1/8", "::1/128")},
 			{Name: "eth0", MAC: strings.ToLower(mac(vm.vmid)), IPs: vm.ips},
 		}})
 	}
@@ -51,8 +52,8 @@ func addLiveEnv(h *harness, hang bool) {
 			"net0": "virtio=BC:24:11:00:21:00,bridge=devext01", "net1": "virtio=BC:24:11:00:21:01,bridge=devint01"})
 	// The NICs' names say nothing: a FreeBSD router's are vtnet0 and vtnet1, in either order.
 	h.api.SetGuest(2100, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{
-		{Name: "lan", MAC: "bc:24:11:00:21:00", IPs: []string{"fe80::1/64", "10.50.12.133/24"}},
-		{Name: "wan", MAC: "bc:24:11:00:21:01", IPs: []string{"192.168.100.2/24"}},
+		{Name: "lan", MAC: "bc:24:11:00:21:00", IPs: podstest.IPs("fe80::1/64", "10.50.12.133/24")},
+		{Name: "wan", MAC: "bc:24:11:00:21:01", IPs: podstest.IPs("192.168.100.2/24")},
 	}})
 	if hang {
 		h.api.Mu.Lock()
@@ -88,12 +89,12 @@ func checkLiveCells(t *testing.T, body string) {
 
 // The page comes with assigned addresses and reads no agent; the script
 // fills in the live ones from pieces, and without it a link shows the page
-// with them. An agent that doesn't answer delays the pieces by no more than
-// the read timeout.
+// with them. An agent that doesn't answer holds up the pieces for the read
+// timeout, not the minute all the reads may take.
 func TestEnvironmentsLiveAddresses(t *testing.T) {
 	h := newHarness(t)
 	addLiveEnv(h, true)
-	h.srv.addrTimeout = 200 * time.Millisecond
+	h.srv.addrTimeout, h.srv.addrWithin = 500*time.Millisecond, time.Minute
 	sess := h.login(asLead)
 
 	body := h.get(&sess, "/environments").Body.String()
@@ -113,8 +114,8 @@ func TestEnvironmentsLiveAddresses(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Header().Get(piecesHeader) != "1" {
 		t.Fatalf("addresses = %d %v:\n%s", rec.Code, rec.Header(), pieces)
 	}
-	if took > 3*time.Second {
-		t.Errorf("the addresses took %v with ash's agent hung", took)
+	if took < h.srv.addrTimeout || took > h.srv.addrTimeout+1500*time.Millisecond {
+		t.Errorf("the addresses took %v with ash's agent hung, read timeout %v", took, h.srv.addrTimeout)
 	}
 	checkLiveCells(t, pieces)
 	contains(t, "the pieces", pieces, `<template><p class="meta liveaddr" id="env-live"><span>Addresses are live from the guest agents, where they answered.</span>`)
@@ -184,19 +185,34 @@ func TestEnvironmentsLiveAddressesPrivileges(t *testing.T) {
 }
 
 // A stopped router leaves its hosts without external addresses, and an
-// agent's error or junk shows no address of its own.
+// agent's error, or an answer without a host's address, shows none of its
+// own.
 func TestEnvironmentsLiveAddressesWithoutRouter(t *testing.T) {
 	h := newHarness(t)
 	addLiveEnv(h, false)
 	h.api.setStatus(2100, "stopped")
-	h.api.SetGuest(2101, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{{MAC: "bc:24:11:00:21:11", IPs: []string{"<b>x</b>/24", "10.50.12.9\u200b/24"}}}})
+	h.api.SetGuest(2101, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{{MAC: "bc:24:11:00:21:11", IPs: podstest.IPs("fe80::11/64", "169.254.1.1/16", "127.0.0.1/8")}}})
 	h.api.FailOn("agent-nics:2102", &proxmox.APIError{Status: 500, Message: "QEMU guest agent is not running"})
 	sess := h.login(asLead)
 	pieces := h.get(&sess, "/environments/addresses").Body.String()
-	lacks(t, "the pieces", pieces, "10.50.12", "<b>x", "external")
+	lacks(t, "the pieces", pieces, "10.50.12", "fe80", "169.254", "external")
 	contains(t, "the router", addrCell(t, pieces, 2100), `<code>192.168.100.2</code> <span class="meta">· not live</span>`)
 	contains(t, "teak", addrCell(t, pieces, 2101), `<span class="chip differs">no live address</span>`, `assigned 192.168.100.10`)
 	contains(t, "yew", addrCell(t, pieces, 2102), `<code>192.168.100.5</code> <span class="meta">· not live</span>`)
+}
+
+// A VM battleship didn't make has no assigned address: its live one shows
+// plainly, neither flagged as differing nor beside an assigned one.
+func TestEnvironmentsLiveAddressWithoutAssigned(t *testing.T) {
+	h := newHarness(t)
+	addLiveEnv(h, false)
+	h.api.Add(proxmox.VM{VMID: 2106, Name: "fir.kilo.alpha", Node: "n1", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "running"},
+		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:21:16,bridge=devint01"})
+	h.api.SetGuest(2106, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{{MAC: "bc:24:11:00:21:16", IPs: podstest.IPs("192.168.100.50/24")}}})
+	sess := h.login(asLead)
+	cell := addrCell(t, h.get(&sess, "/environments/addresses").Body.String(), 2106)
+	contains(t, "fir", cell, `<span class="al"><code>192.168.100.50</code></span>`, `<code>10.50.12.50</code>`)
+	lacks(t, "fir", cell, "differs", "assigned", "none")
 }
 
 // In the browser, the page fills in the live addresses after it loads, as
@@ -207,7 +223,7 @@ func TestBrowserEnvironmentsLiveAddresses(t *testing.T) {
 	h.srv.addrTimeout = 300 * time.Millisecond
 	h.api.Add(proxmox.VM{VMID: 2400, Name: "ad.oscar.lima", Node: "n1", Pool: "dev-04", Tags: "dev;oscar.lima;windows", Status: "running"},
 		map[string]string{"description": "battleship: ip=192.168.100.10 os=windows base=win10-v1", "agent": "1", "net0": "virtio=BC:24:11:00:24:00,bridge=devint04"})
-	h.api.SetGuest(2400, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{{MAC: "bc:24:11:00:24:00", IPs: []string{"fe80::5/64", "2001:db8:100::10/64"}}}})
+	h.api.SetGuest(2400, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{{MAC: "bc:24:11:00:24:00", IPs: podstest.IPs("fe80::5/64", "2001:db8:100::10/64")}}})
 	lead := h.login(asLead)
 	want := map[string]string{}
 	live := h.get(&lead, "/environments?live=1").Body.String()
@@ -285,6 +301,38 @@ func noScriptShot(b *browser, name string) {
 
 // oneLine is markup without its newlines.
 func oneLine(s string) string { return strings.ReplaceAll(s, "\n", "") }
+
+// The page names the paths the server serves the live addresses at.
+func TestTemplateKnowsLiveAddrPaths(t *testing.T) {
+	html, err := templateFS.ReadFile("templates/catalog.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, "catalog.html", string(html), `data-fill="`+envAddrsPath+`"`,
+		`<a href="`+envsPath+`?live=1">Read again</a>`, `<a href="`+envsPath+`?live=1">Show live addresses</a>`)
+}
+
+// A keyboard user on the line's link when the live addresses land stays on
+// it: on its Read again link.
+func TestBrowserLiveAddressesKeepFocus(t *testing.T) {
+	h := browserHarness(t)
+	addLiveEnv(h, true)
+	h.srv.addrTimeout = 2 * time.Second // ash's hung agent holds the pieces up this long
+	lead := h.login(asLead)
+	b := newBrowser(t, h, &lead, 1280, 800, false)
+	b.open("/environments")
+	b.run("focusing the link", chromedp.Focus(`#env-live a`, chromedp.ByQuery))
+	if !b.is(`document.querySelector("[data-fill]") !== null && document.activeElement === document.querySelector("#env-live a")`) {
+		t.Fatal("the addresses landed before the link had focus")
+	}
+	b.waitFor("the live addresses", `!document.querySelector("[data-fill]")`)
+	var focused string
+	b.eval(`document.activeElement.closest("#env-live") ? document.activeElement.textContent : document.activeElement.tagName`, &focused)
+	if focused != "Read again" {
+		t.Errorf("focus is on %q after the fill", focused)
+	}
+	b.clean()
+}
 
 // The script reads the pieces only with the header the server marks them
 // with.
