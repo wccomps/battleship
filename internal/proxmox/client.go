@@ -91,8 +91,10 @@ type Options struct {
 // maxAnswer is the most bytes of an answer a call reads, unless capped.
 const maxAnswer = 32 << 20
 
-// maxHeader is the most bytes of an answer's header a call reads; Proxmox
-// sends well under 1 KiB.
+// maxHeader is the most bytes of an answer's header a call reads. The
+// status line counts, and it holds Proxmox's error text, which a guest
+// agent can lengthen; over this the endpoint did answer, so the call fails
+// with an answer too large (see headerTooLarge), not over or again.
 const maxHeader = 64 << 10
 
 // maxMessage is the most of the status line an APIError keeps. Proxmox puts
@@ -158,6 +160,9 @@ func (c *Client) doAt(ctx context.Context, cred Credential, base, method, path s
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 	resp, err := c.http.Do(req)
+	if headerTooLarge(err) {
+		return false, fmt.Errorf("%s %s: answer too large: header over %d bytes", method, path, maxHeader)
+	}
 	if err != nil {
 		return true, err
 	}
@@ -206,6 +211,12 @@ func (c *Client) doAt(ctx context.Context, cred Credential, base, method, path s
 	dec := json.NewDecoder(bytes.NewReader(envelope.Data))
 	dec.UseNumber()
 	return false, dec.Decode(out)
+}
+
+// headerTooLarge reports whether err is net/http refusing an answer's header
+// over MaxResponseHeaderBytes; it has only this text for it.
+func headerTooLarge(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "net/http: server response headers exceeded")
 }
 
 // cut is s cut to n bytes, as valid UTF-8.
