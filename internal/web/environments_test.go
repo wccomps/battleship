@@ -80,7 +80,7 @@ func TestEnvironmentsPage(t *testing.T) {
 		`<a class="btn sm" href="/environments/kilo.alpha/add">Add hosts</a>`,
 		`<a class="btn sm" href="/environments/kilo.alpha/dns">Set DNS</a>`,
 		`<span class="hname">gw</span> <span class="chip">router</span>`,
-		`<code>192.168.100.2</code>`,
+		`<code>192.168.100.5</code>`,
 		`<span class="gl is-running"><i class="g" aria-hidden="true"></i>running</span> <span class="meta">· gw-v1</span>`,
 		`<div class="notes">admin / gwpass</div>`,
 		`<span class="gl is-stopped"><i class="g" aria-hidden="true"></i>stopped</span> <span class="meta">· debian-12-v2</span>`,

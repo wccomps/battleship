@@ -70,16 +70,17 @@
 {{- end}}
 
 {{/* env-addr is a host's address cell: its assigned address, or once read
-     (.Read) its live one, flagged if it differs from an assigned one, the
-     router's WAN address
-     and a host's external one. */}}
+     (.Read) its live one, flagged if it differs from its expected one (the
+     gateway for a router, else an assigned one), a router's WAN address and
+     a host's external one. */}}
 {{define "env-addr" -}}
 <td class="ad" id="addr-{{.VMID}}">
 {{- if and .Read .Live}}
 {{- with .LAN}}<span class="al"><code>{{.}}</code>{{if $.Differs}} <span class="chip differs">differs</span>{{end}}</span>
 {{- else}}<span class="al"><span class="chip differs">no live address</span></span>{{end}}
-{{- if .Differs}}<span class="al meta">assigned {{.Addr}}</span>{{end}}
-{{- else}}<span class="al">{{with .Addr}}<code>{{.}}</code>{{else}}<span class="meta">no address</span>{{end}}{{if .Read}} <span class="meta">· not live</span>{{end}}</span>
+{{- if .Differs}}<span class="al meta">{{if .Router}}expected {{.Gateway}}{{else}}assigned {{.Addr}}{{end}}</span>{{end}}
+{{- else if and .Read .Running}}<span class="al">{{with .Addr}}<code>{{.}}</code> <span class="meta">· no guest agent</span>{{else}}<span class="meta">no guest agent</span>{{end}}</span>
+{{- else}}<span class="al">{{with .Addr}}<code>{{.}}</code>{{else}}<span class="meta">no address</span>{{end}}</span>
 {{- end}}
 {{- with .WAN}}<span class="al"><span class="meta">WAN</span> <code>{{.}}</code></span>{{end}}
 {{- with .External}}<span class="al"><span class="meta">external</span> <code>{{.}}</code></span>{{end -}}

@@ -65,11 +65,11 @@ func externalAddr(wan netip.Prefix, octet int) string {
 type LiveAddrs struct {
 	// Live: its agent answered; LAN, Differs and WAN are set only then.
 	Live bool
-	LAN  string // on its LAN NIC (the router's net1, a host's net0)
-	// Differs says LAN isn't its assigned address (EnvHost.Addr), if it
-	// has one.
+	LAN  string // on its LAN NIC
+	// Differs says LAN isn't its expected address: the gateway for a
+	// router, else its assigned address (EnvHost.Addr) if it has one.
 	Differs bool
-	WAN     string // the router's, on its WAN NIC (net0)
+	WAN     string // the router's, on its WAN NIC
 	// External is a host's address from outside, through the router's NAT
 	// (externalAddr): by its live LAN octet, else its assigned one.
 	External string
@@ -90,7 +90,11 @@ func (e Environment) addrs(read map[int]agentAddrs) map[int]LiveAddrs {
 			if got.lan.Addr().IsValid() {
 				a.LAN = got.lan.Addr().String()
 			}
-			a.Differs = h.Addr.IsValid() && got.lan.Addr() != h.Addr
+			want := h.Addr
+			if h.Router {
+				want = e.Gateway()
+			}
+			a.Differs = want.IsValid() && got.lan.Addr() != want
 			if h.Router && got.wan.Addr().IsValid() {
 				a.WAN = got.wan.Addr().String()
 				if !wan.Addr().IsValid() {

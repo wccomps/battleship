@@ -99,10 +99,11 @@ type EnvHost struct {
 	UserNotes  string
 	Details    ImageDetails
 	Unreadable bool
-	// Addr is its address: the gateway for the router, else its notes'.
+	// Addr is the address its notes record within the subnet.
 	Addr netip.Addr
-	// LANMAC and WANMAC are its NICs' MACs: a host's LAN NIC is net0; the
-	// router's WAN NIC is net0 and its LAN NIC net1.
+	// LANMAC and WANMAC are its NICs' MACs: a host's LAN NIC is net0; a
+	// router's WAN and LAN NICs are those on the slot's external and
+	// internal bridges, or net0 and net1.
 	LANMAC, WANMAC string
 	Agent          bool   // its config enables the guest agent
 	desc           string // its notes, for the plans that write them
@@ -307,9 +308,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			h.Unreadable = derr != nil
 			h.LANMAC, _ = NICMAC(cfg["net0"])
 			if h.Router {
-				h.Addr = envs[si].Gateway()
-				h.WANMAC = h.LANMAC
-				h.LANMAC, _ = NICMAC(cfg["net1"])
+				h.WANMAC, h.LANMAC = routerMACs(cfg, envs[si].Slot)
 			}
 			h.Agent = agentEnabled(cfg["agent"])
 			envs[si].Hosts = append(envs[si].Hosts, h)
@@ -345,14 +344,47 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 	return envs, vms, nil
 }
 
+func nicBridge(nic string) string {
+	_, opts := splitOptions(nic)
+	return opts["bridge"]
+}
+
+// routerMACs returns a router's WAN and LAN MAC addresses by matching its
+// NICs' bridges to the slot's external and internal bridges, falling back to
+// net0 and net1.
+func routerMACs(cfg map[string]string, s Slot) (wan, lan string) {
+	for i := range 32 {
+		v := cfg[fmt.Sprintf("net%d", i)]
+		mac, ok := NICMAC(v)
+		if !ok {
+			continue
+		}
+		switch nicBridge(v) {
+		case s.ExtBridge:
+			if s.ExtBridge != "" && wan == "" {
+				wan = mac
+			}
+		case s.IntBridge:
+			if s.IntBridge != "" && lan == "" {
+				lan = mac
+			}
+		}
+	}
+	if wan == "" && (s.IntBridge == "" || nicBridge(cfg["net0"]) != s.IntBridge) {
+		wan, _ = NICMAC(cfg["net0"])
+	}
+	if lan == "" && (s.ExtBridge == "" || nicBridge(cfg["net1"]) != s.ExtBridge) {
+		lan, _ = NICMAC(cfg["net1"])
+	}
+	return wan, lan
+}
+
 // nicBridgesAll lists the bridge of every NIC (net0 to net31).
 func nicBridgesAll(cfg map[string]string) []string {
 	var out []string
 	for i := range 32 {
-		if v, ok := cfg[fmt.Sprintf("net%d", i)]; ok {
-			if _, opts := splitOptions(v); opts["bridge"] != "" {
-				out = append(out, opts["bridge"])
-			}
+		if b := nicBridge(cfg[fmt.Sprintf("net%d", i)]); b != "" {
+			out = append(out, b)
 		}
 	}
 	return out

@@ -10,9 +10,8 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// Each host's address is the gateway for the router, else what its notes
-// record within the subnet; a DNS choice resolves to the router's or the
-// chosen host's address.
+// Each host's address is what its notes record within the subnet; a DNS
+// choice resolves to the gateway or the chosen host's address.
 func TestEnvHostAddresses(t *testing.T) {
 	f := podstest.New("alder")
 	add := func(vmid int, name, tags, desc string) {
@@ -23,7 +22,7 @@ func TestEnvHostAddresses(t *testing.T) {
 	add(2101, "oak.kilo.alpha", "dev;kilo.alpha", "battleship: ip=192.168.100.20 os=windows base=win2022-v1 dns=router")
 	add(2102, "elm.kilo.alpha", "dev;kilo.alpha", "battleship: ip=10.50.0.9 os=linux base=debian-12-v1 dns=router")
 	env := envOf(t, NewPlanner(f, envConfig()), 1)
-	want := map[string]string{"gw.kilo.alpha": "192.168.100.2", "oak.kilo.alpha": "192.168.100.20", "elm.kilo.alpha": ""}
+	want := map[string]string{"gw.kilo.alpha": "", "oak.kilo.alpha": "192.168.100.20", "elm.kilo.alpha": ""}
 	for _, h := range env.Hosts {
 		if AddrText(h.Addr) != want[h.Name] {
 			t.Errorf("%s: addr %q, want %q", h.Name, h.Addr, want[h.Name])
