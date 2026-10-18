@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -91,48 +92,31 @@ var kindUses = map[string]string{
 // a pods teardown, or nil for another pod operation. nothing, if set, is
 // why nothing can run; lan is the environments' LAN.
 func review(op operation, in jobs.Inputs, plan *pods.Plan, nothing string, lan config.LAN) *reviewView {
-	var r *reviewView
-	switch {
-	case op.Machines:
-		r = envReview(op, in, plan, lan)
-	case op.Kind == pods.KindImageRegister:
-		if len(plan.Items) != 1 {
-			return nil
-		}
-		return registerReview(op, in, plan.Items[0])
-	case op.Kind == pods.KindEnvDNS:
-		r = dnsReview(in, plan, lan)
-	case op.Kind == pods.KindEnvTeardown:
-		r = teardownReview(in, plan, lan)
-	case op.Kind == pods.KindTeardown:
-		r = podTeardownReview(in, plan)
-	case op.Kind == pods.KindImageDetails:
-		if len(plan.Items) != 1 {
-			return nil
-		}
-		return detailsReview(plan.Items[0])
-	case op.Section == sectionImages:
-		r = imageReview(op, in, plan)
-	default:
+	if op.review == nil {
 		return nil
 	}
-	if nothing != "" {
+	r := op.review(op, in, plan, lan)
+	if r != nil && nothing != "" && !r.Blocked {
 		r.Say, r.Blocked = nothing, true
 	}
 	return r
 }
 
-// registerReview describes registering it: the source VM, the image it
-// becomes and how, its kind, where the template lands, the details it
-// writes, and the source's notes, which the copy keeps.
-func registerReview(op operation, in jobs.Inputs, it pods.Item) *reviewView {
+// registerReview describes registering a base image: the source VM, the
+// image it becomes and how, its kind, where the template lands, the details
+// it writes, and the source's notes, which the copy keeps.
+func registerReview(op operation, in jobs.Inputs, plan *pods.Plan, _ config.LAN) *reviewView {
+	if len(plan.Items) != 1 {
+		return nil
+	}
+	it := plan.Items[0]
 	src := pods.Source{Name: "?"}
 	if it.Source != nil {
 		src = *it.Source
 	}
 	_, version, _ := pods.ParseImageName(it.Name)
 	how := registerHow(version, src.Base)
-	r := &reviewView{Verb: "Register", Subject: src.Name,
+	r := &reviewView{Verb: op.Verb, Subject: src.Name,
 		Say: "Copies " + src.Name + " into a new template, " + it.Name + ". The build VM stays as it is."}
 	if it.Blocked != "" {
 		r.Say, r.Blocked = sentence(it.Blocked), true
@@ -172,7 +156,11 @@ type notesChange struct{ Before, After string }
 
 // detailsReview describes an Edit notes: each detail before and after,
 // then the free text if the job writes it.
-func detailsReview(it pods.Item) *reviewView {
+func detailsReview(op operation, _ jobs.Inputs, plan *pods.Plan, _ config.LAN) *reviewView {
+	if len(plan.Items) != 1 {
+		return nil
+	}
+	it := plan.Items[0]
 	var was pods.NotesRead
 	if it.DetailsWas != nil {
 		was = *it.DetailsWas
@@ -181,7 +169,7 @@ func detailsReview(it pods.Item) *reviewView {
 	if it.Details != nil {
 		after = *it.Details
 	}
-	r := &reviewView{Verb: "Edit notes of", Subject: it.Name, Changes: detailChanges(was.Details, after.ImageDetails)}
+	r := &reviewView{Verb: op.Verb, Subject: it.Name, Changes: detailChanges(was.Details, after.ImageDetails)}
 	switch {
 	case it.Blocked != "":
 		r.Say, r.Blocked = sentence(it.Blocked), true
@@ -205,10 +193,7 @@ func detailsReview(it pods.Item) *reviewView {
 // envReview describes a create or add: a row per machine, and what the
 // guest agent sets on the Windows and Linux hosts.
 func envReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
-	r := &reviewView{Verb: "Create", Subject: in.Domain, Image: true, Addr: true}
-	if op.Kind == pods.KindEnvAdd {
-		r.Verb = "Add hosts to"
-	}
+	r := &reviewView{Verb: op.Verb, Subject: in.Domain, Image: true, Addr: true}
 	specs := map[string]pods.HostSpec{}
 	router, _ := pods.ParseHostSpec(in.Router)
 	for _, line := range append([]string{in.Router}, in.EnvHosts...) {
@@ -278,18 +263,39 @@ func envReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *r
 	return r
 }
 
+// tallyTeardown builds r.Rows and r.Kept from plan, calling fill on each
+// row, and returns the number of VMs deleted and the sentence naming any
+// leftover disks freed.
+func (r *reviewView) tallyTeardown(plan *pods.Plan, fill func(pods.Item, *reviewRow)) (deletes int, diskSay []string) {
+	var disks []string
+	for _, it := range plan.Items {
+		row := reviewRow{Name: it.Name, Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}
+		fill(it, &row)
+		r.Rows = append(r.Rows, row)
+		switch {
+		case it.Blocked != "":
+		case slices.Contains(it.Steps, pods.StepDelete):
+			deletes++
+		case slices.Contains(it.Steps, pods.StepFreeDisks):
+			disks = append(disks, strconv.Itoa(it.VMID))
+		}
+	}
+	r.Kept = pods.KeptLines(plan.Kept)
+	if len(disks) > 0 {
+		diskSay = []string{"Frees the disks deleted VMs left at VMID " + andList(disks) + "."}
+	}
+	return deletes, diskSay
+}
+
 // teardownReview describes tearing an environment down: a row per item
 // (each VM it deletes or can't, with its image and address from its notes,
 // and the disks it frees), and the VMs on its networks it leaves alone.
-func teardownReview(in jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
-	r := &reviewView{Verb: "Tear down", Subject: in.Domain, Image: true, Addr: true, Deletes: true}
+func teardownReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
+	r := &reviewView{Verb: op.Verb, Subject: in.Domain, Image: true, Addr: true, Deletes: true}
 	pool := poolOf(plan.Items)
-	deletes := 0
-	var disks []string
 	var left pods.Environment // what the slot holds afterwards
-	for _, it := range plan.Items {
-		row := reviewRow{Name: it.Name, Router: slices.Contains(pods.Tags(it.Tags), pods.ImageRouter),
-			Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}
+	deletes, diskSay := r.tallyTeardown(plan, func(it pods.Item, row *reviewRow) {
+		row.Router = slices.Contains(pods.Tags(it.Tags), pods.ImageRouter)
 		if it.Notes != nil {
 			row.Image = it.Notes.Base
 			if it.Notes.IP.IsValid() {
@@ -299,27 +305,18 @@ func teardownReview(in jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView
 		if row.Router {
 			row.Addr = "." + strconv.Itoa(pods.GatewayOctet)
 		}
-		r.Rows = append(r.Rows, row)
-		switch {
-		case it.Blocked != "":
+		if it.Blocked != "" {
 			left.Hosts = append(left.Hosts, pods.EnvHost{Name: it.Name})
-		case slices.Contains(it.Steps, pods.StepDelete):
-			deletes++
-		case slices.Contains(it.Steps, pods.StepFreeDisks):
-			disks = append(disks, strconv.Itoa(it.VMID))
 		}
-	}
+	})
 	for _, k := range plan.Kept {
 		left.Users = append(left.Users, k.Name)
 	}
-	r.Kept = pods.KeptLines(plan.Kept)
 	var say []string
 	if deletes > 0 {
 		say = append(say, "Deletes "+countVMs(deletes)+" in "+pool+".")
 	}
-	if len(disks) > 0 {
-		say = append(say, "Frees the disks deleted VMs left at VMID "+andList(disks)+".")
-	}
+	say = append(say, diskSay...)
 	switch {
 	case left.Free():
 		say = append(say, "The slot is free again afterwards.")
@@ -335,10 +332,10 @@ func teardownReview(in jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView
 // podTeardownReview describes tearing down pods: what it takes from which
 // pods, a row per item (each VM it deletes or can't, and the disks it
 // frees), and the VMs it leaves, with why.
-func podTeardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
+func podTeardownReview(op operation, in jobs.Inputs, plan *pods.Plan, _ config.LAN) *reviewView {
 	where := podsText(plan.Teams)
 	set := in.Set
-	r := &reviewView{Verb: "Tear down", Subject: string(set), Deletes: true, Set: set == ""}
+	r := &reviewView{Verb: op.Verb, Subject: string(set), Deletes: true, Set: set == ""}
 	what := string(set)
 	if set == "" {
 		r.Subject, what = where, "everything"
@@ -349,39 +346,24 @@ func podTeardownReview(in jobs.Inputs, plan *pods.Plan) *reviewView {
 	for _, f := range previewFacts(in, false, 0) {
 		r.Facts = append(r.Facts, reviewFact{Label: f.Label, Text: f.Value})
 	}
-	deletes := 0
-	var disks []string
-	for _, it := range plan.Items {
-		row := reviewRow{Name: it.Name, Set: it.Sets.Label(), Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}
-		if it.Host == "" {
-			row.Set = "" // a gone VM's disks, or a half-deleted VM
+	deletes, diskSay := r.tallyTeardown(plan, func(it pods.Item, row *reviewRow) {
+		if it.Host != "" {
+			row.Set = it.Sets.Label()
 		}
-		r.Rows = append(r.Rows, row)
-		switch {
-		case it.Blocked != "":
-		case slices.Contains(it.Steps, pods.StepDelete):
-			deletes++
-		case slices.Contains(it.Steps, pods.StepFreeDisks):
-			disks = append(disks, strconv.Itoa(it.VMID))
-		}
-	}
+	})
 	var say []string
 	if deletes > 0 {
 		say = append(say, "Tears down "+what+" in "+where+": "+countVMs(deletes)+".",
 			byCount(deletes, "It is", "Each is")+" stopped and deleted with its disks. This can't be undone.")
 	}
-	if len(disks) > 0 {
-		say = append(say, "Frees the disks deleted VMs left at VMID "+andList(disks)+".")
-	}
-	r.Say = strings.Join(say, " ")
-	r.Kept = pods.KeptLines(plan.Kept)
+	r.Say = strings.Join(append(say, diskSay...), " ")
 	return r
 }
 
 // dnsReview describes a Set DNS: each Windows and Linux host's DNS server
 // before (Item.DNSWas) and after. The others only record the choice.
-func dnsReview(in jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
-	r := &reviewView{Verb: "Set DNS for", Subject: in.Domain}
+func dnsReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
+	r := &reviewView{Verb: op.Verb, Subject: in.Domain}
 	var changes []string
 	var target netip.Addr
 	router := false
@@ -438,8 +420,8 @@ func lanOctet(lan config.LAN, a netip.Addr) string {
 
 // imageReview describes opening a base image for editing, deprecating it
 // or deleting it.
-func imageReview(op operation, in jobs.Inputs, plan *pods.Plan) *reviewView {
-	r := &reviewView{Subject: in.Image}
+func imageReview(op operation, in jobs.Inputs, plan *pods.Plan, _ config.LAN) *reviewView {
+	r := &reviewView{Verb: op.Verb, Subject: cmp.Or(in.Image, in.Family)}
 	for _, it := range plan.Items {
 		row := reviewRow{Name: it.Name, Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}
 		if it.Source != nil {
@@ -450,37 +432,24 @@ func imageReview(op operation, in jobs.Inputs, plan *pods.Plan) *reviewView {
 	names := itemNames(plan.Items)
 	switch op.Kind {
 	case pods.KindImageEdit:
-		r.Verb, r.Subject = "Edit", in.Family
 		from := "the newest version"
 		if len(r.Rows) == 1 && r.Rows[0].Image != "" {
 			from = r.Rows[0].Image
 		}
 		r.Say = "Copies " + from + " as " + names + " on the edit network, for you to patch and register as the next version."
 	case pods.KindImageDeprecate:
-		r.Verb = "Deprecate"
 		r.Say = names + " will no longer be offered for new hosts. Hosts made from it keep working."
 	case pods.KindImageDelete:
-		r.Verb = "Delete"
 		r.Say = names + " will be deleted. Hosts made from it keep working: they are full copies. This can't be undone."
 	}
 	return r
 }
 
-// reviewBack is where a review's Back goes: the form, filled in; the page
-// it was opened from for a register (Images, whose row was the form) and a
-// teardown (Environments); and the family's page for an edit, deprecate,
-// delete or Edit notes.
+// reviewBack is where a review's Back goes: its operation's back page when
+// set, else the form filled in.
 func reviewBack(op operation, in jobs.Inputs) string {
-	switch op.Kind {
-	case pods.KindImageRegister, pods.KindEnvTeardown:
-		return listPage(in)
-	case pods.KindImageEdit, pods.KindImageDetails:
-		return familyHref(in.Family)
-	case pods.KindImageDeprecate, pods.KindImageDelete:
-		if f, _, ok := pods.ParseImageName(in.Image); ok {
-			return familyHref(f)
-		}
-		return listPage(in)
+	if op.back != nil {
+		return op.back(op, in)
 	}
 	return formQuery(op, in)
 }

@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 
-	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
@@ -62,26 +61,12 @@ func detailChanges(before, after pods.ImageDetails) []detailChange {
 	return out
 }
 
-// registerDetails are the details the register form starts with for VM
-// vmid: those its notes give (pods.RegisterDetails), or none if it can't
-// be read.
-func (s *Server) registerDetails(ctx context.Context, vmid int) pods.ImageDetails {
-	planner := s.planner(ctx)
-	vms, err := planner.API.ClusterVMs(ctx)
-	if err != nil {
-		return pods.ImageDetails{}
+// registerPrefill fills the register form's details from VM vmid's notes
+// when none were posted.
+func (s *Server) registerPrefill(ctx context.Context, p *catalogPage) {
+	if p.In.Details == nil && p.In.VMID != 0 {
+		p.Details = pods.ImageNotes{ImageDetails: s.planner(ctx).SourceDetails(ctx, p.In.VMID)}
 	}
-	for _, vm := range vms {
-		if vm.VMID == vmid {
-			cfg, err := planner.API.VMConfig(ctx, vm.Node, vm.VMID)
-			if err != nil {
-				return pods.ImageDetails{}
-			}
-			d, _ := pods.RegisterDetails(cfg["description"])
-			return d
-		}
-	}
-	return pods.ImageDetails{}
 }
 
 // notesEdit is what an Edit notes form edits: the version it writes and
@@ -94,29 +79,27 @@ type notesEdit struct {
 	Err   string
 }
 
-// notesForm is the data of Edit notes's form for in: the family's newest
-// version's details and free text, or those a refused preview posted. It
-// reads the cluster's VMs and that version's config, nothing more.
-func (s *Server) notesForm(ctx context.Context, op operation, in jobs.Inputs, problem string) catalogPage {
-	p := catalogPage{Op: op, In: in, Error: problem, Edit: &notesEdit{}}
-	if in.Family == "" {
+// notesPrefill fills Edit notes's form with the family's newest version's
+// details and free text, or those a refused preview posted.
+func (s *Server) notesPrefill(ctx context.Context, p *catalogPage) {
+	p.ReadErr, p.Edit = "", &notesEdit{}
+	if p.In.Family == "" {
 		p.Edit.Err = "Choose the base image whose notes to edit: each family on Images has Edit."
-		return p
+		return
 	}
-	at, err := s.planner(ctx).NotesToEdit(ctx, in.Family)
+	at, err := s.planner(ctx).NotesToEdit(ctx, p.In.Family)
 	p.Edit.Image = at.Image.Name
 	if err != nil {
 		p.Edit.Err = "Couldn't read the notes to edit: " + sentence(proxmox.Describe(err))
-		return p
+		return
 	}
 	p.Edit.Was, p.Details = at.Read, at.Edit()
-	if d := in.Details; d != nil {
+	if d := p.In.Details; d != nil {
 		p.Details.ImageDetails, p.Details.From = d.ImageDetails, d.From
 		if d.Free != nil {
 			p.Details.Free = d.Free
 		}
 	}
-	return p
 }
 
 // NoSave is whether the form offers no Review: an Edit notes with nothing

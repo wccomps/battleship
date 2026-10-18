@@ -194,10 +194,10 @@ func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, 
 			p.HostOpts, p.HostsAll = hostOpts(nil, in.Hosts), true
 		}
 	}
-	if op.Pick != "" {
+	if op.step != nil {
 		p.Step = &stepTwo{}
 		if teams, err := pods.ParseTeams(in.Teams); picked && err == nil {
-			p.Step = s.stepTwo(ctx, op, in, teams, chosen)
+			p.Step = op.step(s, ctx, in, teams, chosen)
 			p.Step.HasPicked = true
 		}
 	}
@@ -210,7 +210,7 @@ func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, 
 // renderForm shows the form again with a problem, keeping what was typed.
 func (s *Server) renderForm(w http.ResponseWriter, r *http.Request, status int, op operation, in jobs.Inputs, problem string) {
 	if op.Formless { // its review is its page
-		s.errorPage(w, r, status, "Can't "+strings.ToLower(op.Title)+" "+in.Domain, problem, listPage(in), "Back to "+op.sectionName())
+		s.errorPage(w, r, status, "Can't "+strings.ToLower(op.Title)+" "+in.Domain, problem, op.listPage(in), "Back to "+op.sectionName())
 		return
 	}
 	if op.Kind.Teamless() {
@@ -235,18 +235,10 @@ func (s *Server) deploySets(ctx context.Context) ([]setView, string) {
 	return s.startOf(g, false).Sets, ""
 }
 
-// stepTwo reads what op's second step offers for in's teams.
-func (s *Server) stepTwo(ctx context.Context, op operation, in jobs.Inputs, teams []string, chosen bool) *stepTwo {
-	if op.Kind == pods.KindTeardown {
-		return s.setStep(ctx, in, teams, chosen)
-	}
-	return s.snapshotStep(ctx, in, teams)
-}
-
 // snapshotStep offers the snapshots of the first VM a reset of in covers
 // (first team, first matching grid host). The per-VM baseline is always
 // offered first, chosen unless in names another snapshot.
-func (s *Server) snapshotStep(ctx context.Context, in jobs.Inputs, teams []string) *stepTwo {
+func (s *Server) snapshotStep(ctx context.Context, in jobs.Inputs, teams []string, _ bool) *stepTwo {
 	step := &stepTwo{Legend: "Snapshot", Button: "Preview"}
 	var snaps []string
 	var baseline string

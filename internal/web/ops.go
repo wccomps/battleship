@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/wccomps/battleship/internal/auth"
+	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
 )
@@ -24,9 +25,12 @@ type operation struct {
 	// Label names its jobs where Title doesn't read as one: "Reset to
 	// snapshot", not "Reset".
 	Label string
-	Icon  string // its icon (opIcon)
-	Noun  string // e.g. "reset", for the confirm's summary: "reset of pod 01"
-	Lead  string // the header button of deploy and teardown, which act on whole teams
+	// Verb is its review's heading verb ("Create", "Tear down"); ConfirmVerb
+	// is a single-item image operation's confirm button verb ("Copy as").
+	Verb, ConfirmVerb string
+	Icon              string // its icon (opIcon)
+	Noun              string // e.g. "reset", for the confirm's summary: "reset of pod 01"
+	Lead              string // the header button of deploy and teardown, which act on whole teams
 	// Section is the page an image or environment operation belongs to:
 	// its nav entry, and where its pages close to (listPage).
 	Section string
@@ -36,11 +40,18 @@ type operation struct {
 	// Done is how a VM its job finished reads; "" is "Done".
 	Done string
 	// Machines is whether its form has machine rows (envForm); Formless,
-	// whether it has no form, and opens on its review.
-	Machines, Formless bool
-	// Pick is the field a two-step form's second step (stepTwo) chooses,
+	// whether it has no form, and opens on its review; PostForm, whether
+	// POST Path opens the form (from the grid's ticked VMs, or a register
+	// review's "Edit details").
+	Machines, Formless, PostForm bool
+	// Pick is the field a two-step form's second step (step) chooses,
 	// once pods and hosts are chosen: a reset's snapshot, a teardown's set.
-	Pick string
+	Pick    string
+	review  func(operation, jobs.Inputs, *pods.Plan, config.LAN) *reviewView
+	home    func(jobs.Inputs) (name, href string)
+	back    func(operation, jobs.Inputs) string
+	prefill func(*Server, context.Context, *catalogPage)
+	step    func(*Server, context.Context, jobs.Inputs, []string, bool) *stepTwo
 	// domain is the environment an operation on one (its Path has {domain})
 	// was opened for: see at.
 	domain string
@@ -55,28 +66,36 @@ const (
 // this order.
 var operations = []operation{
 	{Kind: pods.KindPower, Path: "/power", Title: "Power", Icon: "shutdown", Noun: "power action"},
-	{Kind: pods.KindReset, Path: "/reset", Title: "Reset", Label: "Reset to snapshot", Icon: "reset", Noun: "reset", Pick: fieldSnapshot},
-	{Kind: pods.KindSnapshot, Path: "/snapshot", Title: "Take snapshot", Icon: "snapshot", Noun: "snapshot"},
+	{Kind: pods.KindReset, Path: "/reset", Title: "Reset", Label: "Reset to snapshot", Icon: "reset", Noun: "reset",
+		Pick: fieldSnapshot, PostForm: true, step: (*Server).snapshotStep},
+	{Kind: pods.KindSnapshot, Path: "/snapshot", Title: "Take snapshot", Icon: "snapshot", Noun: "snapshot", PostForm: true},
 	{Kind: pods.KindDeploy, Path: "/deploy", Title: "Deploy", Icon: "deploy", Noun: "deploy", Lead: "Deploy pods", Done: "Ready"},
-	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Icon: "teardown", Noun: "teardown", Lead: "Tear down pods", Done: "Deleted", Pick: fieldSet},
-	{Kind: pods.KindEnvCreate, Path: "/environments/new", Title: "Create environment", Icon: "deploy", Noun: "environment",
-		Section: sectionEnvironments, Doing: "Creating an environment", Done: "Ready", Machines: true},
-	{Kind: pods.KindEnvAdd, Path: "/environments/{domain}/add", Title: "Add hosts", Icon: "deploy", Noun: "new hosts",
-		Section: sectionEnvironments, Doing: "Adding hosts", Done: "Ready", Machines: true},
-	{Kind: pods.KindEnvDNS, Path: "/environments/{domain}/dns", Title: "Set DNS", Icon: "reset", Noun: "DNS change",
-		Section: sectionEnvironments, Doing: "Setting DNS"},
-	{Kind: pods.KindEnvTeardown, Path: "/environments/{domain}/teardown", Title: "Tear down", Icon: "teardown", Noun: "teardown",
-		Section: sectionEnvironments, Doing: "Tearing down an environment", Done: "Deleted", Formless: true},
-	{Kind: pods.KindImageRegister, Path: "/images/register", Title: "Register base image", Icon: "deploy", Noun: "registration",
-		Section: sectionImages, Doing: "Registering", Done: "Ready"},
-	{Kind: pods.KindImageEdit, Path: "/images/edit", Title: "Open for editing", Icon: "deploy", Noun: "working copy",
-		Section: sectionImages, Done: "Ready"},
-	{Kind: pods.KindImageDeprecate, Path: "/images/deprecate", Title: "Deprecate base image", Label: "Deprecate", Icon: "reset", Noun: "deprecation",
-		Section: sectionImages, Doing: "Deprecating"},
-	{Kind: pods.KindImageDelete, Path: "/images/delete", Title: "Delete base image", Icon: "teardown", Noun: "deletion",
-		Section: sectionImages, Doing: "Deleting", Done: "Deleted"},
-	{Kind: pods.KindImageDetails, Path: "/images/details", Title: "Edit notes", Icon: "edit", Noun: "notes change",
-		Section: sectionImages, Doing: "Editing notes", Done: "Saved"},
+	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Verb: "Tear down", Icon: "teardown", Noun: "teardown",
+		Lead: "Tear down pods", Done: "Deleted", Pick: fieldSet, review: podTeardownReview, step: (*Server).setStep},
+	{Kind: pods.KindEnvCreate, Path: "/environments/new", Title: "Create environment", Verb: "Create", Icon: "deploy", Noun: "environment",
+		Section: sectionEnvironments, Doing: "Creating an environment", Done: "Ready", Machines: true, review: envReview, home: envHome},
+	{Kind: pods.KindEnvAdd, Path: "/environments/{domain}/add", Title: "Add hosts", Verb: "Add hosts to", Icon: "deploy", Noun: "new hosts",
+		Section: sectionEnvironments, Doing: "Adding hosts", Done: "Ready", Machines: true, review: envReview, home: envHome},
+	{Kind: pods.KindEnvDNS, Path: "/environments/{domain}/dns", Title: "Set DNS", Verb: "Set DNS for", Icon: "reset", Noun: "DNS change",
+		Section: sectionEnvironments, Doing: "Setting DNS", review: dnsReview, home: envHome, prefill: dnsPrefill},
+	{Kind: pods.KindEnvTeardown, Path: "/environments/{domain}/teardown", Title: "Tear down", Verb: "Tear down", Icon: "teardown", Noun: "teardown",
+		Section: sectionEnvironments, Doing: "Tearing down an environment", Done: "Deleted", Formless: true,
+		review: teardownReview, home: envHome, back: (operation).listPage},
+	{Kind: pods.KindImageRegister, Path: "/images/register", Title: "Register base image", Verb: "Register", ConfirmVerb: "Register",
+		Icon: "deploy", Noun: "registration", Section: sectionImages, Doing: "Registering", Done: "Ready", PostForm: true,
+		review: registerReview, home: familyHome, back: (operation).listPage, prefill: (*Server).registerPrefill},
+	{Kind: pods.KindImageEdit, Path: "/images/edit", Title: "Open for editing", Verb: "Edit", ConfirmVerb: "Copy as",
+		Icon: "deploy", Noun: "working copy", Section: sectionImages, Done: "Ready",
+		review: imageReview, home: familyHome, back: toHome},
+	{Kind: pods.KindImageDeprecate, Path: "/images/deprecate", Title: "Deprecate base image", Label: "Deprecate", Verb: "Deprecate", ConfirmVerb: "Deprecate",
+		Icon: "reset", Noun: "deprecation", Section: sectionImages, Doing: "Deprecating",
+		review: imageReview, home: familyHome, back: toHome},
+	{Kind: pods.KindImageDelete, Path: "/images/delete", Title: "Delete base image", Verb: "Delete", ConfirmVerb: "Delete",
+		Icon: "teardown", Noun: "deletion", Section: sectionImages, Doing: "Deleting", Done: "Deleted",
+		review: imageReview, home: familyHome, back: toHome},
+	{Kind: pods.KindImageDetails, Path: "/images/details", Title: "Edit notes", Verb: "Edit notes of", ConfirmVerb: "Save notes of",
+		Icon: "edit", Noun: "notes change", Section: sectionImages, Doing: "Editing notes", Done: "Saved",
+		review: detailsReview, home: familyHome, back: toHome, prefill: (*Server).notesPrefill},
 }
 
 // nav is the nav entry its pages mark current: its section, or else its
@@ -423,39 +442,61 @@ const envsPath = "/environments"
 
 func envHref(domain string) string { return envsPath + "#" + domain }
 
-// listPage is the page a job with inputs in belongs to, where closing its
-// form, preview or job page goes: its operation's section (Images, or
-// Environments at the environment it acted on), else the grid.
-func listPage(in jobs.Inputs) string {
-	op, _ := operationFor(in.Kind)
-	switch op.Section {
+// envHome is the environment in acts on and its block on Environments, or
+// envsPath when in names no valid domain.
+func envHome(in jobs.Inputs) (string, string) {
+	if pods.CheckDomain(in.Domain) == nil {
+		return in.Domain, envHref(in.Domain)
+	}
+	return "", envsPath
+}
+
+// familyHome is the image family in acts on and its page, or "/images"
+// when in names no valid family.
+func familyHome(in jobs.Inputs) (string, string) {
+	f := cmp.Or(in.Family, familyOf(in.Image))
+	if pods.CheckFamily(f) == nil {
+		return f, familyHref(f)
+	}
+	return "", "/images"
+}
+
+func familyOf(image string) string {
+	f, _, _ := pods.ParseImageName(image)
+	return f
+}
+
+func toHome(op operation, in jobs.Inputs) string {
+	_, href := op.home(in)
+	return href
+}
+
+// listPage is the page a job of o with inputs in belongs to, where closing
+// its form, preview or job page goes: its section (Images, or Environments
+// at the environment it acted on), else the grid.
+func (o operation) listPage(in jobs.Inputs) string {
+	switch o.Section {
 	case sectionImages:
 		return "/images"
 	case sectionEnvironments:
-		if op.Kind.OnEnvironment() && pods.CheckDomain(in.Domain) == nil {
-			return envHref(in.Domain)
+		if o.Kind.OnEnvironment() {
+			_, href := envHome(in)
+			return href
 		}
 		return envsPath
 	}
 	return "/"
 }
 
-// result is the page a finished job of op with inputs in shows its work
+// result is the page a finished job of o with inputs in shows its work
 // on: its environment or image family; nil for a team job, and for a
 // teardown, whose work is gone.
 func (o operation) result(in jobs.Inputs) *link {
-	switch {
-	case o.Kind.TearsDown():
-	case o.Section == sectionEnvironments && pods.CheckDomain(in.Domain) == nil:
-		return &link{envHref(in.Domain), "Open " + in.Domain}
-	case o.Section == sectionImages:
-		family := in.Family
-		if f, _, ok := pods.ParseImageName(in.Image); ok && family == "" {
-			family = f
-		}
-		if pods.CheckFamily(family) == nil {
-			return &link{familyHref(family), "Open " + family}
-		}
+	if o.home == nil || o.Kind.TearsDown() {
+		return nil
+	}
+	if name, href := o.home(in); name != "" {
+		return &link{href, "Open " + name}
 	}
 	return nil
 }

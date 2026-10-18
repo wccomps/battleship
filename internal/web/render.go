@@ -49,9 +49,11 @@ func parsePages() map[string]*template.Template {
 // funcs are the template helpers. Times are formatted in Go against the
 // server's clock before they reach a template.
 var funcs = template.FuncMap{"asset": assetURL, "names": keepNames, "icon": icon, "opIcon": opIcon, "needs": needs,
-	"hasPrefix": strings.HasPrefix, "imageKinds": func() []string { return pods.ImageKinds }, "familyHref": familyHref, "notesHref": notesHref,
-	"notesButton": func(family string, may bool) notesButton { return notesButton{family, may} },
-	"details":     detailsOf, "maxDetail": func() int { return pods.MaxDetail }, "maxNotes": func() int { return pods.MaxFreeNotes }}
+	"hasPrefix": strings.HasPrefix, "imageKinds": func() []string { return pods.ImageKinds }, "familyHref": familyHref,
+	"notesButton": func(family string, may bool) offer {
+		return offer{Href: notesHref(family), Label: "Edit notes of " + family, May: may}
+	},
+	"details": detailsOf, "maxDetail": func() int { return pods.MaxDetail }, "maxNotes": func() int { return pods.MaxFreeNotes }}
 
 // nameRE matches a name in prose: letter/digit/_/* runs joined by '-' or '.'
 // (team03-web, dc.kilo.alpha.tpl, *.kilo.alpha). keepNames skips matches

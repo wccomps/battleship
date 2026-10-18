@@ -267,19 +267,8 @@ func newNonce() (string, error) {
 // for an image operation the image it makes or acts on: "Register teak-v2".
 func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
 	n := len(runnable)
-	if n == 1 {
-		switch op.Kind {
-		case pods.KindImageRegister:
-			return "Register " + runnable[0].Name
-		case pods.KindImageEdit:
-			return "Copy as " + runnable[0].Name
-		case pods.KindImageDeprecate:
-			return "Deprecate " + runnable[0].Name
-		case pods.KindImageDelete:
-			return "Delete " + runnable[0].Name
-		case pods.KindImageDetails:
-			return "Save notes of " + runnable[0].Name
-		}
+	if n == 1 && op.ConfirmVerb != "" {
+		return op.ConfirmVerb + " " + runnable[0].Name
 	}
 	vms := countVMs(n)
 	switch op.Kind {
@@ -331,7 +320,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 	}
 	p.Heading = p.Title.Label
 	if op.Kind.Teamless() {
-		p.CloseHref = listPage(in)
+		p.CloseHref = op.listPage(in)
 	}
 	if opts.fromGrid {
 		p.EditHref, p.CloseHref = "/", "/"

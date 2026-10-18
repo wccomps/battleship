@@ -84,6 +84,31 @@ func (h *harness) noJobs(what string) {
 	}
 }
 
+func TestEveryKindHasOperation(t *testing.T) {
+	if len(operations) != len(pods.Kinds) {
+		t.Errorf("operations has %d rows, pods.Kinds has %d", len(operations), len(pods.Kinds))
+	}
+	for _, k := range pods.Kinds {
+		op, ok := operationFor(k)
+		if !ok {
+			t.Errorf("%s has no operation row", k)
+			continue
+		}
+		if op.Path == "" || op.Title == "" || op.Icon == "" || op.Noun == "" {
+			t.Errorf("%s operation row is incomplete: %+v", k, op)
+		}
+		if k.Teamless() && (op.Section == "" || op.review == nil || op.home == nil) {
+			t.Errorf("%s teamless operation row lacks Section, review or home", k)
+		}
+		if (op.Pick != "") != (op.step != nil) {
+			t.Errorf("%s Pick=%q step=%t", k, op.Pick, op.step != nil)
+		}
+		if (op.review != nil) != (op.Verb != "") {
+			t.Errorf("%s review=%t Verb=%q", k, op.review != nil, op.Verb)
+		}
+	}
+}
+
 func TestOperationForms(t *testing.T) {
 	h := newHarness(t)
 	h.poll()

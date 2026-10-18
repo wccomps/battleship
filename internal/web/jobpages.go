@@ -659,7 +659,7 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 		Who:        whoShort(j.CreatedBy),
 		By:         j.CreatedBy,
 		Role:       actsAs(j),
-		Home:       listPage(jobs.Inputs{Kind: op.Kind, Domain: in.Domain}),
+		Home:       op.listPage(in),
 		BackHref:   "/logs",
 		BackLabel:  "Logs",
 		Teams:      jobTeams(in),
