@@ -14,8 +14,7 @@ import (
 // envForm is what Create environment and Add hosts show beyond the other
 // catalog forms: the slot and machines, and the hosts already there.
 type envForm struct {
-	// Router is the router's row: always on Create, and on Add hosts when
-	// the environment has none. Rows are the host rows.
+	// Router is the router's row on Create; Rows are the host rows.
 	Router *machineRow
 	Rows   []machineRow
 	// HostImages are the host image choices by kind; RouterImages, the
@@ -77,7 +76,7 @@ type hereChip struct{ Name, Addr string }
 
 // imageGroup is one kind's images in an image select.
 type imageGroup struct {
-	Kind   string // Windows, Linux or Other
+	Kind   string // Windows, Linux / BSD or Other
 	Images []imageOpt
 }
 
@@ -94,7 +93,7 @@ func imageOpts(ims []pods.BaseImage) []imageOpt {
 
 // blankRows is how many empty host rows the form starts with, and how many
 // Add host adds without JavaScript.
-const blankRows = 4
+const blankRows = 1
 
 // newEnvForm reads p's rows from form if it posted them, else from p.In:
 // at least blankRows, plus blankRows for Add host without JavaScript.
@@ -108,7 +107,7 @@ func (s *Server) newEnvForm(ctx context.Context, p catalogPage, form url.Values)
 		g.Images = append(g.Images, imageOpts([]pods.BaseImage{im})...)
 	}
 	posted := form.Has(fieldHostName) || form.Has(fieldRouterImage)
-	if p.Op.Kind == pods.KindEnvCreate || p.Env != nil && !p.Env.HasRouter() {
+	if p.Op.Kind == pods.KindEnvCreate {
 		switch {
 		case form.Has(fieldRouterImage):
 			r := rawRow(form.Get(fieldRouterName), form.Get(fieldRouterImage), "")
@@ -116,7 +115,7 @@ func (s *Server) newEnvForm(ctx context.Context, p catalogPage, form url.Values)
 		case p.In.Router != "":
 			r := rowOfLine(p.In.Router)
 			f.Router = &r
-		case !posted || p.Op.Kind == pods.KindEnvCreate: // a posted Add hosts without it had it removed
+		default:
 			f.Router = &machineRow{Name: "gw"}
 			if len(p.Routers) == 1 {
 				f.Router.Image = p.Routers[0].Family
@@ -232,7 +231,7 @@ func (p *catalogPage) request() (pods.EnvRequest, map[int]*machineRow) {
 		req.Slot = n
 	}
 	rows := map[int]*machineRow{}
-	if r := p.Router; r != nil && (create || r.Image != "") {
+	if r := p.Router; r != nil {
 		switch {
 		case !shapeOK(r, "the router"):
 		case r.Image == "":

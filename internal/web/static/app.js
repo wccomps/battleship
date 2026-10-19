@@ -523,7 +523,6 @@
           el.setAttribute("aria-label", el.getAttribute("aria-label").replace(/\d+/, i + 1));
         });
       });
-      each(box.querySelectorAll(".router [data-remove-row]"), function (b) { b.hidden = false; });
     });
   }
   machineRows(document);

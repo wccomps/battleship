@@ -159,6 +159,8 @@ func TestBrowserReviews(t *testing.T) {
 			h.t = t
 			b := newBrowser(t, h, &lead, size.width, size.height, size.dark)
 			b.open("/environments/kilo.alpha/add")
+			b.click(`[data-add-row]`)
+			b.waitFor("a second row", `document.querySelectorAll("[data-row]").length === 2`)
 			b.run("filling the rows", chromedp.SendKeys(`input[aria-label="Host 1 name"]`, "wks2", chromedp.ByQuery),
 				chromedp.SetValue(`select[aria-label="Host 1 image"]`, "win2022", chromedp.ByQuery),
 				chromedp.SendKeys(`input[aria-label="Host 2 name"]`, "elm2", chromedp.ByQuery),
@@ -179,6 +181,10 @@ func TestBrowserReviews(t *testing.T) {
 			}
 
 			b.open("/environments/new")
+			b.click(`[data-add-row]`)
+			b.waitFor("a second row", `document.querySelectorAll("[data-row]").length === 2`)
+			b.click(`[data-add-row]`)
+			b.waitFor("a third row", `document.querySelectorAll("[data-row]").length === 3`)
 			b.run("filling the create form", chromedp.SendKeys("#domain", "kilo.bravo"),
 				chromedp.SendKeys(`input[aria-label="Host 1 name"]`, "dc", chromedp.ByQuery),
 				chromedp.SetValue(`select[aria-label="Host 1 image"]`, "win2022", chromedp.ByQuery),

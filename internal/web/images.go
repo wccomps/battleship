@@ -37,7 +37,7 @@ type readyRow struct {
 
 // kindGroup is the catalogue's families of one kind.
 type kindGroup struct {
-	Label    string // "Router", "Windows", "Linux" or "Other"
+	Label    string // "Router", "Windows", "Linux / BSD" or "Other"
 	Families []familyRow
 }
 
@@ -52,7 +52,7 @@ type familyRow struct {
 }
 
 // kindLabels are the catalogue's group headings.
-var kindLabels = map[string]string{pods.ImageRouter: "Router", pods.ImageWindows: "Windows", pods.ImageLinux: "Linux", pods.ImageOther: "Other"}
+var kindLabels = map[string]string{pods.ImageRouter: "Router", pods.ImageWindows: "Windows", pods.ImageLinux: "Linux / BSD", pods.ImageOther: "Other"}
 
 // readyRows says what each candidate becomes when registered.
 func readyRows(cands []pods.RegisterCandidate, images []pods.BaseImage) []readyRow {
