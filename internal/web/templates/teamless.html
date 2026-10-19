@@ -46,12 +46,12 @@
 <div class="mrow router">
 <input class="inp n" type="text" name="router_name" value="{{.Name}}" aria-label="Router name" autocomplete="off" spellcheck="false"{{if eq .Bad "name"}} aria-invalid="true" aria-describedby="r-err"{{end}}>
 <select class="inp im" name="router_image" aria-label="Router image"{{if eq .Bad "image"}} aria-invalid="true" aria-describedby="r-err"{{end}}>
-<option value="">{{if eq $.Data.Op.Kind "env-create"}}Choose image{{else}}No router{{end}}</option>
+<option value="">Choose image</option>
 {{- $r := .}}{{$found := false}}{{range $.Data.RouterImages}}<option value="{{.Family}}"{{if eq .Family $r.Image}} selected{{$found = true}}{{end}}>{{.Label}}</option>{{end}}
 {{- if and .Image (not $found)}}<option value="{{.Image}}" selected data-stale>{{.Image}} · not a current router image</option>{{end}}
 </select>
 <div class="addr fixed a"><span class="pre l">{{$.Data.Subnet}}.</span><span class="pre s">.</span><b>{{$.Data.Gateway}}</b></div>
-{{- if eq $.Data.Op.Kind "env-add"}}<button type="button" class="btn ghost sq x" data-remove-row aria-label="Remove the router" hidden>{{icon "close"}}</button>{{else}}<span class="x"></span>{{end}}
+<span class="x"></span>
 {{- with .Err}}<span class="ferr" id="r-err">{{.}}</span>{{end}}
 </div>
 {{- end}}

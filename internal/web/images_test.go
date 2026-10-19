@@ -120,7 +120,7 @@ func TestImagesPageCatalogue(t *testing.T) {
 	if !ok {
 		t.Fatalf("no catalogue:\n%s", body)
 	}
-	router, linux := strings.Index(table, `<th scope="rowgroup" colspan="5">Router</th>`), strings.Index(table, `<th scope="rowgroup" colspan="5">Linux</th>`)
+	router, linux := strings.Index(table, `<th scope="rowgroup" colspan="5">Router</th>`), strings.Index(table, `<th scope="rowgroup" colspan="5">Linux / BSD</th>`)
 	if router < 0 || linux < router || strings.Contains(table, ">Windows</th>") {
 		t.Errorf("groups wrong (router %d, linux %d):\n%s", router, linux, table)
 	}

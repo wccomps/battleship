@@ -104,7 +104,7 @@ func selectOf(t *testing.T, body, name string) string {
 // Create environment says the LAN, router and host addresses from config,
 // offers the free slots (not those a queued job will fill) with the first
 // chosen, then the router row, fixed at .2 with its one image chosen, and
-// four empty host rows whose images are grouped by kind, each family's
+// an empty host row whose images are grouped by kind, each family's
 // newest usable version. Enter reviews: the first submit button does.
 func TestCreateEnvironmentForm(t *testing.T) {
 	lan, err := config.ParseLAN("10.50.7")
@@ -127,13 +127,13 @@ func TestCreateEnvironmentForm(t *testing.T) {
 	contains(t, "the slot choice", slot, `<option value="03" selected>dev-03 · first free</option><option value="04">dev-04</option>`, `<option value="10">dev-10</option>`)
 	lacks(t, "the slot choice", slot, `value="01"`, `value="02"`)
 	contains(t, "the router image", selectOf(t, body, "router_image"), `<option value="gw" selected>gw · v1</option>`)
-	if rows := formRows(body); len(rows) != blankRows || rows[0] != (formRow{}) || rows[3] != (formRow{}) {
-		t.Errorf("host rows = %+v, want %d empty ones", rows, blankRows)
+	if rows := formRows(body); len(rows) != blankRows || rows[0] != (formRow{}) {
+		t.Errorf("host rows = %+v, want %d empty one", rows, blankRows)
 	}
 	images := selectOf(t, body, "host_image")
 	contains(t, "a host image choice", images, `<option value="">Choose image</option><optgroup label="Windows"><option value="win2019">win2019 · v1</option><option value="win2022">win2022 · v3</option></optgroup>`+
-		`<optgroup label="Linux"><option value="debian-12">debian-12 · v1</option></optgroup><optgroup label="Other"><option value="appliance">appliance · v2</option></optgroup>`)
-	lacks(t, "a host image choice", images, "win10", "v2</option></optgroup><optgroup label=\"Linux\"")
+		`<optgroup label="Linux / BSD"><option value="debian-12">debian-12 · v1</option></optgroup><optgroup label="Other"><option value="appliance">appliance · v2</option></optgroup>`)
+	lacks(t, "a host image choice", images, "win10", "v2</option></optgroup><optgroup label=\"Linux / BSD\"")
 	if review, more := strings.Index(body, `<button type="submit" class="sr" tabindex="-1" aria-hidden="true">Review</button>`), strings.Index(body, `name="more"`); review < 0 || review > more {
 		t.Errorf("the first submit button isn't Review (at %d; Add host at %d)", review, more)
 	}
@@ -273,13 +273,13 @@ func TestMachineFieldErrors(t *testing.T) {
 		`The router needs a router image, not debian-12 (linux).`)
 }
 
-// Without JavaScript, Add host asks for the form again with four more
-// rows, keeping what was typed and checking nothing yet.
+// Without JavaScript, Add host asks for the form again with another row,
+// keeping what was typed and checking nothing yet.
 func TestAddHostWithoutJS(t *testing.T) {
 	h := newHarness(t)
 	addFormImages(h)
 	sess := h.login(asLead)
-	form := rowsForm("gw", "gw", [3]string{"dc", "win2022", "10"}, [3]string{}, [3]string{"Bad", "", ""}, [3]string{})
+	form := rowsForm("gw", "gw", [3]string{"dc", "win2022", "10"}, [3]string{"Bad", "", ""})
 	form.Set("domain", "kilo.bravo")
 	form.Set("slot", "03")
 	form.Set("more", "yes")
@@ -289,27 +289,25 @@ func TestAddHostWithoutJS(t *testing.T) {
 	}
 	body := rec.Body.String()
 	rows := formRows(body)
-	if len(rows) != 8 || rows[0] != (formRow{name: "dc", image: "win2022", octet: "10"}) || rows[1] != (formRow{name: "Bad"}) || rows[2] != (formRow{}) {
-		t.Errorf("rows = %+v, want dc, Bad, then 6 empty", rows)
+	if len(rows) != 3 || rows[0] != (formRow{name: "dc", image: "win2022", octet: "10"}) || rows[1] != (formRow{name: "Bad"}) || rows[2] != (formRow{}) {
+		t.Errorf("rows = %+v, want dc, Bad, then 1 empty", rows)
 	}
 	contains(t, "the form again", body, `value="kilo.bravo"`, `<option value="03" selected>dev-03</option>`,
 		`name="router_name" value="gw"`, `<option value="gw" selected>gw · v1</option>`)
 	lacks(t, "the form again", body, `role="alert"`, "ferr", "aria-invalid")
-	// Again: four more than it had.
-	for i := range 4 {
-		form.Add("host_name", "")
-		form.Add("host_image", "")
-		form.Add("host_octet", strings.Repeat(" ", i%2))
-	}
-	if rows := formRows(h.post(&sess, "/environments/new/preview", form).Body.String()); len(rows) != 12 {
-		t.Errorf("Add host on 8 rows gives %d", len(rows))
+	// Again: one more than it had.
+	form.Add("host_name", "")
+	form.Add("host_image", "")
+	form.Add("host_octet", " ")
+	if rows := formRows(h.post(&sess, "/environments/new/preview", form).Body.String()); len(rows) != 4 {
+		t.Errorf("Add host on 3 rows gives %d", len(rows))
 	}
 	h.noJobs("Add host")
 }
 
 // Add hosts names its environment in the title, shows what is already
-// there (names and addresses, router first), and has no router row when
-// the environment has a router. After Review, addresses already used are
+// there (names and addresses, router first), and starts with one empty
+// host row and no router row. After Review, addresses already used are
 // marked; a host already there is resumed.
 func TestAddHostsForm(t *testing.T) {
 	h := newHarness(t)
@@ -320,10 +318,17 @@ func TestAddHostsForm(t *testing.T) {
 	contains(t, "the form", body, `Add hosts to <span class="vm">kilo.alpha</span></h1>`,
 		`<div class="sec"><span class="hint">Already here · dev-01</span><div class="here"><span>gw .2</span><span>yew .5</span><span>teak .10</span><span>elm</span></div></div>`,
 		`<legend class="lbl">New hosts</legend>`, `action="/environments/kilo.alpha/add/preview"`)
-	lacks(t, "the form", body, `name="router_name"`, `name="domain"`, `name="slot"`)
-	if rows := formRows(body); len(rows) != blankRows {
-		t.Errorf("%d host rows", len(rows))
+	lacks(t, "the form", body, `name="router_name"`, `name="router_image"`, `name="domain"`, `name="slot"`)
+	if rows := formRows(body); len(rows) != blankRows || rows[0] != (formRow{}) {
+		t.Errorf("host rows = %+v, want %d empty one", rows, blankRows)
 	}
+	// An environment without a router also starts with one host row and no router row.
+	noRouter := h.get(&sess, "/environments/oscar.lima/add").Body.String()
+	lacks(t, "add hosts without a router", noRouter, `name="router_name"`, `name="router_image"`, "<span>gw")
+	if rows := formRows(noRouter); len(rows) != blankRows || rows[0] != (formRow{}) {
+		t.Errorf("oscar.lima host rows = %+v, want %d empty one", rows, blankRows)
+	}
+
 	form := rowsForm("", "", [3]string{"teak", "debian-12", ""}, [3]string{"oak", "debian-12", "10"}, [3]string{"ash", "debian-12", "5"}, [3]string{"fir", "debian-12", "11"})
 	form.Del("router_name")
 	form.Del("router_image")
@@ -342,39 +347,6 @@ func TestAddHostsForm(t *testing.T) {
 		t.Errorf("rows:\n got %+v\nwant %+v", got, want)
 	}
 	contains(t, "the form again", rec.Body.String(), `action="/environments/kilo.alpha/add/preview"`)
-}
-
-// An environment without a router gets a router row on Add hosts, filled
-// in with its one image; choosing none, or removing the row (which posts
-// no router fields), adds hosts only.
-func TestAddHostsOffersARouterOnlyWithoutOne(t *testing.T) {
-	h := newHarness(t)
-	addImages(h)
-	addEnv(h, false)
-	sess := h.login(asLead)
-	body := h.get(&sess, "/environments/kilo.alpha/add").Body.String()
-	contains(t, "the form", body, `name="router_name" value="gw"`, `<b>2</b></div><button type="button" class="btn ghost sq x" data-remove-row aria-label="Remove the router" hidden>`)
-	contains(t, "the router image", selectOf(t, body, "router_image"), `<option value="">No router</option><option value="gw" selected>gw · v1</option>`)
-	lacks(t, "the form", body, "Already here · dev-01</span><div class=\"here\"><span>gw")
-
-	for what, form := range map[string]url.Values{
-		"none chosen": rowsForm("gw", "", [3]string{"oak", "debian-12", ""}),
-		"removed":     {"host_name": {"oak"}, "host_image": {"debian-12"}, "host_octet": {""}},
-	} {
-		_, fields, _ := h.preview(&sess, "/environments/kilo.alpha/add", form)
-		if fields.Get("router") != "" || fields.Get("env_hosts") != "oak=debian-12" {
-			t.Errorf("%s: confirm fields %v", what, fields)
-		}
-	}
-	// A removed router row stays removed when the form comes back.
-	back := h.post(&sess, "/environments/kilo.alpha/add/preview", url.Values{"host_name": {"Oak"}, "host_image": {"debian-12"}, "host_octet": {""}}).Body.String()
-	lacks(t, "the form after a removed router", back, `name="router_name"`)
-	// Chosen, it is planned.
-	_, fields, preview := h.preview(&sess, "/environments/kilo.alpha/add", rowsForm("fw", "gw", [3]string{"oak", "debian-12", ""}))
-	if fields.Get("router") != "fw=gw" {
-		t.Errorf("router field = %q", fields.Get("router"))
-	}
-	contains(t, "the preview", preview, "fw.kilo.alpha", "oak.kilo.alpha")
 }
 
 // Typed rows of any content either review, posting exactly the rows typed,
@@ -725,8 +697,9 @@ func TestRetryAFailedAdd(t *testing.T) {
 }
 
 // The environment forms fit a phone, light and dark, with field errors
-// too. With the script, Add host adds a row in place and × removes one,
-// renumbering the rest; Enter in a field reviews rather than adding rows.
+// too. With the script, the form starts with one host row whose × is
+// hidden; Add host adds a row in place and × removes one, renumbering the
+// rest; Enter in a field reviews rather than adding rows.
 func TestBrowserEnvironmentForms(t *testing.T) {
 	h := browserHarness(t)
 	addFormImages(h)
@@ -740,29 +713,36 @@ func TestBrowserEnvironmentForms(t *testing.T) {
 			b.open("/environments/new")
 			b.noSideways("create")
 			b.shot("env-new-" + size.name)
-			if !b.is(rows + ` === 4 && [...document.querySelectorAll("[data-row] [data-remove-row]")].every(x => !x.hidden)`) {
-				t.Errorf("the create form doesn't start with 4 removable host rows")
+			if !b.is(rows + ` === 1 && document.querySelector("[data-row] [data-remove-row]").hidden`) {
+				t.Errorf("the create form doesn't start with 1 unremovable host row")
 			}
 
-			b.run("filling the form", chromedp.SendKeys("#domain", "kilo.bravo"),
+			b.run("filling the first row", chromedp.SendKeys("#domain", "kilo.bravo"),
 				chromedp.SendKeys(`input[aria-label="Host 1 name"]`, "teak", chromedp.ByQuery),
 				chromedp.SetValue(`select[aria-label="Host 1 image"]`, "debian-12", chromedp.ByQuery),
-				chromedp.SendKeys(`input[aria-label="Host 1 last octet"]`, "10", chromedp.ByQuery),
-				chromedp.SendKeys(`input[aria-label="Host 2 name"]`, "oak", chromedp.ByQuery))
+				chromedp.SendKeys(`input[aria-label="Host 1 last octet"]`, "10", chromedp.ByQuery))
 			b.click(`[data-add-row]`)
-			b.waitFor("a fifth row", rows+` === 5`)
-			if !b.is(`location.pathname === "/environments/new" && document.activeElement.getAttribute("aria-label") === "Host 5 name" && document.activeElement.value === ""`) {
-				t.Errorf("Add host didn't add an empty row in place and focus it: %s", b.where())
+			b.waitFor("a second row", rows+` === 2`)
+			if !b.is(`location.pathname === "/environments/new" && document.activeElement.getAttribute("aria-label") === "Host 2 name" && document.activeElement.value === "" && [...document.querySelectorAll("[data-row] [data-remove-row]")].every(x => !x.hidden)`) {
+				t.Errorf("Add host didn't add a second removable row in place and focus it: %s", b.where())
 			}
+			b.run("filling the second row", chromedp.SendKeys(`input[aria-label="Host 2 name"]`, "oak", chromedp.ByQuery))
+			b.click(`[data-add-row]`)
+			b.waitFor("a third row", rows+` === 3`)
 			b.click(`button[aria-label="Remove host 2"]`)
-			b.waitFor("four rows", rows+` === 4`)
+			b.waitFor("two rows", rows+` === 2`)
 			var names []string
 			b.eval(`[...document.querySelectorAll("[data-row] input[name=host_name]")].map(i => i.getAttribute("aria-label") + "=" + i.value)`, &names)
-			if strings.Join(names, ",") != "Host 1 name=teak,Host 2 name=,Host 3 name=,Host 4 name=" {
+			if strings.Join(names, ",") != "Host 1 name=teak,Host 2 name=" {
 				t.Errorf("after removing oak's row, rows %v", names)
 			}
 			b.noSideways("create with rows changed")
 			b.shot("env-new-rows-" + size.name)
+			b.click(`button[aria-label="Remove host 2"]`)
+			b.waitFor("one row", rows+` === 1`)
+			if !b.is(`document.querySelector("[data-row] [data-remove-row]").hidden`) {
+				t.Errorf("the last host row's remove button isn't hidden")
+			}
 
 			// Enter in a name field reviews.
 			b.run("pressing Enter", chromedp.SendKeys(`input[aria-label="Host 1 name"]`, kb.Enter, chromedp.ByQuery))
@@ -773,6 +753,10 @@ func TestBrowserEnvironmentForms(t *testing.T) {
 			// Field errors.
 			b.clean()
 			b.open("/environments/new")
+			for n := 2; n <= 4; n++ {
+				b.click(`[data-add-row]`)
+				b.waitFor("row "+itoa(int64(n)), fmt.Sprintf("%s === %d", rows, n))
+			}
 			b.run("filling the form wrongly", chromedp.SendKeys("#domain", "kilo.bravo"),
 				chromedp.SendKeys(`input[aria-label="Host 1 name"]`, "averyveryverylongname", chromedp.ByQuery),
 				chromedp.SetValue(`select[aria-label="Host 1 image"]`, "win2022", chromedp.ByQuery),
@@ -799,15 +783,16 @@ func TestBrowserEnvironmentForms(t *testing.T) {
 				t.Errorf("phone %v: a row's image is under its name: %v", b.phone, under)
 			}
 
-			// Add hosts, with a router row for oscar.lima, which has none.
-			b.open("/environments/kilo.alpha/add")
-			b.noSideways("add hosts")
+			// Add hosts starts with one host row and no router row, even when
+			// the environment has no router.
+			for _, domain := range []string{"kilo.alpha", "oscar.lima"} {
+				b.open("/environments/" + domain + "/add")
+				b.noSideways("add hosts " + domain)
+				if !b.is(rows + ` === 1 && document.querySelector(".mrow.router") === null && document.querySelector("[data-row] [data-remove-row]").hidden`) {
+					t.Errorf("%s add hosts doesn't start with 1 host row and no router row", domain)
+				}
+			}
 			b.shot("env-add-" + size.name)
-			b.open("/environments/oscar.lima/add")
-			b.noSideways("add hosts with a router row")
-			b.shot("env-add-router-" + size.name)
-			b.click(`button[aria-label="Remove the router"]`)
-			b.waitFor("the router row gone", `document.querySelector(".mrow.router") === null`)
 			b.clean()
 		})
 	}
