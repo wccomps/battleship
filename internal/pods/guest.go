@@ -217,10 +217,12 @@ elif [ -f /etc/network/interfaces ]; then
 	awk -v d="$iface" '
 		($1 == "auto" || $1 == "allow-hotplug") && $2 == d && NF == 2 { next }
 		$1 == "iface" { skip = ($2 == d) }
-		$1 == "auto" || $1 == "allow-hotplug" || $1 == "source" || $1 == "mapping" { skip = 0 }
+		$1 == "auto" || $1 == "allow-hotplug" || $1 == "source" || $1 == "source-directory" || $1 == "mapping" { skip = 0 }
 		!skip { print }' /etc/network/interfaces > /etc/network/interfaces.battleship
 	mv /etc/network/interfaces.battleship /etc/network/interfaces
-	grep -q '^source /etc/network/interfaces.d/\*' /etc/network/interfaces || echo 'source /etc/network/interfaces.d/*' >> /etc/network/interfaces
+	# ifupdown-ng (Alpine) reads source-directory, but not a glob in source.
+	grep -Eq '^(source /etc/network/interfaces\.d/\*|source-directory /etc/network/interfaces\.d/?)[[:space:]]*$' /etc/network/interfaces ||
+		echo 'source-directory /etc/network/interfaces.d' >> /etc/network/interfaces
 	cat > /etc/network/interfaces.d/battleship <<EOF
 auto $iface
 iface $iface inet static
