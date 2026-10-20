@@ -190,13 +190,16 @@ type hostEdit struct {
 
 // hostEditPrefill fills Edit host's form from the host VM's current config
 // and notes, or from the inputs a refused preview posted.
-func (s *Server) hostEditPrefill(ctx context.Context, p *catalogPage) {
+func (s *Server) hostEditPrefill(_ context.Context, p *catalogPage) {
 	p.ReadErr, p.Host = "", &hostEdit{}
 	if p.In.VMID < 100 {
 		p.Host.Err = "Choose the environment host to edit: each host on Environments has Edit."
 		return
 	}
-	at, err := s.planner(ctx).HostToEdit(ctx, p.In.VMID)
+	at, err := pods.HostToEdit(p.Envs, p.vms, p.In.VMID)
+	if p.readErr != nil {
+		err = p.readErr
+	}
 	p.Host.VMID, p.Host.Name = at.Host.VMID, at.Host.Name
 	if err != nil {
 		p.Host.Err = "Couldn't read the host to edit: " + sentence(proxmox.Describe(err))

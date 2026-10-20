@@ -354,9 +354,8 @@ func (e *Executor) finishTemplate(ctx context.Context, spec *pods.TemplateSpec, 
 		return fmt.Errorf("ejecting CD-ROM: %w", err)
 	}
 	// Conversion renames disks to base-*, which linked clones need; the result
-	// is checked below, not trusted. Conversions take the storage lock, so run
-	// one at a time (see Limits).
-	convErr := e.lim.storageOps.do(ctx, func() error { return e.convert(ctx, node, spec.VMID) })
+	// is checked below, not trusted.
+	convErr := e.convert(ctx, node, spec.VMID)
 	if convErr != nil && ctx.Err() != nil {
 		return fmt.Errorf("converting to template: %w", convErr)
 	}
@@ -388,42 +387,44 @@ func (e *Executor) finishTemplate(ctx context.Context, spec *pods.TemplateSpec, 
 // rename its disks.
 const convertWait = 2 * time.Minute
 
-// convert converts the VM to a template and waits for the task. Proxmox sets
-// template: 1 before renaming disks, so a request is never sent once the VM
-// says template: 1 (it would fail) and a failed task is never restarted.
-// If the VM was already converted or the outcome is unknown, convert waits
-// up to convertWait for the rename and returns nil if template: 1; the
-// caller checks the disks.
+// convert converts the VM to a template under the storage-ops slot and waits
+// for the task. Proxmox sets template: 1 before renaming disks, so a request
+// is never sent once the VM says template: 1 (it would fail) and a failed task
+// is never restarted. If the VM was already converted or the outcome is
+// unknown, convert waits up to convertWait for the rename and returns nil if
+// template: 1; the caller checks the disks.
 func (e *Executor) convert(ctx context.Context, node string, vmid int) error {
-	upid, err := e.taskUPID(ctx, 0, func() (string, error) {
-		cfg, err := e.api.VMConfig(ctx, node, vmid)
-		switch {
-		case proxmox.IsNotFound(err):
-			return "", errVanished
-		case err != nil:
-			return "", err
-		case cfg["template"] == "1":
-			return "", nil
+	return e.lim.storageOps.do(ctx, func() error {
+		upid, err := e.taskUPID(ctx, 0, func() (string, error) {
+			cfg, err := e.api.VMConfig(ctx, node, vmid)
+			switch {
+			case proxmox.IsNotFound(err):
+				return "", errVanished
+			case err != nil:
+				return "", err
+			case cfg["template"] == "1":
+				return "", nil
+			}
+			return e.api.ConvertToTemplate(ctx, node, vmid)
+		}, nil)
+		var taskErr *proxmox.TaskError
+		if (err == nil && upid != "") || errors.As(err, &taskErr) || ctx.Err() != nil {
+			return err
 		}
-		return e.api.ConvertToTemplate(ctx, node, vmid)
-	}, nil)
-	var taskErr *proxmox.TaskError
-	if (err == nil && upid != "") || errors.As(err, &taskErr) || ctx.Err() != nil {
+		wctx, cancel := context.WithTimeout(ctx, convertWait)
+		defer cancel()
+		cfg, _ := e.pollVM(wctx, node, vmid, func(cfg map[string]string) bool {
+			if cfg["template"] != "1" {
+				return true // not converting
+			}
+			key, _ := pods.UnconvertedDisk(cfg)
+			return key == ""
+		})
+		if cfg["template"] == "1" {
+			return nil
+		}
 		return err
-	}
-	wctx, cancel := context.WithTimeout(ctx, convertWait)
-	defer cancel()
-	cfg, _ := e.pollVM(wctx, node, vmid, func(cfg map[string]string) bool {
-		if cfg["template"] != "1" {
-			return true // not converting
-		}
-		key, _ := pods.UnconvertedDisk(cfg)
-		return key == ""
 	})
-	if cfg["template"] == "1" {
-		return nil
-	}
-	return err
 }
 
 // errVanished is a VM that disappeared mid-step. Unlike "does not exist"

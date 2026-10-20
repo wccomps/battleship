@@ -42,7 +42,7 @@ const envAddrsPath = envsPath + "/addresses"
 // The Environments page's guest agent reads, bounded so a hung agent
 // doesn't hold up the page.
 const (
-	addrReads       = 4
+	addrReads       = 16
 	addrReadTimeout = 2 * time.Second
 	addrReadsWithin = 5 * time.Second
 )

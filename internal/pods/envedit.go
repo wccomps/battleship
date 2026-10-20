@@ -71,17 +71,14 @@ type HostEditInput struct {
 	Details    *ImageNotes // nil keeps the details block and free notes as they are
 }
 
-// HostToEdit reads the environment host with vmid and its notes for editing.
-func (p Planner) HostToEdit(ctx context.Context, vmid int) (HostEdit, error) {
-	envs, vms, err := p.Environments(ctx)
-	if err != nil {
-		return HostEdit{}, err
-	}
-	at, _, err := p.findEnvHost(envs, vms, vmid)
+// HostToEdit finds the environment host with vmid in envs and vms for
+// editing.
+func HostToEdit(envs []Environment, vms []proxmox.VM, vmid int) (HostEdit, error) {
+	at, _, err := findEnvHost(envs, vms, vmid)
 	return at, err
 }
 
-func (p Planner) findEnvHost(envs []Environment, vms []proxmox.VM, vmid int) (HostEdit, proxmox.VM, error) {
+func findEnvHost(envs []Environment, vms []proxmox.VM, vmid int) (HostEdit, proxmox.VM, error) {
 	if env, h, ok := EnvHostByID(envs, vmid); ok {
 		vm, _ := vmByID(vms, vmid)
 		return HostEdit{Env: env, Host: h, Read: readImageNotes(h.desc)}, vm, nil
@@ -125,7 +122,7 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 	if err != nil {
 		return nil, err
 	}
-	at, vm, err := p.findEnvHost(envs, vms, req.VMID)
+	at, vm, err := findEnvHost(envs, vms, req.VMID)
 	if err != nil {
 		return nil, err
 	}
@@ -373,7 +370,7 @@ func (p Planner) EnvPower(ctx context.Context, vmid int, action string) (*Plan, 
 	if err != nil {
 		return nil, err
 	}
-	at, vm, err := p.findEnvHost(envs, vms, vmid)
+	at, vm, err := findEnvHost(envs, vms, vmid)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +389,7 @@ func (p Planner) EnvDeleteHost(ctx context.Context, vmid int, name string) (*Pla
 	if err != nil {
 		return nil, err
 	}
-	at, vm, err := p.findEnvHost(envs, vms, vmid)
+	at, vm, err := findEnvHost(envs, vms, vmid)
 	if err != nil {
 		return nil, err
 	}
