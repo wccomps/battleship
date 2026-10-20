@@ -60,7 +60,11 @@ func TestEnvEditFormAndConfirm(t *testing.T) {
 	h.api.VMs[2101].Config["ide0"] = "local:iso/debian.iso,media=cdrom"
 	sess := h.login(asLead)
 
+	before := h.api.Called("config:2101")
 	form := h.get(&sess, "/environments/edit?vmid=2101").Body.String()
+	if got := h.api.Called("config:2101") - before; got != 1 {
+		t.Errorf("GET /environments/edit read 2101's config %d times, want 1", got)
+	}
 	contains(t, "edit form", form,
 		`name="vmid" value="2101"`,
 		`name="env_host" value="teak"`,

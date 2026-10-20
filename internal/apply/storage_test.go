@@ -433,6 +433,44 @@ func TestTemplateDeleteAfterAFailedReadIsSerialized(t *testing.T) {
 	}
 }
 
+// Base-image conversions (StepConvert) and template deletes share the
+// storage-ops slot so concurrent image jobs never overlap on the storage lock.
+func TestImageRegisterConvertTakesStorageOps(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 500, Name: "debian-src", Node: "cedar", Status: "stopped"}, map[string]string{
+		"name": "debian-src", "agent": "1", "scsi0": "competitions:500/vm-500-disk-0.qcow2,size=32G",
+	})
+	f.Add(proxmox.VM{VMID: 8001, Name: "old-v1", Node: "cedar", Template: true, Tags: "base;linux;deprecated"}, map[string]string{
+		"name": "old-v1", "template": "1", "tags": "base;linux;deprecated", "scsi0": "competitions:8001/base-8001-disk-0.qcow2,size=32G",
+	})
+	regPlan, err := testPlanner(f).ImageRegister(context.Background(), pods.ImageRequest{VMID: 500, Family: "debian-12", ImageKind: pods.ImageLinux})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delPlan, err := testPlanner(f).ImageDelete(context.Background(), pods.ImageRequest{Image: "old-v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := watchStorageTasks(f, 8001)
+	lim := NewLimits(config.Default().Concurrency)
+	ex1 := testExecutor(f, &recorder{})
+	ex2 := testExecutor(f, &recorder{})
+	ex1.Limits, ex2.Limits = lim, lim
+
+	var wg sync.WaitGroup
+	var res1, res2 Result
+	wg.Add(2)
+	go func() { defer wg.Done(); res1 = ex1.Run(context.Background(), regPlan) }()
+	go func() { defer wg.Done(); res2 = ex2.Run(context.Background(), delPlan) }()
+	wg.Wait()
+	if len(res1.Failed) != 0 || len(res2.Failed) != 0 {
+		t.Fatalf("failed: reg=%v del=%v", res1.Failed, res2.Failed)
+	}
+	if p := w.peak(); p != 1 {
+		t.Errorf("%d storage-lock tasks ran at once, want 1", p)
+	}
+}
+
 // Deleting team VMs doesn't take the storage-ops slot: their destroys run
 // in parallel up to concurrency.deletes.
 func TestTeamVMDeletesAreNotSerialized(t *testing.T) {

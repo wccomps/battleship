@@ -22,7 +22,11 @@ func TestEnvEditUpdatesNotesDetailsRenameAndGuest(t *testing.T) {
 	p := NewPlanner(f, envConfig())
 	ctx := context.Background()
 
-	at, err := p.HostToEdit(ctx, 2101)
+	envs, vms, err := p.Environments(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at, err := HostToEdit(envs, vms, 2101)
 	if err != nil {
 		t.Fatal(err)
 	}

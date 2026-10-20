@@ -32,6 +32,8 @@ type catalogPage struct {
 	// Host is what an Edit host form edits (hostEditPrefill).
 	Host *hostEdit
 	envForm
+	vms     []proxmox.VM
+	readErr error
 }
 
 // newCatalogPage reads images and, for an environment form, environments
@@ -47,9 +49,11 @@ func (s *Server) newCatalogPage(ctx context.Context, section string) catalogPage
 		vms, err = s.planner(ctx).API.ClusterVMs(ctx)
 	}
 	if err != nil {
+		p.readErr = err
 		p.ReadErr = "Couldn't read the cluster: " + sentence(proxmox.Describe(err))
 		return p
 	}
+	p.vms = vms
 	p.Images = pods.BaseImages(vms)
 	p.Families = pods.FamilyNames(p.Images)
 	p.Routers = pods.Families(p.Images, pods.ImageRouter)
