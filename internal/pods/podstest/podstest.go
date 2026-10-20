@@ -407,6 +407,10 @@ func (f *Fake) SetVMConfig(ctx context.Context, node string, vmid int, changes m
 				}
 			}
 			continue
+		case "name":
+			vm.Name = v
+		case "tags":
+			vm.Tags = v
 		}
 		vm.Config[k] = v
 	}

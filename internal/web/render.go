@@ -49,9 +49,12 @@ func parsePages() map[string]*template.Template {
 // funcs are the template helpers. Times are formatted in Go against the
 // server's clock before they reach a template.
 var funcs = template.FuncMap{"asset": assetURL, "names": keepNames, "icon": icon, "opIcon": opIcon, "needs": needs,
-	"hasPrefix": strings.HasPrefix, "imageKinds": func() []string { return pods.ImageKinds }, "familyHref": familyHref,
+	"hasPrefix": strings.HasPrefix, "imageKinds": func() []string { return pods.ImageKinds }, "familyHref": familyHref, "envHostHref": envHostHref,
 	"notesButton": func(family string, may bool) offer {
 		return offer{Href: notesHref(family), Label: "Edit notes of " + family, May: may}
+	},
+	"hostEditButton": func(vmid int, name string, may bool) offer {
+		return offer{Href: envEditHref(vmid), Label: "Edit " + name, May: may}
 	},
 	"details": detailsOf, "maxDetail": func() int { return pods.MaxDetail }, "maxNotes": func() int { return pods.MaxFreeNotes }}
 

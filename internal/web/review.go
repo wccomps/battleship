@@ -249,6 +249,122 @@ func envReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *r
 	return r
 }
 
+// envEditReview describes editing an environment host: its renamed name,
+// kind, address, base image, network/CD-ROM repairs, guest reconfiguration,
+// and any details or free notes written.
+func envEditReview(op operation, _ jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
+	if len(plan.Items) != 1 {
+		return nil
+	}
+	it := plan.Items[0]
+	var was pods.NotesRead
+	if it.DetailsWas != nil {
+		was = *it.DetailsWas
+	}
+	r := &reviewView{Verb: op.Verb, Subject: it.Name}
+	if it.Rename != "" {
+		r.Facts = append(r.Facts, reviewFact{Label: "Rename", Code: it.Name + " -> " + it.Rename, Text: "VMID " + strconv.Itoa(it.VMID) + " · " + it.Node})
+	} else {
+		r.Facts = append(r.Facts, reviewFact{Label: "Host", Code: it.Name, Text: "VMID " + strconv.Itoa(it.VMID) + " · " + it.Node})
+	}
+	if it.Notes != nil {
+		router := slices.Contains(pods.Tags(it.Tags), pods.ImageRouter)
+		kind := cmp.Or(it.Notes.OS, pods.ImageOther)
+		if router {
+			kind = pods.ImageRouter
+		}
+		addr := "none"
+		switch {
+		case router:
+			addr = "." + strconv.Itoa(pods.GatewayOctet)
+		case it.Notes.IP.IsValid():
+			addr = lanOctet(lan, it.Notes.IP)
+		}
+		r.Facts = append(r.Facts,
+			reviewFact{Label: "Kind", Text: kind},
+			reviewFact{Label: "Address", Code: addr},
+			reviewFact{Label: "Base image", Code: cmp.Or(it.Notes.Base, "none")},
+		)
+	}
+	if slices.Contains(it.Steps, pods.StepNetwork) {
+		r.Facts = append(r.Facts, reviewFact{Label: "Network", Text: "moves NICs onto " + it.Pool + "'s bridges"})
+	}
+	if slices.Contains(it.Steps, pods.StepCDROM) {
+		r.Facts = append(r.Facts, reviewFact{Label: "CD-ROM", Text: "ejects attached install media"})
+	}
+	if it.Guest != nil {
+		r.Facts = append(r.Facts, reviewFact{Label: "Guest agent", Text: "sets hostname " + it.Guest.Hostname + " and address " + it.Guest.IP.String() + " inside the guest"})
+	}
+	if it.Details != nil {
+		after := *it.Details
+		r.Changes = detailChanges(was.Details, after.ImageDetails)
+		switch {
+		case was.Unreadable && after.ImageDetails.Empty():
+			r.DetailsSay, r.Block = "Its details block is unreadable: it is removed, and no details are written.", was.Block
+		case was.Unreadable:
+			r.DetailsSay, r.Block = "Its details block is unreadable: these replace it.", was.Block
+		}
+		if after.Free != nil && *after.Free != was.Free {
+			r.NotesChange = &notesChange{Before: was.Free, After: *after.Free}
+		}
+	}
+	switch {
+	case it.Blocked != "":
+		r.Say, r.Blocked = sentence(it.Blocked), true
+	case it.Guest != nil:
+		r.Say = "Updates " + it.Name + " in " + it.Pool + " and configures its hostname and address through the guest agent."
+	case slices.Contains(it.Steps, pods.StepCDROM) && len(it.Steps) == 1:
+		r.Say = "Ejects the attached CD-ROM from " + it.Name + "."
+	default:
+		r.Say = "Updates " + it.Name + " in " + it.Pool + "."
+	}
+	return r
+}
+
+// envPowerReview describes a power action on one environment host.
+func envPowerReview(_ operation, in jobs.Inputs, plan *pods.Plan, _ config.LAN) *reviewView {
+	if len(plan.Items) != 1 {
+		return nil
+	}
+	it := plan.Items[0]
+	r := &reviewView{Verb: powerLabel(in.Action), Subject: it.Name, Deletes: in.Action == "stop"}
+	r.Rows = []reviewRow{{Name: it.Name, Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}}
+	if it.Blocked != "" {
+		r.Say, r.Blocked = sentence(it.Blocked), true
+	} else {
+		r.Say = consequence(pods.KindPower, in, plan.Runnable())
+	}
+	return r
+}
+
+// envDeleteHostReview describes stopping and deleting one environment host.
+func envDeleteHostReview(op operation, _ jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
+	if len(plan.Items) != 1 {
+		return nil
+	}
+	it := plan.Items[0]
+	pool := poolOf(plan.Items)
+	r := &reviewView{Verb: op.Verb, Subject: it.Name, Image: true, Addr: true, Deletes: true}
+	row := reviewRow{Name: it.Name, Router: slices.Contains(pods.Tags(it.Tags), pods.ImageRouter),
+		Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}
+	if it.Notes != nil {
+		row.Image = it.Notes.Base
+		if it.Notes.IP.IsValid() {
+			row.Addr = lanOctet(lan, it.Notes.IP)
+		}
+	}
+	if row.Router {
+		row.Addr = "." + strconv.Itoa(pods.GatewayOctet)
+	}
+	r.Rows = []reviewRow{row}
+	if it.Blocked != "" {
+		r.Say, r.Blocked = sentence(it.Blocked), true
+	} else {
+		r.Say = "Stops and deletes " + it.Name + " in " + pool + " with its disks. The other VMs in " + pool + " stay as they are. This can't be undone."
+	}
+	return r
+}
+
 // tallyTeardown builds r.Rows and r.Kept from plan, calling fill on each
 // row, and returns the number of VMs deleted and the sentence naming any
 // leftover disks freed.

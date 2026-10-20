@@ -12,7 +12,7 @@ import (
 // ConfigHash covers it (TestEveryRunConfigFieldIsClassified requires every
 // field). A field no kind lists only shapes planning, which the plan records.
 var imageKinds = []Kind{KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete}
-var envKinds = []Kind{KindEnvCreate, KindEnvAdd}
+var envKinds = []Kind{KindEnvCreate, KindEnvAdd, KindEnvEdit}
 
 var hashedFor = map[string]map[string][]Kind{
 	"Naming": {
@@ -38,7 +38,7 @@ var hashedFor = map[string]map[string][]Kind{
 		"VMIDBase": envKinds, "Subnet": envKinds, "AgentTimeout": envKinds, "OpsCAKey": envKinds,
 	},
 	"Teardown": {
-		"ShutdownTimeout": {KindTeardown, KindEnvTeardown},
+		"ShutdownTimeout": {KindTeardown, KindEnvTeardown, KindEnvDeleteHost},
 	},
 }
 

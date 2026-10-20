@@ -71,6 +71,10 @@ var validInputs = []Inputs{
 	{Kind: pods.KindEnvCreate, Domain: "kilo.alpha", Slot: "02", Router: "gw=opnsense", EnvHosts: []string{"dc=windows"}},
 	{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"web=debian:20"}},
 	{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"},
+	{Kind: pods.KindEnvEdit, EnvHost: "web", Octet: 10, ImageRequest: pods.ImageRequest{VMID: 2101, ImageKind: pods.ImageLinux, Image: "debian-12-v1",
+		Details: &pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: "Debian 12"}}}},
+	{Kind: pods.KindEnvPower, Action: "stop", ImageRequest: pods.ImageRequest{VMID: 2101}},
+	{Kind: pods.KindEnvDeleteHost, EnvHost: "web.kilo.alpha", ImageRequest: pods.ImageRequest{VMID: 2101}},
 	{Kind: pods.KindImageRegister, ImageRequest: pods.ImageRequest{VMID: 150, Family: "debian-12", ImageKind: pods.ImageLinux}},
 	{Kind: pods.KindImageEdit, ImageRequest: pods.ImageRequest{Family: "debian-12"}},
 	{Kind: pods.KindImageDeprecate, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}},
@@ -143,6 +147,9 @@ func TestPropInputsJSON(t *testing.T) {
 		Slot        string           `json:"slot,omitempty"`
 		Router      string           `json:"router,omitempty"`
 		EnvHosts    []string         `json:"env_hosts,omitempty"`
+		EnvHost     string           `json:"env_host,omitempty"`
+		Octet       int              `json:"octet,omitempty"`
+		EjectCDROM  bool             `json:"eject_cdrom,omitempty"`
 		VMID        int              `json:"vmid,omitempty"`
 		Family      string           `json:"family,omitempty"`
 		ImageKind   string           `json:"image_kind,omitempty"`
@@ -177,8 +184,11 @@ func TestPropInputsJSON(t *testing.T) {
 			Action: text.Draw(t, "action"), VMs: list.Draw(t, "vms"),
 			Domain: text.Draw(t, "domain"), Slot: text.Draw(t, "slot"),
 			Router: text.Draw(t, "router"), EnvHosts: list.Draw(t, "envHosts"),
-			VMID:   rapid.OneOf(rapid.Just(0), rapid.IntRange(-10, 9999)).Draw(t, "vmid"),
-			Family: text.Draw(t, "family"), ImageKind: text.Draw(t, "imageKind"),
+			EnvHost:    text.Draw(t, "envHost"),
+			Octet:      rapid.OneOf(rapid.Just(0), rapid.IntRange(-2, 260)).Draw(t, "octet"),
+			EjectCDROM: rapid.Bool().Draw(t, "ejectCDROM"),
+			VMID:       rapid.OneOf(rapid.Just(0), rapid.IntRange(-10, 9999)).Draw(t, "vmid"),
+			Family:     text.Draw(t, "family"), ImageKind: text.Draw(t, "imageKind"),
 			Image: text.Draw(t, "image"), Details: det,
 		}
 		in := Inputs{
@@ -186,7 +196,7 @@ func TestPropInputsJSON(t *testing.T) {
 			Rebuild: f.Rebuild, NoSnapshot: f.NoSnapshot, Set: f.Set,
 			Snapshot: f.Snapshot, Description: f.Description, VMState: f.VMState,
 			Action: f.Action, VMs: f.VMs, Domain: f.Domain, Slot: f.Slot,
-			Router: f.Router, EnvHosts: f.EnvHosts,
+			Router: f.Router, EnvHosts: f.EnvHosts, EnvHost: f.EnvHost, Octet: f.Octet, EjectCDROM: f.EjectCDROM,
 			ImageRequest: pods.ImageRequest{
 				VMID: f.VMID, Family: f.Family, ImageKind: f.ImageKind, Image: f.Image, Details: f.Details,
 			},
@@ -268,6 +278,13 @@ var spoils = map[string][]spoil{
 		{strp("\xff"), false}, {strp(" a"), false}, {strp(strings.Repeat("x", pods.MaxFreeNotes+1)), false}},
 	"Image": {{"debian-12-v1", true}, {"x-v9999", true}, {"debian-12-v0", false}, {"debian-12", false}, {"debian-12-v10000", false},
 		{" debian-12-v1", false}, {"debian-12-v01", false}, {"Debian-12-v1", false}},
+	"EnvHost": {{"web", true}, {"web.kilo.alpha", true}, {"", true}, {" web ", true}, {"Web", false}, {"web.Kilo.alpha", false},
+		{"web..alpha", false}, {"web.kilo", false}},
+	"DeleteHost": {{"web.kilo.alpha", true}, {" web.kilo.alpha ", true}, {"vm100", true}, {"", false}, {" ", false}},
+	"Octet":      {{0, true}, {pods.ClearOctet, true}, {4, true}, {254, true}, {1, false}, {2, false}, {3, false}, {255, false}, {-2, false}},
+	"EnvImage": {{"", true}, {pods.NoBaseImage, true}, {"debian-12-v1", true}, {"debian-12", false}, {"debian-12-v0", false},
+		{" debian-12-v1", false}},
+	"EjectCDROM": {{true, true}, {false, true}},
 }
 
 // readsFields are the fields each kind reads, beyond a team kind's Teams,
@@ -278,6 +295,9 @@ var readsFields = map[pods.Kind][]string{
 	pods.KindTeardown: {"Set"}, pods.KindReset: {},
 	pods.KindEnvCreate: {"Domain", "Slot", "Router", "EnvHosts", "EnvVMs"}, pods.KindEnvAdd: {"Domain", "EnvHosts", "EnvVMs"},
 	pods.KindEnvTeardown:   {"Domain", "Slot"},
+	pods.KindEnvEdit:       {"VMID", "EnvHost", "ImageKind", "Octet", "EnvImage", "EjectCDROM", "Details", "Free"},
+	pods.KindEnvPower:      {"VMID", "Action"},
+	pods.KindEnvDeleteHost: {"VMID", "DeleteHost"},
 	pods.KindImageRegister: {"VMID", "Family", "ImageKind", "Details"}, pods.KindImageEdit: {"Family"},
 	pods.KindImageDeprecate: {"Image"}, pods.KindImageDelete: {"Image"}, pods.KindImageDetails: {"Family", "Details", "Free"},
 }
@@ -287,6 +307,8 @@ var readsFields = map[pods.Kind][]string{
 func gateCluster() pods.Planner {
 	f := twoTeams()
 	f.addVM(proxmox.VM{VMID: 5001, Name: "dc.kilo.alpha", Node: "n1", Status: "stopped", Tags: "dev"})
+	f.Add(proxmox.VM{VMID: 2101, Name: "web.kilo.alpha", Node: "n1", Pool: "dev-01", Status: "stopped", Tags: "dev;kilo.alpha"},
+		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:21:01,bridge=vmbr101"})
 	f.Add(proxmox.VM{VMID: 150, Name: "fresh", Node: "n1", Status: "stopped"}, map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:01:50,bridge=vmbr0"})
 	f.Add(proxmox.VM{VMID: 8000, Name: "debian-12-v1", Node: "n1", Template: true, Tags: "base;linux"}, map[string]string{"agent": "1"})
 	f.Add(proxmox.VM{VMID: 8001, Name: "gw-v1", Node: "n1", Template: true, Tags: "base;router"}, nil)
@@ -333,6 +355,10 @@ func setField(in *Inputs, field string, v any) {
 	switch field {
 	case "EnvVMs":
 		field = "VMs"
+	case "DeleteHost":
+		field = "EnvHost"
+	case "EnvImage":
+		field = "Image"
 	case "Free":
 		n := *in.Details
 		n.Free = v.(*string)

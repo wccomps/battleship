@@ -923,10 +923,10 @@ func TestOperationAndJobRoutesDoNothingWithoutPrivileges(t *testing.T) {
 // cliValues are a command line's values for one operation: each string
 // field as a flag carries it, by form field name, and the boxes.
 type cliValues struct {
-	strs                     map[string]string
-	envHosts                 []string // -host, repeated
-	vmid                     int
-	rebuild, noSnap, vmstate bool
+	strs                                 map[string]string
+	envHosts                             []string // -host, repeated
+	vmid, octet                          int
+	rebuild, noSnap, vmstate, ejectCDROM bool
 }
 
 // raw is the inputs a command line sets before Normalize.
@@ -935,6 +935,7 @@ func (v cliValues) raw(kind pods.Kind) jobs.Inputs {
 	return jobs.Inputs{Kind: kind, Teams: s[fieldTeams], Hosts: jobs.SplitList(s[fieldHosts]), VMs: jobs.SplitList(s[fieldVMs]),
 		Pattern: s[fieldPattern], Rebuild: v.rebuild, NoSnapshot: v.noSnap, Snapshot: s[fieldSnapshot], Description: s[fieldDescription],
 		VMState: v.vmstate, Action: s[fieldAction], Domain: s[fieldDomain], Router: s[fieldRouter], EnvHosts: v.envHosts,
+		EnvHost: s[fieldEnvHost], Octet: v.octet, EjectCDROM: v.ejectCDROM,
 		ImageRequest: pods.ImageRequest{VMID: v.vmid, Family: s[fieldFamily], ImageKind: s[fieldImageKind], Image: s[fieldImage]}}
 }
 
@@ -947,7 +948,8 @@ func (v cliValues) posted() url.Values {
 	}
 	form.Set(fieldEnvHosts, strings.Join(v.envHosts, "\r\n"))
 	form.Set(fieldVMID, strconv.Itoa(v.vmid))
-	for k, on := range map[string]bool{fieldRebuild: v.rebuild, fieldBaseline: !v.noSnap, fieldVMState: v.vmstate} {
+	form.Set(fieldOctet, strconv.Itoa(v.octet))
+	for k, on := range map[string]bool{fieldRebuild: v.rebuild, fieldBaseline: !v.noSnap, fieldVMState: v.vmstate, fieldEjectCDROM: v.ejectCDROM} {
 		if on {
 			form.Set(k, yes)
 		}
@@ -959,7 +961,7 @@ func (v cliValues) posted() url.Values {
 // page posting the same values.
 func TestPropNormalizeReadsAsTheForm(t *testing.T) {
 	strFields := []string{fieldTeams, fieldHosts, fieldVMs, fieldPattern, fieldSnapshot, fieldDescription, fieldAction, fieldDomain,
-		fieldRouter, fieldFamily, fieldImageKind, fieldImage}
+		fieldRouter, fieldEnvHost, fieldFamily, fieldImageKind, fieldImage}
 	check := func(t interface{ Fatalf(string, ...any) }, kind pods.Kind, v cliValues) {
 		if got, want := Normalize(v.raw(kind)), formInputs(kind, v.posted()); !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s: Normalize(%#v) = %#v, the form reads %#v", kind, v.raw(kind), got, want)
@@ -967,7 +969,7 @@ func TestPropNormalizeReadsAsTheForm(t *testing.T) {
 	}
 	for _, op := range operations {
 		for _, s := range formValues {
-			v := cliValues{strs: map[string]string{}, envHosts: []string{s, "dc=x"}, vmid: 7000}
+			v := cliValues{strs: map[string]string{}, envHosts: []string{s, "dc=x"}, vmid: 7000, octet: 10}
 			for _, f := range strFields {
 				v.strs[f] = s
 			}
@@ -977,8 +979,12 @@ func TestPropNormalizeReadsAsTheForm(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		value := rapid.OneOf(rapid.SampledFrom(formValues), rapid.SampledFrom(formValues), rapid.String())
 		v := cliValues{strs: map[string]string{}, envHosts: rapid.SliceOfN(value, 0, 3).Draw(t, "env hosts"),
-			vmid: rapid.SampledFrom([]int{0, 7000, -5, 100}).Draw(t, "vmid"), rebuild: rapid.Bool().Draw(t, "rebuild"),
-			noSnap: rapid.Bool().Draw(t, "no snapshot"), vmstate: rapid.Bool().Draw(t, "vmstate")}
+			vmid:       rapid.SampledFrom([]int{0, 7000, -5, 100}).Draw(t, "vmid"),
+			octet:      rapid.SampledFrom([]int{0, -1, 4, 254}).Draw(t, "octet"),
+			rebuild:    rapid.Bool().Draw(t, "rebuild"),
+			noSnap:     rapid.Bool().Draw(t, "no snapshot"),
+			vmstate:    rapid.Bool().Draw(t, "vmstate"),
+			ejectCDROM: rapid.Bool().Draw(t, "eject cdrom")}
 		for _, f := range strFields {
 			v.strs[f] = value.Draw(t, f)
 		}

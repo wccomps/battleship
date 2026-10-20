@@ -120,7 +120,7 @@ type confirmForm struct {
 // destructive reports whether in destroys or discards something, so the
 // confirm button says so.
 func destructive(in jobs.Inputs) bool {
-	return in.Kind.TearsDown() || in.Kind == pods.KindReset || (in.Kind == pods.KindPower && in.Action == "stop") ||
+	return in.Kind.TearsDown() || in.Kind == pods.KindReset || ((in.Kind == pods.KindPower || in.Kind == pods.KindEnvPower) && in.Action == "stop") ||
 		in.Kind == pods.KindImageDelete
 }
 
@@ -277,6 +277,11 @@ func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
 	case pods.KindEnvAdd:
 		return "Add " + strconv.Itoa(n) + byCount(n, " host", " hosts")
 	case pods.KindPower:
+		return powerLabel(in.Action) + " " + vms
+	case pods.KindEnvPower:
+		if n == 1 {
+			return powerLabel(in.Action) + " " + runnable[0].Name
+		}
 		return powerLabel(in.Action) + " " + vms
 	case pods.KindTeardown:
 		return "Delete " + vms
@@ -453,9 +458,21 @@ func teamlessFacts(in jobs.Inputs, pool string) []fact {
 	}
 	add("Router", in.Router)
 	add("Hosts", strings.Join(in.EnvHosts, ", "))
+	add("Host", in.EnvHost)
 	add("Only these VMs", strings.Join(in.VMs, ", "))
 	if in.VMID != 0 {
 		add("VM", strconv.Itoa(in.VMID))
+	}
+	if in.Octet == pods.ClearOctet {
+		add("Address", "none")
+	} else if in.Octet > 0 {
+		add("Address", "."+strconv.Itoa(in.Octet))
+	}
+	if in.EjectCDROM {
+		add("CD-ROM", "eject")
+	}
+	if in.Kind == pods.KindEnvPower {
+		add("Action", in.Action)
 	}
 	add("Family", in.Family)
 	add("Kind", in.ImageKind)

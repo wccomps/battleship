@@ -82,7 +82,7 @@ func TestEnvironmentsPage(t *testing.T) {
 		`<h2 id="kilo.alpha-h">kilo.alpha</h2>`,
 		`<span>dev-01</span><span>router <b>gw</b></span>`,
 		`<a class="btn sm" href="/environments/kilo.alpha/add">Add hosts</a>`,
-		`<span class="hname">gw</span> <span class="chip">router</span>`,
+		`<span class="hname">gw</span></a> <span class="chip">router</span>`,
 		`<code>192.168.100.5</code>`,
 		`<span class="gl is-running"><i class="g" aria-hidden="true"></i>running</span> <span class="meta">· gw-v1</span>`,
 		`<div class="notes">admin / gwpass</div>`,

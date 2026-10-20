@@ -6,7 +6,7 @@
 {{template "csrf" $csrf}}
 {{- $machines := .Op.Machines}}
 {{- if $machines}}<button type="submit" class="sr" tabindex="-1" aria-hidden="true">Review</button>{{end}}
-<div class="ph"><h1 id="form-title">{{opIcon (print .Op.Kind)}}{{.Op.Title}}{{with .Env}}{{if eq $.Data.Op.Kind "env-add"}} to{{else}} for{{end}} <span class="vm">{{.Domain}}</span>{{end}}{{with .Edit}}{{with .Image}} of <span class="vm">{{.}}</span>{{end}}{{end}}</h1><span class="sp"></span>{{template "close" $back}}</div>
+<div class="ph"><h1 id="form-title">{{opIcon (print .Op.Kind)}}{{.Op.Title}}{{with .Env}}{{if eq $.Data.Op.Kind "env-add"}} to{{else}} for{{end}} <span class="vm">{{.Domain}}</span>{{end}}{{with .Edit}}{{with .Image}} of <span class="vm">{{.}}</span>{{end}}{{end}}{{with .Host}}{{with .Name}} <span class="vm">{{.}}</span>{{end}}{{end}}</h1><span class="sp"></span>{{template "close" $back}}</div>
 <div class="pb form">
 {{- with .Error}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
 {{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
@@ -123,6 +123,55 @@
 </div>
 {{- end}}
 {{- end}}{{end}}
+{{- if eq .Op.Kind "env-edit"}}{{with .Host}}
+{{- if .Err}}
+<p class="warn" role="alert">{{icon "warn"}}<span>{{.Err}}</span></p>
+{{- else}}
+<input type="hidden" name="vmid" value="{{.VMID}}">
+<p class="facts"><span>{{if .Domain}}<b>{{.Domain}}</b> · {{end}}<b>{{.Slot}}</b></span><span>LAN <b>{{$.Data.Subnet}}.0/24</b></span></p>
+<div class="frow">
+<div class="field">
+<label class="lbl" for="env_host">Host name</label>
+<input class="inp" type="text" id="env_host" name="env_host" value="{{.HostInput}}" required autocomplete="off" spellcheck="false" aria-describedby="env-host-hint">
+<span class="hint" id="env-host-hint">{{if .Domain}}in {{.Domain}} ({{.Slot}}) · renamed inside Windows and Linux guests too{{else}}in {{.Slot}} · write &lt;host&gt;.&lt;domain&gt; to set its domain{{end}}</span>
+</div>
+<div class="field">
+<label class="lbl" for="octet">Address <span class="muted">· non-router</span></label>
+<label class="addr"><span class="pre l">{{$.Data.Subnet}}.</span><span class="pre s">.</span><input type="text" id="octet" name="octet" value="{{.OctetInput}}" inputmode="numeric" placeholder="auto" autocomplete="off" aria-describedby="octet-hint"></label>
+<span class="hint" id="octet-hint">.{{.FirstOctet}}–.{{.LastOctet}} · <code>none</code> clears an other host's</span>
+</div>
+</div>
+<fieldset class="field">
+<legend>Kind</legend>
+<div class="opts">{{range imageKinds}}<label class="opt"><input type="radio" name="image_kind" value="{{.}}"{{if eq . $.Data.Host.KindInput}} checked{{end}}><span>{{.}}</span></label>{{end}}</div>
+<span class="hint">router (.{{.Gateway}} on WAN + LAN) · windows / linux (configured by guest agent) · other (untouched OS)</span>
+</fieldset>
+<div class="field">
+<label class="lbl" for="image">Base image <span class="muted">· recorded in notes</span></label>
+<select class="inp" id="image" name="image">
+<option value="-"{{if eq .ImageInput "-"}} selected{{end}}>none</option>
+{{- $cur := .ImageInput}}{{$found := eq $cur "-"}}
+{{- range $.Data.Images}}<option value="{{.Name}}"{{if eq .Name $cur}} selected{{$found = true}}{{end}}>{{.Name}} ({{.Kind}}{{if .Deprecated}}, deprecated{{end}})</option>{{end}}
+{{- if and $cur (not $found)}}<option value="{{$cur}}" selected>{{$cur}}</option>{{end}}
+</select>
+</div>
+{{- if or .CDROM $.Data.In.EjectCDROM}}
+<label class="sw">Eject attached CD-ROM media<input type="checkbox" name="eject_cdrom" value="yes"{{if $.Data.In.EjectCDROM}} checked{{end}}></label>
+{{- end}}
+{{- if .Was.Unreadable}}
+<div class="say caution">{{icon "warn"}}<div><div>Its details block is unreadable, so the fields start empty. Saving replaces it with the details below, or removes it if they are left empty.</div><div class="meta">The block as it is:</div><div class="notes box">{{.Was.Block}}</div></div></div>
+{{- end}}
+<fieldset class="field">
+<legend>Details</legend>
+{{template "details-fields" $.Data.Details}}
+</fieldset>
+<div class="field">
+<label class="lbl" for="notes">Notes</label>
+<textarea class="inp" id="notes" name="notes" rows="6" maxlength="{{maxNotes}}" spellcheck="true" aria-describedby="notes-hint">{{with $.Data.Details.Free}}{{.}}{{end}}</textarea>
+<span class="hint" id="notes-hint">Shown under the details on Environments. At most {{maxNotes}} characters.</span>
+</div>
+{{- end}}
+{{- end}}{{end}}
 {{- if eq .Op.Kind "image-edit"}}
 <div class="field">
 <label class="lbl" for="family">Family</label>
@@ -139,7 +188,7 @@
 {{- end}}
 </div>
 <div class="pf">
-<a class="btn" href="{{$back}}"{{with .Edit}}{{if .Image}} data-panel-link{{end}}{{end}}>Cancel</a>
+<a class="btn" href="{{$back}}"{{if or (and .Edit .Edit.Image) (and .Host .Host.Name)}} data-panel-link{{end}}>Cancel</a>
 {{- if not .NoSave}}
 <button type="submit" class="btn pri">Review</button>
 {{- end}}

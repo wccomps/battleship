@@ -39,13 +39,16 @@ const (
 	KindEnvCreate      Kind = "env-create"
 	KindEnvAdd         Kind = "env-add"
 	KindEnvTeardown    Kind = "env-teardown"
+	KindEnvEdit        Kind = "env-edit"
+	KindEnvPower       Kind = "env-power"
+	KindEnvDeleteHost  Kind = "env-delete-host"
 )
 
 // Kinds are all known job kinds.
 var Kinds = []Kind{
 	KindDeploy, KindTeardown, KindReset, KindPower, KindSnapshot,
 	KindImageRegister, KindImageEdit, KindImageDeprecate, KindImageDelete, KindImageDetails,
-	KindEnvCreate, KindEnvAdd, KindEnvTeardown,
+	KindEnvCreate, KindEnvAdd, KindEnvTeardown, KindEnvEdit, KindEnvPower, KindEnvDeleteHost,
 }
 
 type subject uint8
@@ -55,6 +58,7 @@ const (
 	subjectImage
 	subjectNewEnvironment
 	subjectEnvironment
+	subjectEnvHost
 )
 
 type retryMode uint8
@@ -89,9 +93,12 @@ var specs = map[Kind]spec{
 	KindImageDelete:    {subject: subjectImage, offer: []string{"VM.Allocate"}, config: imageConfigHash},
 	KindImageDetails:   {subject: subjectImage, offer: []string{"VM.Config.Options"}},
 
-	KindEnvCreate:   {subject: subjectNewEnvironment, offer: []string{"VM.Clone"}, config: envConfigHash, retry: retryNarrowed},
-	KindEnvAdd:      {subject: subjectEnvironment, offer: []string{"VM.Clone"}, config: envConfigHash, retry: retryNarrowed},
-	KindEnvTeardown: {subject: subjectEnvironment, offer: []string{"VM.Allocate"}, config: teardownConfigHash, tearsDown: true, retry: retryWhole},
+	KindEnvCreate:     {subject: subjectNewEnvironment, offer: []string{"VM.Clone"}, config: envConfigHash, retry: retryNarrowed},
+	KindEnvAdd:        {subject: subjectEnvironment, offer: []string{"VM.Clone"}, config: envConfigHash, retry: retryNarrowed},
+	KindEnvTeardown:   {subject: subjectEnvironment, offer: []string{"VM.Allocate"}, config: teardownConfigHash, tearsDown: true, retry: retryWhole},
+	KindEnvEdit:       {subject: subjectEnvHost, offer: []string{"VM.Config.Options"}, config: envConfigHash},
+	KindEnvPower:      {subject: subjectEnvHost, offer: []string{"VM.PowerMgmt"}},
+	KindEnvDeleteHost: {subject: subjectEnvHost, offer: []string{"VM.Allocate"}, config: teardownConfigHash, tearsDown: true},
 }
 
 // Teamless reports whether kind acts on base images or environments rather
@@ -245,6 +252,7 @@ type Item struct {
 	// is a template. Details are what the details step writes.
 	Source     *Source           `json:"source,omitempty"`
 	Pool       string            `json:"pool,omitempty"`
+	Rename     string            `json:"rename,omitempty"`
 	Tags       string            `json:"tags,omitempty"`
 	Notes      *Notes            `json:"notes,omitempty"`
 	NICs       map[string]string `json:"nics,omitempty"`

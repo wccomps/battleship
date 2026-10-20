@@ -28,6 +28,9 @@ var confirmPreviews = map[pods.Kind]url.Values{
 	pods.KindEnvCreate:      {"domain": {"new.env"}, "router": {"gw=gw"}, "env_hosts": {"teak=debian-12\noak=debian-12:20"}},
 	pods.KindEnvAdd:         {"domain": {"lab.env"}, "env_hosts": {"oak=debian-12"}},
 	pods.KindEnvTeardown:    {"domain": {"lab.env"}},
+	pods.KindEnvEdit:        {"vmid": {"2101"}, "env_host": {"teak"}, "image_kind": {"linux"}, "octet": {"15"}},
+	pods.KindEnvPower:       {"vmid": {"2101"}, "action": {"stop"}},
+	pods.KindEnvDeleteHost:  {"vmid": {"2101"}, "env_host": {"teak.lab.env"}},
 	pods.KindImageRegister:  {"vmid": {"7000"}, "family": {"debian-13"}, "image_kind": {"linux"}},
 	pods.KindImageEdit:      {"family": {"debian-12"}},
 	pods.KindImageDeprecate: {"image": {"debian-12-v1"}},
@@ -38,7 +41,7 @@ var confirmPreviews = map[pods.Kind]url.Values{
 var confirmFields = []string{
 	fieldTeams, fieldHosts, fieldVMs, fieldPattern, fieldRebuild, fieldBaseline, fieldSnapshot, fieldDescription, fieldVMState,
 	fieldAction, fieldNonce, fieldFingerprint, fieldTyped, fieldRetryOf, fieldFrom, fieldDomain, fieldRouter, fieldEnvHosts,
-	fieldVMID, fieldFamily, fieldImageKind, fieldImage, fieldDetails, fieldNotes, fieldNotesFrom,
+	fieldEnvHost, fieldOctet, fieldEjectCDROM, fieldVMID, fieldFamily, fieldImageKind, fieldImage, fieldDetails, fieldNotes, fieldNotesFrom,
 }
 
 // operationOf is kind's operation, opened for lab.env if it acts on an
@@ -75,7 +78,7 @@ func confirmFieldsOf(kind pods.Kind) []string {
 		fs = append(fs, fieldTyped)
 	}
 	if kind.Teamless() {
-		return append(fs, fieldDomain, fieldRouter, fieldEnvHosts, fieldVMID, fieldFamily, fieldImageKind, fieldImage, fieldDetails, fieldNotes, fieldNotesFrom)
+		return append(fs, fieldDomain, fieldRouter, fieldEnvHosts, fieldEnvHost, fieldOctet, fieldEjectCDROM, fieldAction, fieldVMID, fieldFamily, fieldImageKind, fieldImage, fieldDetails, fieldNotes, fieldNotesFrom)
 	}
 	fs = append(fs, fieldTeams, fieldHosts, fieldVMs)
 	switch kind {
@@ -111,7 +114,7 @@ func newConfirmTest(t *testing.T) *confirmTest {
 		map[string]string{"net0": "virtio=BC:24:11:00:21:00,bridge=devext01", "net1": "virtio=BC:24:11:00:21:01,bridge=devint01",
 			"description": "battleship: base=gw-v1 dns=router"})
 	h.api.add(proxmox.VM{VMID: 2101, Name: "teak.lab.env", Node: "n1", Pool: "dev-01", Status: "running", Tags: "dev;lab.env"},
-		map[string]string{"net0": "virtio=BC:24:11:00:21:02,bridge=devint01",
+		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:21:02,bridge=devint01",
 			"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1 dns=router"})
 	return &confirmTest{h: h, lead: h.login(asLead), kinds: slices.Sorted(maps.Keys(confirmPreviews))}
 }

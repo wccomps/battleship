@@ -8,10 +8,14 @@ import (
 
 // Exactly the kinds with a typed confirm name what is typed.
 func TestTypedWhat(t *testing.T) {
-	want := map[pods.Kind]string{pods.KindTeardown: "the pod range", pods.KindEnvTeardown: "the domain"}
+	want := map[pods.Kind]string{
+		pods.KindTeardown:      "the pod range",
+		pods.KindEnvTeardown:   "the domain",
+		pods.KindEnvDeleteHost: "the VM name",
+	}
 	for _, k := range []pods.Kind{pods.KindDeploy, pods.KindTeardown, pods.KindReset, pods.KindSnapshot, pods.KindPower,
 		pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete,
-		pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvTeardown, "unknown"} {
+		pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvTeardown, pods.KindEnvEdit, pods.KindEnvPower, pods.KindEnvDeleteHost, "unknown"} {
 		got := Inputs{Kind: k}.TypedWhat()
 		if got != want[k] || (got != "") != k.TypedConfirm() {
 			t.Errorf("%s: TypedWhat %q, want %q (TypedConfirm %v)", k, got, want[k], k.TypedConfirm())

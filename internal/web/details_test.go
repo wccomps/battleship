@@ -115,7 +115,7 @@ func inOrder(t *testing.T, what, body string, wants ...string) {
 // hostRowOf is the Environments page's row of host name.
 func hostRowOf(t *testing.T, body, name string) string {
 	t.Helper()
-	m := regexp.MustCompile(`(?s)<tr><td class="hn"><span class="hname">` + regexp.QuoteMeta(name) + `</span>.*?</tr>`).FindString(body)
+	m := regexp.MustCompile(`(?s)<tr[^>]*><td class="hn">(?:<a[^>]*>)?<span class="hname">` + regexp.QuoteMeta(name) + `</span>.*?</tr>`).FindString(body)
 	if m == "" {
 		t.Fatalf("no row for %s in:\n%s", name, body)
 	}

@@ -1,0 +1,411 @@
+package pods
+
+import (
+	"cmp"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"net/netip"
+	"slices"
+	"strconv"
+	"strings"
+
+	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/proxmox"
+)
+
+const (
+	// NoBaseImage clears an environment host's base image in its notes.
+	NoBaseImage = "-"
+	// ClearOctet clears an other host's address in its notes.
+	ClearOctet = -1
+)
+
+// HostEdit is what Edit host starts from: the environment, the host and its
+// notes as read.
+type HostEdit struct {
+	Env  Environment
+	Host EnvHost
+	Read NotesRead
+}
+
+// Kind is the host's kind: router when tagged router, else its notes' OS,
+// else other.
+func (e HostEdit) Kind() string {
+	if e.Host.Router {
+		return ImageRouter
+	}
+	return cmp.Or(e.Host.Notes.OS, ImageOther)
+}
+
+// Octet is the host's LAN address octet, or 0 without one.
+func (e HostEdit) Octet() int {
+	o, _ := e.Env.LAN.Octet(e.Host.Addr)
+	return o
+}
+
+// Edit is what an Edit host form starts its details and notes fields from,
+// with a mark of the notes read (From).
+func (e HostEdit) Edit() ImageNotes {
+	free := e.Read.Free
+	return ImageNotes{ImageDetails: e.Read.Details, Free: &free, From: e.from()}
+}
+
+func (e HostEdit) from() string {
+	sum := sha256.Sum256([]byte(strconv.Itoa(e.Host.VMID) + "\n" + e.Host.desc))
+	return hex.EncodeToString(sum[:])
+}
+
+// HostEditInput is what EnvEdit changes on an environment host. Empty fields
+// keep what the host already has; Image NoBaseImage clears its base image
+// and Octet ClearOctet clears an other host's address.
+type HostEditInput struct {
+	VMID       int
+	Host       string      // host label (or host.domain in a mixed slot); "" keeps the current name
+	Kind       string      // ImageKinds; "" keeps the current kind
+	Octet      int         // FirstHostOctet..LastHostOctet, ClearOctet, or 0 to keep
+	Image      string      // base image name, NoBaseImage, or "" to keep
+	EjectCDROM bool        // eject attached non-cloudinit CD-ROM media
+	Details    *ImageNotes // nil keeps the details block and free notes as they are
+}
+
+// HostToEdit reads the environment host with vmid and its notes for editing.
+func (p Planner) HostToEdit(ctx context.Context, vmid int) (HostEdit, error) {
+	envs, vms, err := p.Environments(ctx)
+	if err != nil {
+		return HostEdit{}, err
+	}
+	at, _, err := p.findEnvHost(envs, vms, vmid)
+	return at, err
+}
+
+func (p Planner) findEnvHost(envs []Environment, vms []proxmox.VM, vmid int) (HostEdit, proxmox.VM, error) {
+	if env, h, ok := EnvHostByID(envs, vmid); ok {
+		vm, _ := vmByID(vms, vmid)
+		return HostEdit{Env: env, Host: h, Read: readImageNotes(h.desc)}, vm, nil
+	}
+	if vm, ok := vmByID(vms, vmid); ok {
+		if vm.Lock == "destroyed" {
+			return HostEdit{}, vm, errors.New(HalfDeletedText(vm.VMID, vm.Node))
+		}
+		return HostEdit{}, vm, fmt.Errorf("%s (%d) is not in a dev slot pool", vm.Name, vmid)
+	}
+	return HostEdit{}, proxmox.VM{}, fmt.Errorf("there is no environment host with VMID %d, or you can't see it", vmid)
+}
+
+func hostLocks(slot Slot, domains ...string) []string {
+	locks := []string{slotLock(slot.Name)}
+	for _, d := range domains {
+		if CheckDomain(d) == nil && !slices.Contains(locks, "domain:"+d) {
+			locks = append(locks, "domain:"+d)
+		}
+	}
+	return locks
+}
+
+// EnvEdit plans editing an existing host in a dev slot: its name, kind,
+// address, base image, attached CD-ROM, details and free notes. When a
+// Windows or Linux host's name, address or OS kind changes, the guest agent
+// configures it inside the VM too.
+func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) {
+	if req.Kind != "" && !slices.Contains(ImageKinds, req.Kind) {
+		return nil, fmt.Errorf("the host kind must be one of %s, not %q", strings.Join(ImageKinds, ", "), req.Kind)
+	}
+	if req.Octet != 0 && req.Octet != ClearOctet && (req.Octet < FirstHostOctet || req.Octet > LastHostOctet) {
+		return nil, fmt.Errorf("the address must be %d-%d (.%d is the router, .3 the team VPN)", FirstHostOctet, LastHostOctet, GatewayOctet)
+	}
+	if req.Image != "" && req.Image != NoBaseImage {
+		if _, _, ok := ParseImageName(req.Image); !ok {
+			return nil, fmt.Errorf("%q isn't a base image name like debian-12-v1", req.Image)
+		}
+	}
+	envs, vms, err := p.Environments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	at, vm, err := p.findEnvHost(envs, vms, req.VMID)
+	if err != nil {
+		return nil, err
+	}
+	env, h := at.Env, at.Host
+	wantName, wantHost, domain, err := resolveHostName(env, h, req.Host)
+	if err != nil {
+		return nil, err
+	}
+	curKind := at.Kind()
+	wantKind := cmp.Or(req.Kind, curKind)
+	wantBase := h.Notes.Base
+	switch req.Image {
+	case NoBaseImage:
+		wantBase = ""
+	case "":
+	default:
+		wantBase = req.Image
+	}
+	wantTags := hostTags(h.Tags, p.Cfg.Deploy.MasterTag, Domain(h.Name), domain, wantKind == ImageRouter)
+	wantNotes := h.Notes
+	wantNotes.Base = wantBase
+
+	it := Item{Name: h.Name, Host: wantHost, VMID: h.VMID, Node: h.Node, Pool: env.Slot.Pool, DetailsWas: &at.Read}
+	if vm.Template {
+		it.Blocked = "is a template"
+	}
+	if it.Blocked == "" && wantName != h.Name && len(vmsNamed(vms, wantName)) > 0 {
+		it.Blocked = "a VM named " + wantName + " already exists"
+	}
+
+	used := map[int]string{}
+	for _, other := range env.Hosts {
+		if other.VMID == h.VMID {
+			continue
+		}
+		if o, ok := env.LAN.Octet(other.Notes.IP); ok {
+			used[o] = other.Name
+		}
+	}
+
+	switch wantKind {
+	case ImageRouter:
+		wantNotes.IP, wantNotes.OS, wantNotes.DNS = netip.Addr{}, "", ""
+		for _, other := range env.Hosts {
+			if other.VMID != h.VMID && other.Router && it.Blocked == "" {
+				it.Blocked = "an environment has one router (" + other.Name + ")"
+				break
+			}
+		}
+		if it.Blocked == "" && h.Config["net1"] == "" {
+			it.Blocked = h.Name + " has one NIC; a router needs two (WAN on net0, LAN on net1)"
+		}
+	case ImageWindows, ImageLinux:
+		wantNotes.OS = wantKind
+		if wantNotes.DNS == "" {
+			wantNotes.DNS = env.DNS()
+		} else if wantHost != h.Host && wantNotes.DNS == h.Host {
+			wantNotes.DNS = wantHost
+		}
+		if wantKind == ImageWindows && len(wantHost) > MaxWindowsHostname && it.Blocked == "" {
+			it.Blocked = fmt.Sprintf("Windows host names are at most %d characters", MaxWindowsHostname)
+		}
+		switch {
+		case req.Octet >= FirstHostOctet:
+			wantNotes.IP = env.LAN.Host(req.Octet)
+			if other := used[req.Octet]; other != "" && it.Blocked == "" {
+				it.Blocked = fmt.Sprintf("address .%d is already taken by %s", req.Octet, other)
+			}
+		case h.Notes.IP.IsValid():
+			wantNotes.IP = h.Notes.IP
+			if o, ok := env.LAN.Octet(wantNotes.IP); ok && used[o] != "" && it.Blocked == "" {
+				it.Blocked = fmt.Sprintf("address .%d is already taken by %s", o, used[o])
+			}
+		default:
+			taken := map[int]bool{}
+			for o := range used {
+				taken[o] = true
+			}
+			o, ok := PickOctet(cmp.Or(domain, env.Slot.Pool), wantHost, taken)
+			if !ok {
+				if it.Blocked == "" {
+					it.Blocked = "no free address left in " + cmp.Or(domain, env.Slot.Pool)
+				}
+			} else {
+				wantNotes.IP = env.LAN.Host(o)
+			}
+		}
+	default:
+		wantNotes.OS = ""
+		switch {
+		case req.Octet == ClearOctet:
+			wantNotes.IP = netip.Addr{}
+		case req.Octet >= FirstHostOctet:
+			wantNotes.IP = env.LAN.Host(req.Octet)
+			if other := used[req.Octet]; other != "" && it.Blocked == "" {
+				it.Blocked = fmt.Sprintf("address .%d is already taken by %s", req.Octet, other)
+			}
+		}
+	}
+
+	if wantName != h.Name {
+		it.Rename = wantName
+	}
+	if it.Rename != "" || !sameTags(h.Tags, wantTags) || WithNotes(h.desc, wantNotes) != h.desc {
+		it.Tags = wantTags
+		it.Notes = &wantNotes
+		it.Steps = append(it.Steps, StepLabel)
+	}
+
+	if req.Details != nil {
+		if req.Details.From != "" && req.Details.From != at.from() && it.Blocked == "" {
+			it.Blocked = "the notes of " + h.Name + " changed since you opened this form; open Edit host again to start from them as they are"
+		}
+		n, same := req.Details.against(at.Read)
+		if err := n.check(); err != nil {
+			return nil, err
+		}
+		if !same {
+			it.Details = &n
+			it.Steps = append(it.Steps, StepDetails)
+		}
+	}
+
+	wantNICs := map[string]string{"net0": env.Slot.IntBridge}
+	if wantKind == ImageRouter {
+		wantNICs = map[string]string{"net0": env.Slot.ExtBridge, "net1": env.Slot.IntBridge}
+	}
+	if len(NICChanges(h.Config, wantNICs)) > 0 {
+		it.NICs = wantNICs
+		it.Steps = append(it.Steps, StepNetwork)
+	}
+
+	if req.EjectCDROM {
+		if h.CDROM {
+			it.Steps = append(it.Steps, StepCDROM)
+		} else if len(it.Steps) == 0 && it.Blocked == "" {
+			it.Blocked = h.Name + " has no CD-ROM attached"
+		}
+	}
+
+	guestChanged := (wantKind == ImageWindows || wantKind == ImageLinux) &&
+		(wantName != h.Name || wantNotes.IP != h.Notes.IP || wantKind != curKind)
+	if guestChanged {
+		if !h.Agent && it.Blocked == "" {
+			it.Blocked = h.Name + " has no QEMU guest agent enabled (Options, QEMU Guest Agent); environments set hostname and address through it"
+		}
+		if CheckDomain(domain) != nil && it.Blocked == "" {
+			it.Blocked = fmt.Sprintf("%s has no valid domain; write the name as <host>.<domain>, e.g. %s.kilo.alpha", wantName, wantHost)
+		}
+		dnsAddr, err := env.DNSAddress(wantNotes.DNS)
+		if err != nil {
+			dnsAddr = env.Gateway()
+		}
+		if wantNotes.DNS == wantHost && wantNotes.IP.IsValid() {
+			dnsAddr = wantNotes.IP
+		}
+		var caKey string
+		if p.Cfg.Environments.OpsCAKey != "" {
+			if caKey, err = config.ParseSSHPublicKey(p.Cfg.Environments.OpsCAKey); err != nil && it.Blocked == "" {
+				it.Blocked = "ops CA key: " + err.Error()
+			}
+		}
+		if wantNotes.IP.IsValid() && CheckDomain(domain) == nil {
+			it.Guest = &Guest{OS: wantKind, Hostname: wantHost, Domain: domain, IP: wantNotes.IP, Prefix: env.LAN.Bits(), Gateway: env.Gateway(), DNS: dnsAddr, OpsCAKey: caKey}
+			if err := it.Guest.Check(); err != nil && it.Blocked == "" {
+				it.Blocked = err.Error()
+			}
+			if h.Status != "running" {
+				it.Steps = append(it.Steps, StepStart)
+			}
+			it.Steps = append(it.Steps, StepWaitAgent, StepGuest, StepVerify)
+		}
+	}
+
+	if len(it.Steps) == 0 {
+		it.Steps = []Step{StepLabel}
+		if it.Blocked == "" {
+			it.Blocked = h.Name + " already has these settings"
+		}
+	}
+	it.blockLongNotes(h.desc)
+	return &Plan{Kind: KindEnvEdit, Config: ConfigHash(KindEnvEdit, p.Cfg), Slot: env.Slot.Name,
+		Locks: hostLocks(env.Slot, env.Domain, Domain(h.Name), domain), Items: []Item{it}}, nil
+}
+
+// resolveHostName resolves input (empty, a host label like "dc", or a full
+// name like "dc.kilo.alpha") against env and h.
+func resolveHostName(env Environment, h EnvHost, input string) (full, host, domain string, err error) {
+	curDomain := cmp.Or(env.Domain, Domain(h.Name))
+	if input == "" {
+		return h.Name, h.Host, curDomain, nil
+	}
+	if hostPart, domPart, ok := strings.Cut(input, "."); ok {
+		if err := CheckHostname(hostPart); err != nil {
+			return "", "", "", err
+		}
+		if err := CheckDomain(domPart); err != nil {
+			return "", "", "", err
+		}
+		if env.Domain != "" && domPart != env.Domain && len(env.Hosts) > 1 {
+			return "", "", "", fmt.Errorf("dev slot %s holds %s; name the host without a domain, or %s.%s", env.Slot.Name, env.Domain, hostPart, env.Domain)
+		}
+		return input, hostPart, domPart, nil
+	}
+	if err := CheckHostname(input); err != nil {
+		return "", "", "", err
+	}
+	if curDomain == "" {
+		return "", "", "", fmt.Errorf("%s has no domain in its name; write the full name as <host>.<domain>, e.g. %s.kilo.alpha", h.Name, input)
+	}
+	return input + "." + curDomain, input, curDomain, nil
+}
+
+// hostTags updates a slot VM's tag list with masterTag, domain and router,
+// keeping any other tags on the VM in order.
+func hostTags(cur, masterTag, oldDomain, domain string, router bool) string {
+	var out []string
+	add := func(t string) {
+		if t != "" && !slices.Contains(out, t) {
+			out = append(out, t)
+		}
+	}
+	add(masterTag)
+	if CheckDomain(domain) == nil {
+		add(domain)
+	}
+	if router {
+		add(ImageRouter)
+	}
+	for _, t := range Tags(cur) {
+		if t == ImageRouter || (oldDomain != "" && t == oldDomain && domain != oldDomain) {
+			continue
+		}
+		add(t)
+	}
+	return strings.Join(out, ";")
+}
+
+// EnvPower plans a power action on an environment host in a dev slot.
+func (p Planner) EnvPower(ctx context.Context, vmid int, action string) (*Plan, error) {
+	if !IsPowerAction(action) {
+		return nil, fmt.Errorf("power action must be start, shutdown, stop or reboot, not %q", action)
+	}
+	envs, vms, err := p.Environments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	at, vm, err := p.findEnvHost(envs, vms, vmid)
+	if err != nil {
+		return nil, err
+	}
+	env, h := at.Env, at.Host
+	it := Item{Name: h.Name, Host: h.Host, VMID: h.VMID, Node: h.Node, Pool: env.Slot.Pool, Action: action, Steps: []Step{StepPower}}
+	if vm.Template {
+		it.Blocked = "is a template"
+	}
+	return &Plan{Kind: KindEnvPower, Config: ConfigHash(KindEnvPower, p.Cfg), Slot: env.Slot.Name,
+		Locks: hostLocks(env.Slot, env.Domain, Domain(h.Name)), Items: []Item{it}}, nil
+}
+
+// EnvDeleteHost plans stopping and deleting a single host in a dev slot.
+func (p Planner) EnvDeleteHost(ctx context.Context, vmid int, name string) (*Plan, error) {
+	envs, vms, err := p.Environments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	at, vm, err := p.findEnvHost(envs, vms, vmid)
+	if err != nil {
+		return nil, err
+	}
+	env, h := at.Env, at.Host
+	if name != "" && h.Name != name {
+		return nil, fmt.Errorf("VM %d is named %s, not %s", vmid, h.Name, name)
+	}
+	notes := h.Notes
+	it := Item{Name: h.Name, Host: h.Host, VMID: h.VMID, Node: h.Node, Pool: env.Slot.Pool, Tags: h.Tags, Notes: &notes,
+		Steps: []Step{StepStop, StepDelete}}
+	if vm.Template {
+		it.Blocked = "is a template, not an environment host; move it out of " + env.Slot.Pool + " first"
+	}
+	return &Plan{Kind: KindEnvDeleteHost, Config: ConfigHash(KindEnvDeleteHost, p.Cfg), Slot: env.Slot.Name,
+		Locks: hostLocks(env.Slot, env.Domain, Domain(h.Name)), Items: []Item{it}}, nil
+}

@@ -106,9 +106,11 @@ type EnvHost struct {
 	// router's WAN and LAN NICs are those on the slot's external and
 	// internal bridges, or net0 and net1.
 	LANMAC, WANMAC string
-	Agent          bool     // its config enables the guest agent
-	Warnings       []string // discrepancies between its config or tags and its slot
-	desc           string   // its notes, for the plans that write them
+	Agent          bool              // its config enables the guest agent
+	CDROM          bool              // a non-cloudinit CD-ROM drive has media attached
+	Config         map[string]string // its Proxmox config as read
+	Warnings       []string          // discrepancies between its config or tags and its slot
+	desc           string            // its notes, for the plans that write them
 }
 
 // Environment is what a slot holds.
@@ -135,6 +137,18 @@ func EnvByDomain(envs []Environment, domain string) (Environment, bool) {
 		}
 	}
 	return Environment{}, false
+}
+
+// EnvHostByID is the environment and host with vmid across envs.
+func EnvHostByID(envs []Environment, vmid int) (Environment, EnvHost, bool) {
+	for _, e := range envs {
+		for _, h := range e.Hosts {
+			if h.VMID == vmid {
+				return e, h, true
+			}
+		}
+	}
+	return Environment{}, EnvHost{}, false
 }
 
 func slotN(envs []Environment, n int) (Environment, error) {
@@ -304,6 +318,8 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 				h.WANMAC, h.LANMAC = routerMACs(cfg, envs[si].Slot)
 			}
 			h.Agent = agentEnabled(cfg["agent"])
+			h.CDROM = len(CDROMChanges(cfg)) > 0
+			h.Config = cfg
 			h.Warnings = p.hostWarnings(vm, cfg, envs[si].Slot, h.Router, cpuModels)
 			envs[si].Hosts = append(envs[si].Hosts, h)
 			continue

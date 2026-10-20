@@ -1924,3 +1924,41 @@ func TestItemsReportStartedFirst(t *testing.T) {
 		t.Errorf("started %d times, want once", n)
 	}
 }
+
+// StepLabel writes Item.Rename as the VM's new name, and a retry round after
+// a later step fails finds the VM under its new name.
+func TestLabelStepRenamesVMAndRetriesFindNewName(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "cedar", Pool: "dev-01", Tags: "dev;kilo.alpha;linux", Status: "running"}, map[string]string{
+		"agent":       "1",
+		"net0":        "virtio=BC:24:11:00:21:01,bridge=devint01",
+		"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1 dns=teak",
+	})
+	f.SetGuest(2101, podstest.Guest{Up: true, Hostname: "teak", NICs: []proxmox.GuestNIC{{Name: "eth0", MAC: "bc:24:11:00:21:01", IPs: podstest.IPs("192.168.100.10/24")}}})
+	f.ExecHook = applied(f, "")
+	plan, err := testPlanner(f).EnvEdit(context.Background(), pods.HostEditInput{
+		VMID:  2101,
+		Host:  "oak",
+		Kind:  pods.ImageLinux,
+		Octet: 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fail guest configuration in round 0 so round 1 runs after StepLabel
+	// has already renamed the VM to oak.kilo.alpha.
+	f.FailOn("agent-exec:2101", &proxmox.APIError{Status: 400, Message: "agent busy"})
+	rec := &recorder{}
+
+	res := testExecutor(f, rec).Run(context.Background(), plan)
+	if len(res.Failed) != 0 || !reflect.DeepEqual(res.Succeeded, []string{"teak.kilo.alpha"}) {
+		t.Fatalf("result = %+v", res)
+	}
+	vm := f.VMs[2101]
+	if vm.Name != "oak.kilo.alpha" || vm.Config["name"] != "oak.kilo.alpha" {
+		t.Errorf("vm name = %q (config %q), want oak.kilo.alpha", vm.Name, vm.Config["name"])
+	}
+	if !strings.Contains(vm.Config["description"], "ip=192.168.100.20") || !strings.Contains(vm.Config["description"], "dns=oak") {
+		t.Errorf("description = %q", vm.Config["description"])
+	}
+}

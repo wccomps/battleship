@@ -29,6 +29,8 @@ type catalogPage struct {
 	Details pods.ImageNotes
 	// Edit is what an Edit notes form edits (notesForm).
 	Edit *notesEdit
+	// Host is what an Edit host form edits (hostEditPrefill).
+	Host *hostEdit
 	envForm
 }
 
@@ -115,11 +117,14 @@ func (s *Server) renderCatalogForm(w http.ResponseWriter, r *http.Request, statu
 }
 
 // Back is where the form's close and Cancel go: an Edit notes on a
-// version goes to its family's page.
+// version goes to its family's page, and an Edit host to its host sheet.
 func (p catalogPage) Back() string {
 	if p.Edit != nil && p.Edit.Image != "" {
 		_, href := p.Op.home(p.In)
 		return href
+	}
+	if p.Host != nil && p.Host.Name != "" {
+		return envHostHref(p.Host.VMID)
 	}
 	return p.Op.listPage(p.In)
 }

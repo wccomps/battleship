@@ -18,8 +18,8 @@ import (
 
 // allKinds are the operation kinds, and one battleship doesn't know.
 var allKinds = []pods.Kind{pods.KindPower, pods.KindReset, pods.KindSnapshot, pods.KindDeploy, pods.KindTeardown,
-	pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvTeardown,
-	pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete, "x"}
+	pods.KindEnvCreate, pods.KindEnvAdd, pods.KindEnvTeardown, pods.KindEnvEdit, pods.KindEnvPower, pods.KindEnvDeleteHost,
+	pods.KindImageRegister, pods.KindImageEdit, pods.KindImageDeprecate, pods.KindImageDelete, pods.KindImageDetails, "x"}
 
 var (
 	clockRE = regexp.MustCompile(`^(\d+):(\d\d)$|^(\d+):(\d\d):(\d\d)$`)
