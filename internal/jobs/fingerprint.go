@@ -14,6 +14,7 @@ import (
 func Fingerprint(plan *pods.Plan) string {
 	type fpItem struct {
 		Name     string
+		Rename   string `json:",omitempty"`
 		VMID     int
 		Steps    []pods.Step
 		Blocked  bool
@@ -71,6 +72,7 @@ func Fingerprint(plan *pods.Plan) string {
 	for _, it := range plan.Items {
 		fp.Items = append(fp.Items, fpItem{
 			Name:     it.Name,
+			Rename:   it.Rename,
 			VMID:     it.VMID,
 			Steps:    it.Steps,
 			Blocked:  it.Blocked != "",

@@ -134,6 +134,8 @@ func pageData(t *rapid.T, page string) any {
 		return drawHostile[imagesView](t, "images")
 	case "family":
 		return drawHostile[familyView](t, "family")
+	case "envhost":
+		return drawHostile[envHostView](t, "envhost")
 	case "teamless":
 		p := drawHostile[catalogPage](t, "teamless")
 		p.envForm = drawHostile[envForm](t, "teamless.envForm") // embedded and unexported: fillHostile skips it

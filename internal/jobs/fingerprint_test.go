@@ -29,7 +29,7 @@ var fingerprinted = map[string]map[string]bool{
 		"CPU": false, "CloudInit": false, "Bridges": false,
 	},
 	"Item": {
-		"Name": true, "VMID": true, "Steps": true, "Blocked": true, "Snapshot": true, "Action": true, "Template": true,
+		"Name": true, "Rename": true, "VMID": true, "Steps": true, "Blocked": true, "Snapshot": true, "Action": true, "Template": true,
 		"Description": true, "VMState": true, // what a snapshot job writes to Proxmox
 		// What base-image and environment steps do.
 		"Source": true, "Pool": true, "Tags": true, "Notes": true, "NICs": true, "Guest": true, "Supersedes": true, "Details": true,

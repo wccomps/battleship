@@ -38,10 +38,13 @@ type Inputs struct {
 	VMs []string `json:"vms,omitempty"`
 
 	// Environments.
-	Domain   string   `json:"domain,omitempty"`
-	Slot     string   `json:"slot,omitempty"`      // create, teardown: two digits, e.g. "02"; empty takes the first free, or the domain's
-	Router   string   `json:"router,omitempty"`    // create: "name=family"
-	EnvHosts []string `json:"env_hosts,omitempty"` // create, add: "name=family[:octet]" each
+	Domain     string   `json:"domain,omitempty"`
+	Slot       string   `json:"slot,omitempty"`        // create, teardown: two digits, e.g. "02"; empty takes the first free, or the domain's
+	Router     string   `json:"router,omitempty"`      // create: "name=family"
+	EnvHosts   []string `json:"env_hosts,omitempty"`   // create, add: "name=family[:octet]" each
+	EnvHost    string   `json:"env_host,omitempty"`    // env-edit, env-delete-host: host label or full VM name
+	Octet      int      `json:"octet,omitempty"`       // env-edit: FirstHostOctet..LastHostOctet, ClearOctet, or 0
+	EjectCDROM bool     `json:"eject_cdrom,omitempty"` // env-edit: eject attached CD-ROM media
 	pods.ImageRequest
 }
 
@@ -56,6 +59,7 @@ const (
 	inDomain
 	inFamily
 	inImage
+	inVMID
 )
 
 // request records a Kind's input and planning rules: which field groups it
@@ -159,8 +163,85 @@ var requests = map[pods.Kind]request{
 		typed: func(in Inputs) (string, string) { return strings.TrimSpace(in.Domain), "the domain" },
 		plan:  envPlan(pods.Planner.EnvTeardown),
 	},
+	pods.KindEnvEdit: {
+		takes: inVMID | inDetails | inFreeNotes,
+		check: func(in Inputs) []error {
+			var errs []error
+			if in.VMID < 100 {
+				errs = append(errs, errors.New("name the host to edit by its VMID"))
+			}
+			if h := strings.TrimSpace(in.EnvHost); h != "" {
+				if hostPart, domPart, ok := strings.Cut(h, "."); ok {
+					if err := pods.CheckHostname(hostPart); err != nil {
+						errs = append(errs, err)
+					}
+					if err := pods.CheckDomain(domPart); err != nil {
+						errs = append(errs, err)
+					}
+				} else if err := pods.CheckHostname(h); err != nil {
+					errs = append(errs, err)
+				}
+			}
+			if in.ImageKind != "" && !slices.Contains(pods.ImageKinds, in.ImageKind) {
+				errs = append(errs, fmt.Errorf("host kind must be one of %s", strings.Join(pods.ImageKinds, ", ")))
+			}
+			if in.Octet != 0 && in.Octet != pods.ClearOctet && (in.Octet < pods.FirstHostOctet || in.Octet > pods.LastHostOctet) {
+				errs = append(errs, fmt.Errorf("the address must be %d-%d (.%d is the router, .3 the team VPN)", pods.FirstHostOctet, pods.LastHostOctet, pods.GatewayOctet))
+			}
+			if in.Image != "" && in.Image != pods.NoBaseImage {
+				if _, _, ok := pods.ParseImageName(in.Image); !ok {
+					errs = append(errs, fmt.Errorf("%q isn't a base image name like debian-12-v1", in.Image))
+				}
+			}
+			return errs
+		},
+		plan: func(ctx context.Context, p pods.Planner, in Inputs, _ []string) (*pods.Plan, error) {
+			return p.EnvEdit(ctx, pods.HostEditInput{
+				VMID:       in.VMID,
+				Host:       strings.TrimSpace(in.EnvHost),
+				Kind:       in.ImageKind,
+				Octet:      in.Octet,
+				Image:      in.Image,
+				EjectCDROM: in.EjectCDROM,
+				Details:    in.Details,
+			})
+		},
+	},
+	pods.KindEnvPower: {
+		takes: inVMID,
+		check: func(in Inputs) []error {
+			var errs []error
+			if in.VMID < 100 {
+				errs = append(errs, errors.New("name the host by its VMID"))
+			}
+			if !pods.IsPowerAction(in.Action) {
+				errs = append(errs, fmt.Errorf("power action must be start, shutdown, stop or reboot, not %q", in.Action))
+			}
+			return errs
+		},
+		plan: func(ctx context.Context, p pods.Planner, in Inputs, _ []string) (*pods.Plan, error) {
+			return p.EnvPower(ctx, in.VMID, in.Action)
+		},
+	},
+	pods.KindEnvDeleteHost: {
+		takes: inVMID,
+		typed: func(in Inputs) (string, string) { return strings.TrimSpace(in.EnvHost), "the VM name" },
+		check: func(in Inputs) []error {
+			var errs []error
+			if in.VMID < 100 {
+				errs = append(errs, errors.New("name the host to delete by its VMID"))
+			}
+			if strings.TrimSpace(in.EnvHost) == "" {
+				errs = append(errs, errors.New("name the host to delete"))
+			}
+			return errs
+		},
+		plan: func(ctx context.Context, p pods.Planner, in Inputs, _ []string) (*pods.Plan, error) {
+			return p.EnvDeleteHost(ctx, in.VMID, strings.TrimSpace(in.EnvHost))
+		},
+	},
 	pods.KindImageRegister: {
-		takes: inFamily | inDetails,
+		takes: inVMID | inFamily | inDetails,
 		check: func(in Inputs) []error {
 			var errs []error
 			if in.VMID < 100 {
@@ -318,7 +399,7 @@ func (in Inputs) checkText() error {
 	}{
 		{"pods", []string{in.Teams}}, {"hosts", in.Hosts}, {"vms", in.VMs}, {"pattern", []string{in.Pattern}}, {"set", []string{string(in.Set)}},
 		{"snapshot", []string{in.Snapshot}}, {"description", []string{in.Description}}, {"action", []string{in.Action}},
-		{"domain", []string{in.Domain}}, {"slot", []string{in.Slot}}, {"router", []string{in.Router}}, {"env hosts", in.EnvHosts},
+		{"domain", []string{in.Domain}}, {"slot", []string{in.Slot}}, {"router", []string{in.Router}}, {"env hosts", in.EnvHosts}, {"env host", []string{in.EnvHost}},
 		{"family", []string{in.Family}}, {"image kind", []string{in.ImageKind}}, {"image", []string{in.Image}},
 	}
 	if d := in.Details; d != nil {

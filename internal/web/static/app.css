@@ -70,7 +70,7 @@ details[open]>.disc::before{transform:rotate(90deg)}
 .olds .meta{color:var(--tx3);font-size:var(--t1)}
 .imgnotes{margin:0;padding-left:16px;display:grid;gap:6px}
 
-/* ---------- images: ready-to-register rows, the family catalogue, a family's versions ---------- */
+/* ---------- images ---------- */
 .sech{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px}
 .images .sec+.sec{margin-top:var(--s5)}
 .rlist{border:1px solid var(--ln);border-radius:var(--r2);background:var(--sf);overflow:hidden}
@@ -92,14 +92,14 @@ form.rrow:invalid .btn{opacity:.4}
 .tbl.fams td{vertical-align:middle}
 .tbl.fams tr.kg th{position:static;padding:14px 10px 4px;background:var(--sf);color:var(--tx3);font-size:var(--t1);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
 .tbl.fams tr.kg+tr td{border-top:0}
-.tbl.fams tr.link{position:relative}
-.tbl.fams tr.link:hover td{background:var(--sf2)}
-.tbl.fams .fam{font:600 var(--t3) var(--fm);text-decoration:none}
-.tbl.fams .fam::after{content:"";position:absolute;inset:0} /* the whole row opens the family */
-.tbl.fams .fam:hover{text-decoration:underline}
+.tbl.fams tr.link,.envt tr.link{position:relative}
+.tbl.fams tr.link:hover td,.envt tr.link:hover td{background:var(--sf2)}
+.tbl.fams .fam,.envt .fam{font:600 var(--t3) var(--fm);text-decoration:none}
+.tbl.fams .fam::after,.envt .fam::after{content:"";position:absolute;inset:0}
+.tbl.fams .fam:hover,.envt .fam:hover{text-decoration:underline}
 .tbl.fams .cur{white-space:nowrap}
 .tbl.fams .nl{font:var(--t1) var(--fm);overflow-wrap:anywhere}
-.tbl.fams .chev{width:1%;color:var(--tx3)}
+.tbl.fams .chev,.envt .chev{width:1%;color:var(--tx3)}
 .olds li code,.vers code{font-weight:600}
 .notes.box{max-width:none;margin:0;padding:8px 10px}
 .vers{list-style:none;margin:0;padding:0;border:1px solid var(--ln);border-radius:var(--r2);background:var(--sf);font-size:var(--t2)}
@@ -486,9 +486,11 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .hname{font:600 var(--t2) var(--fm);overflow-wrap:anywhere}
 @container app (min-width:641px){
   .envt{table-layout:fixed}
-  .envt th:nth-child(1){width:18%}
-  .envt th:nth-child(2){width:22%}
-  .envt th:nth-child(3){width:24%}
+  .envt th:nth-child(1){width:17%}
+  .envt th:nth-child(2){width:20%}
+  .envt th:nth-child(3){width:22%}
+  .envt th.act{width:68px}
+  .envt th.chev{width:32px}
 }
 .envt .notes{max-width:none;margin:0;padding:0;background:none}
 .envt .dkv{gap:2px 12px;font-size:var(--t1)}
@@ -498,6 +500,7 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .dkv dd{overflow-wrap:anywhere}
 .login{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 6px}
 .pw,.pw details{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;min-width:0}
+.pw{position:relative;z-index:1}
 .pw summary{order:1;cursor:pointer;list-style:none}
 .pw details:not([open]) .hide,.pw details[open] .show{display:none}
 .pw code{font-weight:600;overflow-wrap:anywhere;user-select:all}
@@ -507,7 +510,7 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:vertical}
 .nchg,.dfields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}
 .nchg .notes{margin-top:4px}
-.tbl.fams td.act{width:1%;white-space:nowrap;position:relative;z-index:1}
+.tbl.fams td.act,.envt td.act{width:1%;white-space:nowrap;position:relative;z-index:1}
 .dfields .wide{grid-column:1/-1}
 .dfields .field{gap:4px}
 .dfields .lbl{margin:0}
@@ -564,9 +567,8 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .tbl.fams tr.kg th{display:block;padding:0}
   .tbl.fams td{display:block;padding:0;border:0}
   .tbl.fams td.cur{grid-column:2;grid-row:1;text-align:right}
-  .tbl.fams td.chev{display:none}
   .tbl.fams td.nl{grid-column:1;grid-row:2}
-  .tbl.fams td.act{grid-column:2;grid-row:2;justify-self:end;align-self:start;width:auto}
+  .tbl.fams td.act,.envt td.act{grid-column:2;grid-row:2;justify-self:end;align-self:start;width:auto}
   .nchg{grid-template-columns:minmax(0,1fr)}
   .envh .acts{width:100%;margin-left:0}
   .envh .acts .btn{flex:1}
@@ -581,7 +583,7 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .rvw tr.blk{background:repeating-linear-gradient(135deg,transparent 0 6px,var(--sf2) 6px 9px)}
   .rvw tr.blk td{background:none}
   .envt td.si,.envt td.nt{grid-column:1/-1}
-  .envt td.nt:empty{display:none}
+  .tbl.fams td.chev,.envt td.nt:empty,.envt td.chev{display:none}
   .env{scroll-margin-top:96px} /* the header wraps to two rows */
 }
 @media (pointer:coarse){.grid{--ch:30px}}

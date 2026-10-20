@@ -75,8 +75,11 @@ func opLabelOf(kind string, in jobs.Inputs) opLabel {
 	}
 	l := opLabel{Icon: kind, Label: cmp.Or(op.Label, op.Title)}
 	switch {
-	case op.Kind == pods.KindPower:
+	case op.Kind == pods.KindPower, op.Kind == pods.KindEnvPower:
 		l.Icon, l.Label = in.Action, powerLabel(in.Action)
+		if op.Kind == pods.KindEnvPower {
+			l.Detail = cmp.Or(in.EnvHost, in.Domain)
+		}
 	case op.Kind == pods.KindReset, op.Kind == pods.KindSnapshot:
 		l.Detail = in.Snapshot
 	case op.Kind == pods.KindDeploy:
@@ -87,7 +90,7 @@ func opLabelOf(kind string, in jobs.Inputs) opLabel {
 	case op.Kind == pods.KindTeardown:
 		l.Detail = string(in.Set)
 	case op.Section == sectionEnvironments:
-		l.Detail = in.Domain
+		l.Detail = cmp.Or(in.Domain, in.EnvHost)
 	case op.Section == sectionImages:
 		l.Detail = cmp.Or(in.Image, in.Family)
 	}
@@ -124,7 +127,7 @@ func jobTeams(in jobs.Inputs) string {
 	if !in.Kind.Teamless() {
 		return teamsText(in.Teams)
 	}
-	for _, v := range []string{in.Domain, in.Family, in.Image} {
+	for _, v := range []string{in.Domain, in.EnvHost, in.Family, in.Image} {
 		if v != "" {
 			return v
 		}

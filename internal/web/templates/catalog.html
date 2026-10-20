@@ -36,13 +36,22 @@
 {{- end}}
 {{- with .Hosts}}
 <table class="tbl envt">
-<thead><tr><th scope="col">Host</th><th scope="col">Address</th><th scope="col">Status · image</th><th scope="col">Notes</th></tr></thead>
+<thead><tr><th scope="col">Host</th><th scope="col">Address</th><th scope="col">Status · image</th><th scope="col">Notes</th><th scope="col" class="act"><span class="sr">Edit</span></th><th scope="col" class="chev"><span class="sr">Open</span></th></tr></thead>
 <tbody>
 {{- range .}}
-<tr><td class="hn"><span class="hname">{{.Name}}</span>{{if .Router}} <span class="chip">router</span>{{end}}</td>
+{{- if .HalfDeleted}}
+<tr><td class="hn"><span class="hname">{{.Name}}</span></td>
+{{template "env-addr" .}}
+<td class="si"><span class="gl is-stopped"><i class="g" aria-hidden="true"></i>{{.Status}}</span></td>
+<td class="nt"></td><td></td><td></td></tr>
+{{- else}}
+<tr class="link"><td class="hn"><a class="fam" href="{{envHostHref .VMID}}" data-panel-link><span class="hname">{{.Name}}</span></a>{{if .Router}} <span class="chip">router</span>{{end}}</td>
 {{template "env-addr" .}}
 <td class="si"><span class="gl is-{{if .Running}}running{{else}}stopped{{end}}"><i class="g" aria-hidden="true"></i>{{.Status}}</span>{{with .Image}} <span class="meta">· {{.}}</span>{{end}}{{range .Warnings}}<span class="al is-drifted"><i class="g" aria-hidden="true"></i>{{.}}</span>{{end}}</td>
-<td class="nt">{{with details .Details .Unreadable}}{{template "details" .}}{{end}}{{with .Notes}}<div class="notes">{{.}}</div>{{end}}</td></tr>
+<td class="nt">{{with details .Details .Unreadable}}{{template "details" .}}{{end}}{{with .Notes}}<div class="notes">{{.}}</div>{{end}}</td>
+<td class="act"><div class="acts">{{template "notes-button" hostEditButton .VMID .Name .MayEdit}}</div></td>
+<td class="chev">{{icon "chev"}}</td></tr>
+{{- end}}
 {{- end}}
 </tbody>
 </table>
@@ -57,6 +66,7 @@
 {{- with .Queued}}<span class="meta">· a queued job will fill {{.}}</span>{{end}}</p>
 {{- end}}
 </div>
+<dialog class="panel" id="panel" aria-label="Host"></dialog>
 {{- end}}
 {{- end}}
 

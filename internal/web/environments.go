@@ -81,19 +81,21 @@ func (b envBlock) Acts() bool { return b.Domain != "" && b.Twin == "" }
 // Read says its live addresses were read (pods.LiveAddrs): its address cell
 // shows them, or that it isn't live.
 type envHostRow struct {
-	VMID       int
-	Name       string
-	Router     bool
-	Addr       string
-	Gateway    string
-	Running    bool
-	Status     string
-	Image      string
-	Warnings   []string
-	Details    pods.ImageDetails
-	Unreadable bool
-	Notes      string
-	Read       bool
+	VMID        int
+	Name        string
+	Router      bool
+	Addr        string
+	Gateway     string
+	Running     bool
+	Status      string
+	Image       string
+	Warnings    []string
+	Details     pods.ImageDetails
+	Unreadable  bool
+	Notes       string
+	Read        bool
+	HalfDeleted bool
+	MayEdit     bool
 	pods.LiveAddrs
 	octet int // of Addr on its LAN; 0 without one
 }
@@ -115,6 +117,14 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 			addrs, p.LiveRead = s.liveAddrs(ctx, envs), true
 		}
 		p.Envs = envBlocks(envs, s.hostBases(ctx, envs, vms), addrs)
+		for bi := range p.Envs {
+			for hi := range p.Envs[bi].Hosts {
+				h := &p.Envs[bi].Hosts[hi]
+				if !h.HalfDeleted {
+					h.MayEdit = s.mayOn(ctx, h.VMID, pods.OfferPrivileges(pods.KindEnvEdit)...)
+				}
+			}
+		}
 		open, queued, err := planner.OpenSlots(ctx, envs)
 		if err != nil {
 			p.FreeErr = "Couldn't tell which free slots queued jobs will fill: " + sentence(err.Error())
@@ -252,7 +262,7 @@ func envBlocks(envs []pods.Environment, bases map[string]pods.BaseImage, addrs m
 			b.Hosts = append(b.Hosts, row)
 		}
 		for _, h := range e.HalfDeleted {
-			b.Hosts = append(b.Hosts, envHostRow{VMID: h.VMID, Name: h.Name, Status: cmp.Or(h.Status, "unknown")})
+			b.Hosts = append(b.Hosts, envHostRow{VMID: h.VMID, Name: h.Name, Status: cmp.Or(h.Status, "unknown"), HalfDeleted: true})
 		}
 		slices.SortStableFunc(b.Hosts, hostOrder)
 		out = append(out, b)

@@ -17,6 +17,9 @@ func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tp
 		return e.endItem(ctx, it, "", -1, false, errors.New("no steps planned"))
 	}
 	vm, exists := e.lookup(it.VMID, it.Name)
+	if !exists && it.Rename != "" {
+		vm, exists = e.lookup(it.VMID, it.Rename)
+	}
 	if exists {
 		it.Node = vm.Node
 	}
@@ -175,9 +178,17 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		return true, e.createSnapshot(ctx, it.Node, it.VMID, proxmox.SnapshotRequest{Name: e.Cfg.Deploy.SnapshotName, Description: "baseline from battleship deploy"})
 
 	case pods.StepLabel:
-		return e.applyConfig(ctx, it, false, always(func(cur map[string]string) map[string]string {
-			return pods.LabelChanges(cur, it.Tags, it.Notes)
+		changed, err := e.applyConfig(ctx, it, false, always(func(cur map[string]string) map[string]string {
+			ch := pods.LabelChanges(cur, it.Tags, it.Notes)
+			if it.Rename != "" && cur["name"] != it.Rename {
+				ch["name"] = it.Rename
+			}
+			return ch
 		}))
+		if err == nil && it.Rename != "" {
+			e.setPresent(proxmox.VM{VMID: it.VMID, Name: it.Rename, Node: it.Node}, true)
+		}
+		return changed, err
 	case pods.StepDetails:
 		if it.Details == nil {
 			return false, nil

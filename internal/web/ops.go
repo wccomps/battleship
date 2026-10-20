@@ -79,6 +79,15 @@ var operations = []operation{
 	{Kind: pods.KindEnvTeardown, Path: "/environments/{domain}/teardown", Title: "Tear down", Verb: "Tear down", Icon: "teardown", Noun: "teardown",
 		Section: sectionEnvironments, Doing: "Tearing down an environment", Done: "Deleted", Formless: true,
 		review: teardownReview, home: envHome, back: (operation).listPage},
+	{Kind: pods.KindEnvEdit, Path: "/environments/edit", Title: "Edit host", Verb: "Edit", ConfirmVerb: "Save",
+		Icon: "edit", Noun: "host edit", Section: sectionEnvironments, Doing: "Editing a host", Done: "Saved",
+		review: envEditReview, home: envHome, prefill: (*Server).hostEditPrefill},
+	{Kind: pods.KindEnvPower, Path: "/environments/power", Title: "Power", Verb: "Power", Icon: "shutdown", Noun: "power action",
+		Section: sectionEnvironments, Doing: "Changing power", Formless: true,
+		review: envPowerReview, home: envHome, back: envHostBack},
+	{Kind: pods.KindEnvDeleteHost, Path: "/environments/delete", Title: "Delete host", Verb: "Delete", ConfirmVerb: "Delete",
+		Icon: "teardown", Noun: "host deletion", Section: sectionEnvironments, Doing: "Deleting a host", Done: "Deleted", Formless: true,
+		review: envDeleteHostReview, home: envHome, back: envHostBack},
 	{Kind: pods.KindImageRegister, Path: "/images/register", Title: "Register base image", Verb: "Register", ConfirmVerb: "Register",
 		Icon: "deploy", Noun: "registration", Section: sectionImages, Doing: "Registering", Done: "Ready", PostForm: true,
 		review: registerReview, home: familyHome, back: (operation).listPage, prefill: (*Server).registerPrefill},
@@ -169,9 +178,13 @@ const (
 	fieldRetryOf     = "retry_of" // confirm: the job a retry preview retries; shown only, never trusted
 	fieldFrom        = "from"     // "grid": the grid's form, which sends ticked VMs and no teams
 	fieldDomain      = "domain"
-	fieldSlot        = "slot"      // env-create, env-teardown: the slot's two digits
-	fieldRouter      = "router"    // name=family
-	fieldEnvHosts    = "env_hosts" // one name=family[:octet] per line
+	fieldSlot        = "slot"        // env-create, env-teardown: the slot's two digits
+	fieldRouter      = "router"      // name=family
+	fieldEnvHosts    = "env_hosts"   // one name=family[:octet] per line
+	fieldEnvHost     = "env_host"    // env-edit, env-delete-host: host label or full VM name
+	fieldOctet       = "octet"       // env-edit: LAN octet, or "none" (pods.ClearOctet)
+	fieldEjectCDROM  = "eject_cdrom" // env-edit: "yes" ejects attached CD-ROM media
+	clearOctetValue  = "none"
 	fieldVMID        = "vmid"
 	fieldFamily      = "family"
 	fieldImageKind   = "image_kind"
@@ -209,6 +222,9 @@ const (
 func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 	if kind.Teamless() {
 		in := jobs.Inputs{Kind: kind, Domain: strings.TrimSpace(form.Get(fieldDomain)), Router: strings.TrimSpace(form.Get(fieldRouter)),
+			EnvHost:    strings.TrimSpace(form.Get(fieldEnvHost)),
+			EjectCDROM: form.Get(fieldEjectCDROM) == yes,
+			Action:     strings.TrimSpace(form.Get(fieldAction)),
 			ImageRequest: pods.ImageRequest{
 				Family:    strings.TrimSpace(form.Get(fieldFamily)),
 				ImageKind: strings.TrimSpace(form.Get(fieldImageKind)),
@@ -220,19 +236,24 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 				in.EnvHosts = append(in.EnvHosts, line)
 			}
 		}
-		if form.Has(fieldRouterImage) {
+		if (kind == pods.KindEnvCreate || kind == pods.KindEnvAdd) && form.Has(fieldRouterImage) {
 			in.Router = ""
 			if r := rawRow(form.Get(fieldRouterName), form.Get(fieldRouterImage), ""); r.Image != "" {
 				in.Router = r.line()
 			}
 		}
-		if form.Has(fieldHostName) {
+		if (kind == pods.KindEnvCreate || kind == pods.KindEnvAdd) && form.Has(fieldHostName) {
 			in.EnvHosts = nil
 			for _, row := range postedRows(form) {
 				if line := row.line(); line != "" {
 					in.EnvHosts = append(in.EnvHosts, line)
 				}
 			}
+		}
+		if s := strings.TrimPrefix(strings.TrimSpace(form.Get(fieldOctet)), "."); strings.EqualFold(s, clearOctetValue) {
+			in.Octet = pods.ClearOctet
+		} else {
+			in.Octet, _ = strconv.Atoi(s)
 		}
 		in.VMID, _ = strconv.Atoi(strings.TrimSpace(form.Get(fieldVMID)))
 		if posted := form.Get(fieldDetails); posted == yes || posted == detailsWithNotes {
@@ -290,10 +311,16 @@ func inputFields(in jobs.Inputs) []field {
 	if in.Kind.Teamless() {
 		var fs []field
 		for _, f := range []field{{fieldDomain, in.Domain}, {fieldSlot, in.Slot}, {fieldVMs, strings.Join(in.VMs, ",")}, {fieldRouter, in.Router}, {fieldEnvHosts, strings.Join(in.EnvHosts, "\n")},
-			{fieldFamily, in.Family}, {fieldImageKind, in.ImageKind}, {fieldImage, in.Image}} {
+			{fieldEnvHost, in.EnvHost}, {fieldAction, in.Action}, {fieldFamily, in.Family}, {fieldImageKind, in.ImageKind}, {fieldImage, in.Image}} {
 			if f.Value != "" {
 				fs = append(fs, f)
 			}
+		}
+		if in.Octet != 0 {
+			fs = append(fs, field{fieldOctet, strconv.Itoa(in.Octet)})
+		}
+		if in.EjectCDROM {
+			fs = append(fs, field{fieldEjectCDROM, yes})
 		}
 		if in.VMID != 0 {
 			fs = append(fs, field{fieldVMID, strconv.Itoa(in.VMID)})
