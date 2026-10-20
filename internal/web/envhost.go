@@ -27,16 +27,6 @@ func envEditHref(vmid int) string {
 	return formQuery(op, jobs.Inputs{Kind: pods.KindEnvEdit, ImageRequest: pods.ImageRequest{VMID: vmid}})
 }
 
-func envHostHome(in jobs.Inputs) (string, string) {
-	if in.Domain != "" && pods.CheckDomain(in.Domain) == nil {
-		return in.Domain, envHref(in.Domain)
-	}
-	if in.VMID >= 100 {
-		return strconv.Itoa(in.VMID), envHostHref(in.VMID)
-	}
-	return "", envsPath
-}
-
 func envHostBack(_ operation, in jobs.Inputs) string {
 	if in.VMID >= 100 {
 		return envHostHref(in.VMID)
