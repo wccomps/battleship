@@ -4,8 +4,10 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/status"
 )
 
 func TestEnvHostSheet(t *testing.T) {
@@ -161,4 +163,19 @@ func TestBrowserEnvHostPanel(t *testing.T) {
 	b.click(`#panel a[href="/environments/edit?vmid=2101"]`)
 	b.waitFor("the edit host form", `document.querySelector("#panel[open] input[name=env_host]") !== null`)
 	b.noSideways("edit host form")
+
+	// Deleting a host from the panel updates the Environments page behind it
+	// without a manual reload.
+	b.click(`#panel .pf a[href="/environments/host?vmid=2101"]`)
+	b.waitFor("the host sheet again", `document.querySelector("#panel[open] #host-title") !== null`)
+	b.click(`#panel form[action="/environments/delete/preview"] button`)
+	b.waitFor("the delete review", `document.querySelector("#panel[open] input[name=typed]") !== null`)
+	b.eval(`(function(){var i=document.querySelector("#panel input[name=typed]");i.value="teak.kilo.alpha";i.dispatchEvent(new Event("input",{bubbles:true}))})()`, nil)
+	b.click(`#panel .pf button[type=submit]`)
+	b.waitFor("the delete job in the panel", `document.querySelector("#panel[open] #job-live") !== null`)
+	j := h.jobsInStore()[0]
+	h.runPlan(j)
+	h.hub.Publish(status.Msg{Topic: status.JobTopic(j.ID)})
+	h.clock.Advance(time.Second)
+	b.waitFor("teak removed from Environments", `document.querySelector('a.fam[href="/environments/host?vmid=2101"]') === null`)
 }

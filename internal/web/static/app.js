@@ -94,8 +94,9 @@
   // -- Live updates
 
   // follow applies live's data-events stream; onChange runs after it
-  // changes the page. It returns a function that stops it.
-  function follow(live, onChange) {
+  // changes the page, and onEnd when the stream ends. It returns a function
+  // that stops it.
+  function follow(live, onChange, onEnd) {
     if (!window.EventSource) return function () {};
     var url = live.getAttribute("data-events");
     var source = null, failures = 0, errors = 0, pending = null, retry = null, stopped = false, isDown = false;
@@ -170,6 +171,7 @@
     function end() {
       source.close();
       setDown(false);
+      if (onEnd) onEnd();
     }
 
     function received(apply) {
@@ -371,6 +373,27 @@
   var panel = $("panel");
   var stopPanel = null, opener = null;
 
+  // Refresh the page behind the panel when a job in the panel finishes on a
+  // page without its own event stream (Environments or Images).
+  function refreshPage() {
+    var page = document.querySelector("main > .page");
+    if (!page || page.hasAttribute("data-events") || page.querySelector("[data-events]")) return;
+    fetch(location.href, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      if (!r.ok || r.redirected) return;
+      return r.text();
+    }).then(function (html) {
+      if (!html) return;
+      var next = parse(html).querySelector("main > .page");
+      var cur = document.querySelector("main > .page");
+      if (!next || !cur) return;
+      var href = opener && opener.getAttribute("href");
+      cur.replaceWith(next);
+      if (href) opener = next.querySelector('a[href="' + href + '"]');
+      passwords(next);
+      each(next.querySelectorAll("[data-fill]"), fill);
+    }, function () {});
+  }
+
   function showPanel(html) {
     if (stopPanel) stopPanel();
     stopPanel = null;
@@ -387,7 +410,8 @@
     }
     if (!panel.open) panel.showModal();
     var live = sheet.matches("[data-events]") ? sheet : sheet.querySelector("[data-events]");
-    if (live) stopPanel = follow(live);
+    if (live) stopPanel = follow(live, null, refreshPage);
+    else if (sheet.id === "job-live") refreshPage();
     ticks();
     typedConfirm(sheet);
     machineRows(sheet);
@@ -428,8 +452,10 @@
 
   if (panel) {
     panel.addEventListener("close", function () {
-      if (stopPanel) stopPanel();
-      stopPanel = null;
+      if (stopPanel && !panel.querySelector("#job-live[data-events]")) {
+        stopPanel();
+        stopPanel = null;
+      }
       panel.replaceChildren();
       var back = opener && document.contains(opener) ? opener : bar && bar.querySelector("button:not(:disabled)");
       if (back) back.focus();
