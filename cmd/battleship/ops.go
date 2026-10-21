@@ -16,7 +16,6 @@ import (
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/store"
-	"github.com/wccomps/battleship/internal/web"
 )
 
 // runOp previews and applies (or queues) deploy, teardown, reset, power or
@@ -38,7 +37,7 @@ type command struct {
 }
 
 // parseOp reads a team operation's flags into the inputs the web form would
-// give (web.Normalize); if not ok, the command exits with code.
+// give (Inputs.Normalize); if not ok, the command exits with code.
 func parseOp(cmd string, args []string, stderr io.Writer) (c command, code int, ok bool) {
 	fs := flag.NewFlagSet("battleship "+cmd, flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -98,7 +97,7 @@ func parseOp(cmd string, args []string, stderr io.Writer) (c command, code int, 
 	in.Teams = teamSpec
 	in.Hosts = jobs.SplitList(*hostSpec)
 	in.VMs = jobs.SplitList(*vmSpec)
-	in = web.Normalize(in)
+	in = in.Normalize()
 	if given["hosts"] && len(in.Hosts) == 0 {
 		fmt.Fprintln(stderr, "-hosts is empty")
 		return c, 2, false
@@ -133,14 +132,14 @@ func parseOp(cmd string, args []string, stderr io.Writer) (c command, code int, 
 			fmt.Fprintln(stderr, "-name is required")
 			return c, 2, false
 		}
-		check := in
-		if all {
-			check.Teams = "0" // stands in until the cluster is read
-		}
-		if err := check.Validate(); err != nil {
-			fmt.Fprintln(stderr, err)
-			return c, 2, false
-		}
+	}
+	check := in
+	if all {
+		check.Teams = "0" // stands in until the cluster is read
+	}
+	if err := check.Validate(); err != nil {
+		fmt.Fprintln(stderr, err)
+		return c, 2, false
 	}
 	return command{in: in, cfgPath: *cfgPath, all: all, yes: *yes, queue: *queue}, 0, true
 }
@@ -294,8 +293,8 @@ func submitJob(ctx context.Context, d deps, cfg config.Config, in jobs.Inputs, p
 
 // confirm asks the volunteer to approve the plan just printed. Teardown
 // requires typing the -pods value as given, or, for -pods all, the pods
-// it stands for; an environment's teardown its -domain (jobs.Inputs.Typed);
-// everything else takes "yes".
+// it stands for; an environment's teardown its -domain and an environment
+// host delete its VM name (jobs.Inputs.Typed); everything else takes "yes".
 func confirm(d deps, in jobs.Inputs) bool {
 	want := "yes"
 	if in.Kind.TypedConfirm() {

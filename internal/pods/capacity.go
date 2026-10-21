@@ -129,7 +129,7 @@ func NeedsCapacity(plan *Plan) bool {
 
 // ReadCapacity reads cluster resources in one call and compares them with
 // plan's needs; nil when the plan starts nothing or api can't read them.
-func ReadCapacity(ctx context.Context, api API, plan *Plan, cfg config.Config) (*Capacity, error) {
+func ReadCapacity(ctx context.Context, api Reads, plan *Plan, cfg config.Config) (*Capacity, error) {
 	rr, ok := api.(ResourceReader)
 	if !ok || !NeedsCapacity(plan) {
 		return nil, nil

@@ -80,13 +80,13 @@ var validInputs = []Inputs{
 	{Kind: pods.KindImageDeprecate, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}},
 	{Kind: pods.KindImageDelete, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}},
 	{Kind: pods.KindImageDetails, ImageRequest: pods.ImageRequest{Family: "debian-12", Details: &pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: "Debian 12", User: "debian",
-		Password: "Changeme1!"}, Free: strp("Patched monthly.")}}},
+		Password: "Changeme1!"}, Free: strp("Patched monthly."), From: "deadbeef"}}},
 }
 
 func strp(s string) *string { return &s }
 
 // Validate refuses any string field, of any kind, that holds a control
-// character or invalid UTF-8.
+// character (other than LF in multi-line free notes) or invalid UTF-8.
 func TestPropValidateRefusesUnprintableText(t *testing.T) {
 	for _, in := range validInputs {
 		if err := in.Validate(); err != nil {
@@ -94,32 +94,55 @@ func TestPropValidateRefusesUnprintableText(t *testing.T) {
 		}
 	}
 	bad := rapid.SampledFrom([]string{"\x00", "\x1b", "\n", "\r", "\t", "\x7f", "\u0085", "\u009b", "\xff", "\xc3"})
+	badMultiline := rapid.SampledFrom([]string{"\x00", "\x1b", "\r", "\t", "\x7f", "\u0085", "\u009b", "\xff", "\xc3"})
 	rapid.Check(t, func(t *rapid.T) {
 		in := rapid.SampledFrom(validInputs).Draw(t, "inputs")
 		in.Hosts, in.VMs, in.EnvHosts = slices.Clone(in.Hosts), slices.Clone(in.VMs), slices.Clone(in.EnvHosts)
-		var fields []reflect.Value
+		type strField struct {
+			v         reflect.Value
+			multiline bool
+		}
+		var fields []strField
 		var addFields func(reflect.Value)
 		addFields = func(v reflect.Value) {
 			for i := range v.NumField() {
 				f := v.Field(i)
-				switch {
-				case f.Kind() == reflect.Struct:
+				switch f.Kind() {
+				case reflect.Pointer:
+					if !f.IsNil() {
+						clone := reflect.New(f.Type().Elem())
+						clone.Elem().Set(f.Elem())
+						f.Set(clone)
+						switch clone.Elem().Kind() {
+						case reflect.Struct:
+							addFields(clone.Elem())
+						case reflect.String:
+							fields = append(fields, strField{v: clone.Elem(), multiline: true})
+						}
+					}
+				case reflect.Struct:
 					addFields(f)
-				case f.Kind() == reflect.String && f.Type() != reflect.TypeFor[pods.Kind]():
-					fields = append(fields, f)
-				case f.Kind() == reflect.Slice:
+				case reflect.String:
+					if f.Type() != reflect.TypeFor[pods.Kind]() {
+						fields = append(fields, strField{v: f})
+					}
+				case reflect.Slice:
 					if f.Len() == 0 {
 						f.Set(reflect.ValueOf([]string{"x"}))
 					}
-					fields = append(fields, f.Index(rapid.IntRange(0, f.Len()-1).Draw(t, "index")))
+					fields = append(fields, strField{v: f.Index(rapid.IntRange(0, f.Len()-1).Draw(t, "index"))})
 				}
 			}
 		}
 		addFields(reflect.ValueOf(&in).Elem())
-		f := fields[rapid.IntRange(0, len(fields)-1).Draw(t, "field")]
-		s := f.String()
+		sf := fields[rapid.IntRange(0, len(fields)-1).Draw(t, "field")]
+		s := sf.v.String()
 		at := rapid.IntRange(0, len(s)).Draw(t, "at")
-		f.SetString(s[:at] + bad.Draw(t, "bad") + s[at:])
+		gen := bad
+		if sf.multiline {
+			gen = badMultiline
+		}
+		sf.v.SetString(s[:at] + gen.Draw(t, "bad") + s[at:])
 		if err := in.Validate(); err == nil {
 			t.Fatalf("Validate accepted %+v", in)
 		}
@@ -320,7 +343,7 @@ func gateCluster() pods.Planner {
 
 func checkGate(t interface{ Fatalf(string, ...any) }, p pods.Planner, in Inputs, field string, wantOK bool) {
 	err := in.Validate()
-	if err == nil && (field == "Details" || field == "Free") {
+	if err == nil && field == "Free" {
 		_, err = BuildPlan(bg, p, in)
 	}
 	if (err == nil) != wantOK {

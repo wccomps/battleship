@@ -1,7 +1,8 @@
 // Command battleship deploys, resets, powers and tears down pods on Proxmox.
 //
 // Every operation prints its plan, asks for confirmation (a teardown wants
-// the pod range typed, an environment's its domain), and applies exactly
+// the pod range typed, an environment's its domain, an environment host
+// delete its VM name), and applies exactly
 // that plan. -yes skips the prompt;
 // without -yes and without a terminal, nothing changes. Any character device
 // on stdin (even /dev/null) counts as a terminal, so automation should pass

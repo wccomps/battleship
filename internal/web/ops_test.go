@@ -927,6 +927,7 @@ type cliValues struct {
 	envHosts                             []string // -host, repeated
 	vmid, octet                          int
 	rebuild, noSnap, vmstate, ejectCDROM bool
+	details                              *pods.ImageNotes
 }
 
 // raw is the inputs a command line sets before Normalize.
@@ -936,7 +937,7 @@ func (v cliValues) raw(kind pods.Kind) jobs.Inputs {
 		Pattern: s[fieldPattern], Rebuild: v.rebuild, NoSnapshot: v.noSnap, Snapshot: s[fieldSnapshot], Description: s[fieldDescription],
 		VMState: v.vmstate, Action: s[fieldAction], Domain: s[fieldDomain], Router: s[fieldRouter], EnvHosts: v.envHosts,
 		EnvHost: s[fieldEnvHost], Octet: v.octet, EjectCDROM: v.ejectCDROM, CPU: s[fieldCPU],
-		ImageRequest: pods.ImageRequest{VMID: v.vmid, Family: s[fieldFamily], ImageKind: s[fieldImageKind], Image: s[fieldImage]}}
+		ImageRequest: pods.ImageRequest{VMID: v.vmid, Family: s[fieldFamily], ImageKind: s[fieldImageKind], Image: s[fieldImage], Details: v.details}}
 }
 
 // posted is the form a page posts with the same values: boxes as "yes",
@@ -954,6 +955,21 @@ func (v cliValues) posted() url.Values {
 			form.Set(k, yes)
 		}
 	}
+	if d := v.details; d != nil {
+		form.Set(fieldDetails, yes)
+		if d.Free != nil {
+			form.Set(fieldDetails, detailsWithNotes)
+			form.Set(fieldNotes, *d.Free)
+		}
+		form.Set(fieldOS, d.OS)
+		form.Set(fieldUser, d.User)
+		form.Set(fieldPassword, d.Password)
+		form.Set(fieldBuilt, d.Built)
+		form.Set(fieldGeneralized, d.Generalized)
+		form.Set(fieldInstalled, d.Installed)
+		form.Set(fieldLicence, d.Licence)
+		form.Set(fieldNotesFrom, d.From)
+	}
 	return form
 }
 
@@ -963,8 +979,18 @@ func TestPropNormalizeReadsAsTheForm(t *testing.T) {
 	strFields := []string{fieldTeams, fieldHosts, fieldVMs, fieldPattern, fieldSnapshot, fieldDescription, fieldAction, fieldDomain,
 		fieldRouter, fieldEnvHost, fieldCPU, fieldFamily, fieldImageKind, fieldImage}
 	check := func(t interface{ Fatalf(string, ...any) }, kind pods.Kind, v cliValues) {
-		if got, want := Normalize(v.raw(kind)), formInputs(kind, v.posted()); !reflect.DeepEqual(got, want) {
+		got, want := v.raw(kind).Normalize(), formInputs(kind, v.posted())
+		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s: Normalize(%#v) = %#v, the form reads %#v", kind, v.raw(kind), got, want)
+		}
+		if kind.Teamless() && v.details != nil {
+			if got.Details == nil || got.Details.From != strings.TrimSpace(v.details.From) {
+				t.Fatalf("%s: Normalize dropped Details.From: got %#v", kind, got.Details)
+			}
+			if (got.Details.Free == nil) != (v.details.Free == nil) ||
+				(v.details.Free != nil && *got.Details.Free != pods.CleanFreeNotes(*v.details.Free)) {
+				t.Fatalf("%s: Normalize dropped Details.Free: got %#v", kind, got.Details)
+			}
 		}
 	}
 	for _, op := range operations {
@@ -985,6 +1011,17 @@ func TestPropNormalizeReadsAsTheForm(t *testing.T) {
 			noSnap:     rapid.Bool().Draw(t, "no snapshot"),
 			vmstate:    rapid.Bool().Draw(t, "vmstate"),
 			ejectCDROM: rapid.Bool().Draw(t, "eject cdrom")}
+		if rapid.Bool().Draw(t, "details") {
+			n := pods.ImageNotes{
+				ImageDetails: pods.ImageDetails{OS: value.Draw(t, "os"), User: value.Draw(t, "user"), Password: value.Draw(t, "pw")},
+				From:         value.Draw(t, "from"),
+			}
+			if rapid.Bool().Draw(t, "free") {
+				free := value.Draw(t, "notes")
+				n.Free = &free
+			}
+			v.details = &n
+		}
 		for _, f := range strFields {
 			v.strs[f] = value.Draw(t, f)
 		}

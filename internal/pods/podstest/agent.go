@@ -128,6 +128,10 @@ func (f *Fake) AgentPing(ctx context.Context, node string, vmid int) error {
 	return f.agentCall(ctx, fmt.Sprintf("agent-ping:%d", vmid), node, vmid, func(*Guest) error { return nil })
 }
 
+func (f *Fake) AgentRead(ctx context.Context, node string, vmid int, command []string) (int, error) {
+	return f.AgentExec(ctx, node, vmid, command, "")
+}
+
 // isSetupRead is whether command reads Windows setup's ImageState.
 func isSetupRead(command []string) bool {
 	return slices.ContainsFunc(command, func(a string) bool { return strings.Contains(a, `Setup\State`) })

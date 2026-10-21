@@ -39,7 +39,7 @@ type Options struct {
 const WaitingForPoll = "waiting for the first poll of the cluster"
 
 // Poller keeps the status grid: it polls the cluster every web.status_poll
-// and when a job starts or ends, deep-scans team VMs every web.drift_scan,
+// and when a job or its items change, deep-scans team VMs every web.drift_scan,
 // and publishes grid changes to the hub. Methods are concurrency-safe except
 // Poll, which must not run concurrently with itself (follow is unlocked).
 type Poller struct {
@@ -145,8 +145,8 @@ func (p *Poller) Run(ctx context.Context) {
 		defer wg.Done()
 		p.scanLoop(ctx)
 	}()
-	// Poll when a job starts or ends, so the grid shows what it left as its
-	// busy marks clear.
+	// Poll when a job or its items change, so the grid shows what it left as
+	// its busy marks clear.
 	var jobs <-chan Msg
 	if p.hub != nil {
 		var unsubscribe func()
@@ -207,8 +207,12 @@ func (p *Poller) Poll(ctx context.Context) error {
 		return p.pollFailed(ctx, fmt.Errorf("reading the job history: %w", err))
 	}
 	p.mu.Lock()
+	first := p.polledAt.IsZero()
 	offset := p.dbOffset
 	p.mu.Unlock()
+	if first {
+		offset = p.measureOffset(ctx)
+	}
 	rescanned := p.touchedByTasks(ctx, teamVMs, offset)
 
 	p.mu.Lock()

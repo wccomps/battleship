@@ -139,13 +139,6 @@ func (g guardedAPI) AgentExec(ctx context.Context, node string, vmid int, comman
 	return guard(ctx, g, func(ctx context.Context) (int, error) { return g.changes.AgentExec(ctx, node, vmid, command, input) })
 }
 
-// AgentRead runs command, one that only reads, in the guest. It passes
-// through like a read, so it doesn't count as a change a cancel's grace
-// waits on.
-func (g guardedAPI) AgentRead(ctx context.Context, node string, vmid int, command []string) (int, error) {
-	return g.changes.AgentExec(ctx, node, vmid, command, "")
-}
-
 func (g guardedAPI) Clone(ctx context.Context, r proxmox.CloneRequest) (string, error) {
 	return guard(ctx, g, func(ctx context.Context) (string, error) { return g.changes.Clone(ctx, r) })
 }

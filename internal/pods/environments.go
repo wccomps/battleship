@@ -30,6 +30,14 @@ type Slot struct {
 // LastVMID is the last VMID of the slot's block.
 func (s Slot) LastVMID() int { return s.FirstVMID + 99 }
 
+// wantNICs is the NIC-to-bridge map for a host in s.
+func (s Slot) wantNICs(router bool) map[string]string {
+	if router {
+		return map[string]string{"net0": s.ExtBridge, "net1": s.IntBridge}
+	}
+	return map[string]string{"net0": s.IntBridge}
+}
+
 // ExpandSlot replaces {slot} with n as two digits.
 func ExpandSlot(pattern string, n int) string {
 	return strings.ReplaceAll(pattern, "{slot}", SlotName(n))
@@ -85,15 +93,14 @@ func Domain(vmName string) string {
 
 // EnvHost is a VM in a slot's pool.
 type EnvHost struct {
-	Name     string
-	Host     string
-	VMID     int
-	Node     string
-	Status   string
-	Tags     string
-	Router   bool
-	Notes    Notes
-	HasNotes bool
+	Name   string
+	Host   string
+	VMID   int
+	Node   string
+	Status string
+	Tags   string
+	Router bool
+	Notes  Notes
 	// UserNotes are its other notes, such as what its base image's notes
 	// carried over, less their details block, which Details holds; all of
 	// them when Unreadable says the block is (see ParseDetails).
@@ -296,34 +303,19 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 	if err := g.Wait(); err != nil {
 		return nil, nil, err
 	}
-	var cpuModels []string
-	cpuRead := false
+	cpuByNode := map[string][]string{}
 	for i, vm := range read {
 		cfg := cfgs[i]
 		if cfg == nil {
 			continue
 		}
 		if si, ok := byPool[vm.Pool]; ok {
-			if !cpuRead {
-				cpuModels, cpuRead = p.customCPUModels(ctx, vm.Node), true
+			cpuModels, seen := cpuByNode[vm.Node]
+			if !seen {
+				cpuModels = p.customCPUModels(ctx, vm.Node)
+				cpuByNode[vm.Node] = cpuModels
 			}
-			n, has := ParseNotes(cfg["description"])
-			n = n.Checked(p.Cfg.Environments.Subnet)
-			h := EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node, Status: vm.Status, Tags: vm.Tags,
-				Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, HasNotes: has, Addr: n.IP, desc: cfg["description"]}
-			var derr error
-			h.Details, h.UserNotes, derr = ParseDetails(cfg["description"])
-			h.Unreadable = derr != nil
-			h.LANMAC, _ = NICMAC(cfg["net0"])
-			if h.Router {
-				h.WANMAC, h.LANMAC = routerMACs(cfg, envs[si].Slot)
-			}
-			h.Agent = agentEnabled(cfg["agent"])
-			h.CDROM = len(CDROMChanges(cfg)) > 0
-			h.CPUModels = cpuModels
-			h.Config = cfg
-			h.Warnings = p.hostWarnings(vm, cfg, envs[si].Slot, h.Router, cpuModels)
-			envs[si].Hosts = append(envs[si].Hosts, h)
+			envs[si].Hosts = append(envs[si].Hosts, p.buildEnvHost(vm, cfg, envs[si].Slot, cpuModels))
 			continue
 		}
 		if vm.Template {
@@ -337,23 +329,47 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 	}
 	for i := range envs {
 		e := &envs[i]
-		sort.Slice(e.Hosts, func(a, b int) bool { return e.Hosts[a].Name < e.Hosts[b].Name })
 		sort.Strings(e.Users)
 		slices.SortFunc(e.HalfDeleted, func(a, b EnvHost) int { return a.VMID - b.VMID })
-		for _, h := range e.Hosts {
-			d := Domain(h.Name)
-			switch {
-			case d == "" || (e.Domain != "" && d != e.Domain):
-				e.Mixed = true
-			case e.Domain == "":
-				e.Domain = d
-			}
-		}
-		if e.Mixed {
-			e.Domain = ""
-		}
+		setEnvDomain(e)
 	}
 	return envs, vms, nil
+}
+
+func (p Planner) buildEnvHost(vm proxmox.VM, cfg map[string]string, slot Slot, cpuModels []string) EnvHost {
+	n, _ := ParseNotes(cfg["description"])
+	n = n.Checked(p.Cfg.Environments.Subnet)
+	h := EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node, Status: vm.Status, Tags: vm.Tags,
+		Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, Addr: n.IP, desc: cfg["description"]}
+	var derr error
+	h.Details, h.UserNotes, derr = ParseDetails(cfg["description"])
+	h.Unreadable = derr != nil
+	h.LANMAC, _ = NICMAC(cfg["net0"])
+	if h.Router {
+		h.WANMAC, h.LANMAC = routerMACs(cfg, slot)
+	}
+	h.Agent = agentEnabled(cfg["agent"])
+	h.CDROM = len(CDROMChanges(cfg)) > 0
+	h.CPUModels = cpuModels
+	h.Config = cfg
+	h.Warnings = p.hostWarnings(vm, cfg, slot, h.Router, cpuModels)
+	return h
+}
+
+func setEnvDomain(e *Environment) {
+	sort.Slice(e.Hosts, func(a, b int) bool { return e.Hosts[a].Name < e.Hosts[b].Name })
+	for _, h := range e.Hosts {
+		d := Domain(h.Name)
+		switch {
+		case d == "" || (e.Domain != "" && d != e.Domain):
+			e.Mixed = true
+		case e.Domain == "":
+			e.Domain = d
+		}
+	}
+	if e.Mixed {
+		e.Domain = ""
+	}
 }
 
 func nicBridge(nic string) string {
@@ -445,7 +461,8 @@ func vlanWarnings(cfg map[string]string) []string {
 	return out
 }
 
-// slotNICWarnings checks a slot VM's NIC count, bridges, and VLAN tags.
+// slotNICWarnings checks a VM's NIC count, bridges (when s has bridges), and
+// VLAN tags.
 func slotNICWarnings(cfg map[string]string, s Slot, router bool) []string {
 	var out []string
 	n := CountInterfaces(cfg)
@@ -454,7 +471,7 @@ func slotNICWarnings(cfg map[string]string, s Slot, router bool) []string {
 		if hasHW {
 			if cfg["net0"] == "" || cfg["net1"] == "" {
 				out = append(out, "missing router NIC (needs net0 and net1)")
-			} else {
+			} else if s.ExtBridge != "" || s.IntBridge != "" {
 				if b := nicBridge(cfg["net0"]); b != s.ExtBridge {
 					out = append(out, fmt.Sprintf("net0 on %s, expected %s", cmp.Or(b, "no bridge"), s.ExtBridge))
 				}
@@ -470,8 +487,10 @@ func slotNICWarnings(cfg map[string]string, s Slot, router bool) []string {
 		if hasHW {
 			if cfg["net0"] == "" {
 				out = append(out, "no net0 NIC")
-			} else if b := nicBridge(cfg["net0"]); b != s.IntBridge {
-				out = append(out, fmt.Sprintf("net0 on %s, expected %s", cmp.Or(b, "no bridge"), s.IntBridge))
+			} else if s.IntBridge != "" {
+				if b := nicBridge(cfg["net0"]); b != s.IntBridge {
+					out = append(out, fmt.Sprintf("net0 on %s, expected %s", cmp.Or(b, "no bridge"), s.IntBridge))
+				}
 			}
 		}
 		if n > 1 {
@@ -499,6 +518,20 @@ func (p Planner) customCPUModels(ctx context.Context, node string) []string {
 	return models
 }
 
+func vmHardwareWarnings(cfg map[string]string, cpuModels []string, warnNoAgent bool) []string {
+	var out []string
+	if w := cpuWarning(cfg["cpu"], cpuModels); w != "" {
+		out = append(out, w)
+	}
+	if warnNoAgent && !agentEnabled(cfg["agent"]) {
+		out = append(out, "guest agent off")
+	}
+	if len(CDROMChanges(cfg)) > 0 {
+		out = append(out, "CD-ROM attached")
+	}
+	return out
+}
+
 // hostWarnings checks a slot VM's tags and config for discrepancies.
 func (p Planner) hostWarnings(vm proxmox.VM, cfg map[string]string, s Slot, router bool, cpuModels []string) []string {
 	var out []string
@@ -516,16 +549,7 @@ func (p Planner) hostWarnings(vm proxmox.VM, cfg map[string]string, s Slot, rout
 		out = append(out, "missing tags "+strings.Join(missing, ", "))
 	}
 	out = append(out, slotNICWarnings(cfg, s, router)...)
-	if w := cpuWarning(cfg["cpu"], cpuModels); w != "" {
-		out = append(out, w)
-	}
-	if !agentEnabled(cfg["agent"]) && (cfg["agent"] != "" || len(DiskVolumes(cfg)) > 0) {
-		out = append(out, "guest agent off")
-	}
-	if len(CDROMChanges(cfg)) > 0 {
-		out = append(out, "CD-ROM attached")
-	}
-	return out
+	return append(out, vmHardwareWarnings(cfg, cpuModels, cfg["agent"] != "" || len(DiskVolumes(cfg)) > 0)...)
 }
 
 // masterWarnings checks a deploy master VM's config for discrepancies.
@@ -538,48 +562,13 @@ func (p Planner) masterWarnings(vm proxmox.VM, cfg map[string]string, slotByPool
 	} else {
 		out = append(out, vlanWarnings(cfg)...)
 	}
-	if w := cpuWarning(cfg["cpu"], cpuModels); w != "" {
-		out = append(out, w)
-	}
-	if !agentEnabled(cfg["agent"]) && (cfg["agent"] != "" || (inSlot && len(DiskVolumes(cfg)) > 0)) {
-		out = append(out, "guest agent off")
-	}
-	if len(CDROMChanges(cfg)) > 0 {
-		out = append(out, "CD-ROM attached")
-	}
-	return out
+	return append(out, vmHardwareWarnings(cfg, cpuModels, cfg["agent"] != "" || (inSlot && len(DiskVolumes(cfg)) > 0))...)
 }
 
 // registerWarnings checks a register source VM's config for discrepancies
 // that don't block registration.
 func (p Planner) registerWarnings(cfg map[string]string, kind string, cpuModels []string) []string {
-	var out []string
-	n := CountInterfaces(cfg)
-	hasHW := n > 0 || len(DiskVolumes(cfg)) > 0
-	if kind == ImageRouter {
-		if hasHW && (cfg["net0"] == "" || cfg["net1"] == "") {
-			out = append(out, "missing router NIC (needs net0 and net1)")
-		}
-		if n > 2 {
-			out = append(out, fmt.Sprintf("%d NICs, expected 2", n))
-		}
-	} else {
-		if hasHW && cfg["net0"] == "" {
-			out = append(out, "no net0 NIC")
-		}
-		if n > 1 {
-			out = append(out, fmt.Sprintf("%d NICs, expected 1", n))
-		}
-	}
-	out = append(out, vlanWarnings(cfg)...)
-	if w := cpuWarning(cfg["cpu"], cpuModels); w != "" {
-		out = append(out, w)
-	}
-	if (kind == ImageRouter || kind == ImageOther) && !agentEnabled(cfg["agent"]) && (cfg["agent"] != "" || len(DiskVolumes(cfg)) > 0) {
-		out = append(out, "guest agent off")
-	}
-	if len(CDROMChanges(cfg)) > 0 {
-		out = append(out, "CD-ROM attached")
-	}
-	return out
+	out := slotNICWarnings(cfg, Slot{}, kind == ImageRouter)
+	warnNoAgent := (kind == ImageRouter || kind == ImageOther) && (cfg["agent"] != "" || len(DiskVolumes(cfg)) > 0)
+	return append(out, vmHardwareWarnings(cfg, cpuModels, warnNoAgent)...)
 }

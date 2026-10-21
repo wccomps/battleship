@@ -356,7 +356,7 @@
     }
   });
 
-  // The typed confirm: the button wakes once the range is typed.
+  // The typed confirm: the button wakes once the required name or range is typed.
   function typedConfirm(root) {
     each(root.querySelectorAll("input[data-typed]"), function (input) {
       var button = input.form && input.form.querySelector("button[type=submit]:not([formnovalidate])");

@@ -104,7 +104,8 @@ type itemRow struct {
 }
 
 // confirmForm is what the preview form sends to confirm the plan shown: its
-// nonce and fingerprint, checked against the stored preview.
+// nonce (checked against the stored preview), what to type to confirm, and
+// display fields if the preview is shown again.
 type confirmForm struct {
 	Nonce       string
 	Fingerprint string

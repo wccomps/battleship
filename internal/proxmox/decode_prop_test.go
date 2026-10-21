@@ -161,6 +161,7 @@ func TestPropClientSurvivesAnyAnswer(t *testing.T) {
 		"NodeTasks":        func(ctx context.Context) { c.NodeTasks(ctx, "n1", time.Unix(0, 0)) },
 		"AgentInterfaces":  func(ctx context.Context) { c.AgentInterfaces(ctx, "n1", 101) },
 		"AgentHostname":    func(ctx context.Context) { c.AgentHostname(ctx, "n1", 101) },
+		"AgentRead":        func(ctx context.Context) { c.AgentRead(ctx, "n1", 101, []string{"id"}) },
 		"AgentExec":        func(ctx context.Context) { c.AgentExec(ctx, "n1", 101, []string{"id"}, "") },
 		"AgentExecStatus":  func(ctx context.Context) { c.AgentExecStatus(ctx, "n1", 101, 7, 1<<20) },
 		"AgentPing":        func(ctx context.Context) { c.AgentPing(ctx, "n1", 101) },

@@ -141,7 +141,8 @@ type Fake struct {
 	// next status read finds the agent restarted and the PID forgotten. PIDs
 	// count from 1 in the order commands start, setup state reads included.
 	Restarts map[int]Restart
-	// Execs are the guest commands run, in order, but setup state reads.
+	// Execs are the guest commands run, in order, except setup state reads
+	// and SSH checks.
 	Execs   []ExecCall
 	execs   map[int]proxmox.ExecStatus // by PID
 	polls   map[int]int                // status reads, by PID

@@ -49,6 +49,18 @@ func TestLogLinesDontWakeGridStreams(t *testing.T) {
 	}
 	reads, views = h.srv.busyReads.Load(), h.srv.gridViews.Load()
 
+	// A cluster poll after log lines reuses the cached busy set instead of
+	// querying Postgres again.
+	h.api.setStatus(10201, "stopped")
+	h.poll()
+	if ev := c.next(); ev.Event != "patch" {
+		t.Fatalf("after a cluster poll: %+v, want a patch", ev)
+	}
+	if n := h.srv.busyReads.Load() - reads; n != 0 {
+		t.Errorf("a cluster poll after 50 log lines made %d busy reads, want 0", n)
+	}
+	reads, views = h.srv.busyReads.Load(), h.srv.gridViews.Load()
+
 	// The job ends: its marks go. The stream handles messages in order, so
 	// by this patch it has handled anything the log lines woke it for.
 	h.finish(id, store.Outcome{Status: store.StatusSucceeded})

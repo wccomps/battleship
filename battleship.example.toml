@@ -44,6 +44,24 @@ url = "https://192.0.2.123:8006"
 # baseline_patterns = ["fresh_clone_*"]
 # gpu_vga = "virtio-gl"
 
+# [images]
+# pool = "dev-templates"           # where base images, and the templates deploys build, live; an admin creates it
+# vmid_range = "8000-8999"
+# edit_bridge = "vmbr0"            # network for a working copy opened for editing
+# edit_zone = ""                   # SDN zone of edit_bridge, or "" if it isn't an SDN vnet
+
+# Dev slots where environments are built. Patterns use {slot}, two digits (e.g. 02).
+# [environments]
+# slots = "1-10"
+# pool = "dev-{slot}"
+# int_bridge = "devint{slot}"
+# ext_bridge = "devext{slot}"
+# sdn_zone = "devnet"              # SDN zone of the slot bridges
+# vmid_base = 2000                 # slot NN's VMs get VMIDs vmid_base + NN*100 to +99
+# subnet = "192.168.100.0/24"      # .2 is the router, .4-.254 are hosts
+# agent_timeout = "15m"            # how long a new host waits for its QEMU guest agent
+# ops_ca_key = ""                  # OpenSSH CA public key ("<type> <base64>") trusted for root/Administrator SSH certificates
+
 # config_calls and template_builds are per process; workers is per job. With a
 # database, clones and deletes are shared by all processes: keep them the same everywhere.
 # [concurrency]

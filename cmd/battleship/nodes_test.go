@@ -49,6 +49,16 @@ func TestNodesListsNodesAndPrintsURLs(t *testing.T) {
 	if !strings.Contains(out, "noip") || strings.Contains(out, "https://:8006") {
 		t.Errorf("a node without an IP should be listed but left out of urls:\n%s", out)
 	}
+
+	e = newEnv(t, false, "")
+	api.nodes = []proxmox.ClusterNode{{Name: "alder\x1b[31m", IP: "192.0.2.121\x1b]52;c;aGVsbG8=\x07", Online: true}}
+	e.d.newAPI = func(config.Proxmox) pods.API { return api }
+	if code := e.run("nodes"); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, e.stderr.String())
+	}
+	if got := e.stdout.String(); strings.ContainsAny(got, "\x1b\x07") || !strings.Contains(got, `alder\x1b[31m`) {
+		t.Errorf("nodes output kept terminal escapes:\n%q", got)
+	}
 }
 
 func TestNodesReportsErrors(t *testing.T) {

@@ -5,22 +5,14 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
 func hasTag(tags, tag string) bool {
-	if strings.TrimSpace(tag) == "" {
-		return false
-	}
-	for _, t := range strings.FieldsFunc(tags, func(r rune) bool { return r == ';' || r == ',' || unicode.IsSpace(r) }) {
-		if strings.EqualFold(t, strings.TrimSpace(tag)) {
-			return true
-		}
-	}
-	return false
+	tag = strings.ToLower(strings.TrimSpace(tag))
+	return tag != "" && slices.Contains(Tags(tags), tag)
 }
 
 // FindMasters returns non-template VMs matching pattern that carry tag,

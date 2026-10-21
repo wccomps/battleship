@@ -441,14 +441,6 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .opt input:checked+span{background:var(--tx);border-color:var(--tx);color:var(--bg)}
 .opt input:focus-visible+span{outline:2px solid var(--focus);outline-offset:2px}
 .opt.sans span{font-family:var(--f)}
-/* radio cards: one choice each, the chosen one outlined */
-.choices{display:grid;gap:6px}
-.choice{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:10px 12px;border:1px solid var(--ln);border-radius:var(--r2);cursor:pointer}
-.choice input{margin:0;accent-color:var(--tx)}
-.choice:has(input:checked){border-color:var(--tx);box-shadow:inset 0 0 0 1px var(--tx)}
-.choice .nm{font:600 var(--t3) var(--fm);overflow-wrap:anywhere}
-.choice .meta{grid-column:2/-1;font-family:var(--fm);overflow-wrap:anywhere}
-.choice .chip{grid-column:3;grid-row:1}
 .toggles{display:flex;flex-direction:column;gap:14px;padding-top:18px;border-top:1px solid var(--ln)}
 .sw{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);font-size:var(--t3)}
 .sw input{position:relative;flex:none;appearance:none;width:36px;height:20px;margin:0;border-radius:999px;background:var(--ln2);cursor:pointer}

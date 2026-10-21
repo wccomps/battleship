@@ -1,6 +1,6 @@
 # Postgres for battleship, as a CloudNativePG (CNPG) Cluster.
 #
-# For another operator see deploy/README.md section 4. battleship needs a
+# For another operator see deploy/README.md. battleship needs a
 # database its user owns (migrations run at startup), LISTEN/NOTIFY and
 # advisory locks (no PgBouncer in transaction mode).
 #

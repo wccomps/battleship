@@ -242,9 +242,9 @@ func (s *Store) UpdateSession(ctx context.Context, id string, u SessionUpdate) e
 }
 
 // EndedSession is a session as it was when removed: its ID and its
-// tokens, still sealed.
+// ID token, still sealed.
 type EndedSession struct {
-	ID, RefreshToken, IDToken string
+	ID, IDToken string
 }
 
 // EndSession removes a session and returns it as it was then (a refresh may
@@ -253,7 +253,7 @@ type EndedSession struct {
 func (s *Store) EndSession(ctx context.Context, id string, revoke bool) (_ EndedSession, ok bool, err error) {
 	rows, err := s.pool.Query(ctx, `WITH ended AS (DELETE FROM sessions WHERE id = $1 RETURNING id, refresh_token, id_token_sealed),
 		queued AS (INSERT INTO revocations (session_id, refresh_token) SELECT id, refresh_token FROM ended WHERE $2)
-		SELECT id, refresh_token, id_token_sealed FROM ended`, id, revoke)
+		SELECT id, id_token_sealed FROM ended`, id, revoke)
 	if err != nil {
 		return EndedSession{}, false, fmt.Errorf("ending session: %w", err)
 	}

@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -94,6 +95,14 @@ func TestEnvPowerAndDeleteHost(t *testing.T) {
 	f := podstest.New("alder")
 	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "running"},
 		map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint01"})
+	f.Add(proxmox.VM{VMID: 2201, Name: "oak.other.env", Node: "alder", Pool: "dev-02", Tags: "dev;other.env", Status: "running"}, nil)
+	f.Add(proxmox.VM{VMID: 500, Name: "scratch", Node: "alder", Status: "running"}, nil)
+	f.Gate = func(_ context.Context, key string) (func(), error) {
+		if key == "config:2201" || key == "config:500" {
+			return nil, fmt.Errorf("unexpected read of %s outside dev-01", key)
+		}
+		return nil, nil
+	}
 	p := NewPlanner(f, envConfig())
 	ctx := context.Background()
 
@@ -114,5 +123,8 @@ func TestEnvPowerAndDeleteHost(t *testing.T) {
 	}
 	if _, err := p.EnvDeleteHost(ctx, 2101, "wrong.kilo.alpha"); err == nil {
 		t.Fatal("EnvDeleteHost accepted wrong VM name")
+	}
+	if _, err := p.EnvEdit(ctx, HostEditInput{VMID: 2101, Image: "debian-12-v2"}); err != nil {
+		t.Fatal(err)
 	}
 }

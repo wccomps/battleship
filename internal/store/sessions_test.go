@@ -243,7 +243,7 @@ func TestEndSessionReturnsTheTokensItDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 	ended, ok, err := s.EndSession(ctx, "hash-1", true)
-	if want := (store.EndedSession{ID: "hash-1", RefreshToken: "refresh-2", IDToken: "id-2"}); err != nil || !ok || ended != want {
+	if want := (store.EndedSession{ID: "hash-1", IDToken: "id-2"}); err != nil || !ok || ended != want {
 		t.Errorf("EndSession = %+v, %v, %v; want %+v", ended, ok, err, want)
 	}
 	if _, err := s.Session(ctx, "hash-1"); !errors.Is(err, store.ErrSessionNotFound) {

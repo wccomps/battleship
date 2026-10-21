@@ -93,8 +93,9 @@ func Fingerprint(plan *pods.Plan) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// fpSource is a Source without Bridges, which only decide the privileges
-// needed, as a template's do.
+// fpSource is a Source without Bridges (which only decide the privileges
+// needed, as a template's do) or review-only notes fields (Base, Notes,
+// Unreadable).
 type fpSource struct {
 	VMID int    `json:"vmid"`
 	Node string `json:"node"`

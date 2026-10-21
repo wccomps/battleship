@@ -134,10 +134,11 @@ func (h EnvHost) asksAgent() bool {
 	return h.Status == "running" && h.Agent && (h.LANMAC != "" || h.WANMAC != "")
 }
 
-// LiveAddrs are envs' hosts' addresses by VMID, read through their guest
-// agents, reads at a time (at least one), each read bounded by timeout and
-// all by ctx. A VM whose agent isn't asked (asksAgent), or whose read fails
-// or isn't made before ctx ends, isn't live.
+// LiveAddrs are envs' hosts' addresses and SSH state by VMID, read through
+// their guest agents, reads at a time (at least one), each host bounded by
+// timeout and all by ctx. A VM whose agent isn't asked (asksAgent), or whose
+// interface read fails or isn't made before ctx ends, isn't live; the SSH
+// check (AgentRead) is best-effort once interfaces are read.
 func (p Planner) LiveAddrs(ctx context.Context, envs []Environment, reads int, timeout time.Duration) map[int]LiveAddrs {
 	read := p.readAgents(ctx, envs, reads, timeout)
 	out := map[int]LiveAddrs{}
@@ -147,9 +148,10 @@ func (p Planner) LiveAddrs(ctx context.Context, envs []Environment, reads int, t
 	return out
 }
 
-// readAgents reads the addresses of envs' hosts whose agents may report
-// them (asksAgent), as LiveAddrs says. Each answer is cut to its addresses
-// as it comes, so no more than reads answers are held at once.
+// readAgents reads the addresses and SSH state of envs' hosts whose agents
+// may report them (asksAgent), as LiveAddrs says. Each answer is cut to its
+// addresses and warning as it comes, so no more than reads answers are held
+// at once.
 func (p Planner) readAgents(ctx context.Context, envs []Environment, reads int, timeout time.Duration) map[int]agentAddrs {
 	var mu sync.Mutex
 	out := map[int]agentAddrs{}
@@ -222,7 +224,7 @@ func (p Planner) checkHostSSH(ctx context.Context, h EnvHost, nics []proxmox.Gue
 	win := h.Notes.OS == ImageWindows || slices.ContainsFunc(nics, func(n proxmox.GuestNIC) bool {
 		return strings.Contains(n.Name, "Loopback Pseudo-Interface")
 	})
-	pid, err := p.API.AgentExec(ctx, h.Node, h.VMID, SSHCheckCommand(win), "")
+	pid, err := p.API.AgentRead(ctx, h.Node, h.VMID, SSHCheckCommand(win))
 	if err != nil {
 		var apiErr *proxmox.APIError
 		if errors.As(err, &apiErr) && strings.Contains(strings.ToLower(apiErr.Message), "disabled") {

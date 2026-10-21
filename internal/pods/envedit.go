@@ -3,16 +3,14 @@ package pods
 import (
 	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/netip"
 	"slices"
-	"strconv"
 	"strings"
 
-	"github.com/wccomps/battleship/internal/config"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -48,15 +46,7 @@ func (e HostEdit) Octet() int {
 
 // Edit is what an Edit host form starts its details and notes fields from,
 // with a mark of the notes read (From).
-func (e HostEdit) Edit() ImageNotes {
-	free := e.Read.Free
-	return ImageNotes{ImageDetails: e.Read.Details, Free: &free, From: e.from()}
-}
-
-func (e HostEdit) from() string {
-	sum := sha256.Sum256([]byte(strconv.Itoa(e.Host.VMID) + "\n" + e.Host.desc))
-	return hex.EncodeToString(sum[:])
-}
+func (e HostEdit) Edit() ImageNotes { return e.Read.Edit() }
 
 // HostEditInput is what EnvEdit changes on an environment host. Empty fields
 // keep what the host already has; Image NoBaseImage clears its base image
@@ -72,6 +62,40 @@ type HostEditInput struct {
 	Details    *ImageNotes // nil keeps the details block and free notes as they are
 }
 
+// Check checks req before contacting Proxmox.
+func (req HostEditInput) Check() error {
+	var errs []error
+	if h := strings.TrimSpace(req.Host); h != "" {
+		if hostPart, domPart, ok := strings.Cut(h, "."); ok {
+			if err := CheckHostname(hostPart); err != nil {
+				errs = append(errs, err)
+			}
+			if err := CheckDomain(domPart); err != nil {
+				errs = append(errs, err)
+			}
+		} else if err := CheckHostname(h); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if req.Kind != "" && !slices.Contains(ImageKinds, req.Kind) {
+		errs = append(errs, fmt.Errorf("the host kind must be one of %s, not %q", strings.Join(ImageKinds, ", "), req.Kind))
+	}
+	if req.Octet != 0 && req.Octet != ClearOctet && (req.Octet < FirstHostOctet || req.Octet > LastHostOctet) {
+		errs = append(errs, fmt.Errorf("the address must be %d-%d (.%d is the router, .3 the team VPN)", FirstHostOctet, LastHostOctet, GatewayOctet))
+	}
+	if req.Image != "" && req.Image != NoBaseImage {
+		if _, _, ok := ParseImageName(req.Image); !ok {
+			errs = append(errs, fmt.Errorf("%q isn't a base image name like debian-12-v1", req.Image))
+		}
+	}
+	if req.CPU != "" {
+		if err := CheckCPUModel(req.CPU); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // HostToEdit finds the environment host with vmid in envs and vms for
 // editing.
 func HostToEdit(envs []Environment, vms []proxmox.VM, vmid int) (HostEdit, error) {
@@ -82,7 +106,7 @@ func HostToEdit(envs []Environment, vms []proxmox.VM, vmid int) (HostEdit, error
 func findEnvHost(envs []Environment, vms []proxmox.VM, vmid int) (HostEdit, proxmox.VM, error) {
 	if env, h, ok := EnvHostByID(envs, vmid); ok {
 		vm, _ := vmByID(vms, vmid)
-		return HostEdit{Env: env, Host: h, Read: readImageNotes(h.desc)}, vm, nil
+		return HostEdit{Env: env, Host: h, Read: readVMNotes(h.VMID, h.desc)}, vm, nil
 	}
 	if vm, ok := vmByID(vms, vmid); ok {
 		if vm.Lock == "destroyed" {
@@ -91,6 +115,63 @@ func findEnvHost(envs []Environment, vms []proxmox.VM, vmid int) (HostEdit, prox
 		return HostEdit{}, vm, fmt.Errorf("%s (%d) is not in a dev slot pool", vm.Name, vmid)
 	}
 	return HostEdit{}, proxmox.VM{}, fmt.Errorf("there is no environment host with VMID %d, or you can't see it", vmid)
+}
+
+// envHost reads only the dev slot containing vmid, rather than every slot
+// and unpooled VM in the cluster.
+func (p Planner) envHost(ctx context.Context, vmid int) (HostEdit, proxmox.VM, []proxmox.VM, error) {
+	vms, err := p.API.ClusterVMs(ctx)
+	if err != nil {
+		return HostEdit{}, proxmox.VM{}, nil, err
+	}
+	vm, ok := vmByID(vms, vmid)
+	if !ok {
+		return HostEdit{}, proxmox.VM{}, nil, fmt.Errorf("there is no environment host with VMID %d, or you can't see it", vmid)
+	}
+	if vm.Lock == "destroyed" {
+		return HostEdit{}, vm, nil, errors.New(HalfDeletedText(vm.VMID, vm.Node))
+	}
+	slots := Slots(p.Cfg.Environments)
+	si := slices.IndexFunc(slots, func(s Slot) bool { return s.Pool == vm.Pool })
+	if si < 0 {
+		return HostEdit{}, vm, nil, fmt.Errorf("%s (%d) is not in a dev slot pool", vm.Name, vmid)
+	}
+	slot := slots[si]
+	var inSlot []proxmox.VM
+	for _, v := range vms {
+		if v.Pool == slot.Pool && v.Lock != "destroyed" {
+			inSlot = append(inSlot, v)
+		}
+	}
+	cfgs := make([]map[string]string, len(inSlot))
+	var g errgroup.Group
+	g.SetLimit(envReads)
+	for i, v := range inSlot {
+		g.Go(func() error {
+			cfg, err := p.API.VMConfig(ctx, v.Node, v.VMID)
+			switch {
+			case proxmox.IsNotFound(err):
+				return nil
+			case err != nil:
+				return fmt.Errorf("reading %s (%d): %w", v.Name, v.VMID, err)
+			}
+			cfgs[i] = cfg
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return HostEdit{}, proxmox.VM{}, nil, err
+	}
+	cpuModels := p.customCPUModels(ctx, vm.Node)
+	env := Environment{Slot: slot, LAN: p.Cfg.Environments.Subnet}
+	for i, v := range inSlot {
+		if cfgs[i] != nil {
+			env.Hosts = append(env.Hosts, p.buildEnvHost(v, cfgs[i], slot, cpuModels))
+		}
+	}
+	setEnvDomain(&env)
+	at, vm, err := findEnvHost([]Environment{env}, vms, vmid)
+	return at, vm, vms, err
 }
 
 func hostLocks(slot Slot, domains ...string) []string {
@@ -108,27 +189,10 @@ func hostLocks(slot Slot, domains ...string) []string {
 // Windows or Linux host's name, address or OS kind changes, the guest agent
 // configures it inside the VM too.
 func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) {
-	if req.Kind != "" && !slices.Contains(ImageKinds, req.Kind) {
-		return nil, fmt.Errorf("the host kind must be one of %s, not %q", strings.Join(ImageKinds, ", "), req.Kind)
-	}
-	if req.Octet != 0 && req.Octet != ClearOctet && (req.Octet < FirstHostOctet || req.Octet > LastHostOctet) {
-		return nil, fmt.Errorf("the address must be %d-%d (.%d is the router, .3 the team VPN)", FirstHostOctet, LastHostOctet, GatewayOctet)
-	}
-	if req.Image != "" && req.Image != NoBaseImage {
-		if _, _, ok := ParseImageName(req.Image); !ok {
-			return nil, fmt.Errorf("%q isn't a base image name like debian-12-v1", req.Image)
-		}
-	}
-	if req.CPU != "" {
-		if err := CheckCPUModel(req.CPU); err != nil {
-			return nil, err
-		}
-	}
-	envs, vms, err := p.Environments(ctx)
-	if err != nil {
+	if err := req.Check(); err != nil {
 		return nil, err
 	}
-	at, vm, err := findEnvHost(envs, vms, req.VMID)
+	at, vm, vms, err := p.envHost(ctx, req.VMID)
 	if err != nil {
 		return nil, err
 	}
@@ -203,11 +267,7 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 				it.Blocked = fmt.Sprintf("address .%d is already taken by %s", o, used[o])
 			}
 		default:
-			taken := map[int]bool{}
-			for o := range used {
-				taken[o] = true
-			}
-			o, ok := PickOctet(cmp.Or(domain, env.Slot.Pool), wantHost, taken)
+			o, ok := PickOctet(cmp.Or(domain, env.Slot.Pool), wantHost, env.UsedOctets())
 			if !ok {
 				if it.Blocked == "" {
 					it.Blocked = "no free address left in " + cmp.Or(domain, env.Slot.Pool)
@@ -239,12 +299,12 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 	}
 
 	if req.Details != nil {
-		if req.Details.From != "" && req.Details.From != at.from() && it.Blocked == "" {
-			it.Blocked = "the notes of " + h.Name + " changed since you opened this form; open Edit host again to start from them as they are"
-		}
-		n, same := req.Details.against(at.Read)
-		if err := n.check(); err != nil {
+		n, same, stale, err := at.Read.planChanges(*req.Details, h.Name, "Edit host")
+		if err != nil {
 			return nil, err
+		}
+		if stale != "" && it.Blocked == "" {
+			it.Blocked = stale
 		}
 		if !same {
 			it.Details = &n
@@ -252,10 +312,7 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 		}
 	}
 
-	wantNICs := map[string]string{"net0": env.Slot.IntBridge}
-	if wantKind == ImageRouter {
-		wantNICs = map[string]string{"net0": env.Slot.ExtBridge, "net1": env.Slot.IntBridge}
-	}
+	wantNICs := env.Slot.wantNICs(wantKind == ImageRouter)
 	if len(NICChanges(h.Config, wantNICs)) > 0 {
 		it.NICs = wantNICs
 		it.Steps = append(it.Steps, StepNetwork)
@@ -297,17 +354,12 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 		if wantNotes.DNS == wantHost && wantNotes.IP.IsValid() {
 			dnsAddr = wantNotes.IP
 		}
-		var caKey string
-		if p.Cfg.Environments.OpsCAKey != "" {
-			if caKey, err = config.ParseSSHPublicKey(p.Cfg.Environments.OpsCAKey); err != nil && it.Blocked == "" {
-				it.Blocked = "ops CA key: " + err.Error()
-			}
+		g, why := p.planGuest(env, wantKind, wantHost, domain, wantNotes.IP, dnsAddr)
+		if why != "" && it.Blocked == "" {
+			it.Blocked = why
 		}
 		if wantNotes.IP.IsValid() && CheckDomain(domain) == nil {
-			it.Guest = &Guest{OS: wantKind, Hostname: wantHost, Domain: domain, IP: wantNotes.IP, Prefix: env.LAN.Bits(), Gateway: env.Gateway(), DNS: dnsAddr, OpsCAKey: caKey}
-			if err := it.Guest.Check(); err != nil && it.Blocked == "" {
-				it.Blocked = err.Error()
-			}
+			it.Guest = g
 			if h.Status != "running" {
 				it.Steps = append(it.Steps, StepStart)
 			}
@@ -384,11 +436,7 @@ func (p Planner) EnvPower(ctx context.Context, vmid int, action string) (*Plan, 
 	if !IsPowerAction(action) {
 		return nil, fmt.Errorf("power action must be start, shutdown, stop or reboot, not %q", action)
 	}
-	envs, vms, err := p.Environments(ctx)
-	if err != nil {
-		return nil, err
-	}
-	at, vm, err := findEnvHost(envs, vms, vmid)
+	at, vm, _, err := p.envHost(ctx, vmid)
 	if err != nil {
 		return nil, err
 	}
@@ -403,11 +451,7 @@ func (p Planner) EnvPower(ctx context.Context, vmid int, action string) (*Plan, 
 
 // EnvDeleteHost plans stopping and deleting a single host in a dev slot.
 func (p Planner) EnvDeleteHost(ctx context.Context, vmid int, name string) (*Plan, error) {
-	envs, vms, err := p.Environments(ctx)
-	if err != nil {
-		return nil, err
-	}
-	at, vm, err := findEnvHost(envs, vms, vmid)
+	at, vm, _, err := p.envHost(ctx, vmid)
 	if err != nil {
 		return nil, err
 	}

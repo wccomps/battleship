@@ -1,10 +1,13 @@
 package pods
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -372,6 +375,25 @@ type NotesRead struct {
 	Unreadable bool         `json:"unreadable,omitempty"`
 	Free       string       `json:"notes,omitempty"`
 	Block      string       `json:"block,omitempty"`
+	from       string
+}
+
+// Edit is what a notes form starts from: the details and free text read,
+// and a mark of the notes they were read from (From).
+func (r NotesRead) Edit() ImageNotes {
+	free := r.Free
+	return ImageNotes{ImageDetails: r.Details, Free: &free, From: r.from}
+}
+
+// planChanges checks req against r and returns the cleaned ImageNotes to
+// write, whether it is unchanged from r, any stale-form block message, and
+// any validation error.
+func (r NotesRead) planChanges(req ImageNotes, vmName, formName string) (n ImageNotes, same bool, stale string, err error) {
+	if req.From != "" && req.From != r.from {
+		stale = "the notes of " + vmName + " changed since you opened this form; open " + formName + " again to start from them as they are"
+	}
+	n, same = req.against(r)
+	return n, same, stale, n.check()
 }
 
 // readImageNotes reads notes desc as Edit notes edits them.
@@ -385,6 +407,14 @@ func readImageNotes(desc string) NotesRead {
 		}
 		r.Unreadable, r.Block = true, userText(strings.Join(in, "\n\n"))
 	}
+	return r
+}
+
+// readVMNotes is readImageNotes with From stamped for vmid and desc.
+func readVMNotes(vmid int, desc string) NotesRead {
+	r := readImageNotes(desc)
+	sum := sha256.Sum256([]byte(strconv.Itoa(vmid) + "\n" + desc))
+	r.from = hex.EncodeToString(sum[:])
 	return r
 }
 

@@ -81,6 +81,15 @@ func TestExampleConfigLoads(t *testing.T) {
 	if !reflect.DeepEqual(cfg.Web, wantWeb) {
 		t.Errorf("example [web] differs from the defaults it documents: %+v", cfg.Web)
 	}
+	raw, err := os.ReadFile("../../battleship.example.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, section := range []string{"[proxmox]", "[naming]", "[network]", "[deploy]", "[images]", "[environments]", "[concurrency]", "[teardown]", "[retry]", "[database]", "[jobs]", "[web]", "[oidc]"} {
+		if !strings.Contains(string(raw), section) {
+			t.Errorf("battleship.example.toml missing section %s", section)
+		}
+	}
 }
 
 func TestTeardownAndDeleteDefaults(t *testing.T) {

@@ -163,13 +163,12 @@ func TestScanComparesInDatabaseTime(t *testing.T) {
 	}
 }
 
-// A cell read uses the offset the last scan measured.
+// A cell read uses the offset measured at the first poll or last scan.
 func TestDetailComparesInDatabaseTime(t *testing.T) {
 	h := newHarness(t, nil)
 	driftCluster(h)
 	h.hist.setSkew(5 * time.Minute)
 	h.poll(t)
-	h.scan(t)
 	h.clock.Advance(time.Minute)
 	readAt := h.clock.Now()
 	if _, err := h.p.Detail(ctx, "01", "web"); err != nil {

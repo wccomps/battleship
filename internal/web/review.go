@@ -159,7 +159,8 @@ func detailsReview(op operation, _ jobs.Inputs, plan *pods.Plan, _ config.LAN) *
 	if it.Details != nil {
 		after = *it.Details
 	}
-	r := &reviewView{Verb: op.Verb, Subject: it.Name, Changes: detailChanges(was.Details, after.ImageDetails)}
+	r := &reviewView{Verb: op.Verb, Subject: it.Name}
+	r.applyNotesDiff(was, after)
 	switch {
 	case it.Blocked != "":
 		r.Say, r.Blocked = sentence(it.Blocked), true
@@ -168,16 +169,20 @@ func detailsReview(op operation, _ jobs.Inputs, plan *pods.Plan, _ config.LAN) *
 	default:
 		r.Say = "Writes these details and notes into the notes of " + it.Name + ", which new hosts copy. Older versions keep theirs."
 	}
+	return r
+}
+
+func (r *reviewView) applyNotesDiff(was pods.NotesRead, after pods.ImageNotes) {
+	r.Changes = detailChanges(was.Details, after.ImageDetails)
 	switch {
 	case was.Unreadable && after.ImageDetails.Empty():
 		r.DetailsSay, r.Block = "Its details block is unreadable: it is removed, and no details are written.", was.Block
 	case was.Unreadable:
 		r.DetailsSay, r.Block = "Its details block is unreadable: these replace it.", was.Block
 	}
-	if after.Free != nil {
+	if after.Free != nil && *after.Free != was.Free {
 		r.NotesChange = &notesChange{Before: was.Free, After: *after.Free}
 	}
-	return r
 }
 
 // envReview describes a create or add: a row per machine, and what the
@@ -299,17 +304,7 @@ func envEditReview(op operation, _ jobs.Inputs, plan *pods.Plan, lan config.LAN)
 		r.Facts = append(r.Facts, reviewFact{Label: "Guest agent", Text: "sets hostname " + it.Guest.Hostname + " and address " + it.Guest.IP.String() + " inside the guest"})
 	}
 	if it.Details != nil {
-		after := *it.Details
-		r.Changes = detailChanges(was.Details, after.ImageDetails)
-		switch {
-		case was.Unreadable && after.ImageDetails.Empty():
-			r.DetailsSay, r.Block = "Its details block is unreadable: it is removed, and no details are written.", was.Block
-		case was.Unreadable:
-			r.DetailsSay, r.Block = "Its details block is unreadable: these replace it.", was.Block
-		}
-		if after.Free != nil && *after.Free != was.Free {
-			r.NotesChange = &notesChange{Before: was.Free, After: *after.Free}
-		}
+		r.applyNotesDiff(was, *it.Details)
 	}
 	switch {
 	case it.Blocked != "":

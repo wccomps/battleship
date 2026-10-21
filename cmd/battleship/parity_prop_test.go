@@ -13,7 +13,6 @@ import (
 
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
-	"github.com/wccomps/battleship/internal/web"
 )
 
 // cliFlags are each command's string flags and the Inputs field each sets.
@@ -72,8 +71,9 @@ func kindOf(sub string) pods.Kind {
 }
 
 // checkParity runs sub with flags set to values and checks it asks for
-// what the web form would from the same values (web.Normalize), and, where
-// the CLI validates, refuses just what the form's validation would.
+// what the web form would from the same values (Inputs.Normalize), and
+// refuses just what the form's validation would (plus an explicitly empty
+// -hosts or -vms flag on a team command).
 func checkParity(t interface{ Fatalf(string, ...any) }, sub string, values map[string][]string, boxes map[string]bool) {
 	raw := jobs.Inputs{Kind: kindOf(sub)}
 	r := reflect.ValueOf(&raw).Elem()
@@ -103,7 +103,7 @@ func checkParity(t interface{ Fatalf(string, ...any) }, sub string, values map[s
 			r.FieldByName(field).SetBool(true)
 		}
 	}
-	want := web.Normalize(raw)
+	want := raw.Normalize()
 	c, ok := parseCLI(sub, args)
 	if ok && !reflect.DeepEqual(c.in, want) {
 		t.Fatalf("battleship %s %q asks for %#v; the form, %#v", sub, args, c.in, want)
@@ -114,8 +114,11 @@ func checkParity(t interface{ Fatalf(string, ...any) }, sub string, values map[s
 		if cliOK := ok && c.in.Validate() == nil; cliOK != formOK {
 			t.Fatalf("battleship %s %q: CLI accepts %v, the form %v", sub, args, cliOK, formOK)
 		}
-	case !ok && formOK && (values["hosts"] == nil || len(want.Hosts) > 0) && (values["vms"] == nil || len(want.VMs) > 0):
-		t.Fatalf("battleship %s %q refused what the form accepts", sub, args)
+	default:
+		emptyList := (values["hosts"] != nil && len(want.Hosts) == 0) || (values["vms"] != nil && len(want.VMs) == 0)
+		if ok != (formOK && !emptyList) {
+			t.Fatalf("battleship %s %q: CLI accepts %v, the form %v", sub, args, ok, formOK && !emptyList)
+		}
 	}
 }
 
