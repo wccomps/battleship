@@ -70,6 +70,24 @@ func TestEnvEditUpdatesNotesDetailsRenameAndGuest(t *testing.T) {
 	if !strings.Contains(plan.Items[0].Blocked, "already has these settings") {
 		t.Fatalf("unchanged edit blocked = %q", plan.Items[0].Blocked)
 	}
+
+	// Setting a custom CPU model schedules StepCPU and checks CPUModels.
+	f.CPUModels = []string{"lab-baseline", "lab-baseline-nested"}
+	plan, err = p.EnvEdit(ctx, HostEditInput{VMID: 2101, CPU: "lab-baseline"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	it = plan.Items[0]
+	if it.Blocked != "" || it.CPU != "custom-lab-baseline" || !slices.Equal(it.Steps, []Step{StepCPU}) {
+		t.Fatalf("CPU edit item = %+v", it)
+	}
+	plan, err = p.EnvEdit(ctx, HostEditInput{VMID: 2101, CPU: "other-cpu"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan.Items[0].Blocked, "CPU model other-cpu is not one of lab-baseline or lab-baseline-nested") {
+		t.Fatalf("unknown CPU model blocked = %q", plan.Items[0].Blocked)
+	}
 }
 
 func TestEnvPowerAndDeleteHost(t *testing.T) {

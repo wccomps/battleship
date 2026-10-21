@@ -155,6 +155,12 @@
 {{- if and $cur (not $found)}}<option value="{{$cur}}" selected>{{$cur}}</option>{{end}}
 </select>
 </div>
+{{- if .CPUModels}}
+<fieldset class="field">
+<legend>CPU</legend>
+<div class="opts">{{range .CPUModels}}<label class="opt"><input type="radio" name="cpu" value="{{.}}"{{if eq . $.Data.Host.CPUInput}} checked{{end}}><span>{{.}}</span></label>{{end}}{{if .CurrentCPU}}<label class="opt"><input type="radio" name="cpu" value=""{{if eq $.Data.Host.CPUInput ""}} checked{{end}}><span>keep {{.CurrentCPU}}</span></label>{{end}}</div>
+</fieldset>
+{{- end}}
 {{- if or .CDROM $.Data.In.EjectCDROM}}
 <label class="sw">Eject attached CD-ROM media<input type="checkbox" name="eject_cdrom" value="yes"{{if $.Data.In.EjectCDROM}} checked{{end}}></label>
 {{- end}}

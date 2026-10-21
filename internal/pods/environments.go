@@ -108,6 +108,7 @@ type EnvHost struct {
 	LANMAC, WANMAC string
 	Agent          bool              // its config enables the guest agent
 	CDROM          bool              // a non-cloudinit CD-ROM drive has media attached
+	CPUModels      []string          // custom CPU models on its node
 	Config         map[string]string // its Proxmox config as read
 	Warnings       []string          // discrepancies between its config or tags and its slot
 	desc           string            // its notes, for the plans that write them
@@ -319,6 +320,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			}
 			h.Agent = agentEnabled(cfg["agent"])
 			h.CDROM = len(CDROMChanges(cfg)) > 0
+			h.CPUModels = cpuModels
 			h.Config = cfg
 			h.Warnings = p.hostWarnings(vm, cfg, envs[si].Slot, h.Router, cpuModels)
 			envs[si].Hosts = append(envs[si].Hosts, h)
@@ -409,21 +411,25 @@ func CPUType(raw string) string {
 	return strings.TrimPrefix(head, "cputype=")
 }
 
-// cpuWarning returns a discrepancy when raw's CPU model isn't one of
-// cpuTypes (or "custom-"+t), or "" when cpuTypes is empty or matches.
-func cpuWarning(raw string, cpuTypes []string) string {
-	if len(cpuTypes) == 0 {
-		return ""
-	}
+// CPUModel is the model in cpuTypes that raw ("cputype=…", "custom-<model>",
+// or "<model>") matches, or "" when it matches none.
+func CPUModel(raw string, cpuTypes []string) string {
 	got := CPUType(raw)
 	for _, want := range cpuTypes {
 		if got == want || got == "custom-"+want {
-			return ""
+			return want
 		}
 	}
-	if got == "" {
-		got = "default (kvm64)"
+	return ""
+}
+
+// cpuWarning returns a discrepancy when raw's CPU model isn't one of
+// cpuTypes (or "custom-"+t), or "" when cpuTypes is empty or matches.
+func cpuWarning(raw string, cpuTypes []string) string {
+	if len(cpuTypes) == 0 || CPUModel(raw, cpuTypes) != "" {
+		return ""
 	}
+	got := cmp.Or(CPUType(raw), "default (kvm64)")
 	return fmt.Sprintf("CPU %s, expected %s", got, strings.Join(cpuTypes, " or "))
 }
 

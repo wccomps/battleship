@@ -22,6 +22,9 @@
 <dt>VM</dt><dd>VMID <span class="vm">{{.VMID}}</span> · <span class="vm">{{.Node}}</span></dd>
 <dt>Address</dt><dd>{{if .Addr}}<code>{{.Addr}}</code>{{if .Router}} <span class="meta">· gateway</span>{{end}}{{else}}<span class="muted">none</span>{{end}}{{with .DNS}} <span class="meta">· DNS {{.}}</span>{{end}}</dd>
 <dt>Base image</dt><dd>{{if .Image}}<code>{{.Image}}</code>{{with .Family}} · <a href="{{familyHref .}}">open {{.}}</a>{{end}}{{else}}<span class="muted">none</span>{{end}}</dd>
+{{- with .CPU}}
+<dt>CPU</dt><dd><code>{{.}}</code></dd>
+{{- end}}
 {{- with .Tags}}
 <dt>Tags</dt><dd><code>{{.}}</code></dd>
 {{- end}}
@@ -75,6 +78,14 @@
 <input type="hidden" name="vmid" value="{{.VMID}}">
 <input type="hidden" name="eject_cdrom" value="yes">
 <button type="submit" class="btn"{{if not .MayEdit}} disabled{{end}}>Eject CD-ROM</button>
+</form>
+{{- end}}
+{{- with .FixCPU}}
+<form method="post" action="/environments/edit/preview">
+{{template "csrf" $csrf}}
+<input type="hidden" name="vmid" value="{{$d.VMID}}">
+<input type="hidden" name="cpu" value="{{.}}">
+<button type="submit" class="btn"{{if not $d.MayEdit}} disabled{{end}}>Set CPU {{.}}</button>
 </form>
 {{- end}}
 <form method="post" action="/environments/delete/preview">

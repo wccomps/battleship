@@ -292,6 +292,9 @@ func envEditReview(op operation, _ jobs.Inputs, plan *pods.Plan, lan config.LAN)
 	if slices.Contains(it.Steps, pods.StepCDROM) {
 		r.Facts = append(r.Facts, reviewFact{Label: "CD-ROM", Text: "ejects attached install media"})
 	}
+	if slices.Contains(it.Steps, pods.StepCPU) {
+		r.Facts = append(r.Facts, reviewFact{Label: "CPU", Code: strings.TrimPrefix(it.CPU, "custom-")})
+	}
 	if it.Guest != nil {
 		r.Facts = append(r.Facts, reviewFact{Label: "Guest agent", Text: "sets hostname " + it.Guest.Hostname + " and address " + it.Guest.IP.String() + " inside the guest"})
 	}
@@ -315,6 +318,8 @@ func envEditReview(op operation, _ jobs.Inputs, plan *pods.Plan, lan config.LAN)
 		r.Say = "Updates " + it.Name + " in " + it.Pool + " and configures its hostname and address through the guest agent."
 	case slices.Contains(it.Steps, pods.StepCDROM) && len(it.Steps) == 1:
 		r.Say = "Ejects the attached CD-ROM from " + it.Name + "."
+	case slices.Contains(it.Steps, pods.StepCPU) && len(it.Steps) == 1:
+		r.Say = "Sets the CPU of " + it.Name + " to " + strings.TrimPrefix(it.CPU, "custom-") + "."
 	default:
 		r.Say = "Updates " + it.Name + " in " + it.Pool + "."
 	}

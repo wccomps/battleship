@@ -45,6 +45,7 @@ type Inputs struct {
 	EnvHost    string   `json:"env_host,omitempty"`    // env-edit, env-delete-host: host label or full VM name
 	Octet      int      `json:"octet,omitempty"`       // env-edit: FirstHostOctet..LastHostOctet, ClearOctet, or 0
 	EjectCDROM bool     `json:"eject_cdrom,omitempty"` // env-edit: eject attached CD-ROM media
+	CPU        string   `json:"cpu,omitempty"`         // env-edit: custom CPU model name
 	pods.ImageRequest
 }
 
@@ -193,6 +194,11 @@ var requests = map[pods.Kind]request{
 					errs = append(errs, fmt.Errorf("%q isn't a base image name like debian-12-v1", in.Image))
 				}
 			}
+			if in.CPU != "" {
+				if err := pods.CheckCPUModel(in.CPU); err != nil {
+					errs = append(errs, err)
+				}
+			}
 			return errs
 		},
 		plan: func(ctx context.Context, p pods.Planner, in Inputs, _ []string) (*pods.Plan, error) {
@@ -202,6 +208,7 @@ var requests = map[pods.Kind]request{
 				Kind:       in.ImageKind,
 				Octet:      in.Octet,
 				Image:      in.Image,
+				CPU:        in.CPU,
 				EjectCDROM: in.EjectCDROM,
 				Details:    in.Details,
 			})
@@ -399,7 +406,7 @@ func (in Inputs) checkText() error {
 	}{
 		{"pods", []string{in.Teams}}, {"hosts", in.Hosts}, {"vms", in.VMs}, {"pattern", []string{in.Pattern}}, {"set", []string{string(in.Set)}},
 		{"snapshot", []string{in.Snapshot}}, {"description", []string{in.Description}}, {"action", []string{in.Action}},
-		{"domain", []string{in.Domain}}, {"slot", []string{in.Slot}}, {"router", []string{in.Router}}, {"env hosts", in.EnvHosts}, {"env host", []string{in.EnvHost}},
+		{"domain", []string{in.Domain}}, {"slot", []string{in.Slot}}, {"router", []string{in.Router}}, {"env hosts", in.EnvHosts}, {"env host", []string{in.EnvHost}}, {"cpu", []string{in.CPU}},
 		{"family", []string{in.Family}}, {"image kind", []string{in.ImageKind}}, {"image", []string{in.Image}},
 	}
 	if d := in.Details; d != nil {

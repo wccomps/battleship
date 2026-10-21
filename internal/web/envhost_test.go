@@ -14,6 +14,7 @@ func TestEnvHostSheet(t *testing.T) {
 	h := newHarness(t)
 	addCatalog(h)
 	addEnvs(h)
+	h.api.CPUModels = []string{"lab-baseline", "lab-baseline-nested"}
 	h.api.VMs[2101].Config["ide0"] = "local:iso/debian.iso,media=cdrom"
 	sess := h.login(asLead)
 
@@ -28,10 +29,13 @@ func TestEnvHostSheet(t *testing.T) {
 		`<dt>VM</dt><dd>VMID <span class="vm">2101</span> · <span class="vm">n1</span></dd>`,
 		`<dt>Address</dt><dd><code>192.168.100.10</code> <span class="meta">· DNS router</span></dd>`,
 		`<dt>Base image</dt><dd><code>debian-12-v2</code> · <a href="/images/family/debian-12">open debian-12</a></dd>`,
+		`<dt>CPU</dt><dd><code>default (kvm64)</code></dd>`,
 		`<span class="name">CD-ROM</span> attached`,
 		`<a class="btn sm" href="/environments/edit?vmid=2101" data-panel-link>`,
 		`<div class="notes box">debian / Changeme1!</div>`,
 		`Eject CD-ROM</button>`,
+		`<input type="hidden" name="cpu" value="lab-baseline">`,
+		`Set CPU lab-baseline</button>`,
 		`action="/environments/power/preview"`,
 		`action="/environments/delete/preview"`,
 		`<input type="hidden" name="env_host" value="teak.kilo.alpha">`,
@@ -56,6 +60,7 @@ func TestEnvEditFormAndConfirm(t *testing.T) {
 	h := newHarness(t)
 	addCatalog(h)
 	addEnvs(h)
+	h.api.CPUModels = []string{"lab-baseline", "lab-baseline-nested"}
 	h.api.VMs[2101].Config["agent"] = "1"
 	h.api.VMs[2101].Config["ide0"] = "local:iso/debian.iso,media=cdrom"
 	sess := h.login(asLead)
@@ -71,6 +76,9 @@ func TestEnvEditFormAndConfirm(t *testing.T) {
 		`<input type="radio" name="image_kind" value="linux" checked>`,
 		`name="octet" value="10"`,
 		`<option value="debian-12-v2" selected>debian-12-v2 (linux)</option>`,
+		`<input type="radio" name="cpu" value="lab-baseline" checked><span>lab-baseline</span>`,
+		`<input type="radio" name="cpu" value="lab-baseline-nested"><span>lab-baseline-nested</span>`,
+		`<input type="radio" name="cpu" value=""><span>keep default (kvm64)</span>`,
 		`name="eject_cdrom" value="yes"`,
 		`debian / Changeme1!`,
 	)
@@ -81,6 +89,7 @@ func TestEnvEditFormAndConfirm(t *testing.T) {
 		"image_kind":  {"linux"},
 		"octet":       {"25"},
 		"image":       {"debian-12-v1"},
+		"cpu":         {"lab-baseline"},
 		"eject_cdrom": {"yes"},
 		"details":     {"with-notes"},
 		"detail_os":   {"Debian 12"},
@@ -93,6 +102,7 @@ func TestEnvEditFormAndConfirm(t *testing.T) {
 		"oak.kilo.alpha",
 		"192.168.100.25",
 		"debian-12-v1",
+		"lab-baseline",
 		"ejects attached install media",
 		"Debian 12",
 		"updated notes",
@@ -106,7 +116,7 @@ func TestEnvEditFormAndConfirm(t *testing.T) {
 		t.Fatalf("jobs = %+v, want one env-edit", js)
 	}
 	in := readInputs(js[0])
-	if in.VMID != 2101 || in.EnvHost != "oak" || in.Octet != 25 || in.Image != "debian-12-v1" || !in.EjectCDROM {
+	if in.VMID != 2101 || in.EnvHost != "oak" || in.Octet != 25 || in.Image != "debian-12-v1" || in.CPU != "lab-baseline" || !in.EjectCDROM {
 		t.Errorf("inputs = %+v", in)
 	}
 	page := h.get(&sess, rec.Header().Get("Location")).Body.String()

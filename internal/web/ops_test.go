@@ -935,7 +935,7 @@ func (v cliValues) raw(kind pods.Kind) jobs.Inputs {
 	return jobs.Inputs{Kind: kind, Teams: s[fieldTeams], Hosts: jobs.SplitList(s[fieldHosts]), VMs: jobs.SplitList(s[fieldVMs]),
 		Pattern: s[fieldPattern], Rebuild: v.rebuild, NoSnapshot: v.noSnap, Snapshot: s[fieldSnapshot], Description: s[fieldDescription],
 		VMState: v.vmstate, Action: s[fieldAction], Domain: s[fieldDomain], Router: s[fieldRouter], EnvHosts: v.envHosts,
-		EnvHost: s[fieldEnvHost], Octet: v.octet, EjectCDROM: v.ejectCDROM,
+		EnvHost: s[fieldEnvHost], Octet: v.octet, EjectCDROM: v.ejectCDROM, CPU: s[fieldCPU],
 		ImageRequest: pods.ImageRequest{VMID: v.vmid, Family: s[fieldFamily], ImageKind: s[fieldImageKind], Image: s[fieldImage]}}
 }
 
@@ -961,7 +961,7 @@ func (v cliValues) posted() url.Values {
 // page posting the same values.
 func TestPropNormalizeReadsAsTheForm(t *testing.T) {
 	strFields := []string{fieldTeams, fieldHosts, fieldVMs, fieldPattern, fieldSnapshot, fieldDescription, fieldAction, fieldDomain,
-		fieldRouter, fieldEnvHost, fieldFamily, fieldImageKind, fieldImage}
+		fieldRouter, fieldEnvHost, fieldCPU, fieldFamily, fieldImageKind, fieldImage}
 	check := func(t interface{ Fatalf(string, ...any) }, kind pods.Kind, v cliValues) {
 		if got, want := Normalize(v.raw(kind)), formInputs(kind, v.posted()); !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s: Normalize(%#v) = %#v, the form reads %#v", kind, v.raw(kind), got, want)

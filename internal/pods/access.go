@@ -315,6 +315,11 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAc
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Disk"))
 		case StepCDROM:
 			ns = append(ns, on(it.VMID, pool, "VM.Config.CDROM"))
+		case StepCPU:
+			ns = append(ns, on(it.VMID, pool, "VM.Config.CPU"))
+			if m := cpuMapping(it.CPU); m != "" {
+				ns = append(ns, one(m, "Mapping.Use"))
+			}
 		case StepSnapshot:
 			ns = append(ns, on(it.VMID, pool, "VM.Snapshot"))
 		case StepStart, StepStop, StepPower:

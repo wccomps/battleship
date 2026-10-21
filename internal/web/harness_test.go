@@ -642,7 +642,7 @@ func (h *harness) ticketWith(subject string, privs []string) proxmox.Credential 
 
 // allPrivileges are the privileges an administrator holds.
 var allPrivileges = []string{"VM.Audit", "VM.PowerMgmt", "VM.Snapshot", "VM.Snapshot.Rollback", "VM.Clone", "VM.Allocate",
-	"VM.Config.Network", "VM.Config.Disk", "VM.Config.Cloudinit", "VM.Config.CDROM", "VM.Config.Options", "Datastore.AllocateSpace",
+	"VM.Config.Network", "VM.Config.Disk", "VM.Config.Cloudinit", "VM.Config.CDROM", "VM.Config.CPU", "VM.Config.Options", "Datastore.AllocateSpace",
 	"Datastore.Allocate", "Datastore.Audit", "Pool.Audit", "Pool.Allocate", "Sys.Audit", "Sys.Modify", "SDN.Use", "Mapping.Use",
 	"VM.GuestAgent.Audit", "VM.GuestAgent.Unrestricted"}
 

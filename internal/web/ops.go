@@ -184,6 +184,7 @@ const (
 	fieldEnvHost     = "env_host"    // env-edit, env-delete-host: host label or full VM name
 	fieldOctet       = "octet"       // env-edit: LAN octet, or "none" (pods.ClearOctet)
 	fieldEjectCDROM  = "eject_cdrom" // env-edit: "yes" ejects attached CD-ROM media
+	fieldCPU         = "cpu"         // env-edit: custom CPU model name
 	clearOctetValue  = "none"
 	fieldVMID        = "vmid"
 	fieldFamily      = "family"
@@ -224,6 +225,7 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 		in := jobs.Inputs{Kind: kind, Domain: strings.TrimSpace(form.Get(fieldDomain)), Router: strings.TrimSpace(form.Get(fieldRouter)),
 			EnvHost:    strings.TrimSpace(form.Get(fieldEnvHost)),
 			EjectCDROM: form.Get(fieldEjectCDROM) == yes,
+			CPU:        strings.TrimSpace(form.Get(fieldCPU)),
 			Action:     strings.TrimSpace(form.Get(fieldAction)),
 			ImageRequest: pods.ImageRequest{
 				Family:    strings.TrimSpace(form.Get(fieldFamily)),
@@ -311,7 +313,7 @@ func inputFields(in jobs.Inputs) []field {
 	if in.Kind.Teamless() {
 		var fs []field
 		for _, f := range []field{{fieldDomain, in.Domain}, {fieldSlot, in.Slot}, {fieldVMs, strings.Join(in.VMs, ",")}, {fieldRouter, in.Router}, {fieldEnvHosts, strings.Join(in.EnvHosts, "\n")},
-			{fieldEnvHost, in.EnvHost}, {fieldAction, in.Action}, {fieldFamily, in.Family}, {fieldImageKind, in.ImageKind}, {fieldImage, in.Image}} {
+			{fieldEnvHost, in.EnvHost}, {fieldCPU, in.CPU}, {fieldAction, in.Action}, {fieldFamily, in.Family}, {fieldImageKind, in.ImageKind}, {fieldImage, in.Image}} {
 			if f.Value != "" {
 				fs = append(fs, f)
 			}
