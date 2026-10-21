@@ -299,6 +299,7 @@ func (w *Worker) heartbeat(ctx context.Context, jobID int64, claim *lease, cance
 			return
 		case err != nil:
 			w.Logf("job %d: heartbeat: %v", jobID, err)
+			claim.check()
 		default:
 			claim.renew(start, startWall)
 			if stop {
@@ -482,6 +483,9 @@ func (l *lease) held() (time.Time, error) {
 	case l.lost:
 		return time.Time{}, fmt.Errorf("not sent to Proxmox: the %w", errLostClaim)
 	case elapsed >= l.stale/2:
+		if l.onUnsure != nil {
+			l.onUnsure()
+		}
 		return time.Time{}, errClaimUnsure
 	}
 	return monoNow.Add(l.stale - l.margin() - elapsed), nil
