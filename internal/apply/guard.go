@@ -103,6 +103,9 @@ func (g guardedAPI) may(ctx context.Context) (_ context.Context, done context.Ca
 	if g.held != nil {
 		deadline, err := g.held()
 		if err != nil {
+			if st, ok := ctx.Value(stepKey{}).(*stepState); ok && st.run.Err() != nil {
+				return ctx, done, errHeldBack
+			}
 			return ctx, done, err
 		}
 		ctx, done = context.WithDeadline(ctx, deadline)
