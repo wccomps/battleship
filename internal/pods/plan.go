@@ -834,7 +834,7 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 }
 
 // orphanListings is how many storage listings run at once.
-const orphanListings = 8
+const orphanListings = 16
 
 // orphanCandidates are the VMIDs teams' VMs get when cloned from templates
 // in template_vmid_base..template_vmid_base+99 (CloneVMID), only set's when

@@ -279,7 +279,9 @@ func (p Planner) ImageDeprecate(ctx context.Context, req ImageRequest) (*Plan, e
 }
 
 // ImageDelete plans deleting a version. Environment VMs are full clones, so
-// none depend on it.
+// none depend on it. Because destroying a template holds the cluster-wide
+// storage-ops lock from the start, image deletes lock storage-ops so queued
+// deletes wait in pending rather than tying up extra workers.
 func (p Planner) ImageDelete(ctx context.Context, req ImageRequest) (*Plan, error) {
 	im, err := p.imageItem(ctx, req)
 	if err != nil {
@@ -287,7 +289,7 @@ func (p Planner) ImageDelete(ctx context.Context, req ImageRequest) (*Plan, erro
 	}
 	return &Plan{Kind: KindImageDelete, Config: ConfigHash(KindImageDelete, p.Cfg),
 		Items: []Item{{Name: im.Name, VMID: im.VMID, Node: im.Node, Steps: []Step{StepDelete}}},
-		Locks: []string{"family:" + im.Family}}, nil
+		Locks: []string{"family:" + im.Family, "storage-ops"}}, nil
 }
 
 // NotesEdit is what Edit notes on a family works on: the family's newest
