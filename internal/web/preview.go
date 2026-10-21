@@ -471,6 +471,9 @@ func teamlessFacts(in jobs.Inputs, pool string) []fact {
 	if in.EjectCDROM {
 		add("CD-ROM", "eject")
 	}
+	if in.CPU != "" {
+		add("CPU", strings.TrimPrefix(in.CPU, "custom-"))
+	}
 	if in.Kind == pods.KindEnvPower {
 		add("Action", in.Action)
 	}

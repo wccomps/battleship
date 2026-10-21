@@ -50,6 +50,8 @@ type envHostView struct {
 	DNS             string
 	Image           string
 	Family          string
+	CPU             string
+	FixCPU          string
 	Tags            string
 	CDROM           bool
 	Warnings        []string
@@ -120,6 +122,13 @@ func (s *Server) envHostPage(w http.ResponseWriter, r *http.Request) {
 	if env.Domain != "" {
 		back = envHref(env.Domain)
 	}
+	var cpu, fixCPU string
+	if h.Config["cpu"] != "" || len(h.CPUModels) > 0 {
+		cpu = cmp.Or(pods.CPUModel(h.Config["cpu"], h.CPUModels), pods.CPUType(h.Config["cpu"]), "default (kvm64)")
+	}
+	if len(h.CPUModels) > 0 && pods.CPUModel(h.Config["cpu"], h.CPUModels) == "" {
+		fixCPU = h.CPUModels[0]
+	}
 	p := envHostView{
 		VMID:            h.VMID,
 		Name:            h.Name,
@@ -134,6 +143,8 @@ func (s *Server) envHostPage(w http.ResponseWriter, r *http.Request) {
 		Addr:            addr,
 		Image:           h.Notes.Base,
 		Family:          family,
+		CPU:             cpu,
+		FixCPU:          fixCPU,
 		Tags:            strings.Join(pods.Tags(h.Tags), ", "),
 		CDROM:           h.CDROM,
 		Warnings:        h.Warnings,
@@ -184,6 +195,9 @@ type hostEdit struct {
 	KindInput  string
 	OctetInput string
 	ImageInput string
+	CPUModels  []string
+	CurrentCPU string
+	CPUInput   string
 	Was        pods.NotesRead
 	Err        string
 }
@@ -225,6 +239,22 @@ func (s *Server) hostEditPrefill(_ context.Context, p *catalogPage) {
 	if p.In.Image != "" {
 		imageIn = p.In.Image
 	}
+	cpuModels := slices.Clone(at.Host.CPUModels)
+	curModel := pods.CPUModel(at.Host.Config["cpu"], cpuModels)
+	var curCPU string
+	if len(cpuModels) > 0 && curModel == "" {
+		curCPU = cmp.Or(pods.CPUType(at.Host.Config["cpu"]), "default (kvm64)")
+	}
+	cpuIn := curModel
+	if cpuIn == "" && len(cpuModels) > 0 {
+		cpuIn = cpuModels[0]
+	}
+	if p.In.CPU != "" {
+		cpuIn = strings.TrimPrefix(p.In.CPU, "custom-")
+		if !slices.Contains(cpuModels, cpuIn) {
+			cpuModels = append(cpuModels, cpuIn)
+		}
+	}
 	p.Host = &hostEdit{
 		VMID:       at.Host.VMID,
 		Name:       at.Host.Name,
@@ -238,6 +268,9 @@ func (s *Server) hostEditPrefill(_ context.Context, p *catalogPage) {
 		KindInput:  cmp.Or(p.In.ImageKind, at.Kind()),
 		OctetInput: octetIn,
 		ImageInput: imageIn,
+		CPUModels:  cpuModels,
+		CurrentCPU: curCPU,
+		CPUInput:   cpuIn,
 		Was:        at.Read,
 	}
 	p.Details = at.Edit()

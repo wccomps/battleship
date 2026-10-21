@@ -150,6 +150,7 @@ func TestPropInputsJSON(t *testing.T) {
 		EnvHost     string           `json:"env_host,omitempty"`
 		Octet       int              `json:"octet,omitempty"`
 		EjectCDROM  bool             `json:"eject_cdrom,omitempty"`
+		CPU         string           `json:"cpu,omitempty"`
 		VMID        int              `json:"vmid,omitempty"`
 		Family      string           `json:"family,omitempty"`
 		ImageKind   string           `json:"image_kind,omitempty"`
@@ -187,6 +188,7 @@ func TestPropInputsJSON(t *testing.T) {
 			EnvHost:    text.Draw(t, "envHost"),
 			Octet:      rapid.OneOf(rapid.Just(0), rapid.IntRange(-2, 260)).Draw(t, "octet"),
 			EjectCDROM: rapid.Bool().Draw(t, "ejectCDROM"),
+			CPU:        text.Draw(t, "cpu"),
 			VMID:       rapid.OneOf(rapid.Just(0), rapid.IntRange(-10, 9999)).Draw(t, "vmid"),
 			Family:     text.Draw(t, "family"), ImageKind: text.Draw(t, "imageKind"),
 			Image: text.Draw(t, "image"), Details: det,
@@ -196,7 +198,7 @@ func TestPropInputsJSON(t *testing.T) {
 			Rebuild: f.Rebuild, NoSnapshot: f.NoSnapshot, Set: f.Set,
 			Snapshot: f.Snapshot, Description: f.Description, VMState: f.VMState,
 			Action: f.Action, VMs: f.VMs, Domain: f.Domain, Slot: f.Slot,
-			Router: f.Router, EnvHosts: f.EnvHosts, EnvHost: f.EnvHost, Octet: f.Octet, EjectCDROM: f.EjectCDROM,
+			Router: f.Router, EnvHosts: f.EnvHosts, EnvHost: f.EnvHost, Octet: f.Octet, EjectCDROM: f.EjectCDROM, CPU: f.CPU,
 			ImageRequest: pods.ImageRequest{
 				VMID: f.VMID, Family: f.Family, ImageKind: f.ImageKind, Image: f.Image, Details: f.Details,
 			},
@@ -285,6 +287,7 @@ var spoils = map[string][]spoil{
 	"EnvImage": {{"", true}, {pods.NoBaseImage, true}, {"debian-12-v1", true}, {"debian-12", false}, {"debian-12-v0", false},
 		{" debian-12-v1", false}},
 	"EjectCDROM": {{true, true}, {false, true}},
+	"CPU":        {{"", true}, {"lab-baseline", true}, {"lab-baseline-nested", true}, {"custom-lab-baseline", true}, {" lab-baseline", false}, {"bad cpu", false}, {"-bad", false}},
 }
 
 // readsFields are the fields each kind reads, beyond a team kind's Teams,
@@ -295,7 +298,7 @@ var readsFields = map[pods.Kind][]string{
 	pods.KindTeardown: {"Set"}, pods.KindReset: {},
 	pods.KindEnvCreate: {"Domain", "Slot", "Router", "EnvHosts", "EnvVMs"}, pods.KindEnvAdd: {"Domain", "EnvHosts", "EnvVMs"},
 	pods.KindEnvTeardown:   {"Domain", "Slot"},
-	pods.KindEnvEdit:       {"VMID", "EnvHost", "ImageKind", "Octet", "EnvImage", "EjectCDROM", "Details", "Free"},
+	pods.KindEnvEdit:       {"VMID", "EnvHost", "ImageKind", "Octet", "EnvImage", "EjectCDROM", "CPU", "Details", "Free"},
 	pods.KindEnvPower:      {"VMID", "Action"},
 	pods.KindEnvDeleteHost: {"VMID", "DeleteHost"},
 	pods.KindImageRegister: {"VMID", "Family", "ImageKind", "Details"}, pods.KindImageEdit: {"Family"},

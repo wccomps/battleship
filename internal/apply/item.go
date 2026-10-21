@@ -150,6 +150,10 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		}))
 	case pods.StepCDROM:
 		return e.applyConfig(ctx, it, false, always(pods.CDROMChanges))
+	case pods.StepCPU:
+		return e.applyConfig(ctx, it, false, always(func(cur map[string]string) map[string]string {
+			return pods.CPUChanges(cur, it.CPU)
+		}))
 	case pods.StepNotes:
 		return e.applyConfig(ctx, it, false, always(pods.NotesChanges))
 	case pods.StepSetTag:

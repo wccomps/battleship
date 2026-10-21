@@ -67,6 +67,7 @@ type HostEditInput struct {
 	Kind       string      // ImageKinds; "" keeps the current kind
 	Octet      int         // FirstHostOctet..LastHostOctet, ClearOctet, or 0 to keep
 	Image      string      // base image name, NoBaseImage, or "" to keep
+	CPU        string      // custom CPU model name; "" keeps the current CPU
 	EjectCDROM bool        // eject attached non-cloudinit CD-ROM media
 	Details    *ImageNotes // nil keeps the details block and free notes as they are
 }
@@ -116,6 +117,11 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 	if req.Image != "" && req.Image != NoBaseImage {
 		if _, _, ok := ParseImageName(req.Image); !ok {
 			return nil, fmt.Errorf("%q isn't a base image name like debian-12-v1", req.Image)
+		}
+	}
+	if req.CPU != "" {
+		if err := CheckCPUModel(req.CPU); err != nil {
+			return nil, err
 		}
 	}
 	envs, vms, err := p.Environments(ctx)
@@ -260,6 +266,18 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 			it.Steps = append(it.Steps, StepCDROM)
 		} else if len(it.Steps) == 0 && it.Blocked == "" {
 			it.Blocked = h.Name + " has no CD-ROM attached"
+		}
+	}
+
+	if req.CPU != "" {
+		model := strings.TrimPrefix(req.CPU, "custom-")
+		wantCPU := "custom-" + model
+		if len(h.CPUModels) > 0 && !slices.Contains(h.CPUModels, model) && it.Blocked == "" {
+			it.Blocked = fmt.Sprintf("CPU model %s is not one of %s", model, strings.Join(h.CPUModels, " or "))
+		}
+		if len(CPUChanges(h.Config, wantCPU)) > 0 {
+			it.CPU = wantCPU
+			it.Steps = append(it.Steps, StepCPU)
 		}
 	}
 

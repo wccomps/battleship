@@ -138,6 +138,7 @@ const (
 	StepConvert   Step = "convert"            // make the VM a template
 	StepRetire    Step = "deprecate-previous" // tag the version this one replaces deprecated
 	StepDetails   Step = "details"            // write the details, and free text if asked, into the notes (ImageNotes.Changes)
+	StepCPU       Step = "cpu"                // set a custom CPU model (CPUChanges)
 	StepWaitAgent Step = "wait-agent"
 	StepGuest     Step = "configure-guest"
 	StepVerify    Step = "verify"
@@ -256,6 +257,7 @@ type Item struct {
 	Tags       string            `json:"tags,omitempty"`
 	Notes      *Notes            `json:"notes,omitempty"`
 	NICs       map[string]string `json:"nics,omitempty"`
+	CPU        string            `json:"cpu,omitempty"`
 	Guest      *Guest            `json:"guest,omitempty"`
 	Supersedes *Source           `json:"supersedes,omitempty"`
 	Details    *ImageNotes       `json:"details,omitempty"`

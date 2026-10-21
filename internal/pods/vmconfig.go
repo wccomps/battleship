@@ -159,6 +159,26 @@ func CDROMChanges(cur map[string]string) map[string]string {
 	return diff(cur, want)
 }
 
+var cpuModelRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+
+// CheckCPUModel checks a CPU model name (with or without "custom-").
+func CheckCPUModel(cpu string) error {
+	name := strings.TrimPrefix(cpu, "custom-")
+	if !cpuModelRE.MatchString(name) {
+		return fmt.Errorf("CPU model %q must be letters, digits, dashes and underscores", cpu)
+	}
+	return nil
+}
+
+// CPUChanges sets cpu (such as "custom-lab-baseline") when the VM's CPU
+// model differs.
+func CPUChanges(cur map[string]string, cpu string) map[string]string {
+	if cpu == "" || CPUType(cur["cpu"]) == cpu {
+		return map[string]string{}
+	}
+	return map[string]string{"cpu": cpu}
+}
+
 // NotesChanges empties a team VM's notes. A clone copies its template's,
 // which can hold a base image's login (see ImageDetails), and anyone with
 // VM.Audit on the team VM can read them. Nothing reads a battleship line

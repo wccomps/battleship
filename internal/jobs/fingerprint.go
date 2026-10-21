@@ -30,6 +30,7 @@ func Fingerprint(plan *pods.Plan) string {
 		Tags       string            `json:",omitempty"`
 		Notes      *pods.Notes       `json:",omitempty"`
 		NICs       map[string]string `json:",omitempty"`
+		CPU        string            `json:",omitempty"`
 		Guest      *pods.Guest       `json:",omitempty"`
 		Supersedes *fpSource         `json:",omitempty"`
 		Details    *pods.ImageNotes  `json:",omitempty"`
@@ -84,7 +85,7 @@ func Fingerprint(plan *pods.Plan) string {
 			VMState:     it.VMState,
 
 			Source: sourceFP(it.Source), Pool: it.Pool, Tags: it.Tags, Notes: it.Notes,
-			NICs: it.NICs, Guest: it.Guest, Supersedes: sourceFP(it.Supersedes), Details: it.Details, Replaces: it.DetailsWas,
+			NICs: it.NICs, CPU: it.CPU, Guest: it.Guest, Supersedes: sourceFP(it.Supersedes), Details: it.Details, Replaces: it.DetailsWas,
 		})
 	}
 	b, _ := json.Marshal(fp) // plain structs of strings, ints, bools and addresses can't fail

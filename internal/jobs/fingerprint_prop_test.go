@@ -80,7 +80,7 @@ func drawPlan(t *rapid.T) *pods.Plan {
 			Node: drawFPText(t, "node"), Template: drawFPText(t, "template"), Snapshot: drawFPText(t, "snapshot"), Baseline: rapid.Bool().Draw(t, "baseline"),
 			Action: drawFPText(t, "action"), Blocked: drawFPText(t, "blocked"), Unpermitted: rapid.Bool().Draw(t, "unpermitted"),
 			Description: drawFPText(t, "description"), VMState: rapid.Bool().Draw(t, "vmstate"),
-			Pool: drawFPText(t, "pool"), Tags: drawFPText(t, "tags"), Source: drawSource(t, "source"), Supersedes: drawSource(t, "supersedes"),
+			Pool: drawFPText(t, "pool"), Tags: drawFPText(t, "tags"), CPU: drawFPText(t, "item cpu"), Source: drawSource(t, "source"), Supersedes: drawSource(t, "supersedes"),
 		}
 		for _, s := range drawStrings(t, "steps") {
 			it.Steps = append(it.Steps, pods.Step(s))
