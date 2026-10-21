@@ -246,9 +246,6 @@ func (s *Server) hostEditPrefill(_ context.Context, p *catalogPage) {
 		curCPU = cmp.Or(pods.CPUType(at.Host.Config["cpu"]), "default (kvm64)")
 	}
 	cpuIn := curModel
-	if cpuIn == "" && len(cpuModels) > 0 {
-		cpuIn = cpuModels[0]
-	}
 	if p.In.CPU != "" {
 		cpuIn = strings.TrimPrefix(p.In.CPU, "custom-")
 		if !slices.Contains(cpuModels, cpuIn) {
