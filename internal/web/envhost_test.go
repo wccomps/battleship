@@ -76,9 +76,9 @@ func TestEnvEditFormAndConfirm(t *testing.T) {
 		`<input type="radio" name="image_kind" value="linux" checked>`,
 		`name="octet" value="10"`,
 		`<option value="debian-12-v2" selected>debian-12-v2 (linux)</option>`,
-		`<input type="radio" name="cpu" value="lab-baseline" checked><span>lab-baseline</span>`,
+		`<input type="radio" name="cpu" value="lab-baseline"><span>lab-baseline</span>`,
 		`<input type="radio" name="cpu" value="lab-baseline-nested"><span>lab-baseline-nested</span>`,
-		`<input type="radio" name="cpu" value=""><span>keep default (kvm64)</span>`,
+		`<input type="radio" name="cpu" value="" checked><span>keep default (kvm64)</span>`,
 		`name="eject_cdrom" value="yes"`,
 		`debian / Changeme1!`,
 	)
