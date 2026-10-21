@@ -13,7 +13,7 @@ import (
 // user can't see, which only VMIDHeld reveals (the listing shows what the
 // user may audit).
 type vmidUse struct {
-	api      API
+	api      Reads
 	listed   map[int]bool
 	reserved map[string]bool
 }

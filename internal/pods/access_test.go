@@ -486,3 +486,14 @@ func TestCloneNeedsSDNUseOnSourceBridges(t *testing.T) {
 		t.Errorf("with SDN.Use on the edit bridge: %q, %v", p.Items[0].Blocked, err)
 	}
 }
+
+func TestHoldsOfferedSkipsEmptyPool(t *testing.T) {
+	// A bogus grant on "/pool/" must not satisfy an empty pool.
+	acc := grants{"/pool/": {"VM.PowerMgmt"}}
+	if HoldsOffered(context.Background(), acc, KindPower, 10101, "") {
+		t.Fatal("HoldsOffered checked /pool/ for an empty pool")
+	}
+	if !HoldsOffered(context.Background(), grants{"/pool/dev-01": {"VM.Clone"}}, KindEnvCreate, 2100, "dev-01") {
+		t.Fatal("HoldsOffered missed the privilege on /pool/dev-01")
+	}
+}

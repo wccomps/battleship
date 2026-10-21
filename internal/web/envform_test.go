@@ -498,7 +498,7 @@ func TestPropSlotInput(t *testing.T) {
 		case verr == nil:
 			t.Fatalf("slot %q (read %q) is valid", typed, in.Slot)
 		}
-		if again := Normalize(in); again.Slot != in.Slot {
+		if again := in.Normalize(); again.Slot != in.Slot {
 			t.Fatalf("slot %q doesn't read back: %q, then %q", typed, in.Slot, again.Slot)
 		}
 	})

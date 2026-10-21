@@ -377,7 +377,7 @@ func (s *Server) polledGrid(ctx context.Context) status.Grid {
 func (s *Server) gridPage(w http.ResponseWriter, r *http.Request) {
 	g := s.polledGrid(r.Context())
 	v := s.liveGridView(r.Context(), g, s.now())
-	v.markBusy(s.sharedBusy(r.Context(), s.hub.Seq()).jobs)
+	v.markBusy(s.sharedBusy(r.Context()).jobs)
 	ticked, last := v.markSelected(r.URL.Query()["select"])
 	p := gridPageView{Live: v}
 	if ticked == 1 {
@@ -471,15 +471,15 @@ func (s *Server) gridEvents(w http.ResponseWriter, r *http.Request) {
 	var last gridParts
 	// Holding the stream open keeps the viewer's view polling (status.Views).
 	view := s.view(r.Context())
-	s.stream(w, r, []string{status.TopicGrid, status.TopicJobs}, 0, func(sw *sseWriter, resync bool, seq uint64) error {
-		cur, frag, err := s.renderedGrid(r.Context(), view, resync || last.shape == "", seq)
+	s.stream(w, r, []string{status.TopicGrid, status.TopicJobs}, 0, func(sw *sseWriter, resync bool, _ uint64) error {
+		cur, frag, err := s.renderedGrid(r.Context(), view, resync || last.shape == "")
 		if err != nil {
 			s.logf("web: rendering the grid for its event stream: %v", err)
 			return err
 		}
 		if resync || cur.shape != last.shape {
 			if frag == "" {
-				if cur, frag, err = s.renderedGrid(r.Context(), view, true, seq); err != nil {
+				if cur, frag, err = s.renderedGrid(r.Context(), view, true); err != nil {
 					s.logf("web: rendering the grid for its event stream: %v", err)
 					return err
 				}
@@ -509,11 +509,10 @@ type gridCache struct {
 
 // renderedGrid returns the grid's pieces and, if whole, the whole fragment,
 // re-rendering only when grid version, busy set or day changed (clock times
-// name the day). Busy marks are read as of hub sequence need. The cache key
-// is checked first because every job change but a log line wakes each grid
-// stream, and most change nothing shown.
-func (s *Server) renderedGrid(ctx context.Context, view *status.View, whole bool, need uint64) (gridParts, string, error) {
-	busy := s.sharedBusy(ctx, need)
+// name the day). Busy marks are read first because every job change but a log
+// line wakes each grid stream, and most change nothing shown.
+func (s *Server) renderedGrid(ctx context.Context, view *status.View, whole bool) (gridParts, string, error) {
+	busy := s.sharedBusy(ctx)
 	now := s.now()
 	keyOf := func(version uint64) string {
 		return fmt.Sprintf("%d\x00%s\x00%s", version, now.UTC().Format(time.DateOnly), busy.key)

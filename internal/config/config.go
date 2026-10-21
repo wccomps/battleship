@@ -57,7 +57,7 @@ type Proxmox struct {
 	// SDNZone holds the team bridges' vnets; a deploy needs SDN.Use on them.
 	SDNZone string `toml:"sdn_zone"`
 	// TicketMaxAge is how long a Proxmox login lasts through renewals.
-	// Renewal skips the IdP, so group changes apply only at the next login.
+	// Renewal skips the IdP, so IdP user or policy changes apply only at the next login.
 	TicketMaxAge time.Duration `toml:"ticket_max_age"`
 }
 

@@ -83,15 +83,17 @@ naming the missing privilege.
 
 | Step | Privilege | Path |
 |---|---|---|
-| Clone | `VM.Clone`; `VM.Allocate`; `Datastore.AllocateSpace` | template; pod's pool; `/storage/<deploy.storage>` |
-| Build template | `VM.Clone`; `VM.Allocate`; `Datastore.AllocateSpace` | master; `<images.pool>` (rebuild: also the old template); `/storage/<deploy.storage>` |
-| Network | `VM.Config.Network`, `VM.Config.Cloudinit`; `SDN.Use` | VM; `/sdn/zones/<proxmox.sdn_zone>/<bridge>` |
-| Disk limits / CD-ROM | `VM.Config.Disk` / `VM.Config.CDROM` | VM |
-| Clear notes (a clone copies its master's, which can hold a login), tag the set | `VM.Config.Options` (tagging needs Proxmox's default `user-tag-access` of `free`; otherwise a new tag needs `Sys.Modify` on `/`) | VM |
-| Edit notes (a base image's details and notes) | `VM.Config.Options` | the family's newest version |
+| Clone | `VM.Clone`; `VM.Allocate`; `Datastore.AllocateSpace` (`Mapping.Use` for a `custom-<model>` CPU; `SDN.Use` on an edit/slot source bridge) | template or source; target pool; `/storage/<deploy.storage>` (`/mapping/cpu/<model>`) |
+| Build template | `VM.Clone` (`VM.PowerMgmt` if stopping a running master); `VM.Allocate`; `Datastore.AllocateSpace` (`Mapping.Use` for a `custom-<model>` CPU) | master; `<images.pool>` (rebuild: also the old template); `/storage/<deploy.storage>` |
+| Network | `VM.Config.Network` (`VM.Config.Cloudinit` for cloud-init); `SDN.Use` | VM or pool; `/sdn/zones/<zone>/<bridge>` |
+| Disk limits / CD-ROM / CPU | `VM.Config.Disk` / `VM.Config.CDROM` / `VM.Config.CPU` (`Mapping.Use` on `/mapping/cpu/<model>`) | VM or pool |
+| Clear notes (a clone copies its master's, which can hold a login), tag the set | `VM.Config.Options` (tagging needs Proxmox's default `user-tag-access` of `free`; otherwise a new tag needs `Sys.Modify` on `/`) | VM or pool |
+| Labels, details and notes (`image-register`, `image-deprecate`, `image-details`, `env-edit`) | `VM.Config.Options` | VM or pool |
+| Guest setup (`env-create`, `env-add`, `env-edit`) | `VM.GuestAgent.Audit`, `VM.GuestAgent.Unrestricted` (`VM.PowerMgmt` when rebooting a Windows host) | VM or pool |
+| Live addresses and SSH CA check | `VM.GuestAgent.Audit` (`VM.GuestAgent.Unrestricted` for the SSH check when held) | VM |
 | Snapshot / roll back | `VM.Snapshot` (or `VM.Snapshot.Rollback`) | VM |
 | Power | `VM.PowerMgmt` | VM |
-| Delete | `VM.Allocate` | VM |
+| Delete / convert to template | `VM.Allocate` | VM |
 | Free leftover disks | `Datastore.Allocate` | `/storage/<deploy.storage>` |
 | Capacity check, others' tasks | `Sys.Audit` | `/nodes/<node>` |
 

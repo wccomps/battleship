@@ -145,7 +145,8 @@ const (
 )
 
 // TypedConfirm reports whether kind k needs what it deletes typed to confirm
-// (CLI and web): a teardown's team range, an environment's domain.
+// (CLI and web): a teardown's team range, an environment's domain, or an
+// environment host's VM name.
 func (k Kind) TypedConfirm() bool { return specs[k].tearsDown }
 
 // Retryable reports whether a job of kind k can be retried with RetryInputs
@@ -244,13 +245,14 @@ type Item struct {
 	VMState     bool   `json:"vmstate,omitempty"`
 
 	// Base-image and environment items (Team is ""): Source is cloned instead
-	// of a template, into Pool. Tags is the whole tag list the label step sets
-	// ("" clears them); Notes, if set, is the notes line it writes. An
-	// environment teardown's items carry the VM's tags and notes as they are,
-	// for its review. NICs maps NIC keys to the bridge the network step puts
-	// them on. Guest is what configure-guest sets inside the VM. Supersedes
-	// is the version a registered image replaces, tagged deprecated once it
-	// is a template. Details are what the details step writes.
+	// of a template, into Pool (for image-register, image-edit, env-create and
+	// env-add). Tags is the whole tag list the label step sets ("" clears
+	// them); Notes, if set, is the notes line it writes. An environment
+	// teardown's or host delete's items carry the VM's tags and notes as they
+	// are, for its review. NICs maps NIC keys to the bridge the network step
+	// puts them on. Guest is what configure-guest sets inside the VM.
+	// Supersedes is the version a registered image replaces, tagged deprecated
+	// once it is a template. Details are what the details step writes.
 	Source     *Source           `json:"source,omitempty"`
 	Pool       string            `json:"pool,omitempty"`
 	Rename     string            `json:"rename,omitempty"`
@@ -261,14 +263,14 @@ type Item struct {
 	Guest      *Guest            `json:"guest,omitempty"`
 	Supersedes *Source           `json:"supersedes,omitempty"`
 	Details    *ImageNotes       `json:"details,omitempty"`
-	// DetailsWas is an Edit notes's notes as it read them, for its review
-	// and fingerprint.
+	// DetailsWas is an Edit notes's or Edit host's notes as read, for its
+	// review and fingerprint.
 	DetailsWas *NotesRead `json:"details_was,omitempty"`
 }
 
 // Plan is what an operation will do: the templates a deploy needs and one
-// item per team VM. It is stored with each job, so its JSON keys are a
-// stored format.
+// item per VM. It is stored with each job, so its JSON keys are a stored
+// format.
 type Plan struct {
 	Kind      Kind           `json:"kind"`
 	Teams     []string       `json:"teams"`
@@ -392,9 +394,10 @@ func (p *Plan) Runnable() []Item {
 	return out
 }
 
-// Planner builds plans from the cluster's current state. It only reads.
+// Planner builds plans and reads live state from the cluster using read-only
+// API calls (Reads).
 type Planner struct {
-	API    API
+	API    Reads
 	Cfg    config.Config
 	Naming Naming
 	// Access, if set, is the planning user's privileges: jobs.BuildPlan
@@ -408,7 +411,7 @@ type Planner struct {
 
 // NewPlanner plans with api. If api can read the caller's privileges (a
 // Proxmox client acting as someone), plans are checked against them.
-func NewPlanner(api API, cfg config.Config) Planner {
+func NewPlanner(api Reads, cfg config.Config) Planner {
 	p := Planner{API: api, Cfg: cfg, Naming: NewNaming(cfg.Naming)}
 	if r, ok := api.(PermissionReader); ok {
 		p.Access = NewAccess(r)

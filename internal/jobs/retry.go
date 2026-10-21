@@ -24,7 +24,9 @@ var (
 // which would block every VM of the retry. An environment's create or add
 // keeps its hosts, so the plan is the same, and is narrowed to the VMs; a
 // create keeps its slot, where the planner resumes it. An environment's
-// teardown is planned again whole in its slot (pods.Kind.RetriedWhole).
+// teardown is planned again whole in its slot (pods.Kind.RetriedWhole). Image
+// jobs and single-host environment jobs (env-edit, env-power, env-delete-host)
+// aren't retryable here; they are started again from their form.
 func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 	if !store.JobStatus(job.Status).CanRetry() {
 		return Inputs{}, fmt.Errorf("job %d is %s: %w", job.ID, job.Status, ErrNotRetryable)

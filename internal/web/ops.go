@@ -174,7 +174,7 @@ const (
 	fieldAction      = "action"      // power
 	fieldNonce       = "nonce"       // confirm: names the preview
 	fieldFingerprint = "fingerprint"
-	fieldTyped       = "typed"    // confirm: the team range or domain, typed (jobs.Inputs.Typed)
+	fieldTyped       = "typed"    // confirm: the team range, domain or VM name, typed (jobs.Inputs.Typed)
 	fieldRetryOf     = "retry_of" // confirm: the job a retry preview retries; shown only, never trusted
 	fieldFrom        = "from"     // "grid": the grid's form, which sends ticked VMs and no teams
 	fieldDomain      = "domain"
@@ -222,21 +222,22 @@ const (
 // hidden field), one per ticked box (the grid), or both.
 func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 	if kind.Teamless() {
-		in := jobs.Inputs{Kind: kind, Domain: strings.TrimSpace(form.Get(fieldDomain)), Router: strings.TrimSpace(form.Get(fieldRouter)),
-			EnvHost:    strings.TrimSpace(form.Get(fieldEnvHost)),
+		in := jobs.Inputs{
+			Kind:       kind,
+			Domain:     form.Get(fieldDomain),
+			Slot:       form.Get(fieldSlot),
+			Router:     form.Get(fieldRouter),
+			EnvHosts:   []string{form.Get(fieldEnvHosts)},
+			EnvHost:    form.Get(fieldEnvHost),
 			EjectCDROM: form.Get(fieldEjectCDROM) == yes,
-			CPU:        strings.TrimSpace(form.Get(fieldCPU)),
-			Action:     strings.TrimSpace(form.Get(fieldAction)),
+			CPU:        form.Get(fieldCPU),
+			Action:     form.Get(fieldAction),
+			VMs:        form[fieldVMs],
 			ImageRequest: pods.ImageRequest{
-				Family:    strings.TrimSpace(form.Get(fieldFamily)),
-				ImageKind: strings.TrimSpace(form.Get(fieldImageKind)),
-				Image:     strings.TrimSpace(form.Get(fieldImage)),
+				Family:    form.Get(fieldFamily),
+				ImageKind: form.Get(fieldImageKind),
+				Image:     form.Get(fieldImage),
 			},
-			Slot: slotName(form.Get(fieldSlot)), VMs: jobs.SplitList(strings.Join(form[fieldVMs], ","))}
-		for _, line := range strings.Split(form.Get(fieldEnvHosts), "\n") {
-			if line = strings.TrimSpace(line); line != "" {
-				in.EnvHosts = append(in.EnvHosts, line)
-			}
 		}
 		if (kind == pods.KindEnvCreate || kind == pods.KindEnvAdd) && form.Has(fieldRouterImage) {
 			in.Router = ""
@@ -261,39 +262,31 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 		if posted := form.Get(fieldDetails); posted == yes || posted == detailsWithNotes {
 			n := pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: form.Get(fieldOS), User: form.Get(fieldUser), Password: form.Get(fieldPassword),
 				Built: form.Get(fieldBuilt), Generalized: form.Get(fieldGeneralized), Installed: form.Get(fieldInstalled),
-				Licence: form.Get(fieldLicence)}.Trimmed()}
+				Licence: form.Get(fieldLicence)}}
 			if posted == detailsWithNotes {
-				free := pods.CleanFreeNotes(form.Get(fieldNotes))
+				free := form.Get(fieldNotes)
 				n.Free = &free
 			}
-			n.From = strings.TrimSpace(form.Get(fieldNotesFrom))
+			n.From = form.Get(fieldNotesFrom)
 			in.Details = &n
 		}
-		return in
+		return in.Normalize()
 	}
 	in := jobs.Inputs{
-		Kind:  kind,
-		Teams: strings.TrimSpace(form.Get(fieldTeams)),
-		Hosts: jobs.SplitList(strings.Join(form[fieldHosts], ",")),
-		VMs:   jobs.SplitList(strings.Join(form[fieldVMs], ",")),
+		Kind:        kind,
+		Teams:       form.Get(fieldTeams),
+		Hosts:       form[fieldHosts],
+		VMs:         form[fieldVMs],
+		Pattern:     form.Get(fieldPattern),
+		Rebuild:     form.Get(fieldRebuild) == yes,
+		NoSnapshot:  form.Get(fieldBaseline) != yes,
+		Set:         pods.Set(form.Get(fieldSet)),
+		Snapshot:    form.Get(fieldSnapshot),
+		Description: form.Get(fieldDescription),
+		VMState:     form.Get(fieldVMState) == yes,
+		Action:      form.Get(fieldAction),
 	}
-	switch kind {
-	case pods.KindDeploy:
-		in.Pattern = strings.TrimSpace(form.Get(fieldPattern))
-		in.Rebuild = form.Get(fieldRebuild) == yes
-		in.NoSnapshot = form.Get(fieldBaseline) != yes
-	case pods.KindTeardown:
-		in.Set = pods.Set(strings.ToLower(strings.TrimSpace(form.Get(fieldSet))))
-	case pods.KindReset:
-		in.Snapshot = strings.TrimSpace(form.Get(fieldSnapshot))
-	case pods.KindSnapshot:
-		in.Snapshot = strings.TrimSpace(form.Get(fieldSnapshot))
-		in.Description = strings.TrimSpace(form.Get(fieldDescription))
-		in.VMState = form.Get(fieldVMState) == yes
-	case pods.KindPower:
-		in.Action = strings.TrimSpace(form.Get(fieldAction))
-	}
-	return in
+	return in.Normalize()
 }
 
 // postedForm is the request's form body; an unparsable body reads as empty
@@ -364,17 +357,6 @@ func inputFields(in jobs.Inputs) []field {
 		fs = append(fs, field{fieldAction, in.Action})
 	}
 	return fs
-}
-
-// Normalize is in as the form reads it back from a page that posts it:
-// values trimmed, lists split and blanks dropped. The CLI passes its flags
-// through it, so a command asks for the same job the form would.
-func Normalize(in jobs.Inputs) jobs.Inputs {
-	form := url.Values{}
-	for _, f := range inputFields(in) {
-		form.Add(f.Name, f.Value)
-	}
-	return formInputs(in.Kind, form)
 }
 
 // detailsFields are details as the form fields formInputs reads, for
@@ -531,14 +513,4 @@ func nth(vs []string, i int) string {
 		return vs[i]
 	}
 	return ""
-}
-
-// slotName is a typed slot as its two-digit name ("2" is "02"); anything
-// but 1-99 is kept, trimmed, for validation to refuse.
-func slotName(typed string) string {
-	typed = strings.TrimSpace(typed)
-	if n, err := strconv.Atoi(typed); err == nil && n >= 1 && n <= 99 {
-		return pods.SlotName(n)
-	}
-	return typed
 }

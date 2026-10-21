@@ -339,7 +339,7 @@ type jobView struct {
 	RetryTip   string // what to know before retrying
 	RetryLock  string // why this viewer can't retry it: they lack its privilege
 	RetryFault string // why the job can't be retried at all, when its stored job can't be read
-	StartAgain string // a stale, failed or cancelled job: its form, filled in, if the user may use it
+	StartAgain string // a stale, failed, interrupted or cancelled job: its form, filled in, if the user may use it
 	AgainPage  bool   // StartAgain opens as its own page, not in the side panel
 	AgainLock  string // why this viewer can't start it again: they lack its privilege
 	Events     []eventView
@@ -715,8 +715,8 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	mayOp := s.mayAnywhere(ctx, pods.OfferPrivileges(pods.Kind(j.Kind))...)
 	v.CanCancel = j.Active() && !j.CancelRequested && s.mayCancel(ctx, j, items, u)
 	v.AskCancel = j.Active() && !j.CancelRequested && !v.CanCancel
-	// A stale, failed or cancelled job is restarted from a new preview when
-	// retry isn't offered.
+	// A stale, failed, interrupted or cancelled job is restarted from a new
+	// preview when retry isn't offered.
 	if store.JobStatus(j.Status).StartAgain() {
 		if op, ok := operationFor(pods.Kind(j.Kind)); ok {
 			if mayOp {
@@ -1076,8 +1076,8 @@ func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 }
 
 // mayCancel reports whether u may cancel j: its starter, or anyone holding the
-// operation's privilege on every VM of the job (on the VM or its team pool,
-// for VMs a deploy has yet to create), as Proxmox resolves it.
+// operation's privilege on every VM of the job (on the VM or its pool, for VMs
+// yet to be created), as Proxmox resolves it.
 func (s *Server) mayCancel(ctx context.Context, j store.Job, items []store.Item, u auth.User) bool {
 	if j.CreatedBy == actor(u) {
 		return true
@@ -1086,12 +1086,35 @@ func (s *Server) mayCancel(ctx context.Context, j store.Job, items []store.Item,
 	if acc == nil {
 		return true // a test fake that can't read privileges
 	}
+	var plan pods.Plan
+	_ = json.Unmarshal(j.Plan, &plan)
+	kind := pods.Kind(j.Kind)
 	for _, it := range items {
-		if !pods.HoldsOffered(ctx, acc, pods.Kind(j.Kind), it.VMID, s.naming.Pool(it.Team)) {
+		if !pods.HoldsOffered(ctx, acc, kind, it.VMID, s.itemPool(kind, plan, it)) {
 			return false
 		}
 	}
 	return len(items) > 0
+}
+
+// itemPool is the Proxmox pool of job item it: its team pool, the pool planned
+// on the item or environment slot, or the images pool for image jobs.
+func (s *Server) itemPool(kind pods.Kind, plan pods.Plan, it store.Item) string {
+	if it.Team != "" {
+		return s.naming.Pool(it.Team)
+	}
+	for _, p := range plan.Items {
+		if p.Name == it.Name && p.Pool != "" {
+			return p.Pool
+		}
+	}
+	if n, ok := pods.ParseSlotName(plan.DevSlot()); ok {
+		return pods.ExpandSlot(s.cfg.Environments.Pool, n)
+	}
+	if op, ok := operationFor(kind); ok && op.Section == sectionImages {
+		return s.cfg.Images.Pool
+	}
+	return ""
 }
 
 // notPermitted says why a job's operation isn't offered to the viewer.

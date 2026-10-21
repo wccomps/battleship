@@ -12,6 +12,7 @@ import (
 	"github.com/wccomps/battleship/internal/auth/authtest"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/proxmox"
 )
 
 // loginWith signs in subject, whose Proxmox user holds VM.Audit on / and
@@ -44,6 +45,19 @@ func TestCancelNeedsThePrivilegeOnTheJobsVMs(t *testing.T) {
 	mine := h.loginWith("test-team1", []int{10101, 10102}, "VM.PowerMgmt")
 	if rec := h.post(&mine, "/logs/"+itoa(id)+"/cancel", url.Values{}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("cancel by someone who may power its VMs = %d", rec.Code)
+	}
+
+	// A pending teamless job whose VMs aren't created yet checks the item's
+	// pool (the environment slot pool or images pool), not "pool-".
+	h.api.add(proxmox.VM{VMID: 8000, Name: "vyos-v1", Node: "n1", Pool: h.cfg.Images.Pool, Template: true, Tags: "base;router;linux"},
+		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:80:00,bridge=vmbr0", "net1": "virtio=BC:24:11:00:80:01,bridge=vmbr0"})
+	h.api.add(proxmox.VM{VMID: 8001, Name: "debian-12-v1", Node: "n1", Pool: h.cfg.Images.Pool, Template: true, Tags: "base;linux"},
+		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:80:02,bridge=vmbr0"})
+	envID := h.submitJob(jobs.Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.alpha", Router: "gw=vyos", EnvHosts: []string{"dc=debian-12"}}, byLead)
+	slotHolder := h.loginWith("test-slot1", nil)
+	h.pve.Grant("test-slot1@auth.example.org", "/pool/dev-01", "VM.Clone")
+	if rec := h.post(&slotHolder, "/logs/"+itoa(envID)+"/cancel", url.Values{}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("cancel of pending env job by /pool/dev-01 holder = %d, want 303", rec.Code)
 	}
 }
 

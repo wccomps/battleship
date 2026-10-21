@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -312,14 +313,13 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 				continue
 			}
 			tags += ";" + ImageRouter
-			ip.NICs = map[string]string{"net0": env.Slot.ExtBridge, "net1": env.Slot.IntBridge}
 		default:
 			if cfg["net0"] == "" {
 				ip.Blocked = "base image " + im.Name + " has no net0"
 				continue
 			}
-			ip.NICs = map[string]string{"net0": env.Slot.IntBridge}
 		}
+		ip.NICs = env.Slot.wantNICs(im.Kind == ImageRouter)
 		ip.Tags = tags
 		ip.Steps = []Step{StepClone, StepLabel, StepNetwork, StepStart}
 		if resumed {
@@ -339,20 +339,13 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 				}
 				addr, used[o] = env.LAN.Host(o), true
 			}
-			var caKey string
-			if p.Cfg.Environments.OpsCAKey != "" {
-				var err error
-				if caKey, err = config.ParseSSHPublicKey(p.Cfg.Environments.OpsCAKey); err != nil {
-					ip.Blocked = "ops CA key: " + err.Error()
-					continue
-				}
-			}
-			notes.IP, notes.OS = addr, im.Kind
-			ip.Guest = &Guest{OS: im.Kind, Hostname: h.Host, Domain: env.Domain, IP: addr, Prefix: env.LAN.Bits(), Gateway: env.Gateway(), DNS: dnsAddr, OpsCAKey: caKey}
-			if err := ip.Guest.Check(); err != nil {
-				ip.Blocked = err.Error()
+			g, why := p.planGuest(env, im.Kind, h.Host, env.Domain, addr, dnsAddr)
+			if why != "" {
+				ip.Blocked = why
 				continue
 			}
+			notes.IP, notes.OS = addr, im.Kind
+			ip.Guest = g
 			ip.Steps = append(ip.Steps, StepWaitAgent, StepGuest, StepVerify)
 		}
 		ip.Notes = &notes
@@ -363,6 +356,23 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		ip.blockLongNotes(desc)
 	}
 	return plan, nil
+}
+
+// planGuest builds the Guest configuration for an environment host and
+// returns any block reason (bad ops CA key or invalid Guest fields).
+func (p Planner) planGuest(env Environment, os, host, domain string, ip, dns netip.Addr) (*Guest, string) {
+	var caKey, why string
+	if p.Cfg.Environments.OpsCAKey != "" {
+		var err error
+		if caKey, err = config.ParseSSHPublicKey(p.Cfg.Environments.OpsCAKey); err != nil {
+			why = "ops CA key: " + err.Error()
+		}
+	}
+	g := &Guest{OS: os, Hostname: host, Domain: domain, IP: ip, Prefix: env.LAN.Bits(), Gateway: env.Gateway(), DNS: dns, OpsCAKey: caKey}
+	if err := g.Check(); err != nil && why == "" {
+		why = err.Error()
+	}
+	return g, why
 }
 
 // resumeMismatch says how an existing host differs from the requested image,

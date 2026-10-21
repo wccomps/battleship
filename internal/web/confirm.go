@@ -22,7 +22,7 @@ import (
 //   - the nonce names an unsubmitted preview of this session and operation;
 //   - the new plan's fingerprint matches, so the cluster hasn't changed; else,
 //     or past previewTTL, the new plan is shown for re-checking;
-//   - the pod range or domain was typed, where required.
+//   - the pod range, domain or VM name was typed, where required.
 //
 // The job consumes the preview in the transaction that stores it, so a
 // double-clicked confirm makes one job.

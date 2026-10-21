@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -61,6 +62,7 @@ const (
 	inFamily
 	inImage
 	inVMID
+	inAction
 )
 
 // request records a Kind's input and planning rules: which field groups it
@@ -110,13 +112,7 @@ var requests = map[pods.Kind]request{
 		},
 	},
 	pods.KindPower: {
-		takes: inTeams | inVMs,
-		check: func(in Inputs) []error {
-			if !pods.IsPowerAction(in.Action) {
-				return []error{fmt.Errorf("power action must be start, shutdown, stop or reboot, not %q", in.Action)}
-			}
-			return nil
-		},
+		takes: inTeams | inVMs | inAction,
 		plan: func(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*pods.Plan, error) {
 			return p.Power(ctx, teams, in.Hosts, in.Action)
 		},
@@ -167,65 +163,21 @@ var requests = map[pods.Kind]request{
 	pods.KindEnvEdit: {
 		takes: inVMID | inDetails | inFreeNotes,
 		check: func(in Inputs) []error {
-			var errs []error
-			if in.VMID < 100 {
-				errs = append(errs, errors.New("name the host to edit by its VMID"))
+			if _, err := in.HostEditInput(); err != nil {
+				return []error{err}
 			}
-			if h := strings.TrimSpace(in.EnvHost); h != "" {
-				if hostPart, domPart, ok := strings.Cut(h, "."); ok {
-					if err := pods.CheckHostname(hostPart); err != nil {
-						errs = append(errs, err)
-					}
-					if err := pods.CheckDomain(domPart); err != nil {
-						errs = append(errs, err)
-					}
-				} else if err := pods.CheckHostname(h); err != nil {
-					errs = append(errs, err)
-				}
-			}
-			if in.ImageKind != "" && !slices.Contains(pods.ImageKinds, in.ImageKind) {
-				errs = append(errs, fmt.Errorf("host kind must be one of %s", strings.Join(pods.ImageKinds, ", ")))
-			}
-			if in.Octet != 0 && in.Octet != pods.ClearOctet && (in.Octet < pods.FirstHostOctet || in.Octet > pods.LastHostOctet) {
-				errs = append(errs, fmt.Errorf("the address must be %d-%d (.%d is the router, .3 the team VPN)", pods.FirstHostOctet, pods.LastHostOctet, pods.GatewayOctet))
-			}
-			if in.Image != "" && in.Image != pods.NoBaseImage {
-				if _, _, ok := pods.ParseImageName(in.Image); !ok {
-					errs = append(errs, fmt.Errorf("%q isn't a base image name like debian-12-v1", in.Image))
-				}
-			}
-			if in.CPU != "" {
-				if err := pods.CheckCPUModel(in.CPU); err != nil {
-					errs = append(errs, err)
-				}
-			}
-			return errs
+			return nil
 		},
 		plan: func(ctx context.Context, p pods.Planner, in Inputs, _ []string) (*pods.Plan, error) {
-			return p.EnvEdit(ctx, pods.HostEditInput{
-				VMID:       in.VMID,
-				Host:       strings.TrimSpace(in.EnvHost),
-				Kind:       in.ImageKind,
-				Octet:      in.Octet,
-				Image:      in.Image,
-				CPU:        in.CPU,
-				EjectCDROM: in.EjectCDROM,
-				Details:    in.Details,
-			})
+			req, err := in.HostEditInput()
+			if err != nil {
+				return nil, err
+			}
+			return p.EnvEdit(ctx, req)
 		},
 	},
 	pods.KindEnvPower: {
-		takes: inVMID,
-		check: func(in Inputs) []error {
-			var errs []error
-			if in.VMID < 100 {
-				errs = append(errs, errors.New("name the host by its VMID"))
-			}
-			if !pods.IsPowerAction(in.Action) {
-				errs = append(errs, fmt.Errorf("power action must be start, shutdown, stop or reboot, not %q", in.Action))
-			}
-			return errs
-		},
+		takes: inVMID | inAction,
 		plan: func(ctx context.Context, p pods.Planner, in Inputs, _ []string) (*pods.Plan, error) {
 			return p.EnvPower(ctx, in.VMID, in.Action)
 		},
@@ -234,14 +186,10 @@ var requests = map[pods.Kind]request{
 		takes: inVMID,
 		typed: func(in Inputs) (string, string) { return strings.TrimSpace(in.EnvHost), "the VM name" },
 		check: func(in Inputs) []error {
-			var errs []error
-			if in.VMID < 100 {
-				errs = append(errs, errors.New("name the host to delete by its VMID"))
-			}
 			if strings.TrimSpace(in.EnvHost) == "" {
-				errs = append(errs, errors.New("name the host to delete"))
+				return []error{errors.New("name the host to delete")}
 			}
-			return errs
+			return nil
 		},
 		plan: func(ctx context.Context, p pods.Planner, in Inputs, _ []string) (*pods.Plan, error) {
 			return p.EnvDeleteHost(ctx, in.VMID, strings.TrimSpace(in.EnvHost))
@@ -250,14 +198,10 @@ var requests = map[pods.Kind]request{
 	pods.KindImageRegister: {
 		takes: inVMID | inFamily | inDetails,
 		check: func(in Inputs) []error {
-			var errs []error
-			if in.VMID < 100 {
-				errs = append(errs, errors.New("name the VM to register by its VMID"))
-			}
 			if in.ImageKind != "" && !slices.Contains(pods.ImageKinds, in.ImageKind) {
-				errs = append(errs, fmt.Errorf("image kind must be one of %s", strings.Join(pods.ImageKinds, ", ")))
+				return []error{fmt.Errorf("image kind must be one of %s", strings.Join(pods.ImageKinds, ", "))}
 			}
-			return errs
+			return nil
 		},
 		plan: imagePlan(pods.Planner.ImageRegister),
 	},
@@ -297,7 +241,8 @@ func imagePlan(fn func(pods.Planner, context.Context, pods.ImageRequest) (*pods.
 }
 
 // Typed is what a person types to confirm in (pods.Kind.TypedConfirm): a
-// teardown's pod range or an environment's domain, as given.
+// teardown's pod range, an environment's domain, or an environment host's VM
+// name, as given.
 func (in Inputs) Typed() string {
 	if r := requests[in.Kind]; r.typed != nil {
 		v, _ := r.typed(in)
@@ -306,8 +251,8 @@ func (in Inputs) Typed() string {
 	return ""
 }
 
-// TypedWhat names what Typed is, for asking for it: "the pod range" or
-// "the domain"; "" when nothing is typed.
+// TypedWhat names what Typed is, for asking for it: "the pod range",
+// "the domain" or "the VM name"; "" when nothing is typed.
 func (in Inputs) TypedWhat() string {
 	if r := requests[in.Kind]; r.typed != nil {
 		_, what := r.typed(in)
@@ -369,9 +314,19 @@ func (in Inputs) Validate() error {
 			errs = append(errs, errors.New("name the details to write"))
 		}
 	case r.takes&inDetails == 0:
-		errs = append(errs, errors.New("details apply only to registering a base image and editing its notes"))
+		errs = append(errs, errors.New("details apply only to registering a base image and editing notes"))
 	case (in.Details.Free != nil || in.Details.From != "") && r.takes&inFreeNotes == 0:
-		errs = append(errs, errors.New("free text, and the notes a form opened on, apply only to editing a base image's notes"))
+		errs = append(errs, errors.New("free text, and the notes a form opened on, apply only to editing notes"))
+	default:
+		if err := pods.CheckDetails(in.Details.ImageDetails); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if r.takes&inVMID != 0 && in.VMID < 100 {
+		errs = append(errs, errors.New("name the VM by its VMID"))
+	}
+	if r.takes&inAction != 0 && !pods.IsPowerAction(in.Action) {
+		errs = append(errs, fmt.Errorf("power action must be start, shutdown, stop or reboot, not %q", in.Action))
 	}
 	if r.takes&inDomain != 0 {
 		if err := pods.CheckDomain(strings.TrimSpace(in.Domain)); err != nil {
@@ -398,7 +353,7 @@ func (in Inputs) Validate() error {
 }
 
 // checkText rejects invalid UTF-8 and control characters in every string
-// field. Each value is one line: the form splits env hosts by line.
+// field. Each value is one line, except free notes, which may contain LF.
 func (in Inputs) checkText() error {
 	fields := []struct {
 		name   string
@@ -413,19 +368,27 @@ func (in Inputs) checkText() error {
 		fields = append(fields, struct {
 			name   string
 			values []string
-		}{"details", []string{d.OS, d.User, d.Password, d.Built, d.Generalized, d.Installed, d.Licence}})
+		}{"details", []string{d.OS, d.User, d.Password, d.Built, d.Generalized, d.Installed, d.Licence, d.From}})
 	}
 	var errs []error
+	refuse := func(name, v string) {
+		// Bounded: the error reaches pages and logs.
+		if len(v) > 100 {
+			v = v[:100] + "..."
+		}
+		errs = append(errs, fmt.Errorf("%s must be printable text, not %q", name, v))
+	}
 	for _, f := range fields {
 		for _, v := range f.values {
 			if !utf8.ValidString(v) || strings.ContainsFunc(v, unicode.IsControl) {
-				// Bounded: the error reaches pages and logs.
-				if len(v) > 100 {
-					v = v[:100] + "..."
-				}
-				errs = append(errs, fmt.Errorf("%s must be printable text, not %q", f.name, v))
+				refuse(f.name, v)
 				break
 			}
+		}
+	}
+	if d := in.Details; d != nil && d.Free != nil {
+		if v := *d.Free; !utf8.ValidString(v) || strings.ContainsFunc(v, func(r rune) bool { return r != '\n' && unicode.IsControl(r) }) {
+			refuse("notes", v)
 		}
 	}
 	return errors.Join(errs...)
@@ -517,6 +480,101 @@ func SplitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// slotName is a typed slot as its two-digit name ("2" is "02"); anything
+// but 1-99 is kept, trimmed, for validation to refuse.
+func slotName(typed string) string {
+	typed = strings.TrimSpace(typed)
+	if n, err := strconv.Atoi(typed); err == nil && n >= 1 && n <= 99 {
+		return pods.SlotName(n)
+	}
+	return typed
+}
+
+// Normalize is in with values trimmed, lists split, blanks dropped, and
+// fields outside in.Kind cleared, as a form submission produces them.
+func (in Inputs) Normalize() Inputs {
+	if in.Kind.Teamless() {
+		var envHosts []string
+		for _, s := range in.EnvHosts {
+			for _, line := range strings.Split(s, "\n") {
+				if line = strings.TrimSpace(line); line != "" {
+					envHosts = append(envHosts, line)
+				}
+			}
+		}
+		var details *pods.ImageNotes
+		if in.Details != nil {
+			n := pods.ImageNotes{
+				ImageDetails: in.Details.ImageDetails.Trimmed(),
+				From:         strings.TrimSpace(in.Details.From),
+			}
+			if in.Details.Free != nil {
+				free := pods.CleanFreeNotes(*in.Details.Free)
+				n.Free = &free
+			}
+			details = &n
+		}
+		return Inputs{
+			Kind:       in.Kind,
+			Domain:     strings.TrimSpace(in.Domain),
+			Slot:       slotName(in.Slot),
+			Router:     strings.TrimSpace(in.Router),
+			EnvHosts:   envHosts,
+			EnvHost:    strings.TrimSpace(in.EnvHost),
+			Octet:      in.Octet,
+			EjectCDROM: in.EjectCDROM,
+			CPU:        strings.TrimSpace(in.CPU),
+			Action:     strings.TrimSpace(in.Action),
+			VMs:        SplitList(strings.Join(in.VMs, ",")),
+			ImageRequest: pods.ImageRequest{
+				VMID:      in.VMID,
+				Family:    strings.TrimSpace(in.Family),
+				ImageKind: strings.TrimSpace(in.ImageKind),
+				Image:     strings.TrimSpace(in.Image),
+				Details:   details,
+			},
+		}
+	}
+	out := Inputs{
+		Kind:  in.Kind,
+		Teams: strings.TrimSpace(in.Teams),
+		Hosts: SplitList(strings.Join(in.Hosts, ",")),
+		VMs:   SplitList(strings.Join(in.VMs, ",")),
+	}
+	switch in.Kind {
+	case pods.KindDeploy:
+		out.Pattern = strings.TrimSpace(in.Pattern)
+		out.Rebuild = in.Rebuild
+		out.NoSnapshot = in.NoSnapshot
+	case pods.KindTeardown:
+		out.Set = pods.Set(strings.ToLower(strings.TrimSpace(string(in.Set))))
+	case pods.KindReset:
+		out.Snapshot = strings.TrimSpace(in.Snapshot)
+	case pods.KindSnapshot:
+		out.Snapshot = strings.TrimSpace(in.Snapshot)
+		out.Description = strings.TrimSpace(in.Description)
+		out.VMState = in.VMState
+	case pods.KindPower:
+		out.Action = strings.TrimSpace(in.Action)
+	}
+	return out
+}
+
+// HostEditInput parses an environment host edit job's inputs.
+func (in Inputs) HostEditInput() (pods.HostEditInput, error) {
+	req := pods.HostEditInput{
+		VMID:       in.VMID,
+		Host:       strings.TrimSpace(in.EnvHost),
+		Kind:       in.ImageKind,
+		Octet:      in.Octet,
+		Image:      in.Image,
+		CPU:        in.CPU,
+		EjectCDROM: in.EjectCDROM,
+		Details:    in.Details,
+	}
+	return req, req.Check()
 }
 
 // EnvRequest parses an environment job's inputs.

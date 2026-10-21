@@ -46,6 +46,12 @@ func (c *Client) AgentPing(ctx context.Context, node string, vmid int) error {
 	return c.agent(ctx, maxSmallAnswer, http.MethodPost, node, vmid, "ping", nil, nil)
 }
 
+// AgentRead starts command, one that only reads, in the guest and returns
+// its PID.
+func (c *Client) AgentRead(ctx context.Context, node string, vmid int, command []string) (int, error) {
+	return c.AgentExec(ctx, node, vmid, command, "")
+}
+
 // AgentExec starts command in the guest with input on its stdin and returns
 // its PID.
 func (c *Client) AgentExec(ctx context.Context, node string, vmid int, command []string, input string) (int, error) {

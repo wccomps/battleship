@@ -99,6 +99,11 @@ const execCap = 1 << 20
 var agentCalls = []agentCall{
 	{"AgentPing", "POST /nodes/cedar/qemu/2501/agent/ping", maxSmallAnswer, `{"data":{"result":{},"x":"`, `"}}`,
 		func(c *Client) error { return c.AgentPing(context.Background(), "cedar", 2501) }},
+	{"AgentRead", "POST /nodes/cedar/qemu/2501/agent/exec", maxSmallAnswer, `{"data":{"pid":7,"x":"`, `"}}`,
+		func(c *Client) error {
+			_, err := c.AgentRead(context.Background(), "cedar", 2501, []string{"true"})
+			return err
+		}},
 	{"AgentExec", "POST /nodes/cedar/qemu/2501/agent/exec", maxSmallAnswer, `{"data":{"pid":7,"x":"`, `"}}`,
 		func(c *Client) error {
 			_, err := c.AgentExec(context.Background(), "cedar", 2501, []string{"true"}, "")

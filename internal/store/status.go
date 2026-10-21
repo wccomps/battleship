@@ -75,8 +75,8 @@ func (s JobStatus) RanNothing() bool { r, _ := s.rule(); return r.ranNothing }
 // CanRetry reports whether a job with this status may be retried.
 func (s JobStatus) CanRetry() bool { r, _ := s.rule(); return r.retry }
 
-// StartAgain reports whether the job's form is offered again: nothing ran,
-// or it was cancelled.
+// StartAgain reports whether the job's form is offered again (when retry isn't):
+// nothing ran, or it failed, was interrupted, or was cancelled.
 func (s JobStatus) StartAgain() bool { r, _ := s.rule(); return r.startAgain }
 
 // CancelTooLate reports whether a cancel on a job ending this way stopped

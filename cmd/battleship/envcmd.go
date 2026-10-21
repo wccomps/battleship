@@ -11,7 +11,6 @@ import (
 
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
-	"github.com/wccomps/battleship/internal/web"
 )
 
 // stringList is a repeatable string flag.
@@ -30,7 +29,7 @@ func runImage(ctx context.Context, args []string, d deps) int {
 }
 
 // parseImage reads an image command's flags into the inputs the web form
-// would give (web.Normalize); if not ok, the command exits with code.
+// would give (Inputs.Normalize); if not ok, the command exits with code.
 func parseImage(args []string, stderr io.Writer) (c command, code int, ok bool) {
 	kinds := map[string]pods.Kind{"register": pods.KindImageRegister, "edit": pods.KindImageEdit,
 		"deprecate": pods.KindImageDeprecate, "delete": pods.KindImageDelete}
@@ -65,7 +64,7 @@ func parseImage(args []string, stderr io.Writer) (c command, code int, ok bool) 
 		fmt.Fprintln(stderr, "-vm is required: the VMID of the VM to register")
 		return c, 2, false
 	}
-	return command{in: web.Normalize(in), cfgPath: *cfgPath, yes: *yes, queue: *queue}, 0, true
+	return command{in: in.Normalize(), cfgPath: *cfgPath, yes: *yes, queue: *queue}, 0, true
 }
 
 // runEnv handles battleship env create|add|teardown.
@@ -78,7 +77,7 @@ func runEnv(ctx context.Context, args []string, d deps) int {
 }
 
 // parseEnv reads an environment command's flags into the inputs the web
-// form would give (web.Normalize); if not ok, the command exits with code.
+// form would give (Inputs.Normalize); if not ok, the command exits with code.
 func parseEnv(args []string, stderr io.Writer) (c command, code int, ok bool) {
 	kinds := map[string]pods.Kind{"create": pods.KindEnvCreate, "add": pods.KindEnvAdd, "teardown": pods.KindEnvTeardown}
 	if len(args) == 0 || kinds[args[0]] == "" {
@@ -106,7 +105,7 @@ func parseEnv(args []string, stderr io.Writer) (c command, code int, ok bool) {
 		return c, 2, false
 	}
 	in.EnvHosts = hosts
-	return command{in: web.Normalize(in), cfgPath: *cfgPath, yes: *yes, queue: *queue}, 0, true
+	return command{in: in.Normalize(), cfgPath: *cfgPath, yes: *yes, queue: *queue}, 0, true
 }
 
 func commonFlags(fs *flag.FlagSet) (cfgPath *string, yes, queue *bool) {

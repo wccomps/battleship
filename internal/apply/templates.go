@@ -41,8 +41,8 @@ type tplBuild struct {
 // blocks until all have.
 //
 // A build holds a template_builds slot throughout, bounding how many
-// masters are stopped at once; the copy also takes a master-node clone
-// slot (see ensureTemplate).
+// masters are stopped at once; the copy also takes a clone slot (see
+// ensureTemplate).
 func (e *Executor) startTemplates(ctx context.Context, specs []pods.TemplateSpec, builds map[string]*tplBuild, pending []pods.Item) (wait func()) {
 	var wg sync.WaitGroup
 	for _, spec := range specs {

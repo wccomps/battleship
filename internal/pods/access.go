@@ -174,8 +174,9 @@ func one(path, priv string) need { return need{{path, priv}} }
 func VMPath(vmid int) string      { return "/vms/" + strconv.Itoa(vmid) }
 func PoolPath(pool string) string { return "/pool/" + pool }
 
-// LiveAddrsPrivilege is what reading a VM's addresses from its guest agent
-// (LiveAddrs) needs.
+// LiveAddrsPrivilege is what reading a VM's NIC addresses from its guest
+// agent (LiveAddrs) needs; the SSH check in LiveAddrs also uses
+// VM.GuestAgent.Unrestricted when held.
 const LiveAddrsPrivilege = "VM.GuestAgent.Audit"
 
 // OfferPrivileges are the privileges any of which makes k worth offering:
@@ -187,7 +188,11 @@ func OfferPrivileges(k Kind) []string { return slices.Clone(specs[k].offer) }
 // vmid or on pool (for a VM a deploy will create; see on). Unreadable paths
 // grant nothing.
 func HoldsOffered(ctx context.Context, acc Access, k Kind, vmid int, pool string) bool {
-	for _, path := range []string{VMPath(vmid), PoolPath(pool)} {
+	paths := []string{VMPath(vmid)}
+	if pool != "" {
+		paths = append(paths, PoolPath(pool))
+	}
+	for _, path := range paths {
 		held, err := acc.Privileges(ctx, path)
 		if err == nil && slices.ContainsFunc(specs[k].offer, func(p string) bool { _, ok := held[p]; return ok }) {
 			return true

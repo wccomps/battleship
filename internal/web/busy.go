@@ -32,12 +32,13 @@ type busyCache struct {
 	last   busySet // the last good read, shown while a read fails
 }
 
-// sharedBusy returns the busy VMs as read at or after hub sequence need, on
-// the server's lifetime since others may wait. On failure it logs and returns
-// the last good set: the marks are a hint and the grid works without them.
-func (s *Server) sharedBusy(ctx context.Context, need uint64) busySet {
+// sharedBusy returns the busy VMs as read at or after the latest job change
+// (status.Hub.JobSeq), on the server's lifetime since others may wait. On
+// failure it logs and returns the last good set: the marks are a hint and the
+// grid works without them.
+func (s *Server) sharedBusy(ctx context.Context) busySet {
 	c := &s.busy
-	set, err := c.flight.get(ctx, struct{}{}, need, s.hub.Seq, func() (busySet, error) {
+	set, err := c.flight.get(ctx, struct{}{}, s.hub.JobSeq(), s.hub.JobSeq, func() (busySet, error) {
 		s.busyReads.Add(1)
 		rctx, cancel := context.WithTimeout(s.life, busyTimeout)
 		defer cancel()

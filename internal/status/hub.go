@@ -68,6 +68,7 @@ type Hub struct {
 	subs    map[string]map[*subscriber]struct{}
 	stopped bool
 	seq     uint64 // the last message's Seq
+	jobSeq  uint64 // the last TopicJobs, connect or disconnect sequence number
 }
 
 type subscriber struct {
@@ -148,12 +149,24 @@ func (h *Hub) Seq() uint64 {
 	return h.seq
 }
 
+// JobSeq is the sequence number of the last TopicJobs message, connect or
+// disconnect. Busy-VM reads started once JobSeq reached its value see every
+// job change published so far.
+func (h *Hub) JobSeq() uint64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.jobSeq
+}
+
 // Publish sends m to the subscribers of m.Topic without blocking, stamped
 // with the next sequence number (m.Seq is ignored).
 func (h *Hub) Publish(m Msg) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.seq++
+	if m.Topic == TopicJobs {
+		h.jobSeq++
+	}
 	m.Seq = h.seq
 	for s := range h.subs[m.Topic] {
 		h.deliver(s, m)
@@ -204,6 +217,7 @@ func (h *Hub) bumpSeq() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.seq++
+	h.jobSeq++
 }
 
 // resyncAll tells every subscriber to re-read what it shows.
@@ -211,6 +225,7 @@ func (h *Hub) resyncAll() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.seq++
+	h.jobSeq++
 	for _, subs := range h.subs {
 		for s := range subs {
 			// Multi-topic subscribers get one per topic; they merge.

@@ -56,13 +56,13 @@ func runNodes(ctx context.Context, args []string, d deps) int {
 		if n.Online {
 			status = "online"
 		}
-		ip := n.IP
+		ip := clean(n.IP)
 		if ip == "" {
 			ip = "-"
 		} else {
-			urls = append(urls, fmt.Sprintf("%q", "https://"+net.JoinHostPort(n.IP, "8006")))
+			urls = append(urls, fmt.Sprintf("%q", "https://"+net.JoinHostPort(ip, "8006")))
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", n.Name, status, ip)
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", clean(n.Name), status, ip)
 	}
 	tw.Flush()
 	fmt.Fprintf(d.stdout, "\nPaste under [proxmox] in place of url (battleship uses one at a time and fails over in this order):\nurls = [%s]\n", strings.Join(urls, ", "))
