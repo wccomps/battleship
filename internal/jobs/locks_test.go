@@ -76,6 +76,27 @@ func TestJobsTouchingOneVMShareALock(t *testing.T) {
 	}
 }
 
+// Deleting a base image template takes the cluster-wide storage-ops slot for
+// its whole run, so queued image deletes across families share storage-ops and
+// wait in pending instead of claiming extra workers.
+func TestImageDeletesAcrossFamiliesShareStorageOpsLock(t *testing.T) {
+	ctx := context.Background()
+	f := envCluster()
+	f.Add(proxmox.VM{VMID: 8002, Name: "win11-v1", Node: "alder", Template: true, Tags: "base;windows;deprecated"}, nil)
+	p := pods.NewPlanner(f, config.Default())
+	delA, err := p.ImageDelete(ctx, pods.ImageRequest{Image: "debian-12-v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delB, err := p.ImageDelete(ctx, pods.ImageRequest{Image: "win11-v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !clash(delA, delB) {
+		t.Errorf("image deletes %v and %v share no lock, want storage-ops", writeKeys(delA), writeKeys(delB))
+	}
+}
+
 // Only the image's own changes wait: clones of an image share it, and its
 // delete, or a register that retires it, waits for them.
 func TestCloningAnImageIsShared(t *testing.T) {
