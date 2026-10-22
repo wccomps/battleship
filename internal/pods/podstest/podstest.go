@@ -139,7 +139,8 @@ type Fake struct {
 	ExecRunsFor func(pid int) int
 	// Restarts maps a PID to its guest restarting under that command: its
 	// next status read finds the agent restarted and the PID forgotten. PIDs
-	// count from 1 in the order commands start, setup state reads included.
+	// count from 1 in the order commands start, setup state reads and SSH
+	// checks included.
 	Restarts map[int]Restart
 	// Execs are the guest commands run, in order, except setup state reads
 	// and SSH checks.

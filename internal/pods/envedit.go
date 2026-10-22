@@ -96,25 +96,20 @@ func (req HostEditInput) Check() error {
 	return errors.Join(errs...)
 }
 
-// HostToEdit finds the environment host with vmid in envs and vms for
-// editing.
-func HostToEdit(envs []Environment, vms []proxmox.VM, vmid int) (HostEdit, error) {
-	at, _, err := findEnvHost(envs, vms, vmid)
-	return at, err
-}
+// ErrNoEnvHost marks a VMID that is missing, half-deleted, or outside any
+// dev slot pool.
+var ErrNoEnvHost = errors.New("not an environment host")
 
-func findEnvHost(envs []Environment, vms []proxmox.VM, vmid int) (HostEdit, proxmox.VM, error) {
-	if env, h, ok := EnvHostByID(envs, vmid); ok {
-		vm, _ := vmByID(vms, vmid)
-		return HostEdit{Env: env, Host: h, Read: readVMNotes(h.VMID, h.desc)}, vm, nil
-	}
-	if vm, ok := vmByID(vms, vmid); ok {
-		if vm.Lock == "destroyed" {
-			return HostEdit{}, vm, errors.New(HalfDeletedText(vm.VMID, vm.Node))
-		}
-		return HostEdit{}, vm, fmt.Errorf("%s (%d) is not in a dev slot pool", vm.Name, vmid)
-	}
-	return HostEdit{}, proxmox.VM{}, fmt.Errorf("there is no environment host with VMID %d, or you can't see it", vmid)
+type noEnvHostError struct{ msg string }
+
+func (e noEnvHostError) Error() string        { return e.msg }
+func (e noEnvHostError) Is(target error) bool { return target == ErrNoEnvHost }
+
+// HostToEdit reads the dev slot containing vmid from vms and returns vmid's
+// HostEdit.
+func (p Planner) HostToEdit(ctx context.Context, vms []proxmox.VM, vmid int) (HostEdit, error) {
+	at, _, err := p.envHostFrom(ctx, vms, vmid)
+	return at, err
 }
 
 // envHost reads only the dev slot containing vmid, rather than every slot
@@ -124,17 +119,22 @@ func (p Planner) envHost(ctx context.Context, vmid int) (HostEdit, proxmox.VM, [
 	if err != nil {
 		return HostEdit{}, proxmox.VM{}, nil, err
 	}
+	at, vm, err := p.envHostFrom(ctx, vms, vmid)
+	return at, vm, vms, err
+}
+
+func (p Planner) envHostFrom(ctx context.Context, vms []proxmox.VM, vmid int) (HostEdit, proxmox.VM, error) {
 	vm, ok := vmByID(vms, vmid)
 	if !ok {
-		return HostEdit{}, proxmox.VM{}, nil, fmt.Errorf("there is no environment host with VMID %d, or you can't see it", vmid)
+		return HostEdit{}, proxmox.VM{}, noEnvHostError{fmt.Sprintf("there is no environment host with VMID %d, or you can't see it", vmid)}
 	}
 	if vm.Lock == "destroyed" {
-		return HostEdit{}, vm, nil, errors.New(HalfDeletedText(vm.VMID, vm.Node))
+		return HostEdit{}, vm, noEnvHostError{HalfDeletedText(vm.VMID, vm.Node)}
 	}
 	slots := Slots(p.Cfg.Environments)
 	si := slices.IndexFunc(slots, func(s Slot) bool { return s.Pool == vm.Pool })
 	if si < 0 {
-		return HostEdit{}, vm, nil, fmt.Errorf("%s (%d) is not in a dev slot pool", vm.Name, vmid)
+		return HostEdit{}, vm, noEnvHostError{fmt.Sprintf("%s (%d) is not in a dev slot pool", vm.Name, vmid)}
 	}
 	slot := slots[si]
 	var inSlot []proxmox.VM
@@ -160,7 +160,7 @@ func (p Planner) envHost(ctx context.Context, vmid int) (HostEdit, proxmox.VM, [
 		})
 	}
 	if err := g.Wait(); err != nil {
-		return HostEdit{}, proxmox.VM{}, nil, err
+		return HostEdit{}, proxmox.VM{}, err
 	}
 	cpuModels := p.customCPUModels(ctx, vm.Node)
 	env := Environment{Slot: slot, LAN: p.Cfg.Environments.Subnet}
@@ -170,8 +170,12 @@ func (p Planner) envHost(ctx context.Context, vmid int) (HostEdit, proxmox.VM, [
 		}
 	}
 	setEnvDomain(&env)
-	at, vm, err := findEnvHost([]Environment{env}, vms, vmid)
-	return at, vm, vms, err
+	for _, h := range env.Hosts {
+		if h.VMID == vmid {
+			return HostEdit{Env: env, Host: h, Read: readVMNotes(h.VMID, h.desc())}, vm, nil
+		}
+	}
+	return HostEdit{}, proxmox.VM{}, noEnvHostError{fmt.Sprintf("there is no environment host with VMID %d, or you can't see it", vmid)}
 }
 
 func hostLocks(slot Slot, domains ...string) []string {
@@ -185,7 +189,7 @@ func hostLocks(slot Slot, domains ...string) []string {
 }
 
 // EnvEdit plans editing an existing host in a dev slot: its name, kind,
-// address, base image, attached CD-ROM, details and free notes. When a
+// address, base image, CPU, attached CD-ROM, details and free notes. When a
 // Windows or Linux host's name, address or OS kind changes, the guest agent
 // configures it inside the VM too.
 func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) {
@@ -197,7 +201,7 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 		return nil, err
 	}
 	env, h := at.Env, at.Host
-	wantName, wantHost, domain, err := resolveHostName(env, h, req.Host)
+	wantName, wantHost, domain, err := resolveHostName(env, h, strings.TrimSpace(req.Host))
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +296,7 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 	if wantName != h.Name {
 		it.Rename = wantName
 	}
-	if it.Rename != "" || !sameTags(h.Tags, wantTags) || WithNotes(h.desc, wantNotes) != h.desc {
+	if it.Rename != "" || !sameTags(h.Tags, wantTags) || WithNotes(h.desc(), wantNotes) != h.desc() {
 		it.Tags = wantTags
 		it.Notes = &wantNotes
 		it.Steps = append(it.Steps, StepLabel)
@@ -373,32 +377,24 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 			it.Blocked = h.Name + " already has these settings"
 		}
 	}
-	it.blockLongNotes(h.desc)
+	it.blockLongNotes(h.desc())
 	return &Plan{Kind: KindEnvEdit, Config: ConfigHash(KindEnvEdit, p.Cfg), Slot: env.Slot.Name,
 		Locks: hostLocks(env.Slot, env.Domain, Domain(h.Name), domain), Items: []Item{it}}, nil
 }
 
 // resolveHostName resolves input (empty, a host label like "dc", or a full
-// name like "dc.kilo.alpha") against env and h.
+// name like "dc.kilo.alpha", already checked by HostEditInput.Check) against
+// env and h.
 func resolveHostName(env Environment, h EnvHost, input string) (full, host, domain string, err error) {
 	curDomain := cmp.Or(env.Domain, Domain(h.Name))
 	if input == "" {
 		return h.Name, h.Host, curDomain, nil
 	}
 	if hostPart, domPart, ok := strings.Cut(input, "."); ok {
-		if err := CheckHostname(hostPart); err != nil {
-			return "", "", "", err
-		}
-		if err := CheckDomain(domPart); err != nil {
-			return "", "", "", err
-		}
 		if env.Domain != "" && domPart != env.Domain && len(env.Hosts) > 1 {
 			return "", "", "", fmt.Errorf("dev slot %s holds %s; name the host without a domain, or %s.%s", env.Slot.Name, env.Domain, hostPart, env.Domain)
 		}
 		return input, hostPart, domPart, nil
-	}
-	if err := CheckHostname(input); err != nil {
-		return "", "", "", err
 	}
 	if curDomain == "" {
 		return "", "", "", fmt.Errorf("%s has no domain in its name; write the full name as <host>.<domain>, e.g. %s.kilo.alpha", h.Name, input)

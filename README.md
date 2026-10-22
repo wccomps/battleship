@@ -83,7 +83,7 @@ naming the missing privilege.
 
 | Step | Privilege | Path |
 |---|---|---|
-| Clone | `VM.Clone`; `VM.Allocate`; `Datastore.AllocateSpace` (`Mapping.Use` for a `custom-<model>` CPU; `SDN.Use` on an edit/slot source bridge) | template or source; target pool; `/storage/<deploy.storage>` (`/mapping/cpu/<model>`) |
+| Clone | `VM.Clone`; `VM.Allocate`; `Datastore.AllocateSpace` (`Mapping.Use` for a `custom-<model>` CPU; `SDN.Use` on an edit/slot/team source bridge) | template or source; target pool; `/storage/<deploy.storage>` (`/mapping/cpu/<model>`; `/sdn/zones/<zone>/<bridge>`) |
 | Build template | `VM.Clone` (`VM.PowerMgmt` if stopping a running master); `VM.Allocate`; `Datastore.AllocateSpace` (`Mapping.Use` for a `custom-<model>` CPU) | master; `<images.pool>` (rebuild: also the old template); `/storage/<deploy.storage>` |
 | Network | `VM.Config.Network` (`VM.Config.Cloudinit` for cloud-init); `SDN.Use` | VM or pool; `/sdn/zones/<zone>/<bridge>` |
 | Disk limits / CD-ROM / CPU | `VM.Config.Disk` / `VM.Config.CDROM` / `VM.Config.CPU` (`Mapping.Use` on `/mapping/cpu/<model>`) | VM or pool |

@@ -83,7 +83,7 @@ func (p *Poller) Scan(ctx context.Context) error {
 	return nil
 }
 
-// dbClockReadTimeout keeps a hung connection from stalling the drift scan.
+// dbClockReadTimeout keeps a hung connection from stalling a poll or drift scan.
 const dbClockReadTimeout = 10 * time.Second
 
 // measureOffset records and returns the database clock's offset from
@@ -103,6 +103,7 @@ func (p *Poller) measureOffset(ctx context.Context) time.Duration {
 		return p.dbOffset
 	}
 	p.dbOffset = dbNow.Sub(before.Add(after.Sub(before) / 2))
+	p.offsetRead = true
 	return p.dbOffset
 }
 

@@ -22,6 +22,9 @@ func TestEnvHostSheet(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /environments/host?vmid=2101 = %d\n%s", rec.Code, rec.Body)
 	}
+	if got := h.api.Called("config:2400"); got != 0 {
+		t.Errorf("GET /environments/host?vmid=2101 read 2400's config in dev-04 %d times, want 0", got)
+	}
 	body := rec.Body.String()
 	contains(t, "teak's sheet", body,
 		`<h1 id="host-title"><span class="vm">teak.kilo.alpha</span> <span class="chip">linux</span></h1>`,
@@ -69,6 +72,9 @@ func TestEnvEditFormAndConfirm(t *testing.T) {
 	form := h.get(&sess, "/environments/edit?vmid=2101").Body.String()
 	if got := h.api.Called("config:2101") - before; got != 1 {
 		t.Errorf("GET /environments/edit read 2101's config %d times, want 1", got)
+	}
+	if got := h.api.Called("config:2400"); got != 0 {
+		t.Errorf("GET /environments/edit?vmid=2101 read 2400's config in dev-04 %d times, want 0", got)
 	}
 	contains(t, "edit form", form,
 		`name="vmid" value="2101"`,

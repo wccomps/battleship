@@ -25,7 +25,7 @@ func runImage(ctx context.Context, args []string, d deps) int {
 	if !ok {
 		return code
 	}
-	return validated(ctx, d, args[0], c)
+	return runPlanned(ctx, d, args[0], c.cfgPath, c.in, false, c.yes, c.queue)
 }
 
 // parseImage reads an image command's flags into the inputs the web form
@@ -60,11 +60,7 @@ func parseImage(args []string, stderr io.Writer) (c command, code int, ok bool) 
 		}
 		return c, 2, false
 	}
-	if in.Kind == pods.KindImageRegister && in.VMID == 0 {
-		fmt.Fprintln(stderr, "-vm is required: the VMID of the VM to register")
-		return c, 2, false
-	}
-	return command{in: in.Normalize(), cfgPath: *cfgPath, yes: *yes, queue: *queue}, 0, true
+	return finishTeamless(fs, in, *cfgPath, *yes, *queue, stderr)
 }
 
 // runEnv handles battleship env create|add|teardown.
@@ -73,7 +69,7 @@ func runEnv(ctx context.Context, args []string, d deps) int {
 	if !ok {
 		return code
 	}
-	return validated(ctx, d, args[0], c)
+	return runPlanned(ctx, d, args[0], c.cfgPath, c.in, false, c.yes, c.queue)
 }
 
 // parseEnv reads an environment command's flags into the inputs the web
@@ -105,7 +101,7 @@ func parseEnv(args []string, stderr io.Writer) (c command, code int, ok bool) {
 		return c, 2, false
 	}
 	in.EnvHosts = hosts
-	return command{in: in.Normalize(), cfgPath: *cfgPath, yes: *yes, queue: *queue}, 0, true
+	return finishTeamless(fs, in, *cfgPath, *yes, *queue, stderr)
 }
 
 func commonFlags(fs *flag.FlagSet) (cfgPath *string, yes, queue *bool) {
@@ -114,12 +110,15 @@ func commonFlags(fs *flag.FlagSet) (cfgPath *string, yes, queue *bool) {
 		fs.Bool("queue", false, "queue the confirmed plan as a job and exit instead of following it")
 }
 
-// validated checks c's inputs before contacting anything, then plans and
-// applies.
-func validated(ctx context.Context, d deps, cmd string, c command) int {
-	if err := c.in.Validate(); err != nil {
-		fmt.Fprintln(d.stderr, err)
-		return 2
+func finishTeamless(fs *flag.FlagSet, in jobs.Inputs, cfgPath string, yes, queue bool, stderr io.Writer) (c command, code int, ok bool) {
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "unexpected argument %q (put flags before any other words)\n", fs.Arg(0))
+		return c, 2, false
 	}
-	return runPlanned(ctx, d, cmd, c.cfgPath, c.in, false, c.yes, c.queue)
+	in = in.Normalize()
+	if err := in.Validate(); err != nil {
+		fmt.Fprintln(stderr, err)
+		return c, 2, false
+	}
+	return command{in: in, cfgPath: cfgPath, yes: yes, queue: queue}, 0, true
 }

@@ -32,6 +32,9 @@ func TestImageRegisterNeedsVM(t *testing.T) {
 	if code, out := runCLI("image", "register", "-family", "deb"); code != 2 || !strings.Contains(out, "VMID") {
 		t.Errorf("code %d, output %q", code, out)
 	}
+	if code, out := runCLI("image", "edit", "-family", "deb", "extra"); code != 2 || !strings.Contains(out, "unexpected argument") {
+		t.Errorf("stray arg: code %d, output %q", code, out)
+	}
 }
 
 // -slot takes the slot's number as well as its two-digit name.

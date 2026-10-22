@@ -308,8 +308,8 @@ type jobView struct {
 	// RanAt is the full time, for a title.
 	Ran, RanAt string
 	Asked      []fact // the inputs beyond teams and hosts, e.g. the snapshot
-	// Details are the details a register or Edit notes writes, and Notes
-	// the free text an Edit notes writes.
+	// Details are the details a register, Edit notes, or Edit host writes,
+	// and Notes the free text an Edit notes or Edit host writes.
 	Details    *detailsView
 	Notes      string
 	Error      string
@@ -1090,31 +1090,11 @@ func (s *Server) mayCancel(ctx context.Context, j store.Job, items []store.Item,
 	_ = json.Unmarshal(j.Plan, &plan)
 	kind := pods.Kind(j.Kind)
 	for _, it := range items {
-		if !pods.HoldsOffered(ctx, acc, kind, it.VMID, s.itemPool(kind, plan, it)) {
+		if !pods.HoldsOffered(ctx, acc, kind, it.VMID, plan.ItemPool(s.naming, it.Name, it.Team)) {
 			return false
 		}
 	}
 	return len(items) > 0
-}
-
-// itemPool is the Proxmox pool of job item it: its team pool, the pool planned
-// on the item or environment slot, or the images pool for image jobs.
-func (s *Server) itemPool(kind pods.Kind, plan pods.Plan, it store.Item) string {
-	if it.Team != "" {
-		return s.naming.Pool(it.Team)
-	}
-	for _, p := range plan.Items {
-		if p.Name == it.Name && p.Pool != "" {
-			return p.Pool
-		}
-	}
-	if n, ok := pods.ParseSlotName(plan.DevSlot()); ok {
-		return pods.ExpandSlot(s.cfg.Environments.Pool, n)
-	}
-	if op, ok := operationFor(kind); ok && op.Section == sectionImages {
-		return s.cfg.Images.Pool
-	}
-	return ""
 }
 
 // notPermitted says why a job's operation isn't offered to the viewer.

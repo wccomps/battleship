@@ -24,8 +24,8 @@ type catalogPage struct {
 	ReadErr  string // why the cluster couldn't be read
 	// Env is the environment an env-add form works on.
 	Env *pods.Environment
-	// Details fill a register's and an Edit notes's fields: those given,
-	// else those of the VM's notes or the family's newest version.
+	// Details fill a register's, an Edit notes's, and an Edit host's fields:
+	// those given, else those of the VM's notes or the family's newest version.
 	Details pods.ImageNotes
 	// Edit is what an Edit notes form edits (notesForm).
 	Edit *notesEdit
@@ -36,14 +36,14 @@ type catalogPage struct {
 	readErr error
 }
 
-// newCatalogPage reads images and, for an environment form, environments
+// newCatalogPage reads images and, when needEnvs is set, environments
 // as the user, without the images' notes: only the pages that show them
 // read them (withNotes).
-func (s *Server) newCatalogPage(ctx context.Context, section string) catalogPage {
+func (s *Server) newCatalogPage(ctx context.Context, needEnvs bool) catalogPage {
 	p := catalogPage{Subnet: s.cfg.Environments.Subnet.String()}
 	var vms []proxmox.VM
 	var err error
-	if section == sectionEnvironments {
+	if needEnvs {
 		p.Envs, vms, err = s.planner(ctx).Environments(ctx)
 	} else {
 		vms, err = s.planner(ctx).API.ClusterVMs(ctx)
@@ -86,11 +86,8 @@ func (s *Server) teamlessForm(w http.ResponseWriter, r *http.Request, status int
 // the request (newEnvForm); not ok if op's environment isn't there.
 func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, problem string) (catalogPage, bool) {
 	ctx := r.Context()
-	p := s.newCatalogPage(ctx, op.Section)
+	p := s.newCatalogPage(ctx, op.Machines || op.Kind.OnEnvironment())
 	p.Op, p.In, p.Error = op, in, problem
-	if in.Details != nil {
-		p.Details = *in.Details
-	}
 	if op.Kind.OnEnvironment() {
 		e, ok := pods.EnvByDomain(p.Envs, in.Domain)
 		if !ok && p.ReadErr == "" {
@@ -102,6 +99,12 @@ func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, prob
 	}
 	if op.prefill != nil {
 		op.prefill(s, ctx, &p)
+	}
+	if d := in.Details; d != nil {
+		p.Details.ImageDetails, p.Details.From = d.ImageDetails, d.From
+		if d.Free != nil {
+			p.Details.Free = d.Free
+		}
 	}
 	if op.Machines {
 		form := r.URL.Query()

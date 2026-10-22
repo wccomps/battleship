@@ -185,7 +185,7 @@ const LiveAddrsPrivilege = "VM.GuestAgent.Audit"
 func OfferPrivileges(k Kind) []string { return slices.Clone(specs[k].offer) }
 
 // HoldsOffered reports whether acc grants any of k's OfferPrivileges on VM
-// vmid or on pool (for a VM a deploy will create; see on). Unreadable paths
+// vmid or on pool (for a VM a clone will create; see on). Unreadable paths
 // grant nothing.
 func HoldsOffered(ctx context.Context, acc Access, k Kind, vmid int, pool string) bool {
 	paths := []string{VMPath(vmid)}
@@ -247,10 +247,7 @@ func templateNeeds(t TemplateSpec, cfg config.Config) []need {
 func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAccess) []need {
 	pool := ""
 	if slices.Contains(it.Steps, StepClone) {
-		pool = NewNaming(cfg.Naming).Pool(it.Team)
-		if it.Source != nil {
-			pool = it.Pool
-		}
+		pool = it.TargetPool(NewNaming(cfg.Naming))
 	}
 	var ns []need
 	for _, st := range it.Steps {

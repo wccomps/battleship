@@ -268,6 +268,31 @@ type Item struct {
 	DetailsWas *NotesRead `json:"details_was,omitempty"`
 }
 
+// TargetPool is the Proxmox pool of it: its Pool if set, else its team's
+// pool when it has a Team.
+func (it Item) TargetPool(naming Naming) string {
+	if it.Pool != "" {
+		return it.Pool
+	}
+	if it.Team != "" {
+		return naming.Pool(it.Team)
+	}
+	return ""
+}
+
+// ItemPool is the Proxmox pool of the planned item with name or team.
+func (plan *Plan) ItemPool(naming Naming, name, team string) string {
+	if team != "" {
+		return naming.Pool(team)
+	}
+	for _, it := range plan.Items {
+		if it.Name == name && it.Pool != "" {
+			return it.Pool
+		}
+	}
+	return ""
+}
+
 // Plan is what an operation will do: the templates a deploy needs and one
 // item per VM. It is stored with each job, so its JSON keys are a stored
 // format.

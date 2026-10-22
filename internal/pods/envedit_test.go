@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -23,11 +24,11 @@ func TestEnvEditUpdatesNotesDetailsRenameAndGuest(t *testing.T) {
 	p := NewPlanner(f, envConfig())
 	ctx := context.Background()
 
-	envs, vms, err := p.Environments(ctx)
+	vms, err := p.API.ClusterVMs(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	at, err := HostToEdit(envs, vms, 2101)
+	at, err := p.HostToEdit(ctx, vms, 2101)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +36,6 @@ func TestEnvEditUpdatesNotesDetailsRenameAndGuest(t *testing.T) {
 		t.Fatalf("HostToEdit = %+v", at)
 	}
 
-	// Editing only details and base image does not touch the guest agent.
 	det := at.Edit()
 	det.OS = "Debian 12.8"
 	free := "Patched kernel."
@@ -49,7 +49,6 @@ func TestEnvEditUpdatesNotesDetailsRenameAndGuest(t *testing.T) {
 		t.Fatalf("details+base edit item = %+v", it)
 	}
 
-	// Renaming and changing the octet schedules guest reconfiguration and ejects CD-ROM.
 	plan, err = p.EnvEdit(ctx, HostEditInput{VMID: 2101, Host: "oak", Octet: 25, EjectCDROM: true})
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +62,6 @@ func TestEnvEditUpdatesNotesDetailsRenameAndGuest(t *testing.T) {
 		t.Fatalf("guest = %+v", it.Guest)
 	}
 
-	// Unchanged settings are blocked.
 	plan, err = p.EnvEdit(ctx, HostEditInput{VMID: 2101})
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +70,6 @@ func TestEnvEditUpdatesNotesDetailsRenameAndGuest(t *testing.T) {
 		t.Fatalf("unchanged edit blocked = %q", plan.Items[0].Blocked)
 	}
 
-	// Setting a custom CPU model schedules StepCPU and checks CPUModels.
 	f.CPUModels = []string{"lab-baseline", "lab-baseline-nested"}
 	plan, err = p.EnvEdit(ctx, HostEditInput{VMID: 2101, CPU: "lab-baseline"})
 	if err != nil {
@@ -126,5 +123,13 @@ func TestEnvPowerAndDeleteHost(t *testing.T) {
 	}
 	if _, err := p.EnvEdit(ctx, HostEditInput{VMID: 2101, Image: "debian-12-v2"}); err != nil {
 		t.Fatal(err)
+	}
+	vms, err := p.API.ClusterVMs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(f.VMs, 2101)
+	if _, err := p.HostToEdit(ctx, vms, 2101); !errors.Is(err, ErrNoEnvHost) || strings.Contains(err.Error(), "not in a dev slot pool") {
+		t.Fatalf("HostToEdit on concurrently deleted VM = %v, want ErrNoEnvHost not-found error", err)
 	}
 }

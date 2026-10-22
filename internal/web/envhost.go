@@ -78,18 +78,22 @@ func (s *Server) envHostPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	planner := s.planner(ctx)
-	envs, vms, err := planner.Environments(ctx)
+	vms, err := planner.API.ClusterVMs(ctx)
+	var at pods.HostEdit
+	if err == nil {
+		at, err = planner.HostToEdit(ctx, vms, vmid)
+	}
+	if errors.Is(err, pods.ErrNoEnvHost) {
+		s.errorPage(w, r, http.StatusNotFound, "No such host",
+			fmt.Sprintf("There's no environment host with VMID %d. It may have been deleted.", vmid), envsPath, "Back to Environments")
+		return
+	}
 	if err != nil {
 		s.errorPage(w, r, http.StatusBadGateway, "Environments",
 			"Couldn't read the cluster: "+sentence(proxmox.Describe(err)), envsPath, "Back to Environments")
 		return
 	}
-	env, h, ok := pods.EnvHostByID(envs, vmid)
-	if !ok {
-		s.errorPage(w, r, http.StatusNotFound, "No such host",
-			fmt.Sprintf("There's no environment host with VMID %d. It may have been deleted.", vmid), envsPath, "Back to Environments")
-		return
-	}
+	env, h := at.Env, at.Host
 	kind := cmp.Or(h.Notes.OS, pods.ImageOther)
 	if h.Router {
 		kind = pods.ImageRouter
@@ -181,7 +185,7 @@ func (s *Server) envHostPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, http.StatusOK, "envhost", s.newView(w, r, h.Name, "environments", p))
 }
 
-// hostEdit is what an Edit host form edits (pods.HostToEdit).
+// hostEdit is what an Edit host form edits (pods.Planner.HostToEdit).
 type hostEdit struct {
 	VMID       int
 	Name       string
@@ -204,15 +208,16 @@ type hostEdit struct {
 
 // hostEditPrefill fills Edit host's form from the host VM's current config
 // and notes, or from the inputs a refused preview posted.
-func (s *Server) hostEditPrefill(_ context.Context, p *catalogPage) {
+func (s *Server) hostEditPrefill(ctx context.Context, p *catalogPage) {
 	p.ReadErr, p.Host = "", &hostEdit{}
 	if p.In.VMID < 100 {
 		p.Host.Err = "Choose the environment host to edit: each host on Environments has Edit."
 		return
 	}
-	at, err := pods.HostToEdit(p.Envs, p.vms, p.In.VMID)
-	if p.readErr != nil {
-		err = p.readErr
+	var at pods.HostEdit
+	err := p.readErr
+	if err == nil {
+		at, err = s.planner(ctx).HostToEdit(ctx, p.vms, p.In.VMID)
 	}
 	p.Host.VMID, p.Host.Name = at.Host.VMID, at.Host.Name
 	if err != nil {
@@ -271,10 +276,4 @@ func (s *Server) hostEditPrefill(_ context.Context, p *catalogPage) {
 		Was:        at.Read,
 	}
 	p.Details = at.Edit()
-	if d := p.In.Details; d != nil {
-		p.Details.ImageDetails, p.Details.From = d.ImageDetails, d.From
-		if d.Free != nil {
-			p.Details.Free = d.Free
-		}
-	}
 }

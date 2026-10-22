@@ -163,11 +163,19 @@ func TestScanComparesInDatabaseTime(t *testing.T) {
 	}
 }
 
-// A cell read uses the offset measured at the first poll or last scan.
+// A cell read uses the offset measured at the first poll (retrying on the
+// next poll if the first clock read failed) or last scan.
 func TestDetailComparesInDatabaseTime(t *testing.T) {
 	h := newHarness(t, nil)
 	driftCluster(h)
 	h.hist.setSkew(5 * time.Minute)
+	h.hist.mu.Lock()
+	h.hist.nowErr = errors.New("clock read failed on first poll")
+	h.hist.mu.Unlock()
+	h.poll(t)
+	h.hist.mu.Lock()
+	h.hist.nowErr = nil
+	h.hist.mu.Unlock()
 	h.poll(t)
 	h.clock.Advance(time.Minute)
 	readAt := h.clock.Now()

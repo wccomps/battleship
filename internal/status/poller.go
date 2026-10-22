@@ -66,10 +66,11 @@ type Poller struct {
 	scannedAt time.Time
 	scanErr   string
 	grid      Grid
-	// dbOffset is the database clock minus p.clock, from the last scan. Scan
-	// times are kept in database time so they compare with job finish times
-	// despite host clock skew.
-	dbOffset time.Duration
+	// dbOffset is the database clock minus p.clock, from the first poll or
+	// last scan. Scan times are kept in database time so they compare with job
+	// finish times despite host clock skew.
+	dbOffset   time.Duration
+	offsetRead bool
 	// dbClockTimeout is dbClockReadTimeout; tests shorten it.
 	dbClockTimeout time.Duration
 
@@ -207,10 +208,10 @@ func (p *Poller) Poll(ctx context.Context) error {
 		return p.pollFailed(ctx, fmt.Errorf("reading the job history: %w", err))
 	}
 	p.mu.Lock()
-	first := p.polledAt.IsZero()
+	needOffset := !p.offsetRead
 	offset := p.dbOffset
 	p.mu.Unlock()
-	if first {
+	if needOffset {
 		offset = p.measureOffset(ctx)
 	}
 	rescanned := p.touchedByTasks(ctx, teamVMs, offset)

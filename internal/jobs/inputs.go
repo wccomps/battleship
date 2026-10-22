@@ -163,17 +163,13 @@ var requests = map[pods.Kind]request{
 	pods.KindEnvEdit: {
 		takes: inVMID | inDetails | inFreeNotes,
 		check: func(in Inputs) []error {
-			if _, err := in.HostEditInput(); err != nil {
+			if err := in.hostEditInput().Check(); err != nil {
 				return []error{err}
 			}
 			return nil
 		},
 		plan: func(ctx context.Context, p pods.Planner, in Inputs, _ []string) (*pods.Plan, error) {
-			req, err := in.HostEditInput()
-			if err != nil {
-				return nil, err
-			}
-			return p.EnvEdit(ctx, req)
+			return p.EnvEdit(ctx, in.hostEditInput())
 		},
 	},
 	pods.KindEnvPower: {
@@ -562,9 +558,8 @@ func (in Inputs) Normalize() Inputs {
 	return out
 }
 
-// HostEditInput parses an environment host edit job's inputs.
-func (in Inputs) HostEditInput() (pods.HostEditInput, error) {
-	req := pods.HostEditInput{
+func (in Inputs) hostEditInput() pods.HostEditInput {
+	return pods.HostEditInput{
 		VMID:       in.VMID,
 		Host:       strings.TrimSpace(in.EnvHost),
 		Kind:       in.ImageKind,
@@ -574,7 +569,6 @@ func (in Inputs) HostEditInput() (pods.HostEditInput, error) {
 		EjectCDROM: in.EjectCDROM,
 		Details:    in.Details,
 	}
-	return req, req.Check()
 }
 
 // EnvRequest parses an environment job's inputs.

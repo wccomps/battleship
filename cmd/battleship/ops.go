@@ -291,10 +291,10 @@ func submitJob(ctx context.Context, d deps, cfg config.Config, in jobs.Inputs, p
 	return st, id, closeStore, nil
 }
 
-// confirm asks the volunteer to approve the plan just printed. Teardown
-// requires typing the -pods value as given, or, for -pods all, the pods
-// it stands for; an environment's teardown its -domain and an environment
-// host delete its VM name (jobs.Inputs.Typed); everything else takes "yes".
+// confirm asks the volunteer to approve the plan just printed. Operations
+// with a typed confirmation (jobs.Inputs.Typed: a pod teardown's -pods
+// value, an environment teardown's -domain, or a host delete's VM name)
+// require typing that value; everything else takes "yes".
 func confirm(d deps, in jobs.Inputs) bool {
 	want := "yes"
 	if in.Kind.TypedConfirm() {

@@ -129,11 +129,11 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		if exists {
 			return false, nil
 		}
-		req := proxmox.CloneRequest{NewVMID: it.VMID, Name: it.Name, TargetNode: it.Node, Storage: e.Cfg.Deploy.Storage}
+		req := proxmox.CloneRequest{NewVMID: it.VMID, Name: it.Name, TargetNode: it.Node, Pool: it.TargetPool(e.naming), Storage: e.Cfg.Deploy.Storage}
 		if it.Source != nil {
-			req.SourceNode, req.SourceVMID, req.Pool, req.Full = it.Source.Node, it.Source.VMID, it.Pool, true
+			req.SourceNode, req.SourceVMID, req.Full = it.Source.Node, it.Source.VMID, true
 		} else {
-			req.SourceNode, req.SourceVMID, req.Pool, req.Full = tpl.node, tpl.spec.VMID, e.naming.Pool(it.Team), !e.Cfg.Deploy.Linked
+			req.SourceNode, req.SourceVMID, req.Full = tpl.node, tpl.spec.VMID, !e.Cfg.Deploy.Linked
 		}
 		return e.cloneVM(ctx, it, req)
 

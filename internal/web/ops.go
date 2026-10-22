@@ -211,7 +211,7 @@ const (
 	fieldInstalled   = "detail_installed"
 	fieldLicence     = "detail_licence"
 	fieldNotes       = "notes"
-	fieldNotesFrom   = "notes_from" // the notes an Edit notes form opened on (pods.ImageNotes.From)
+	fieldNotesFrom   = "notes_from" // the notes an Edit notes or Edit host form opened on (pods.ImageNotes.From)
 	fromGridValue    = "grid"
 	yes              = "yes"
 )
@@ -221,57 +221,6 @@ const (
 // baseline (pods.BaselineSnapshot). VMs may come comma-separated (a confirm's
 // hidden field), one per ticked box (the grid), or both.
 func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
-	if kind.Teamless() {
-		in := jobs.Inputs{
-			Kind:       kind,
-			Domain:     form.Get(fieldDomain),
-			Slot:       form.Get(fieldSlot),
-			Router:     form.Get(fieldRouter),
-			EnvHosts:   []string{form.Get(fieldEnvHosts)},
-			EnvHost:    form.Get(fieldEnvHost),
-			EjectCDROM: form.Get(fieldEjectCDROM) == yes,
-			CPU:        form.Get(fieldCPU),
-			Action:     form.Get(fieldAction),
-			VMs:        form[fieldVMs],
-			ImageRequest: pods.ImageRequest{
-				Family:    form.Get(fieldFamily),
-				ImageKind: form.Get(fieldImageKind),
-				Image:     form.Get(fieldImage),
-			},
-		}
-		if (kind == pods.KindEnvCreate || kind == pods.KindEnvAdd) && form.Has(fieldRouterImage) {
-			in.Router = ""
-			if r := rawRow(form.Get(fieldRouterName), form.Get(fieldRouterImage), ""); r.Image != "" {
-				in.Router = r.line()
-			}
-		}
-		if (kind == pods.KindEnvCreate || kind == pods.KindEnvAdd) && form.Has(fieldHostName) {
-			in.EnvHosts = nil
-			for _, row := range postedRows(form) {
-				if line := row.line(); line != "" {
-					in.EnvHosts = append(in.EnvHosts, line)
-				}
-			}
-		}
-		if s := strings.TrimPrefix(strings.TrimSpace(form.Get(fieldOctet)), "."); strings.EqualFold(s, clearOctetValue) {
-			in.Octet = pods.ClearOctet
-		} else {
-			in.Octet, _ = strconv.Atoi(s)
-		}
-		in.VMID, _ = strconv.Atoi(strings.TrimSpace(form.Get(fieldVMID)))
-		if posted := form.Get(fieldDetails); posted == yes || posted == detailsWithNotes {
-			n := pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: form.Get(fieldOS), User: form.Get(fieldUser), Password: form.Get(fieldPassword),
-				Built: form.Get(fieldBuilt), Generalized: form.Get(fieldGeneralized), Installed: form.Get(fieldInstalled),
-				Licence: form.Get(fieldLicence)}}
-			if posted == detailsWithNotes {
-				free := form.Get(fieldNotes)
-				n.Free = &free
-			}
-			n.From = form.Get(fieldNotesFrom)
-			in.Details = &n
-		}
-		return in.Normalize()
-	}
 	in := jobs.Inputs{
 		Kind:        kind,
 		Teams:       form.Get(fieldTeams),
@@ -285,6 +234,49 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 		Description: form.Get(fieldDescription),
 		VMState:     form.Get(fieldVMState) == yes,
 		Action:      form.Get(fieldAction),
+		Domain:      form.Get(fieldDomain),
+		Slot:        form.Get(fieldSlot),
+		Router:      form.Get(fieldRouter),
+		EnvHosts:    []string{form.Get(fieldEnvHosts)},
+		EnvHost:     form.Get(fieldEnvHost),
+		EjectCDROM:  form.Get(fieldEjectCDROM) == yes,
+		CPU:         form.Get(fieldCPU),
+		ImageRequest: pods.ImageRequest{
+			Family:    form.Get(fieldFamily),
+			ImageKind: form.Get(fieldImageKind),
+			Image:     form.Get(fieldImage),
+		},
+	}
+	if (kind == pods.KindEnvCreate || kind == pods.KindEnvAdd) && form.Has(fieldRouterImage) {
+		in.Router = ""
+		if r := rawRow(form.Get(fieldRouterName), form.Get(fieldRouterImage), ""); r.Image != "" {
+			in.Router = r.line()
+		}
+	}
+	if (kind == pods.KindEnvCreate || kind == pods.KindEnvAdd) && form.Has(fieldHostName) {
+		in.EnvHosts = nil
+		for _, row := range postedRows(form) {
+			if line := row.line(); line != "" {
+				in.EnvHosts = append(in.EnvHosts, line)
+			}
+		}
+	}
+	if s := strings.TrimPrefix(strings.TrimSpace(form.Get(fieldOctet)), "."); strings.EqualFold(s, clearOctetValue) {
+		in.Octet = pods.ClearOctet
+	} else {
+		in.Octet, _ = strconv.Atoi(s)
+	}
+	in.VMID, _ = strconv.Atoi(strings.TrimSpace(form.Get(fieldVMID)))
+	if posted := form.Get(fieldDetails); posted == yes || posted == detailsWithNotes {
+		n := pods.ImageNotes{ImageDetails: pods.ImageDetails{OS: form.Get(fieldOS), User: form.Get(fieldUser), Password: form.Get(fieldPassword),
+			Built: form.Get(fieldBuilt), Generalized: form.Get(fieldGeneralized), Installed: form.Get(fieldInstalled),
+			Licence: form.Get(fieldLicence)}}
+		if posted == detailsWithNotes {
+			free := form.Get(fieldNotes)
+			n.Free = &free
+		}
+		n.From = form.Get(fieldNotesFrom)
+		in.Details = &n
 	}
 	return in.Normalize()
 }
