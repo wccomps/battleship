@@ -46,8 +46,8 @@ a{color:inherit}
 h1,h2,h3,p{margin:0}
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-.skip{position:absolute;left:-999px;z-index:50}
-.skip:focus{left:var(--s4);top:var(--s2);padding:6px 10px;border-radius:var(--r2);background:var(--sf)}
+a.skip{position:absolute;left:-999px;z-index:50}
+a.skip:focus{left:var(--s4);top:var(--s2);padding:6px 10px;border-radius:var(--r2);background:var(--sf)}
 .vm,code{font-family:var(--fm);font-size:.93em;white-space:nowrap}
 .name{white-space:nowrap}
 .muted{color:var(--tx3)}
@@ -75,6 +75,7 @@ details[open]>.disc::before{transform:rotate(90deg)}
 /* ---------- images ---------- */
 .sech{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px}
 .images .sec+.sec{margin-top:var(--s6)}
+#cat{gap:var(--s4)}
 .rlist{border:1px solid var(--ln);border-radius:var(--r2);background:var(--sf);overflow:hidden}
 .rhead,.rrow{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.1fr) minmax(0,1.5fr) 110px;gap:6px 16px;align-items:center;margin:0;padding:8px 12px}
 .rhead{background:var(--sf2);color:var(--tx2);font-size:var(--t1);font-weight:500;padding-block:6px}
@@ -521,8 +522,11 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .mrow.router{border-bottom-style:solid}
   .mrow>.n{grid-area:n}.mrow>.a{grid-area:a}.mrow>.x{grid-area:x}.mrow>.im{grid-area:i}
   .addr .pre.l{display:none}.addr .pre.s{display:inline}
-  .top{flex-wrap:wrap;gap:var(--s1) var(--s2);padding:var(--s1) var(--s4) var(--s2)}
-  .nav a{padding:5px 7px}
+  .top{flex-wrap:wrap;gap:var(--s1) 6px;padding:var(--s1) var(--s4) var(--s2)}
+  .top .sp{display:none}
+  .nav,span.brand{margin-right:auto}
+  .nav a{padding:5px 6px}
+  .live>summary{width:28px;height:28px}
   .lead-ops{order:8;width:100%;gap:var(--s1)}
   .lead-ops .btn{flex:1;padding:0 9px;font-size:var(--t2)}
   .brand span:last-child,.me .role{display:none}
@@ -569,7 +573,7 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .tbl.jobt tr.bad{background:var(--bad-bg)}
   .rvw tr.blk{background:repeating-linear-gradient(135deg,transparent 0 6px,var(--sf2) 6px 9px)}
   .rvw tr.blk td{background:none}
-  .env{scroll-margin-top:120px} /* the header wraps to two rows */
+  .env{scroll-margin-top:92px} /* the header wraps to two rows */
 }
 @media (pointer:coarse){.grid{--ch:30px}.hb,.all{height:28px}.all input{width:18px;height:18px}.btn{min-height:36px}.opt span{height:34px}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}.is-busy .g,.spin{animation:spin 4s steps(8) infinite!important}}

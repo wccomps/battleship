@@ -503,6 +503,10 @@
 
   document.addEventListener("click", function (e) {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || !e.target.closest) return;
+    if (e.target.closest("summary .acts") && !e.target.closest("a")) {
+      e.preventDefault();
+      return;
+    }
     var close = e.target.closest("#panel [data-close]");
     if (close) {
       e.preventDefault();
