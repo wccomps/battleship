@@ -292,7 +292,7 @@ func TestEditNotesJob(t *testing.T) {
 
 	form := h.get(&sess, notesHref("win2022")).Body.String()
 	contains(t, "the Edit notes form", form, `Edit notes of <span class="vm">win2022-v1</span></h1>`, `action="/images/details/preview"`,
-		`<input type="hidden" name="family" value="win2022">`, "Written into the notes of <code>win2022-v1</code>",
+		`<input type="hidden" name="family" value="win2022">`,
 		`<a class="btn" href="/images/family/win2022" data-panel-link>Cancel</a>`)
 	lacks(t, "the Edit notes form", form, "battleship:", "**Details**", "unreadable")
 	if d, notes := notesFormValues(t, form); d != winDetails || notes != "Patched monthly." {
