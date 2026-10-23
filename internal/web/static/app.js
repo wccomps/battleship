@@ -505,7 +505,7 @@
       closePanel();
       return;
     }
-    var link = panel && e.target.closest("a[data-panel-link]");
+    var link = panel && e.target.closest("a[data-panel-link], a.cell");
     if (!link) return;
     e.preventDefault();
     if (!panel.contains(link)) opener = link;
@@ -524,6 +524,14 @@
   });
 
   document.addEventListener("keydown", function (e) {
+    if (e.key === " " && e.target.closest) {
+      var hb = e.target.closest('a[role="button"][data-select]');
+      if (hb && form && form.contains(hb)) {
+        e.preventDefault();
+        hb.click();
+        return;
+      }
+    }
     if (e.key !== "Escape") return;
     var menu = document.querySelector("header details[open]");
     if (menu) {

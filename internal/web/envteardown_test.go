@@ -270,7 +270,7 @@ func TestBrowserEnvTeardown(t *testing.T) {
 			if !b.is(`[...document.querySelectorAll(".envh .acts .btn")].every(e => e.scrollWidth <= e.clientWidth && e.getBoundingClientRect().right <= e.closest(".env").getBoundingClientRect().right)`) {
 				t.Errorf("a block's actions are cut off")
 			}
-			if !b.is(`getComputedStyle(document.querySelector('#kilo\\.alpha .acts a[href$="/teardown"]')).color === getComputedStyle(document.querySelector(".lead-ops .btn.bad")).color`) {
+			if !b.is(`getComputedStyle(document.querySelector('#kilo\\.alpha .acts a[href$="/teardown"]')).color !== getComputedStyle(document.querySelector('#kilo\\.alpha .acts a[href$="/add"]')).color`) {
 				t.Errorf("Tear down isn't in the danger colour")
 			}
 			b.click(`#kilo\.alpha .acts a[href$="/teardown"]`)

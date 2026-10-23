@@ -38,7 +38,7 @@ func TestGridPage(t *testing.T) {
 		`<div class="gc" role="cell" id="cell-01-dc"><label class="cell is-running" title="team01-dc · running"><input type="checkbox" name="vms" value="team01-dc" data-team="01" data-host="dc">`,
 		`<span class="sr">team01-dc, running</span>`,
 		`<div class="gc" role="cell" id="cell-01-web"><label class="cell is-stopped" title="team01-web · stopped">`,
-		`<div class="gc" role="cell" id="cell-01-ftp"><span class="cell is-missing" title="team01-ftp · missing">`,
+		`<div class="gc" role="cell" id="cell-01-ftp"><a class="cell is-missing" href="/vm/01/ftp" title="team01-ftp · missing">`,
 		`<div class="gc" role="cell" id="cell-03-ftp"><label class="cell is-drifted" title="team03-ftp · drifted — in pool &#34;wrong-pool&#34;, expected &#34;pool-03&#34;">`,
 		// The legend counts.
 		`<li class="is-running"><i class="g" aria-hidden="true"></i><b>5</b>running</li>`,

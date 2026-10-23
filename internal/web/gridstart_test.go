@@ -238,6 +238,6 @@ func TestGridTemplatesNothingDeployed(t *testing.T) {
 	h.api.add(teamVM("04", "dc", 10401), cleanConfig("04"), "initial")
 	h.poll()
 	body = h.get(&lead, "/").Body.String()
-	contains(t, "lead's grid with team04-dc", body, `id="grid-table"`, `id="cell-04-web"><span class="cell is-missing" title="team04-web · missing">`)
+	contains(t, "lead's grid with team04-dc", body, `id="grid-table"`, `id="cell-04-web"><a class="cell is-missing" href="/vm/04/web" title="team04-web · missing">`)
 	lacks(t, "lead's grid with team04-dc", body, `id="grid-start"`)
 }
