@@ -513,7 +513,7 @@
     if (!link) return;
     e.preventDefault();
     if (!panel.contains(link)) opener = link;
-    var menu = link.closest("details");
+    var menu = link.closest("header details");
     if (menu) menu.open = false;
     var href = link.getAttribute("href");
     load(href, { method: "GET" }).catch(function () { location.href = href; });

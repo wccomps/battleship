@@ -835,13 +835,19 @@ func TestServeStartupFailsClearly(t *testing.T) {
 func TestServeFlags(t *testing.T) {
 	var stderr strings.Builder
 	d := deps{stdout: io.Discard, stderr: &stderr}
-	if code := run(context.Background(), []string{"serve", "-log-format", "xml"}, d); code != 2 ||
-		!strings.Contains(stderr.String(), `-log-format must be text or json, not "xml"`) {
-		t.Errorf("bad -log-format: exit %d, stderr %q", code, stderr.String())
+	if code := run(context.Background(), []string{"-h"}, d); code != 0 {
+		t.Errorf("-h: exit %d, want 0", code)
 	}
-	stderr.Reset()
-	if code := run(context.Background(), []string{"serve", "extra"}, d); code != 2 {
-		t.Errorf("stray argument: exit %d, want 2", code)
+	for _, prefix := range [][]string{nil, {"serve"}} {
+		stderr.Reset()
+		if code := run(context.Background(), append(prefix, "-log-format", "xml"), d); code != 2 ||
+			!strings.Contains(stderr.String(), `-log-format must be text or json, not "xml"`) {
+			t.Errorf("%v bad -log-format: exit %d, stderr %q", prefix, code, stderr.String())
+		}
+		stderr.Reset()
+		if code := run(context.Background(), append(prefix, "extra"), d); code != 2 {
+			t.Errorf("%v stray argument: exit %d, want 2", prefix, code)
+		}
 	}
 }
 

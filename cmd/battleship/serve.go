@@ -62,15 +62,22 @@ type serveDeps struct {
 	stopReserve time.Duration
 }
 
-// runServe is "battleship serve": the web app, the status grid and the job
-// workers in one process, until a stop signal.
+// runServe runs the web app, the status grid and the job workers in one
+// process, until a stop signal.
 func runServe(ctx context.Context, args []string, d deps) int {
-	fs := flag.NewFlagSet("battleship serve", flag.ContinueOnError)
+	fs := flag.NewFlagSet("battleship", flag.ContinueOnError)
 	fs.SetOutput(d.stderr)
 	cfgPath := fs.String("config", "battleship.toml", "config file")
 	format := fs.String("log-format", "text", "log format: text or json")
-	if code, ok := parseFlags(fs, args, 0, d); !ok {
-		return code
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(d.stderr, "unexpected argument %q\n", fs.Arg(0))
+		return 2
 	}
 	log, err := newLogger(d.stderr, *format)
 	if err != nil {
@@ -286,12 +293,12 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 
 // noServiceToken refuses to run what with a Proxmox token in the
 // environment: serve acts only as the people who asked, so a token
-// there is a leftover (or a user's own, for their CLI only) and must not linger.
+// there is a leftover and must not linger.
 func noServiceToken(what string) error {
 	for _, k := range []string{"BATTLESHIP_PROXMOX_TOKEN_ID", "BATTLESHIP_PROXMOX_TOKEN_SECRET"} {
 		if os.Getenv(k) != "" {
 			return fmt.Errorf("%s is set, but %s holds no Proxmox token: it acts as each person who asked. "+
-				"Remove it (these variables are only for a person's own token on the command line), and delete the old service token in Proxmox", k, what)
+				"Remove it, and delete the old service token in Proxmox", k, what)
 		}
 	}
 	return nil

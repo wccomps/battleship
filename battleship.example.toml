@@ -4,15 +4,14 @@
 
 [proxmox]
 url = "https://192.0.2.123:8006"
-# Or list several nodes to fail over between (not both); "battleship nodes" prints this line:
+# Or list several nodes to fail over between (not both):
 # urls = ["https://192.0.2.121:8006", "https://192.0.2.122:8006", "https://192.0.2.123:8006"]
-# battleship holds no Proxmox token: every call uses the caller's own ticket or
-# API token, so Proxmox's ACLs decide what each person may do.
+# battleship holds no Proxmox token: every call uses the caller's own ticket,
+# so Proxmox's ACLs decide what each person may do.
 # realm = "auth.example.org"     # the Proxmox OpenID realm people sign in to Proxmox through
 # ticket_renew_after = "60m"     # renew a ticket (a session's or a job's) once it is this old; tickets last 2h
 # ticket_max_age = "12h"         # sign in to Proxmox again after this
 # sdn_zone = "teams"             # the SDN zone of the team bridges; a deploy needs SDN.Use on their vnets
-# The CLI uses your own API token: BATTLESHIP_PROXMOX_TOKEN_ID and _SECRET in the environment.
 # serve needs exactly one of: ca_file, the cluster CA (any node's
 # /etc/pve/pve-root-ca.pem), or insecure_skip_verify = true (logs a warning).
 # ca_file = "/config/pve-root-ca.pem"
@@ -84,8 +83,6 @@ url = "https://192.0.2.123:8006"
 # round_pause = "2s"
 # task_poll = "2s"              # longest wait between task status polls; they start at 100ms and double
 
-# Needed by battleship serve and -queue. When set, CLI runs are queued as jobs
-# for serve's workers, so they wait for overlapping jobs.
 # [database]
 # url = ""                       # prefer the BATTLESHIP_DATABASE_URL environment variable
 # max_conns = 16                 # main pool size per process (at least 4); +2 more for heartbeats and readiness, +1 for clone, delete and storage slots, +1 to listen for job changes
@@ -94,7 +91,7 @@ url = "https://192.0.2.123:8006"
 # [jobs]
 # heartbeat = "10s"              # how often a running job proves it's alive
 # stale_after = "60s"            # a running job silent this long is marked interrupted (>= 5 x heartbeat)
-# poll = "2s"                    # how often the CLI checks a job it follows
+# poll = "2s"                    # how often an idle worker checks for jobs when notifications are silent
 # cancel_grace = "30s"           # after a cancel, how long a step waits on a Proxmox task it started (0s-5m)
 
 # battleship serve: the volunteer web app and the job workers.

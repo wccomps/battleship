@@ -25,8 +25,6 @@ services:
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U battleship -d battleship"], interval: 5s }
 ```
 
-The CLI runs inside it: `docker exec -it battleship battleship jobs list`.
-
 ## Kubernetes
 
 `k8s/base` has the Deployment (2 replicas), Service, PDB, Ingress,

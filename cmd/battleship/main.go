@@ -1,30 +1,10 @@
-// Command battleship deploys, resets, powers and tears down pods on Proxmox.
+// Command battleship runs the volunteer web app and job workers in one
+// process per replica. On SIGTERM it fails readiness, claims no more jobs,
+// lets running jobs finish (stopping them cleanly if web.shutdown_timeout is
+// about to run out) and exits within web.shutdown_timeout; a second signal
+// exits at once.
 //
-// Every operation prints its plan, asks for confirmation (a teardown wants
-// the pod range typed, an environment's its domain), and applies exactly
-// that plan. -yes skips the prompt;
-// without -yes and without a terminal, nothing changes. Any character device
-// on stdin (even /dev/null) counts as a terminal, so automation should pass
-// -yes or redirect stdin from a file.
-//
-// With a database configured, a confirmed plan is queued as a job for a
-// worker, which replans and refuses to run if the cluster changed; the
-// command follows it, or with -queue exits once it is queued.
-//
-// battleship serve runs the volunteer web app and job workers in one process
-// per replica. On SIGTERM it fails readiness, claims no more jobs, lets
-// running jobs finish (stopping them cleanly if web.shutdown_timeout is about
-// to run out) and exits within web.shutdown_timeout; a second signal exits
-// at once.
-//
-//	battleship deploy   -config battleship.toml -templates '*.kilo.alpha' -pods 1-32
-//	battleship teardown -config battleship.toml -pods 1-32 -set kilo.alpha -yes
-//	battleship teardown -config battleship.toml -pods all -yes
-//	battleship reset    -config battleship.toml -pods 7 -hosts dc -yes
-//	battleship power    -config battleship.toml -pods 1-32 -action start -yes -queue
-//	battleship jobs list|show ID|cancel ID -config battleship.toml
-//	battleship serve    -config battleship.toml -log-format json
-//	battleship nodes    -config battleship.toml
+//	battleship [-config battleship.toml] [-log-format text|json]
 package main
 
 import (
@@ -43,24 +23,13 @@ import (
 )
 
 func main() {
-	serving := len(os.Args) > 1 && os.Args[1] == "serve"
-	ctx, stop := stopOnSignal(func() {
-		if !serving {
-			fmt.Fprintln(os.Stderr, "Interrupting... finishing or removing anything half-built. "+
-				"Press Ctrl-C again to force quit (may leave half-built VMs and a stopped master). "+
-				"Proxmox tasks already started keep running.")
-		}
-	})
+	ctx, stop := stopOnSignal(func() {})
 	defer stop()
-	fi, err := os.Stdin.Stat()
 	d := deps{
-		newAPI:      newProxmoxAPI,
-		openStore:   openStore,
-		user:        cliUser(),
-		in:          os.Stdin,
-		interactive: err == nil && fi.Mode()&os.ModeCharDevice != 0,
-		stdout:      os.Stdout,
-		stderr:      os.Stderr,
+		newAPI:    newProxmoxAPI,
+		openStore: openStore,
+		stdout:    os.Stdout,
+		stderr:    os.Stderr,
 	}
 	os.Exit(run(ctx, os.Args[1:], d))
 }
@@ -86,79 +55,35 @@ func newProxmoxAPI(p config.Proxmox) pods.API {
 	})
 }
 
+// setProxmoxLogf sends the client's failover lines to logf, if api is a
+// client that logs them.
+func setProxmoxLogf(api any, logf func(format string, args ...any)) {
+	if l, ok := api.(interface {
+		SetLogf(func(format string, args ...any))
+	}); ok {
+		l.SetLogf(logf)
+	}
+}
+
 // deps are the process-level dependencies of run, replaced in tests.
 type deps struct {
 	newAPI func(config.Proxmox) pods.API
 	// openStore connects to and migrates the job database; the returned func
 	// closes it.
 	openStore      func(ctx context.Context, db config.Database) (*store.Store, func(), error)
-	user           string // recorded on jobs this process queues or cancels
-	in             io.Reader
-	interactive    bool // stdin is a terminal, so we can ask for confirmation
 	stdout, stderr io.Writer
-	// battleship serve: listen opens the HTTP listener, and drain waits between
-	// failing readiness and stopping the HTTP server. Nil means net.Listen
-	// and drainDelay.
+	// listen opens the HTTP listener, and drain waits between failing
+	// readiness and stopping the HTTP server. Nil means net.Listen and
+	// drainDelay.
 	listen func(network, addr string) (net.Listener, error)
 	drain  func()
 }
 
-const usage = `usage: battleship <deploy|teardown|reset|power|snapshot> [flags]
-       battleship jobs <list|show ID|cancel ID> [flags]
-       battleship image <register|edit|deprecate|delete> [flags]
-       battleship env <create|add|teardown> [flags]
-       battleship serve [flags]
-       battleship nodes [flags]
-
-Every operation prints its plan first, then asks you to confirm it (-yes
-skips the question and applies the plan; with a database it runs as a job
-on a worker, and -queue exits without following it). -pods is required
-(-teams is the same); for teardown, power, reset and snapshot, -pods all
-means every pod that has VMs (e.g. 0-32 with a test pod 00), worked out
-from the cluster and printed with the plan. A teardown takes everything in
-its pods, or with -set one template set's VMs. Put flags before any other
-words. Run "battleship <command> -h" for flags. battleship serve runs the
-web app and job workers. battleship nodes lists the cluster's nodes and
-prints a proxmox.urls line.
-
-  battleship deploy   -config battleship.toml -templates '*.kilo.alpha' -pods 1-32
-  battleship teardown -config battleship.toml -pods 1-32 -set kilo.alpha -yes
-  battleship teardown -config battleship.toml -pods all -yes
-  battleship reset    -config battleship.toml -pods 7 -hosts dc -yes
-  battleship power    -config battleship.toml -pods 1-32 -action start -yes -queue
-  battleship snapshot -config battleship.toml -pods 7 -hosts dc -name before-scoring -yes
-  battleship image register -config battleship.toml -vm 101 -family win11 -kind windows
-  battleship env create -config battleship.toml -domain kilo.alpha -router gw=opnsense -host dc=win2022:10
-  battleship env teardown -config battleship.toml -domain kilo.alpha
-  battleship jobs list -config battleship.toml
-  battleship serve    -config battleship.toml -log-format json
-  battleship nodes    -config battleship.toml
-`
-
 func run(ctx context.Context, args []string, d deps) int {
-	if len(args) == 0 {
-		fmt.Fprint(d.stderr, usage)
-		return 2
+	if len(args) > 0 && args[0] == "serve" {
+		args = args[1:]
 	}
-	switch args[0] {
-	case "-h", "-help", "--help", "help":
-		fmt.Fprint(d.stdout, usage)
-		return 0
-	case "deploy", "teardown", "reset", "power", "snapshot":
-		return runOp(ctx, args[0], args[1:], d)
-	case "image":
-		return runImage(ctx, args[1:], d)
-	case "env":
-		return runEnv(ctx, args[1:], d)
-	case "jobs":
-		return runJobs(ctx, args[1:], d)
-	case "serve":
-		return runServe(ctx, args[1:], d)
-	case "nodes":
-		return runNodes(ctx, args[1:], d)
-	}
-	fmt.Fprint(d.stderr, usage)
-	return 2
+	return runServe(ctx, args, d)
 }
 
 func openStore(ctx context.Context, db config.Database) (*store.Store, func(), error) {
@@ -171,14 +96,4 @@ func openStore(ctx context.Context, db config.Database) (*store.Store, func(), e
 		return nil, nil, fmt.Errorf("migrating database: %w", err)
 	}
 	return st, st.Close, nil
-}
-
-// cliUser names whoever runs the CLI, for the job record.
-func cliUser() string {
-	for _, k := range []string{"SUDO_USER", "USER", "LOGNAME"} {
-		if v := os.Getenv(k); v != "" {
-			return "cli:" + v
-		}
-	}
-	return "cli:unknown"
 }
