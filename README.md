@@ -1,26 +1,16 @@
 # battleship
 
-Deploys, resets, powers, snapshots and tears down VM pods, dev environments and base images on Proxmox.
+Web app for deploying, resetting, snapshotting, and tearing down competition VM pods, dev environments, and base images on Proxmox.
 
-- **Every operation is a job.** Preview a plan, confirm it, and a worker runs it (re-planning first and refusing to run if the cluster changed).
-- **No service token.** Every Proxmox call runs with the signed-in user's own ticket, so Proxmox ACLs decide who may do what.
-- **Safe re-runs & live updates.** Steps check VM state first, cancelled/failed jobs clean up half-built VMs, and pages update live via server-sent events.
+Every change previews a plan first and runs as a queued job using the signed-in user's own Proxmox ticket; Battleship holds no Proxmox credentials of its own. Failed or cancelled jobs clean up any VMs they half-built, so re-running a job is safe. [`ARCHITECTURE.md`](ARCHITECTURE.md) covers how jobs, locks, and packages fit together.
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the job lifecycle and package layout.
+![Pod grid](screenshots/grid.png)
 
-## Screenshots
+![Running deploy job](screenshots/job.png)
 
-### Pod Grid
-![Pod grid with live status and multi-cell selection](screenshots/grid.png)
+![Environments](screenshots/environments.png)
 
-### Live Job Progress
-![Running deploy job across 32 pods](screenshots/job.png)
-
-### Environments
-![Dev environments with live guest-agent addresses](screenshots/environments.png)
-
-### Base Images
-![Base image catalogue grouped by category](screenshots/images.png)
+![Base images](screenshots/images.png)
 
 ## Running
 
@@ -30,13 +20,13 @@ export BATTLESHIP_DATABASE_URL=... BATTLESHIP_SEAL_KEY=... BATTLESHIP_OIDC_CLIEN
 battleship -log-format json
 ```
 
-See [`battleship.example.toml`](battleship.example.toml) for all settings and [`deploy/README.md`](deploy/README.md) for Docker Compose and Kubernetes manifests.
+See [`battleship.example.toml`](battleship.example.toml) for all settings and [`deploy/README.md`](deploy/README.md) for Docker Compose and Kubernetes setup.
 
-**Authentik setup:**
+For Authentik:
 1. Create a confidential OAuth2/OpenID provider with redirect URI `<base_url>/auth/callback` and scopes `openid`, `email`, `profile`, `offline_access`.
 2. Create an application `battleship` and bind policies for volunteers.
 3. Add `<base_url>/auth/proxmox/callback` to the redirect URIs of the provider behind Proxmox's OpenID realm (`proxmox.realm`).
-4. Set `oidc.issuer`, `oidc.client_id` and `BATTLESHIP_OIDC_CLIENT_SECRET`.
+4. Set `oidc.issuer`, `oidc.client_id`, and `BATTLESHIP_OIDC_CLIENT_SECRET`.
 
 ## Tests
 
@@ -46,4 +36,4 @@ export BATTLESHIP_TEST_DATABASE_URL='postgres://postgres:test@127.0.0.1:55432/po
 go test -race ./...
 ```
 
-Set `BATTLESHIP_BROWSER=http://127.0.0.1:9222` (e.g. `chromedp/headless-shell`) to run the headless Chrome tests.
+Set `BATTLESHIP_BROWSER=http://127.0.0.1:9222` (for example `chromedp/headless-shell`) to include the browser tests.
