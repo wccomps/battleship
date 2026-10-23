@@ -73,12 +73,13 @@ var operations = []operation{
 	{Kind: pods.KindTeardown, Path: "/teardown", Title: "Teardown", Verb: "Tear down", Icon: "teardown", Noun: "teardown",
 		Lead: "Tear down pods", Done: "Deleted", Pick: fieldSet, review: podTeardownReview, step: (*Server).setStep},
 	{Kind: pods.KindEnvCreate, Path: "/environments/new", Title: "Create environment", Verb: "Create", Icon: "deploy", Noun: "environment",
-		Section: sectionEnvironments, Doing: "Creating an environment", Done: "Ready", Machines: true, review: envReview, home: envHome},
+		Lead: "Create environment", Section: sectionEnvironments, Doing: "Creating an environment", Done: "Ready",
+		Machines: true, review: envReview, home: envHome},
 	{Kind: pods.KindEnvAdd, Path: "/environments/{domain}/add", Title: "Add hosts", Verb: "Add hosts to", Icon: "deploy", Noun: "new hosts",
 		Section: sectionEnvironments, Doing: "Adding hosts", Done: "Ready", Machines: true, review: envReview, home: envHome},
-	{Kind: pods.KindEnvTeardown, Path: "/environments/{domain}/teardown", Title: "Tear down", Verb: "Tear down", Icon: "teardown", Noun: "teardown",
-		Section: sectionEnvironments, Doing: "Tearing down an environment", Done: "Deleted", Formless: true,
-		review: teardownReview, home: envHome, back: (operation).listPage},
+	{Kind: pods.KindEnvTeardown, Path: "/environments/teardown", Title: "Tear down environment", Label: "Tear down", Verb: "Tear down", Icon: "teardown", Noun: "teardown",
+		Lead: "Tear down environment", Section: sectionEnvironments, Doing: "Tearing down an environment", Done: "Deleted",
+		review: teardownReview, home: envHome, prefill: (*Server).teardownPrefill},
 	{Kind: pods.KindEnvEdit, Path: "/environments/edit", Title: "Edit host", Verb: "Edit", ConfirmVerb: "Save",
 		Icon: "edit", Noun: "host edit", Section: sectionEnvironments, Doing: "Editing a host", Done: "Saved",
 		review: envEditReview, home: envHome, prefill: (*Server).hostEditPrefill},
@@ -129,12 +130,14 @@ func (o operation) page() bool {
 	return o.Kind == pods.KindDeploy || o.Kind == pods.KindTeardown || o.Kind.Teamless()
 }
 
-// at is an operation on one environment (pods.Kind.OnEnvironment, its Path
-// /environments/{domain}/...) opened for domain, a checked domain
-// (pods.CheckDomain): its paths name it, and it overrides any domain its
-// forms post.
+// inEnv reports whether the operation acts on one environment named in its path.
+func (o operation) inEnv() bool { return o.domain != "" || strings.Contains(o.Path, "{domain}") }
+
+// at is an operation on one environment (its Path /environments/{domain}/...)
+// opened for domain, a checked domain (pods.CheckDomain): its paths name it,
+// and it overrides any domain its forms post.
 func (o operation) at(domain string) operation {
-	if o.Kind.OnEnvironment() && o.domain == "" {
+	if strings.Contains(o.Path, "{domain}") {
 		o.Path, o.domain = strings.Replace(o.Path, "{domain}", domain, 1), domain
 	}
 	return o
@@ -375,7 +378,7 @@ func detailsFields(d *pods.ImageNotes) []field {
 // environment's form has its domain in the path; without a valid one, it
 // is the Environments page.
 func formQuery(op operation, in jobs.Inputs) string {
-	if op.Kind.OnEnvironment() && op.domain == "" {
+	if strings.Contains(op.Path, "{domain}") {
 		if pods.CheckDomain(in.Domain) != nil {
 			return envsPath
 		}
@@ -384,7 +387,7 @@ func formQuery(op operation, in jobs.Inputs) string {
 	q := url.Values{}
 	in.Details = nil
 	for _, f := range inputFields(in) {
-		if f.Name != fieldDomain || !op.Kind.OnEnvironment() {
+		if f.Name != fieldDomain || !op.inEnv() {
 			q.Set(f.Name, f.Value)
 		}
 	}

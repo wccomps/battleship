@@ -30,18 +30,22 @@ func reviewRowOf(t *testing.T, body, name string) string {
 	return m
 }
 
-// Tear down opens on its review: one sentence, a row per VM with its
-// image version, address and VMID · node, the domain to type, and a red
-// button naming it. Close and Back go to its block on Environments.
+// Tear down opens a form listing the active environments, and its preview
+// shows one sentence, a row per VM with its image version, address and
+// VMID · node, the domain to type, and a red button naming it.
 func TestEnvTeardownReview(t *testing.T) {
 	h := newHarness(t)
 	addEnvs(h)
 	sess := h.login(asLead)
-	rec := h.get(&sess, "/environments/kilo.alpha/teardown")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET = %d\n%s", rec.Code, rec.Body)
+	formRec := h.get(&sess, "/environments/teardown")
+	if formRec.Code != http.StatusOK {
+		t.Fatalf("GET form = %d\n%s", formRec.Code, formRec.Body)
 	}
-	body := rec.Body.String()
+	contains(t, "the form", formRec.Body.String(),
+		`Tear down environment</h1>`, `action="/environments/teardown/preview"`,
+		`<input type="radio" name="domain" value="kilo.alpha" required><span>kilo.alpha · dev-01</span>`,
+		`<input type="radio" name="domain" value="oscar.lima" required><span>oscar.lima · dev-04</span>`)
+	action, _, body := h.preview(&sess, "/environments/teardown", url.Values{"domain": {"kilo.alpha"}})
 	contains(t, "the review", body,
 		`<span class="eyebrow">Review ·</span> Tear down <span class="vm">kilo.alpha</span></h1>`,
 		`<p class="say bad"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16`,
@@ -50,14 +54,13 @@ func TestEnvTeardownReview(t *testing.T) {
 		`pattern="\s*kilo\.alpha\s*"`, `data-typed="kilo.alpha"`,
 		`<button type="submit" class="btn pri bad">`, `Tear down kilo.alpha</button>`,
 		`<a class="btn ghost sq" href="/environments#kilo.alpha" data-close aria-label="Close">`,
-		`<a class="btn first" href="/environments#kilo.alpha" data-close>Back</a>`)
+		`<a class="btn first" href="/environments/teardown?domain=kilo.alpha" data-panel-link>Back</a>`)
 	lacks(t, "the review", body, "Not touched", `class="blk"`)
 	contains(t, "gw's row", reviewRowOf(t, body, "gw.kilo.alpha"), `<span class="chip">router</span>`, "<code>gw-v1</code>", "<code>.2</code>", "2100 · n1")
 	contains(t, "teak's row", reviewRowOf(t, body, "teak.kilo.alpha"), "<code>debian-12-v2</code>", "<code>.10</code>", "2101 · n1")
 	contains(t, "elm's row", reviewRowOf(t, body, "elm.kilo.alpha"), "<code>win10-v1</code>", "2102 · n1")
 	lacks(t, "the review", body, "ad.oscar.lima")
-	action, _ := confirmOf(t, body)
-	if action != "/environments/kilo.alpha/teardown/confirm" {
+	if action != "/environments/teardown/confirm" {
 		t.Errorf("confirm posts to %s", action)
 	}
 }
@@ -70,7 +73,7 @@ func TestEnvTeardownReviewListsVMsItLeaves(t *testing.T) {
 	h.api.add(proxmox.VM{VMID: 151, Name: "stray-two", Node: "n1", Status: "running"},
 		map[string]string{"net0": "virtio=BC:24:11:00:22:00,bridge=devint01"})
 	sess := h.login(asLead)
-	body := h.get(&sess, "/environments/kilo.alpha/teardown").Body.String()
+	_, _, body := h.preview(&sess, "/environments/teardown", url.Values{"domain": {"kilo.alpha"}})
 	contains(t, "the review", body,
 		`<span>Deletes 4 VMs in <span class="name">dev-01</span>. VMs outside <span class="name">dev-01</span> stay on its networks, so the slot isn&#39;t free afterwards.</span>`,
 		`<h2 class="sub">Not touched</h2>`, `<span><span class="name">stray-two</span> is outside <span class="name">dev-01</span> but has a NIC on its networks.</span>`)
@@ -83,7 +86,7 @@ func TestEnvTeardownReviewBlocksWhatTheUserMayNotDelete(t *testing.T) {
 	h := newHarness(t)
 	addEnvs(h)
 	sess := h.loginWith("test-partial", []int{2100, 2101, 2103}, "VM.Allocate", "VM.PowerMgmt")
-	body := h.get(&sess, "/environments/kilo.alpha/teardown").Body.String()
+	_, _, body := h.preview(&sess, "/environments/teardown", url.Values{"domain": {"kilo.alpha"}})
 	contains(t, "elm's row", reviewRowOf(t, body, "elm.kilo.alpha"), `class="blk"`,
 		`you don&#39;t have <span class="name">VM.PowerMgmt</span> on /vms/2102; you don&#39;t have <span class="name">VM.Allocate</span> on /vms/2102`)
 	contains(t, "the review", body, `<span>Deletes 3 VMs in <span class="name">dev-01</span>. The blocked VM stays, so the slot isn&#39;t free afterwards.</span>`,
@@ -91,33 +94,29 @@ func TestEnvTeardownReviewBlocksWhatTheUserMayNotDelete(t *testing.T) {
 	lacks(t, "teak's row", reviewRowOf(t, body, "teak.kilo.alpha"), `class="blk"`)
 }
 
-// A slot of mixed domains, a domain no slot holds, and a path that names
-// no domain can't be torn down; nothing is offered to confirm.
+// A slot of mixed domains, a domain no slot holds, and a domain that isn't
+// valid can't be torn down; nothing is offered to confirm.
 func TestEnvTeardownRefusals(t *testing.T) {
 	h := newHarness(t)
 	addEnvs(h)
 	h.api.add(proxmox.VM{VMID: 2200, Name: "a.kilo.bravo", Node: "n1", Pool: "dev-02"}, nil)
 	h.api.add(proxmox.VM{VMID: 2201, Name: "b.other.zone", Node: "n1", Pool: "dev-02"}, nil)
 	sess := h.login(asLead)
-	for path, want := range map[string]string{
-		"/environments/kilo.bravo/teardown":   "Dev slot 02 holds VMs of several domains",
-		"/environments/nowhere.zone/teardown": `No dev slot holds <span class="name">nowhere.zone</span>`,
+	for domain, want := range map[string]string{
+		"kilo.bravo":   "Dev slot 02 holds VMs of several domains",
+		"nowhere.zone": `No dev slot holds nowhere.zone`,
+		"Not A Domain": `Domain &#34;Not A Domain&#34; must be two or more labels like kilo.alpha.`,
 	} {
-		rec := h.get(&sess, path)
+		rec := h.post(&sess, "/environments/teardown/preview", url.Values{"domain": {domain}})
 		if rec.Code != http.StatusUnprocessableEntity {
-			t.Errorf("GET %s = %d, want 422", path, rec.Code)
+			t.Errorf("POST domain=%q = %d, want 422", domain, rec.Code)
 		}
-		contains(t, path, rec.Body.String(), want, `href="/environments#`)
-		lacks(t, path, rec.Body.String(), "/confirm")
+		contains(t, domain, rec.Body.String(), want)
+		lacks(t, domain, rec.Body.String(), "/confirm")
 	}
-	if rec := h.get(&sess, "/environments/Not%20A%20Domain/teardown"); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/environments" ||
-		flashOf(rec) != "Add hosts and Tear down start from an environment: pick one below." {
-		t.Errorf("a path naming no domain = %d %s %q", rec.Code, rec.Header().Get("Location"), flashOf(rec))
-	}
-	// Add hosts once named the domain in a field; a teardown
-	// never did, so no such address leads to one.
-	if rec := h.get(&sess, "/environments/teardown?domain=kilo.alpha"); rec.Code != http.StatusNotFound {
-		t.Errorf("GET /environments/teardown?domain= = %d, want 404", rec.Code)
+	if rec := h.get(&sess, "/environments/teardown?domain=kilo.alpha"); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `value="kilo.alpha" required checked`) {
+		t.Errorf("GET /environments/teardown?domain=kilo.alpha = %d", rec.Code)
 	}
 	h.noJobs("refusals")
 }
@@ -128,7 +127,7 @@ func TestEnvTeardownTypedConfirm(t *testing.T) {
 	h := newHarness(t)
 	addEnvs(h)
 	sess := h.login(asLead)
-	action, form := confirmOf(t, h.get(&sess, "/environments/kilo.alpha/teardown").Body.String())
+	action, form, _ := h.preview(&sess, "/environments/teardown", url.Values{"domain": {"kilo.alpha"}})
 	for _, wrong := range []string{"", "kilo", "KILO.ALPHA", "kiloxalpha", "oscar.lima", "kilo.alpha.", "1-2"} {
 		f := url.Values{}
 		for k, v := range form {
@@ -168,7 +167,7 @@ func TestEnvTeardownFreesTheSlot(t *testing.T) {
 	h := newHarness(t)
 	addEnvs(h)
 	sess := h.login(asLead)
-	action, form := confirmOf(t, h.get(&sess, "/environments/kilo.alpha/teardown").Body.String())
+	action, form, _ := h.preview(&sess, "/environments/teardown", url.Values{"domain": {"kilo.alpha"}})
 	form.Set(fieldTyped, "kilo.alpha")
 	if rec := h.post(&sess, action, form); rec.Code != http.StatusSeeOther {
 		t.Fatalf("confirm = %d\n%s", rec.Code, rec.Body)
@@ -191,17 +190,16 @@ func TestEnvTeardownFreesTheSlot(t *testing.T) {
 		`<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>Tear down <span class="vm">kilo.alpha</span>`)
 }
 
-// A teardown that can't be planned has no form to show again: its page
-// says why, and leads back to Environments.
+// A teardown that can't be planned returns the form saying why.
 func TestEnvTeardownRefused(t *testing.T) {
 	h := newHarness(t)
 	addEnvs(h)
 	sess := h.login(asLead)
-	rec := h.get(&sess, "/environments/kilo.bravo/teardown")
+	rec := h.post(&sess, "/environments/teardown/preview", url.Values{"domain": {"kilo.bravo"}})
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("teardown of an environment that isn't there = %d\n%s", rec.Code, rec.Body)
 	}
-	contains(t, "the page", rec.Body.String(), "Can&#39;t tear down kilo.bravo", `href="/environments#kilo.bravo"`, "Back to Environments")
+	contains(t, "the page", rec.Body.String(), `No dev slot holds kilo.bravo`, `action="/environments/teardown/preview"`)
 }
 
 // A teardown that failed partway is retried in its slot: the review plans
@@ -237,7 +235,7 @@ func TestEnvTeardownRetry(t *testing.T) {
 		`<p class="meta">Retry of #`+itoa(id)+": the teardown of what is left.</p>", `<input type="hidden" name="slot" value="01">`)
 	lacks(t, "the retry", body, "didn&#39;t finish")
 	action, _ := confirmOf(t, body)
-	if action != "/environments/kilo.alpha/teardown/confirm" {
+	if action != "/environments/teardown/confirm" {
 		t.Errorf("retry confirms at %s", action)
 	}
 	for _, gone := range []string{"gw.kilo.alpha", "yew.kilo.alpha"} {
@@ -247,10 +245,11 @@ func TestEnvTeardownRetry(t *testing.T) {
 	}
 }
 
-// Tear down is on the block, red; its review fits a phone and a laptop,
-// light and dark, with its blocked row striped and the VMs it leaves
-// listed. The button wakes once the domain is typed, and confirming
-// opens the job.
+// Tear down environment is in the header, red; each environment block
+// collapses and expands as an accordion; the teardown form and review fit
+// a phone and a laptop, light and dark, with its blocked row striped and
+// the VMs it leaves listed. The button wakes once the domain is typed,
+// and confirming opens the job.
 func TestBrowserEnvTeardown(t *testing.T) {
 	h := browserHarness(t)
 	addEnvs(h)
@@ -270,11 +269,26 @@ func TestBrowserEnvTeardown(t *testing.T) {
 			if !b.is(`[...document.querySelectorAll(".envh .acts .btn")].every(e => e.scrollWidth <= e.clientWidth && e.getBoundingClientRect().right <= e.closest(".env").getBoundingClientRect().right)`) {
 				t.Errorf("a block's actions are cut off")
 			}
-			if !b.is(`getComputedStyle(document.querySelector('#kilo\\.alpha .acts a[href$="/teardown"]')).color !== getComputedStyle(document.querySelector('#kilo\\.alpha .acts a[href$="/add"]')).color`) {
-				t.Errorf("Tear down isn't in the danger colour")
+			if !b.is(`document.querySelector('#kilo\\.alpha > details').open && document.querySelector('#kilo\\.alpha table.envt').checkVisibility()`) {
+				t.Errorf("kilo.alpha doesn't start open")
 			}
-			b.click(`#kilo\.alpha .acts a[href$="/teardown"]`)
-			b.waitFor("the teardown review", `location.pathname === "/environments/kilo.alpha/teardown" && document.querySelector("table.rvw") !== null`)
+			b.click(`#kilo\.alpha > details > summary h2`)
+			if b.is(`document.querySelector('#kilo\\.alpha > details').open || document.querySelector('#kilo\\.alpha table.envt').checkVisibility()`) {
+				t.Errorf("kilo.alpha didn't fold on header click")
+			}
+			b.click(`#kilo\.alpha > details > summary h2`)
+			if !b.is(`document.querySelector('#kilo\\.alpha > details').open && document.querySelector('#kilo\\.alpha table.envt').checkVisibility()`) {
+				t.Errorf("kilo.alpha didn't unfold on second header click")
+			}
+			if !b.is(`getComputedStyle(document.querySelector('.lead-ops a[href="/environments/teardown"]')).color !== getComputedStyle(document.querySelector('.lead-ops a[href="/environments/new"]')).color`) {
+				t.Errorf("Tear down environment isn't in the danger colour")
+			}
+			b.click(`.lead-ops a[href="/environments/teardown"]`)
+			b.waitFor("the teardown form", `location.pathname === "/environments/teardown" && document.querySelector('input[name="domain"][value="kilo.alpha"]') !== null`)
+			b.noSideways("teardown form")
+			b.click(`label.opt:has(input[value="kilo.alpha"])`)
+			b.click(`.pf button[type=submit]`)
+			b.waitFor("the teardown review", `location.pathname === "/environments/teardown/preview" && document.querySelector("table.rvw") !== null`)
 			b.noSideways("teardown review")
 			b.shot("teardown-review-" + size.name)
 			b.fullShot("teardown-review-full-" + size.name)

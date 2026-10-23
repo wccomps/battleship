@@ -794,7 +794,7 @@ func TestInputFieldsRoundTrip(t *testing.T) {
 			t.Fatalf("%s: %v", kind, err)
 		}
 		q := link.Query()
-		if kind.OnEnvironment() {
+		if op.inEnv() {
 			// The domain is in the path; without a valid one, the link is
 			// the Environments page.
 			if pods.CheckDomain(in.Domain) != nil {

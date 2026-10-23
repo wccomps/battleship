@@ -79,10 +79,13 @@ func TestEnvironmentsPage(t *testing.T) {
 	body := h.get(&sess, "/environments").Body.String()
 	lacks(t, "the page with environments", body, "No environments in use yet")
 	contains(t, "the page", body,
-		`<a class="btn pri" href="/environments/new">Create environment</a>`,
+		`<nav class="lead-ops" aria-label="Environment operations">`,
+		`href="/environments/new"`, `Create environment</a>`,
+		`href="/environments/teardown"`, `Tear down environment</a>`,
 		`<p class="free"><span class="sub">Free</span><span class="vm">dev-02, dev-03, dev-05 – dev-10</span><span class="meta">· Create uses dev-02</span></p>`)
 	kilo := envSection(t, body, "kilo.alpha")
 	contains(t, "kilo.alpha", kilo,
+		`<details open>`, `<summary class="envh disc">`,
 		`<h2 id="kilo.alpha-h">kilo.alpha</h2>`,
 		`<span>dev-01</span><span>router <b>gw</b></span>`,
 		`<a class="btn sm" href="/environments/kilo.alpha/add">Add hosts</a>`,
@@ -92,7 +95,7 @@ func TestEnvironmentsPage(t *testing.T) {
 		`<td class="nl">admin / gwpass</td>`,
 		`<span class="gl is-stopped"><i class="g" aria-hidden="true"></i>stopped</span> <span class="meta">· debian-12-v2</span>`,
 		`<span class="meta">no address</span>`)
-	lacks(t, "kilo.alpha", kilo, "battleship:", "Set DNS", "DNS <b>")
+	lacks(t, "kilo.alpha", kilo, "battleship:", "Set DNS", "DNS <b>", "/teardown")
 	if got := strings.Join(hostNames(kilo), " "); got != "gw yew teak elm" {
 		t.Errorf("hosts in order %q, want gw yew teak elm", got)
 	}
@@ -157,8 +160,8 @@ func TestEnvironmentsPageOddSlots(t *testing.T) {
 		"Nothing is in dev-03, but VMs outside it are on its networks, so Create skips it: <code>stray-one</code>.")
 	lacks(t, "the slot used from outside", users, "<table")
 	contains(t, "kilo.alpha", envSection(t, body, "kilo.alpha"), "Also on its networks, from outside dev-01: <code>stray-two</code>.",
-		`<a class="btn sm" href="/environments/kilo.alpha/add">Add hosts</a>`,
-		`<a class="btn sm bad" href="/environments/kilo.alpha/teardown">Tear down kilo.alpha</a>`)
+		`<a class="btn sm" href="/environments/kilo.alpha/add">Add hosts</a>`)
+	lacks(t, "kilo.alpha", envSection(t, body, "kilo.alpha"), "Tear down kilo.alpha")
 
 	contains(t, "the free line", body, `<span class="vm">dev-06 – dev-10</span><span class="meta">· Create uses dev-06</span>`)
 }
@@ -170,12 +173,11 @@ func TestEnvironmentsPageLacksPrivileges(t *testing.T) {
 	op := h.login(asOperator)
 	body := h.get(&op, "/environments").Body.String()
 	contains(t, "as an operator", body,
-		`<button class="btn pri" type="button" disabled>Create environment</button>`,
 		`<button class="btn sm" type="button" disabled>Add hosts</button>`,
-		`<button class="btn sm bad" type="button" disabled>Tear down kilo.alpha</button>`,
 		"Creating an environment needs VM.Clone, which you don&#39;t have.",
 		"Adding hosts needs VM.Clone, which you don&#39;t have.",
 		"Tearing down an environment needs VM.Allocate, which you don&#39;t have.")
+	lacks(t, "as an operator", body, `href="/environments/new"`, `href="/environments/teardown"`)
 	lead := h.login(asLead)
 	lacks(t, "as a lead", h.get(&lead, "/environments").Body.String(), "disabled", "which you don&#39;t have")
 }
@@ -200,7 +202,7 @@ func TestEnvironmentRoutes(t *testing.T) {
 		}
 	}
 	gone := "There's no environment kilo.bravo. It may have been torn down or renamed; pick one below."
-	pick := "Add hosts and Tear down start from an environment: pick one below."
+	pick := "Add hosts starts from an environment: pick one below."
 	goesBack(h.get(&sess, "/environments/kilo.bravo/add"), "an unknown environment", gone)
 	goesBack(h.post(&sess, "/environments/kilo.bravo/add/preview", url.Values{"env_hosts": {"oak=debian-12"}}), "an unknown environment's preview", gone)
 	before, _, _ := h.api.readCounts()

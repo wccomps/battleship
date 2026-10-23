@@ -2,8 +2,7 @@
 {{- with .Data}}
 {{- $d := .}}
 <div class="page mid envs">
-<div class="phead"><h1 class="ptitle">Environments</h1><span class="sp"></span>
-{{- if .MayCreate}}<a class="btn pri" href="/environments/new">Create environment</a>{{else}}<button class="btn pri" type="button" disabled>Create environment</button>{{end}}</div>
+<div class="phead"><h1 class="ptitle">Environments</h1></div>
 {{- range .Lacks}}
 <p class="lock">{{icon "lock"}}{{.}}</p>
 {{- end}}
@@ -26,7 +25,8 @@
 {{- range .Envs}}
 {{- $b := .}}
 <section class="env" id="{{.ID}}" aria-labelledby="{{.ID}}-h">
-<div class="envh">
+<details open>
+<summary class="envh disc">
 <h2 id="{{.ID}}-h">{{if .Domain}}{{.Domain}}{{else}}{{.Slot}}{{end}}</h2>
 <div class="facts">
 {{- if .Domain}}<span>{{.Slot}}</span><span>router <b>{{or .Router "none"}}</b></span>
@@ -34,10 +34,9 @@
 {{- if .Acts}}
 <div class="acts">
 {{- if $d.MayAdd}}<a class="btn sm" href="/environments/{{.Domain}}/add">Add hosts</a>{{else}}<button class="btn sm" type="button" disabled>Add hosts</button>{{end}}
-{{- if $d.MayTearDown}}<a class="btn sm bad" href="/environments/{{.Domain}}/teardown">Tear down {{.Domain}}</a>{{else}}<button class="btn sm bad" type="button" disabled>Tear down {{.Domain}}</button>{{end}}
 </div>
 {{- end}}
-</div>
+</summary>
 {{- if .Mixed}}
 <p class="fix">{{icon "warn"}}<span>Its VMs don't share one domain, so Add hosts and Tear down can't act on it. Rename them to one domain, or move the others out of {{.Slot}}.</span></p>
 {{- else if .Twin}}
@@ -67,6 +66,7 @@
 </tbody>
 </table>
 {{- end}}
+</details>
 </section>
 {{- end}}
 </div>

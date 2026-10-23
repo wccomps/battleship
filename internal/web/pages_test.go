@@ -320,7 +320,7 @@ func TestConnectionNoteStaysInPage(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
 	op := h.login(asOperator)
-	for _, path := range []string{"/", "/logs"} {
+	for _, path := range []string{"/", "/environments", "/images", "/logs"} {
 		body := h.get(&op, path).Body.String()
 		contains(t, path, body, `<span class="sr" id="live-note" role="status"></span>`, `<details class="live" id="live">`)
 	}
