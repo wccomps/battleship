@@ -38,20 +38,6 @@ See [`battleship.example.toml`](battleship.example.toml) for all settings and [`
 3. Add `<base_url>/auth/proxmox/callback` to the redirect URIs of the provider behind Proxmox's OpenID realm (`proxmox.realm`).
 4. Set `oidc.issuer`, `oidc.client_id` and `BATTLESHIP_OIDC_CLIENT_SECRET`.
 
-## Proxmox Privileges
-
-Previews mark any VM the user lacks privileges for as blocked and name the missing privilege:
-
-| Step | Privilege | Path |
-|---|---|---|
-| Clone | `VM.Clone`; `VM.Allocate`; `Datastore.AllocateSpace` (`Mapping.Use` for `custom-<model>` CPU; `SDN.Use` on source bridge) | template/source; target pool; `/storage/<deploy.storage>` |
-| Build template | `VM.Clone` (`VM.PowerMgmt` if stopping a running master); `VM.Allocate`; `Datastore.AllocateSpace` | master; `<images.pool>`; `/storage/<deploy.storage>` |
-| Network | `VM.Config.Network` (`VM.Config.Cloudinit` for cloud-init); `SDN.Use` | VM or pool; `/sdn/zones/<zone>/<bridge>` |
-| Disk / CD-ROM / CPU / Notes | `VM.Config.Disk` / `VM.Config.CDROM` / `VM.Config.CPU` / `VM.Config.Options` | VM or pool |
-| Guest setup & live addresses | `VM.GuestAgent.Audit`, `VM.GuestAgent.Unrestricted` (`VM.PowerMgmt` on Windows reboot) | VM or pool |
-| Snapshot / roll back | `VM.Snapshot` / `VM.Snapshot.Rollback` | VM |
-| Power / Delete | `VM.PowerMgmt` / `VM.Allocate` (`Datastore.Allocate` to free leftover disks) | VM |
-
 ## Tests
 
 ```sh
