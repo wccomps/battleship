@@ -179,9 +179,9 @@ func (s *Server) newView(w http.ResponseWriter, r *http.Request, title, active s
 		if cred, ok := auth.ProxmoxCredential(ctx); ok && !v.Panel {
 			v.PVEUser = cred.User
 			switch active {
-			case sectionImages, "logs":
-			case sectionEnvironments:
-				v.Lead = s.leadOps(ctx, sectionEnvironments)
+			case "logs":
+			case sectionImages, sectionEnvironments:
+				v.Lead = s.leadOps(ctx, active)
 			default:
 				v.Lead = s.leadOps(ctx, "")
 			}

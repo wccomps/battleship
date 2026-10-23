@@ -38,8 +38,8 @@
 </details>
 {{- end}}
 {{- if .Lead}}
-<nav class="lead-ops" aria-label="{{if eq .Active "environments"}}Environment{{else}}Pod{{end}} operations">
-{{- range .Lead}}<a class="btn{{if or (eq .Key "teardown") (eq .Key "env-teardown")}} bad{{end}}" href="{{.Href}}"{{if eq .Key $.Active}} aria-current="page"{{end}}>{{opIcon .Key}}{{.Label}}</a>{{end -}}
+<nav class="lead-ops" aria-label="{{if eq .Active "environments"}}Environment{{else if eq .Active "images"}}Image{{else}}Pod{{end}} operations">
+{{- range .Lead}}<a class="btn{{if or (eq .Key "teardown") (eq .Key "env-teardown") (eq .Key "image-delete")}} bad{{end}}" href="{{.Href}}"{{if eq .Key $.Active}} aria-current="page"{{end}}>{{opIcon .Key}}{{.Label}}</a>{{end -}}
 </nav>
 {{- end}}
 {{- with .User}}
