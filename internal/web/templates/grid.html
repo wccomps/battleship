@@ -111,11 +111,11 @@
 {{- end}}
 
 {{/* A cell: a box that ticks the VM, a link to the job working on it, or,
-     for a missing VM, just its outline. */}}
+     for a missing VM, a link to its page. */}}
 {{define "grid-cell" -}}
 <div class="gc" role="cell" id="{{.ID}}">
 {{- if .Busy}}<a class="cell is-busy" href="/logs/{{.Busy}}" data-panel-link title="{{.Tip}}"><span class="cv"><i class="g" aria-hidden="true"></i></span><span class="sr">{{.Label}}</span></a>
 {{- else if .Pick}}<label class="cell is-{{.State}}" title="{{.Tip}}"><input type="checkbox" name="vms" value="{{.Pick}}" data-team="{{.Team}}" data-host="{{.Host}}"{{with .Lacks}} data-lacks="{{.}}"{{end}}{{if .Checked}} checked{{end}}><span class="cv"><i class="g" aria-hidden="true"></i></span><span class="sr">{{.Label}}</span></label>
-{{- else}}<span class="cell is-{{.State}}" title="{{.Tip}}"><span class="cv"><i class="g" aria-hidden="true"></i></span><span class="sr">{{.Label}}</span></span>
+{{- else}}<a class="cell is-{{.State}}" href="{{.Href}}" title="{{.Tip}}"><span class="cv"><i class="g" aria-hidden="true"></i></span><span class="sr">{{.Label}}</span></a>
 {{- end}}</div>
 {{- end}}

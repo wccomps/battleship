@@ -360,7 +360,7 @@ func checkCellWords(t *rapid.T, c cellView, why []string) {
 }
 
 // checkCellMarkup checks a rendered cell: a busy one is a link to its
-// job, a missing one an outline, and only the others have a box.
+// job, a missing one is a link to its VM page, and only the others have a box.
 func checkCellMarkup(t *rapid.T, c cellView) {
 	h, err := execute("grid-cell", c)
 	if err != nil {
@@ -383,13 +383,17 @@ func checkCellMarkup(t *rapid.T, c cellView) {
 			}
 		case tag.Name == "a":
 			links++
-			if want := "/logs/" + strconv.FormatInt(c.Busy, 10); tag.Attrs["href"] != want {
+			want := c.Href
+			if c.Busy != 0 {
+				want = "/logs/" + strconv.FormatInt(c.Busy, 10)
+			}
+			if tag.Attrs["href"] != want {
 				t.Fatalf("cell %s links to %q, want %q", c.Name, tag.Attrs["href"], want)
 			}
 		}
 	}
 	wantBox := c.Busy == 0 && c.State != string(status.StateMissing)
-	if (boxes == 1) != wantBox || boxes > 1 || (links == 1) != (c.Busy != 0) || links > 1 {
+	if (boxes == 1) != wantBox || boxes > 1 || (links == 1) != !wantBox || links > 1 {
 		t.Fatalf("cell %s (%s, busy %d) has %d boxes and %d links", c.Name, c.State, c.Busy, boxes, links)
 	}
 }

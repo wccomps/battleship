@@ -176,7 +176,10 @@ func (s *Server) newView(w http.ResponseWriter, r *http.Request, title, active s
 		v.Initial = initial(u.Name + u.Email)
 		// Only the layout shows these, and only a Proxmox ticket can read privileges.
 		if cred, ok := auth.ProxmoxCredential(ctx); ok && !v.Panel {
-			v.PVEUser, v.Lead = cred.User, s.leadOps(ctx)
+			v.PVEUser = cred.User
+			if active != "environments" && active != "images" && active != "logs" {
+				v.Lead = s.leadOps(ctx)
+			}
 		}
 	}
 	v.Nav = nav(v.User)
