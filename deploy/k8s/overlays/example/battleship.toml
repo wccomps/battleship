@@ -4,8 +4,8 @@
 
 [proxmox]
 url = "https://proxmox.example.invalid:8006" # CHANGE ME
-# Or fail over: replace url with urls (not both); "battleship nodes" prints this
-# line. Allow every listed IP in networkpolicy.yaml.
+# Or fail over: replace url with urls (not both). Allow every listed IP in
+# networkpolicy.yaml.
 # urls = ["https://192.0.2.121:8006", "https://192.0.2.123:8006", "https://192.0.2.125:8006"]
 # The cluster CA from the ConfigMap (see kustomization.yaml and the base's note).
 ca_file = "/config/pve-root-ca.pem"

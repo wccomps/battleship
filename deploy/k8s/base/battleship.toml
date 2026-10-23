@@ -15,7 +15,6 @@
 # verification unless every node's certificate covers it.
 url = "https://proxmox.example.invalid:8006"
 # Better: list several nodes instead (not both) to fail over between them.
-# "battleship nodes" prints the line.
 # urls = ["https://pve1.example.invalid:8006", "https://pve2.example.invalid:8006"]
 # No token: battleship acts as each signed-in person via their Proxmox OpenID
 # ticket, so Proxmox's roles decide what they may do.
@@ -72,8 +71,8 @@ task_poll = "2s"                   # longest wait between task status polls; the
 [database]
 # url comes from BATTLESHIP_DATABASE_URL (the Postgres operator's secret).
 # Main pool per replica; each replica uses up to max_conns + 4 = 20. Budget
-# (replicas + 1 surging) x 20 = 60, plus CLI runs, under Postgres's
-# max_connections. See deploy/README.md.
+# (replicas + 1 surging) x 20 = 60 under Postgres's max_connections.
+# See deploy/README.md.
 max_conns = 16
 
 [jobs]

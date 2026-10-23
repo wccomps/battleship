@@ -663,6 +663,9 @@ func TestBrowserEditNotes(t *testing.T) {
 			b.shot("editnotes-images-" + size.name)
 			b.click(`a[aria-label="Edit notes of win2022"]`)
 			b.waitFor("the form in the panel", `!!document.querySelector("#panel textarea[name=notes]")`)
+			if !b.is(`document.querySelector('#kind-windows > details').open && document.querySelector('#kind-windows table.fams').checkVisibility()`) {
+				t.Errorf("clicking Edit notes folded the Windows category")
+			}
 			if got := b.text("#panel h1"); got != "Edit notes of win2022-v1" {
 				t.Errorf("the panel's heading is %q", got)
 			}

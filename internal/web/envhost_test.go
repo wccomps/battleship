@@ -180,6 +180,9 @@ func TestBrowserEnvHostPanel(t *testing.T) {
 	b.open("/environments")
 	b.click(`a.fam[href="/environments/host?vmid=2101"]`)
 	b.waitFor("the host sheet", `document.querySelector("#panel[open] #host-title") !== null`)
+	if !b.is(`document.querySelector('#kilo\\.alpha > details').open && document.querySelector('#kilo\\.alpha table.envt').checkVisibility()`) {
+		t.Errorf("clicking a host folded its environment")
+	}
 	b.noSideways("host sheet")
 	b.shot("envhost-panel")
 
