@@ -178,6 +178,10 @@ func TestBrowserEnvHostPanel(t *testing.T) {
 	defer b.clean()
 
 	b.open("/environments")
+	b.eval(`(function(){var d=document.querySelector('#kilo\\.alpha summary .acts');d.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,button:0}))})()`, nil)
+	if !b.is(`document.querySelector('#kilo\\.alpha > details').open`) {
+		t.Errorf("clicking summary .acts folded its environment")
+	}
 	b.click(`a.fam[href="/environments/host?vmid=2101"]`)
 	b.waitFor("the host sheet", `document.querySelector("#panel[open] #host-title") !== null`)
 	if !b.is(`document.querySelector('#kilo\\.alpha > details').open && document.querySelector('#kilo\\.alpha table.envt').checkVisibility()`) {

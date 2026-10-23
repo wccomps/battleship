@@ -105,7 +105,8 @@ func TestImagesPageReadyRows(t *testing.T) {
 	contains(t, "Odd_Name's row", odd, `href="/images/register?vmid=153&amp;image_kind=linux"`)
 
 	// gw-build is gw-v1's source: its family offers it, not this list.
-	lacks(t, "the page", body, `<div class="nm">gw-build</div>`, `href="/images/register">`, "Register base image")
+	lacks(t, "the page", body, `<div class="nm">gw-build</div>`)
+	contains(t, "the page", body, `<a class="btn" href="/images/register">`, "Register image</a>", `<a class="btn bad" href="/images/delete">`, "Delete image</a>")
 }
 
 // The catalogue lists each family once, by its current version, grouped by

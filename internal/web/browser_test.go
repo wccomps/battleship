@@ -504,7 +504,7 @@ func TestBrowserPreviewAndJob(t *testing.T) {
 			}
 			n, _ := parseID(id)
 			h.start(n)
-			h.event(n, "team07-web", "stop", string(apply.EventDone), "")
+			h.event(n, "team07-web", string(pods.StepPower), string(apply.EventDone), "")
 			publishJob(h, n)
 			b.waitFor("the job to run", `document.querySelector("#job-head .st").textContent.trim().startsWith("running · ")`)
 			b.waitFor("the log line", `document.querySelectorAll("#job-log li").length > 0`)
