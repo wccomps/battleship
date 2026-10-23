@@ -34,8 +34,9 @@ func Fingerprint(plan *pods.Plan) string {
 		Guest      *pods.Guest       `json:",omitempty"`
 		Supersedes *fpSource         `json:",omitempty"`
 		Details    *pods.ImageNotes  `json:",omitempty"`
-		// Replaces is the notes an Edit notes replaces, as pods reads them:
-		// changed since the preview, the job is stale, not a lost update.
+		// Replaces is the notes an Edit notes or Edit host replaces, as pods
+		// reads them: changed since the preview, the job is stale, not a lost
+		// update.
 		Replaces *pods.NotesRead `json:",omitempty"`
 	}
 	type fpTemplate struct {

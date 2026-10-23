@@ -28,8 +28,8 @@ func (h *harness) loginWith(subject string, vmids []int, privs ...string) authte
 	return sess
 }
 
-// Item 18: cancelling a job takes its operation's privilege on the job's
-// own VMs, not just somewhere (or having started it).
+// Cancelling a job takes its operation's privilege on the job's own VMs, not
+// just somewhere (or having started it).
 func TestCancelNeedsThePrivilegeOnTheJobsVMs(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -59,10 +59,21 @@ func TestCancelNeedsThePrivilegeOnTheJobsVMs(t *testing.T) {
 	if rec := h.post(&slotHolder, "/logs/"+itoa(envID)+"/cancel", url.Values{}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("cancel of pending env job by /pool/dev-01 holder = %d, want 303", rec.Code)
 	}
+
+	// An existing-VM image job (image-delete) checks only the VM's path, not
+	// the configured images pool when the image sits outside that pool.
+	h.api.add(proxmox.VM{VMID: 8002, Name: "debian-12-v2", Node: "n1", Template: true, Tags: "base;linux"},
+		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:80:03,bridge=vmbr0"})
+	delID := h.submitJob(jobs.Inputs{Kind: pods.KindImageDelete, ImageRequest: pods.ImageRequest{Image: "debian-12-v1"}}, byLead)
+	imgPoolHolder := h.loginWith("test-imgpool", nil)
+	h.pve.Grant("test-imgpool@auth.example.org", "/pool/"+h.cfg.Images.Pool, "VM.Allocate")
+	if rec := h.post(&imgPoolHolder, "/logs/"+itoa(delID)+"/cancel", url.Values{}); rec.Code != http.StatusForbidden {
+		t.Fatalf("cancel of image-delete by images-pool holder without /vms/8001 grant = %d, want 403", rec.Code)
+	}
 }
 
-// Item 19: when the job can't be read, a cancel is refused (500), never
-// let through without the privilege check.
+// When the job can't be read, a cancel is refused (500), never let through
+// without the privilege check.
 func TestCancelFailsClosedWhenTheJobCantBeRead(t *testing.T) {
 	h := newHarness(t)
 	h.poll()

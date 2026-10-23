@@ -309,15 +309,16 @@ func shift(bs [][2]int, n int) [][2]int {
 	return out
 }
 
-// ImageNotes are what a register or an Edit notes writes into an image's
-// notes: details, and the free text beside them unless Free is nil, which
-// keeps the free text there is. The details are embedded, so a value
+// ImageNotes are what a register, an Edit notes, or an Edit host writes into
+// a VM's notes: details, and the free text beside them unless Free is nil,
+// which keeps the free text there is. The details are embedded, so a value
 // without free text has the JSON its details alone had.
 type ImageNotes struct {
 	ImageDetails
 	Free *string `json:"free,omitempty"`
-	// From marks the notes an Edit notes form opened on (NotesEdit.Edit):
-	// changed since, the plan is blocked rather than write over them.
+	// From marks the notes an Edit notes or Edit host form opened on
+	// (NotesRead.Edit): changed since, the plan is blocked rather than write
+	// over them.
 	From string `json:"from,omitempty"`
 }
 
@@ -352,9 +353,9 @@ func (n ImageNotes) Changes(cur map[string]string) (map[string]string, error) {
 	return map[string]string{"description": desc}, nil
 }
 
-// against is n as Edit notes writes it over notes read as r: From is
-// cleared, and free text that is r's once cleaned is kept as it is (Free
-// nil), so a form sent back unchanged writes nothing there, even text
+// against is n as Edit notes or Edit host writes it over notes read as r:
+// From is cleared, and free text that is r's once cleaned is kept as it is
+// (Free nil), so a form sent back unchanged writes nothing there, even text
 // checkFreeNotes would refuse. same says n changes nothing in r.
 func (n ImageNotes) against(r NotesRead) (_ ImageNotes, same bool) {
 	n.From = ""
@@ -364,7 +365,7 @@ func (n ImageNotes) against(r NotesRead) (_ ImageNotes, same bool) {
 	return n, !r.Unreadable && n.ImageDetails == r.Details && n.Free == nil
 }
 
-// NotesRead is an image's notes as Edit notes reads them
+// NotesRead is a VM's notes as Edit notes or Edit host reads them
 // (readImageNotes): the details, and the free text beside them as editing
 // writes it (editText). An unreadable details block gives no details:
 // Unreadable is set, and Block holds the block's lines as pages show them.
@@ -396,7 +397,7 @@ func (r NotesRead) planChanges(req ImageNotes, vmName, formName string) (n Image
 	return n, same, stale, n.check()
 }
 
-// readImageNotes reads notes desc as Edit notes edits them.
+// readImageNotes reads notes desc as Edit notes or Edit host edits them.
 func readImageNotes(desc string) NotesRead {
 	lines, bs, d, err := splitNotes(desc)
 	r := NotesRead{Details: d, Free: editText(strings.Join(without(lines, bs), "\n"))}
@@ -419,7 +420,7 @@ func readVMNotes(vmid int, desc string) NotesRead {
 }
 
 const (
-	// MaxFreeNotes is the longest free text Edit notes writes, in
+	// MaxFreeNotes is the longest free text Edit notes or Edit host writes, in
 	// characters: as much as pages show (UserNotes).
 	MaxFreeNotes = maxUserNotes
 	// maxDescription is qemu-server's 8192-character description limit
@@ -460,10 +461,10 @@ func (it *Item) blockLongNotes(desc string) {
 var freeSpaces = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\v", "\n", "\f", "\n", "\u0085", "\n", "\u2028", "\n", "\u2029", "\n",
 	"\t", "    ")
 
-// CleanFreeNotes is free text as Edit notes writes it: line breaks as LF
-// (freeSpaces), tabs and other spaces (NBSP, U+3000) as spaces, no spaces
-// at a line's end, no blank lines or spaces at the start or end. Forms post
-// text through it.
+// CleanFreeNotes is free text as Edit notes or Edit host writes it: line
+// breaks as LF (freeSpaces), tabs and other spaces (NBSP, U+3000) as spaces,
+// no spaces at a line's end, no blank lines or spaces at the start or end.
+// Forms post text through it.
 func CleanFreeNotes(s string) string {
 	s = strings.Map(func(r rune) rune {
 		if r != ' ' && unicode.Is(unicode.Zs, r) {

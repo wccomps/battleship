@@ -109,16 +109,9 @@ func checkParity(t interface{ Fatalf(string, ...any) }, sub string, values map[s
 		t.Fatalf("battleship %s %q asks for %#v; the form, %#v", sub, args, c.in, want)
 	}
 	formOK := want.Validate() == nil && !badVM
-	switch {
-	case want.Kind.Teamless():
-		if cliOK := ok && c.in.Validate() == nil; cliOK != formOK {
-			t.Fatalf("battleship %s %q: CLI accepts %v, the form %v", sub, args, cliOK, formOK)
-		}
-	default:
-		emptyList := (values["hosts"] != nil && len(want.Hosts) == 0) || (values["vms"] != nil && len(want.VMs) == 0)
-		if ok != (formOK && !emptyList) {
-			t.Fatalf("battleship %s %q: CLI accepts %v, the form %v", sub, args, ok, formOK && !emptyList)
-		}
+	emptyList := (values["hosts"] != nil && len(want.Hosts) == 0) || (values["vms"] != nil && len(want.VMs) == 0)
+	if ok != (formOK && !emptyList) {
+		t.Fatalf("battleship %s %q: CLI accepts %v, the form %v", sub, args, ok, formOK && !emptyList)
 	}
 }
 

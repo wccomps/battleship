@@ -94,12 +94,6 @@ func (s *Server) notesPrefill(ctx context.Context, p *catalogPage) {
 		return
 	}
 	p.Edit.Was, p.Details = at.Read, at.Edit()
-	if d := p.In.Details; d != nil {
-		p.Details.ImageDetails, p.Details.From = d.ImageDetails, d.From
-		if d.Free != nil {
-			p.Details.Free = d.Free
-		}
-	}
 }
 
 // NoSave is whether the form offers no Review: an Edit notes or Edit host

@@ -351,7 +351,7 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		ip.Notes = &notes
 		desc := cfg["description"]
 		if resumed {
-			desc = existing.desc
+			desc = existing.desc()
 		}
 		ip.blockLongNotes(desc)
 	}

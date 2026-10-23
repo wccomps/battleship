@@ -37,8 +37,8 @@ type reviewView struct {
 	Details     *detailsView
 	DetailsSay  string
 	EditDetails string
-	// Changes are an Edit notes's details, before and after; Block, the
-	// unreadable block they replace; NotesChange, its free text.
+	// Changes are an Edit notes's or Edit host's details, before and after;
+	// Block, the unreadable block they replace; NotesChange, its free text.
 	Changes     []detailChange
 	Block       string
 	NotesChange *notesChange
@@ -141,7 +141,7 @@ func registerReview(op operation, in jobs.Inputs, plan *pods.Plan, _ config.LAN)
 	return r
 }
 
-// notesChange is the free text an Edit notes changes, before and after.
+// notesChange is the free text an Edit notes or Edit host changes, before and after.
 type notesChange struct{ Before, After string }
 
 // detailsReview describes an Edit notes: each detail before and after,
@@ -255,8 +255,8 @@ func envReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *r
 }
 
 // envEditReview describes editing an environment host: its renamed name,
-// kind, address, base image, network/CD-ROM repairs, guest reconfiguration,
-// and any details or free notes written.
+// kind, address, base image, CPU, network/CD-ROM repairs, guest
+// reconfiguration, and any details or free notes written.
 func envEditReview(op operation, _ jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
 	if len(plan.Items) != 1 {
 		return nil

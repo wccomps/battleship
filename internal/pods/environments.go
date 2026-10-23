@@ -118,8 +118,9 @@ type EnvHost struct {
 	CPUModels      []string          // custom CPU models on its node
 	Config         map[string]string // its Proxmox config as read
 	Warnings       []string          // discrepancies between its config or tags and its slot
-	desc           string            // its notes, for the plans that write them
 }
+
+func (h EnvHost) desc() string { return h.Config["description"] }
 
 // Environment is what a slot holds.
 type Environment struct {
@@ -145,18 +146,6 @@ func EnvByDomain(envs []Environment, domain string) (Environment, bool) {
 		}
 	}
 	return Environment{}, false
-}
-
-// EnvHostByID is the environment and host with vmid across envs.
-func EnvHostByID(envs []Environment, vmid int) (Environment, EnvHost, bool) {
-	for _, e := range envs {
-		for _, h := range e.Hosts {
-			if h.VMID == vmid {
-				return e, h, true
-			}
-		}
-	}
-	return Environment{}, EnvHost{}, false
 }
 
 func slotN(envs []Environment, n int) (Environment, error) {
@@ -340,7 +329,7 @@ func (p Planner) buildEnvHost(vm proxmox.VM, cfg map[string]string, slot Slot, c
 	n, _ := ParseNotes(cfg["description"])
 	n = n.Checked(p.Cfg.Environments.Subnet)
 	h := EnvHost{Name: vm.Name, Host: Hostname(vm.Name), VMID: vm.VMID, Node: vm.Node, Status: vm.Status, Tags: vm.Tags,
-		Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, Addr: n.IP, desc: cfg["description"]}
+		Router: slices.Contains(Tags(vm.Tags), ImageRouter), Notes: n, Addr: n.IP}
 	var derr error
 	h.Details, h.UserNotes, derr = ParseDetails(cfg["description"])
 	h.Unreadable = derr != nil
