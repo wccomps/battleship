@@ -82,6 +82,7 @@ details[open]>.disc::before{transform:rotate(90deg)}
 .rrow .nm{font:600 var(--t3) var(--fm);overflow-wrap:anywhere}
 .rrow .becomes{font-size:var(--t2);overflow-wrap:anywhere}
 .rrow .act{justify-self:end}
+form.rrow:invalid .btn{opacity:.4}
 .rrow.blocked{background:repeating-linear-gradient(135deg,transparent 0 6px,var(--sf2) 6px 9px)}
 .kindq{display:grid;gap:4px;min-width:0;margin:0;padding:0;border:0}
 .kindq legend{padding:0;margin-bottom:4px;font-family:var(--f)}
@@ -89,10 +90,8 @@ details[open]>.disc::before{transform:rotate(90deg)}
 .kindq .opt span{height:26px;padding:0 9px}
 .fix{display:flex;align-items:flex-start;gap:8px;margin:0;font-size:var(--t2);color:var(--tx2);overflow-wrap:anywhere}
 .fix .i{width:14px;height:14px;margin-top:3px;color:var(--stale)}
-.tbl.fams{background:var(--sf)}
+.tbl.fams th{position:static;background:var(--sf)}
 .tbl.fams td{vertical-align:middle}
-.tbl.fams tr.kg th{position:static;padding:14px 10px 4px;background:var(--sf);color:var(--tx3);font-size:var(--t1);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
-.tbl.fams tr.kg+tr td{border-top:0}
 :is(.tbl.fams,.envt) tr.link{position:relative}
 :is(.tbl.fams,.envt) tr.link:is(:hover,:focus-within) td{background:var(--sf2)}
 :is(.tbl.fams,.envt) .fam{font:600 var(--t3) var(--fm);text-decoration:none}
@@ -458,13 +457,15 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .envs{display:flex;flex-direction:column;gap:var(--s4)}
 .envbar{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 16px;padding:8px 12px;border:1px solid var(--ln);border-radius:var(--r2);background:var(--sf2)}
 .env{border:1px solid var(--ln);border-radius:var(--r2);background:var(--sf);overflow:hidden;scroll-margin-top:64px}
-.envh{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;padding:10px 12px;border-bottom:1px solid var(--ln)}
+.envh{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;padding:10px 12px;color:var(--tx);font-size:var(--t3);text-decoration:none}
+.env details[open]>.envh{border-bottom:1px solid var(--ln)}
+.envh:hover{background:var(--sf2)}
 .envh h2{min-width:0;font:600 var(--t4) var(--fm);overflow-wrap:anywhere}
 .facts{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:var(--t2);color:var(--tx2)}
 .facts b{font:500 .95em var(--fm);color:var(--tx)}
 .envh .acts{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
-.env>.fix{padding:8px 12px;border-bottom:1px solid var(--ln)}
-.env>.fix:last-child{border-bottom:0}
+.env .fix{padding:8px 12px;border-bottom:1px solid var(--ln)}
+.env .fix:last-child{border-bottom:0}
 .envt th{position:static;background:var(--sf)}
 .envt td{vertical-align:middle}
 .envt .gl{white-space:nowrap}
@@ -521,6 +522,9 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .mrow>.n{grid-area:n}.mrow>.a{grid-area:a}.mrow>.x{grid-area:x}.mrow>.im{grid-area:i}
   .addr .pre.l{display:none}.addr .pre.s{display:inline}
   .top{flex-wrap:wrap;gap:var(--s1) var(--s2);padding:var(--s1) var(--s4) var(--s2)}
+  .nav a{padding:5px 7px}
+  .lead-ops{order:8;width:100%;gap:var(--s1)}
+  .lead-ops .btn{flex:1;padding:0 9px;font-size:var(--t2)}
   .brand span:last-child,.me .role{display:none}
   .top .legend{order:9;width:100%;gap:2px var(--s3);font-size:var(--t1)}
   .gwrap{padding:var(--s3) 0 168px}
@@ -555,21 +559,17 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .tbl.fams thead{display:none}
   .tbl.fams,.tbl.fams tbody,:is(.envt,.rvw,.jobt),:is(.envt,.rvw,.jobt) tbody{display:block}
   .tbl.fams tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:9px 12px;border-top:1px solid var(--ln)}
-  .tbl.fams tr.kg,:is(.tbl.fams tr.kg+tr,.envt tr:first-child,.rvw tr:first-child,.jobt tr:first-child){border-top:0}
-  .tbl.fams tr.kg{display:block;padding:14px 12px 2px}
-  .tbl.fams tr.kg th{display:block;padding:0}
+  :is(.tbl.fams,.envt,.rvw,.jobt) tr:first-child{border-top:0}
   :is(.tbl.fams,.envt,.rvw,.jobt) td{display:block;min-width:0;padding:0;border:0}
   .tbl.fams td.cur,.envt td.ad,:is(.rvw,.jobt) td.c2{grid-column:2;grid-row:1;text-align:right}
   .tbl.fams td.nl{grid-column:1;grid-row:2}
   .tbl.fams td.act{grid-column:2;grid-row:2;justify-self:end;align-self:start;width:auto}
   .nchg{grid-template-columns:minmax(0,1fr)}
-  .envh .acts{width:100%;margin-left:0}
-  .envh .acts .btn{flex:1}
   .envt tr,.rvw tr,.jobt tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:9px 12px;border-top:1px solid var(--ln)}
   .tbl.jobt tr.bad{background:var(--bad-bg)}
   .rvw tr.blk{background:repeating-linear-gradient(135deg,transparent 0 6px,var(--sf2) 6px 9px)}
   .rvw tr.blk td{background:none}
-  .env{scroll-margin-top:96px} /* the header wraps to two rows */
+  .env{scroll-margin-top:120px} /* the header wraps to two rows */
 }
 @media (pointer:coarse){.grid{--ch:30px}.hb,.all{height:28px}.all input{width:18px;height:18px}.btn{min-height:36px}.opt span{height:34px}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}.is-busy .g,.spin{animation:spin 4s steps(8) infinite!important}}

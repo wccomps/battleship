@@ -154,12 +154,13 @@ func nav(u *auth.User) []navItem {
 	return []navItem{{"grid", "Grid", "/"}, {"environments", "Environments", "/environments"}, {"images", "Images", "/images"}, {"logs", "Logs", logsPath}}
 }
 
-// leadOps is the team page operations (deploy and teardown) the user holds a
-// privilege for somewhere; image and environment ones start from their pages.
-func (s *Server) leadOps(ctx context.Context) []navItem {
+// leadOps is the header's create/deploy and teardown buttons for section
+// ("" for the grid's pod operations, sectionEnvironments for environments)
+// that the user holds a privilege for somewhere.
+func (s *Server) leadOps(ctx context.Context, section string) []navItem {
 	var items []navItem
 	for _, op := range operations {
-		if op.page() && !op.Kind.Teamless() && s.mayRun(ctx, op.Kind) {
+		if op.Lead != "" && op.Section == section && s.mayRun(ctx, op.Kind) {
 			items = append(items, navItem{string(op.Kind), op.Lead, op.Path})
 		}
 	}
@@ -177,8 +178,12 @@ func (s *Server) newView(w http.ResponseWriter, r *http.Request, title, active s
 		// Only the layout shows these, and only a Proxmox ticket can read privileges.
 		if cred, ok := auth.ProxmoxCredential(ctx); ok && !v.Panel {
 			v.PVEUser = cred.User
-			if active != "environments" && active != "images" && active != "logs" {
-				v.Lead = s.leadOps(ctx)
+			switch active {
+			case sectionImages, "logs":
+			case sectionEnvironments:
+				v.Lead = s.leadOps(ctx, sectionEnvironments)
+			default:
+				v.Lead = s.leadOps(ctx, "")
 			}
 		}
 	}

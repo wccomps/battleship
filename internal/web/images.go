@@ -37,6 +37,7 @@ type readyRow struct {
 
 // kindGroup is the catalogue's families of one kind.
 type kindGroup struct {
+	Kind     string // "router", "windows", "linux" or "other"
 	Label    string // "Router", "Windows", "Linux / BSD" or "Other"
 	Families []familyRow
 }
@@ -97,7 +98,7 @@ func catalogue(images []pods.BaseImage) (groups []kindGroup, retired []familyRow
 	}
 	for _, k := range pods.ImageKinds {
 		if rows := byKind[k]; len(rows) > 0 {
-			groups = append(groups, kindGroup{kindLabels[k], rows})
+			groups = append(groups, kindGroup{k, kindLabels[k], rows})
 		}
 	}
 	return groups, retired
@@ -181,7 +182,13 @@ func (s *Server) imagesPage(w http.ResponseWriter, r *http.Request) {
 	default:
 		p.NotesLack = lacksOf(pods.KindImageDetails, andList(lack))
 	}
-	s.render(w, r, http.StatusOK, "images", s.newView(w, r, "Images", "images", p))
+	v := s.newView(w, r, "Images", "images", p)
+	if p.ReadErr != "" {
+		v.Live = "stale"
+	} else {
+		v.Live = "live"
+	}
+	s.render(w, r, http.StatusOK, "images", v)
 }
 
 // familyView is a family's page: its current version, its details and

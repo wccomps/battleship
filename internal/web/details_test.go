@@ -649,6 +649,17 @@ func TestBrowserEditNotes(t *testing.T) {
 			b := newBrowser(t, h, &lead, size.width, size.height, size.dark)
 			b.open("/images")
 			b.noSideways("the Images page")
+			if !b.is(`document.querySelector('#kind-windows > details').open && document.querySelector('#kind-windows table.fams').checkVisibility()`) {
+				t.Errorf("Windows category doesn't start open")
+			}
+			b.click(`#kind-windows > details > summary h2`)
+			if b.is(`document.querySelector('#kind-windows > details').open || document.querySelector('#kind-windows table.fams').checkVisibility()`) {
+				t.Errorf("Windows category didn't fold on header click")
+			}
+			b.click(`#kind-windows > details > summary h2`)
+			if !b.is(`document.querySelector('#kind-windows > details').open && document.querySelector('#kind-windows table.fams').checkVisibility()`) {
+				t.Errorf("Windows category didn't unfold on second header click")
+			}
 			b.shot("editnotes-images-" + size.name)
 			b.click(`a[aria-label="Edit notes of win2022"]`)
 			b.waitFor("the form in the panel", `!!document.querySelector("#panel textarea[name=notes]")`)

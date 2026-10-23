@@ -24,6 +24,8 @@ type catalogPage struct {
 	ReadErr  string // why the cluster couldn't be read
 	// Env is the environment an env-add form works on.
 	Env *pods.Environment
+	// Teardown are the environments a Tear down environment form offers.
+	Teardown []teardownEnv
 	// Details fill a register's, an Edit notes's, and an Edit host's fields:
 	// those given, else those of the VM's notes or the family's newest version.
 	Details pods.ImageNotes
@@ -88,7 +90,7 @@ func (s *Server) catalogForm(r *http.Request, op operation, in jobs.Inputs, prob
 	ctx := r.Context()
 	p := s.newCatalogPage(ctx, op.Machines || op.Kind.OnEnvironment())
 	p.Op, p.In, p.Error = op, in, problem
-	if op.Kind.OnEnvironment() {
+	if op.domain != "" {
 		e, ok := pods.EnvByDomain(p.Envs, in.Domain)
 		if !ok && p.ReadErr == "" {
 			return p, false

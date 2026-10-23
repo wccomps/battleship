@@ -116,20 +116,21 @@ func TestImagesPageCatalogue(t *testing.T) {
 	addCatalog(h)
 	sess := h.login(asLead)
 	body := h.get(&sess, "/images").Body.String()
-	table, rest, ok := strings.Cut(body[strings.Index(body, `<table class="tbl fams">`):], "</table>")
+	cat, rest, ok := strings.Cut(body[strings.Index(body, `<section class="sec" id="cat" aria-label="Base images">`):], `<details class="olds">`)
 	if !ok {
 		t.Fatalf("no catalogue:\n%s", body)
 	}
-	router, linux := strings.Index(table, `<th scope="rowgroup" colspan="5">Router</th>`), strings.Index(table, `<th scope="rowgroup" colspan="5">Linux / BSD</th>`)
-	if router < 0 || linux < router || strings.Contains(table, ">Windows</th>") {
-		t.Errorf("groups wrong (router %d, linux %d):\n%s", router, linux, table)
+	router, linux := strings.Index(cat, `<h2 id="kind-router-h">Router</h2>`), strings.Index(cat, `<h2 id="kind-linux-h">Linux / BSD</h2>`)
+	if router < 0 || linux < router || strings.Contains(cat, ">Windows</h2>") {
+		t.Errorf("groups wrong (router %d, linux %d):\n%s", router, linux, cat)
 	}
-	contains(t, "the catalogue", table,
+	contains(t, "the catalogue", cat,
+		`<details open>`, `<summary class="envh disc">`, `<span>1 family</span>`,
 		`<a class="fam" href="/images/family/gw" data-panel-link>gw</a></td><td class="cur"><code>v1</code> <span class="meta">· 8000</span></td><td class="nl">admin / gwpass</td><td class="act"><div class="acts"><a class="btn sm" href="/images/details?family=gw" data-panel-link aria-label="Edit notes of gw">`,
 		`<a class="fam" href="/images/family/debian-12" data-panel-link>debian-12</a></td><td class="cur"><code>v2</code> <span class="meta">· 8002</span></td><td class="nl">debian / Changeme1!</td><td class="act"><div class="acts"><a class="btn sm" href="/images/details?family=debian-12" data-panel-link aria-label="Edit notes of debian-12">`)
-	lacks(t, "the catalogue", table, "win10", "WAN dhcp", "old login", "debian-12-v1")
-	if strings.Count(table, `class="fam"`) != 2 {
-		t.Errorf("want 2 families in the catalogue:\n%s", table)
+	lacks(t, "the catalogue", cat, "win10", "WAN dhcp", "old login", "debian-12-v1")
+	if strings.Count(cat, `class="fam"`) != 2 {
+		t.Errorf("want 2 families in the catalogue:\n%s", cat)
 	}
 	fold, _, _ := strings.Cut(rest, "</details>")
 	contains(t, "the retired fold", fold, `<summary class="disc">Retired families (1)</summary>`, "<code>win10</code>",
@@ -183,7 +184,7 @@ func TestFamilyPageStates(t *testing.T) {
 		`action="/images/delete/preview"`, `name="image" value="debian-12-v1"`)
 
 	gw := h.get(&sess, "/images/family/gw").Body.String()
-	contains(t, "gw", gw, `<dt>Built from</dt><dd><code>gw-build</code> · VMID 140 · stopped</dd>`, "Copy <code>gw-build</code> in again",
+	contains(t, "gw", gw, `<dt>Built from</dt><dd><code>gw-build</code> · VMID 140 · stopped</dd>`,
 		`<input type="hidden" name="vmid" value="140"><input type="hidden" name="family" value="gw">`+"\n"+`<button class="btn pri" type="submit">New version from gw-build</button>`,
 		`action="/images/edit/preview"`, `<button class="btn" type="submit">Open for editing</button>`, "Next version · v2")
 	lacks(t, "gw", gw, "is open for editing", "Delete</button>")

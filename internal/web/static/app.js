@@ -44,7 +44,7 @@
   function liveState() {
     if (down > 0) return "off";
     var st = $("grid-status");
-    return (st && st.getAttribute("data-live")) || "live";
+    return (st && st.getAttribute("data-live")) || shown || "live";
   }
   function showLive() {
     if (!app || !app.hasAttribute("data-live")) return;
@@ -386,6 +386,10 @@
       var next = parse(html).querySelector("main > .page");
       var cur = document.querySelector("main > .page");
       if (!next || !cur) return;
+      each(cur.querySelectorAll(".env[id] > details"), function (d) {
+        var n = next.querySelector('[id="' + d.parentNode.id + '"] > details');
+        if (n) n.open = d.open;
+      });
       var href = opener && opener.getAttribute("href");
       cur.replaceWith(next);
       if (href) opener = next.querySelector('a[href="' + href + '"]');

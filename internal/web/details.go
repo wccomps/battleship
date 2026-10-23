@@ -97,7 +97,9 @@ func (s *Server) notesPrefill(ctx context.Context, p *catalogPage) {
 }
 
 // NoSave is whether the form offers no Review: an Edit notes or Edit host
-// with nothing to edit.
+// with nothing to edit, or a Tear down environment with no environment to
+// tear down.
 func (p catalogPage) NoSave() bool {
-	return (p.Edit != nil && p.Edit.Err != "") || (p.Host != nil && p.Host.Err != "")
+	return (p.Edit != nil && p.Edit.Err != "") || (p.Host != nil && p.Host.Err != "") ||
+		(p.Op.Kind == pods.KindEnvTeardown && len(p.Teardown) == 0)
 }

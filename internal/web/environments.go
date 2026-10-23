@@ -25,11 +25,10 @@ type envsView struct {
 	Create  string
 	Queued  string
 	FreeErr string // why the queued jobs couldn't be read
-	// MayCreate, MayAdd and MayTearDown say whether the user holds
-	// each action's privilege anywhere; Lacks says, a line each, what they
-	// lack.
-	MayCreate, MayAdd, MayTearDown bool
-	Lacks                          []string
+	// MayAdd says whether the user holds Add hosts's privilege anywhere;
+	// Lacks says, a line each, what they lack.
+	MayAdd bool
+	Lacks  []string
 	// MayLive says the page offers live addresses: there are hosts, and
 	// the user may read guest agents somewhere. LiveRead says it has them.
 	MayLive, LiveRead bool
@@ -136,8 +135,9 @@ func hostWhat(notes string, d pods.ImageDetails, unreadable bool) string {
 // fills in after the page loads (environmentAddrs).
 func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	p := envsView{MayCreate: s.mayRun(ctx, pods.KindEnvCreate), MayAdd: s.mayRun(ctx, pods.KindEnvAdd),
-		MayTearDown: s.mayRun(ctx, pods.KindEnvTeardown), MayLive: s.mayAnywhere(ctx, pods.LiveAddrsPrivilege)}
+	mayCreate := s.mayRun(ctx, pods.KindEnvCreate)
+	mayTearDown := s.mayRun(ctx, pods.KindEnvTeardown)
+	p := envsView{MayAdd: s.mayRun(ctx, pods.KindEnvAdd), MayLive: s.mayAnywhere(ctx, pods.LiveAddrsPrivilege)}
 	planner := s.planner(ctx)
 	envs, vms, err := planner.Environments(ctx)
 	if err != nil {
@@ -157,7 +157,7 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 			p.Create = open[0].Pool
 		}
 	}
-	if !p.MayCreate {
+	if !mayCreate {
 		p.Lacks = append(p.Lacks, lacksOf(pods.KindEnvCreate, ""))
 	}
 	if !slices.ContainsFunc(p.Envs, func(b envBlock) bool { return len(b.Hosts) > 0 }) {
@@ -169,11 +169,17 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 		if !p.MayAdd {
 			p.Lacks = append(p.Lacks, lacksOf(pods.KindEnvAdd, ""))
 		}
-		if !p.MayTearDown {
+		if !mayTearDown {
 			p.Lacks = append(p.Lacks, lacksOf(pods.KindEnvTeardown, ""))
 		}
 	}
-	s.render(w, r, http.StatusOK, "catalog", s.newView(w, r, "Environments", "environments", p))
+	v := s.newView(w, r, "Environments", "environments", p)
+	if p.ReadErr != "" {
+		v.Live = "stale"
+	} else {
+		v.Live = "live"
+	}
+	s.render(w, r, http.StatusOK, "catalog", v)
 }
 
 // environmentAddrs serves the Environments page's address cells, and the
@@ -339,11 +345,34 @@ func slotRuns(slots []pods.Slot) string {
 	return strings.Join(out, ", ")
 }
 
+// teardownEnv is an environment a teardown form offers to tear down.
+type teardownEnv struct {
+	Domain, Pool string
+	Checked      bool
+}
+
+// teardownPrefill lists the environments with a single domain that Tear
+// down environment may act on, pre-selecting In.Domain or an only choice.
+func (s *Server) teardownPrefill(_ context.Context, p *catalogPage) {
+	for _, e := range p.Envs {
+		if e.Domain == "" {
+			continue
+		}
+		if first, ok := pods.EnvByDomain(p.Envs, e.Domain); !ok || first.Slot.N != e.Slot.N {
+			continue
+		}
+		p.Teardown = append(p.Teardown, teardownEnv{Domain: e.Domain, Pool: e.Slot.Pool, Checked: e.Domain == p.In.Domain})
+	}
+	if p.In.Domain == "" && len(p.Teardown) == 1 {
+		p.Teardown[0].Checked = true
+	}
+}
+
 // inEnv serves next for op opened for the environment its path names
 // (operation.at). A path that can't name one goes back to Environments
 // without reading the cluster.
 func (s *Server) inEnv(op operation, next func(operation) http.Handler) http.Handler {
-	if !op.Kind.OnEnvironment() {
+	if !op.inEnv() {
 		return next(op)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -359,7 +388,7 @@ func (s *Server) inEnv(op operation, next func(operation) http.Handler) http.Han
 // noEnv sends an environment operation without an environment (domain, if
 // it names one that doesn't exist) back to Environments, saying why.
 func (s *Server) noEnv(w http.ResponseWriter, r *http.Request, domain string) {
-	msg := "Add hosts and Tear down start from an environment: pick one below."
+	msg := "Add hosts starts from an environment: pick one below."
 	if domain != "" {
 		msg = "There's no environment " + domain + ". It may have been torn down or renamed; pick one below."
 	}

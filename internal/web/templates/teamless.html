@@ -37,6 +37,16 @@
 {{- if eq .Op.Kind "env-add"}}{{with .Env}}
 <div class="sec"><span class="hint">Already here · {{.Slot.Pool}}</span><div class="here">{{range $.Data.Here}}<span>{{.Name}}{{with .Addr}} {{.}}{{end}}</span>{{end}}</div></div>
 {{- end}}{{end}}
+{{- if eq .Op.Kind "env-teardown"}}
+{{- if .Teardown}}
+<fieldset class="field">
+<legend>Environment</legend>
+<div class="opts">{{range .Teardown}}<label class="opt"><input type="radio" name="domain" value="{{.Domain}}" required{{if .Checked}} checked{{end}}><span>{{.Domain}} · {{.Pool}}</span></label>{{end}}</div>
+</fieldset>
+{{- else if not .ReadErr}}
+<p class="say">No environments in use yet.</p>
+{{- end}}
+{{- end}}
 {{- if $machines}}
 <fieldset class="field">
 <legend class="lbl">{{if eq .Op.Kind "env-create"}}Machines{{else}}New hosts{{end}}</legend>
