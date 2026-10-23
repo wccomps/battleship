@@ -237,8 +237,19 @@ func TestEnvironmentsLiveAddressWithoutAssigned(t *testing.T) {
 	lacks(t, "fir", cell, "differs", "assigned", "none")
 }
 
+// siCell is the status · image cell of VM vmid in body.
+func siCell(t *testing.T, body string, vmid int) string {
+	t.Helper()
+	m := regexp.MustCompile(`(?s)<td class="si" id="si-` + strconv.Itoa(vmid) + `">.*?</td>`).FindString(body)
+	if m == "" {
+		t.Fatalf("no status cell of %d in:\n%s", vmid, body)
+	}
+	return m
+}
+
 // Live address reads also check whether SSH and the ops CA key are ready on
-// each answering host, showing a warning chip in the address cell when not.
+// each answering host, counting the warning in the row's status cell and
+// showing the full warning text in the host's side sheet.
 func TestEnvironmentsLiveSSHWarnings(t *testing.T) {
 	h := newHarness(t)
 	addLiveEnv(h, false)
@@ -256,10 +267,21 @@ func TestEnvironmentsLiveSSHWarnings(t *testing.T) {
 	for _, path := range []string{"/environments/addresses", "/environments?live=1"} {
 		h.api.FailOn("agent-ssh:2105", &proxmox.APIError{Status: 500, Message: "Command guest-exec has been disabled"})
 		body := h.get(&sess, path).Body.String()
-		lacks(t, "the router at "+path, addrCell(t, body, 2100), "is-drifted")
-		contains(t, "teak at "+path, addrCell(t, body, 2101), `<span class="al is-drifted"><i class="g" aria-hidden="true"></i>missing ops CA key</span>`)
-		contains(t, "yew at "+path, addrCell(t, body, 2102), `<span class="al is-drifted"><i class="g" aria-hidden="true"></i>SSH not running</span>`)
-		contains(t, "ash at "+path, addrCell(t, body, 2105), `<span class="al is-drifted"><i class="g" aria-hidden="true"></i>guest-exec disabled</span>`)
+		if path == "/environments?live=1" {
+			lacks(t, "the router at "+path, siCell(t, body, 2100), "is-drifted")
+		}
+		for _, vmid := range []int{2101, 2102, 2105} {
+			contains(t, strconv.Itoa(vmid)+" at "+path, siCell(t, body, vmid), `<span class="chip is-drifted"><i class="g" aria-hidden="true"></i>1 warning</span>`)
+		}
+	}
+	for vmid, warn := range map[int]string{
+		2101: "missing ops CA key",
+		2102: "SSH not running",
+		2105: `<span class="name">guest-exec</span> disabled`,
+	} {
+		h.api.FailOn("agent-ssh:2105", &proxmox.APIError{Status: 500, Message: "Command guest-exec has been disabled"})
+		sheet := h.get(&sess, envHostHref(vmid)).Body.String()
+		contains(t, strconv.Itoa(vmid)+" sheet", sheet, warn, `<code>10.50.12.`)
 	}
 }
 

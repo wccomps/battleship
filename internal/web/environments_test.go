@@ -71,9 +71,13 @@ func hostNames(section string) []string {
 func TestEnvironmentsPage(t *testing.T) {
 	h := newHarness(t)
 	addCatalog(h)
-	addEnvs(h)
 	sess := h.login(asLead)
+	empty := h.get(&sess, "/environments").Body.String()
+	contains(t, "empty page", empty, "No environments in use yet. Create environment builds one in dev-01.")
+
+	addEnvs(h)
 	body := h.get(&sess, "/environments").Body.String()
+	lacks(t, "the page with environments", body, "No environments in use yet")
 	contains(t, "the page", body,
 		`<a class="btn pri" href="/environments/new">Create environment</a>`,
 		`<p class="free"><span class="sub">Free</span><span class="vm">dev-02, dev-03, dev-05 – dev-10</span><span class="meta">· Create uses dev-02</span></p>`)
@@ -85,7 +89,7 @@ func TestEnvironmentsPage(t *testing.T) {
 		`<span class="hname">gw</span></a> <span class="chip">router</span>`,
 		`<code>192.168.100.5</code>`,
 		`<span class="gl is-running"><i class="g" aria-hidden="true"></i>running</span> <span class="meta">· gw-v1</span>`,
-		`<div class="notes">admin / gwpass</div>`,
+		`<td class="nl">admin / gwpass</td>`,
 		`<span class="gl is-stopped"><i class="g" aria-hidden="true"></i>stopped</span> <span class="meta">· debian-12-v2</span>`,
 		`<span class="meta">no address</span>`)
 	lacks(t, "kilo.alpha", kilo, "battleship:", "Set DNS", "DNS <b>")
@@ -382,8 +386,8 @@ func TestPropEnvironmentsPageShowsVMsAsText(t *testing.T) {
 			if !strings.Contains(section, `<span class="hname">`+escaped(want)+`</span>`) {
 				t.Fatalf("%q isn't shown as text:\n%s", want, section)
 			}
-			if notes[i] != "" && !strings.Contains(section, `<div class="notes">`+escaped(notes[i])+`</div>`) {
-				t.Fatalf("notes %q aren't shown as text:\n%s", notes[i], section)
+			if first := hostWhat(notes[i], pods.ImageDetails{}, false); first != "" && !strings.Contains(section, `<td class="nl">`+escaped(first)+`</td>`) {
+				t.Fatalf("notes summary %q isn't shown as text:\n%s", first, section)
 			}
 		}
 	})
@@ -447,10 +451,14 @@ func TestEnvironmentsPageHostWarnings(t *testing.T) {
 	sess := h.login(asLead)
 	body := h.get(&sess, "/environments").Body.String()
 	contains(t, "the environment row", body,
-		`<span class="al is-drifted"><i class="g" aria-hidden="true"></i>missing tags dev, kilo.alpha</span>`,
-		`<span class="al is-drifted"><i class="g" aria-hidden="true"></i>net0 on devint02, expected devint01</span>`,
-		`<span class="al is-drifted"><i class="g" aria-hidden="true"></i>CPU x86-64-v2-AES, expected baseline</span>`,
-		`<span class="al is-drifted"><i class="g" aria-hidden="true"></i>guest agent off</span>`,
-		`<span class="al is-drifted"><i class="g" aria-hidden="true"></i>CD-ROM attached</span>`)
-	lacks(t, "the environment row", body, `<span class="chip is-drifted">`)
+		`<span class="chip is-drifted"><i class="g" aria-hidden="true"></i>5 warnings</span>`)
+	lacks(t, "the environment row", body, "missing tags", "net0 on devint02", "CPU x86-64-v2-AES", "guest agent off", "CD-ROM attached")
+
+	sheet := h.get(&sess, "/environments/host?vmid=2101").Body.String()
+	contains(t, "the host sheet", sheet,
+		`missing tags dev, <span class="name">kilo.alpha</span>`,
+		`net0 on devint02, expected devint01`,
+		`CPU <span class="name">x86-64-v2-AES</span>, expected baseline`,
+		`guest agent off`,
+		`<span class="name">CD-ROM</span> attached`)
 }

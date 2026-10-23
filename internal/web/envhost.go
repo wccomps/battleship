@@ -36,18 +36,20 @@ func envHostBack(_ operation, in jobs.Inputs) string {
 
 // envHostView is the side-panel sheet for one environment host VM.
 type envHostView struct {
-	VMID            int
-	Name            string
-	Host            string
-	Domain          string
-	Slot            string
-	Node            string
-	Status          string
-	Running         bool
-	Router          bool
-	Kind            string
-	Addr            string
-	DNS             string
+	VMID    int
+	Name    string
+	Host    string
+	Domain  string
+	Slot    string
+	Node    string
+	Status  string
+	Running bool
+	Router  bool
+	Kind    string
+	Addr    string
+	Gateway string
+	DNS     string
+	pods.LiveAddrs
 	Image           string
 	Family          string
 	CPU             string
@@ -133,6 +135,23 @@ func (s *Server) envHostPage(w http.ResponseWriter, r *http.Request) {
 	if len(h.CPUModels) > 0 && pods.CPUModel(h.Config["cpu"], h.CPUModels) == "" {
 		fixCPU = h.CPUModels[0]
 	}
+	warnings := slices.Clone(h.Warnings)
+	var live pods.LiveAddrs
+	if s.mayAnywhere(ctx, pods.LiveAddrsPrivilege) {
+		hosts := []pods.EnvHost{h}
+		if !h.Router {
+			for _, rh := range env.Hosts {
+				if rh.Router {
+					hosts = append(hosts, rh)
+					break
+				}
+			}
+		}
+		live = s.liveAddrs(ctx, []pods.Environment{{Slot: env.Slot, LAN: env.LAN, Hosts: hosts}})[h.VMID]
+		if live.SSHWarning != "" {
+			warnings = append(warnings, live.SSHWarning)
+		}
+	}
 	p := envHostView{
 		VMID:            h.VMID,
 		Name:            h.Name,
@@ -145,13 +164,15 @@ func (s *Server) envHostPage(w http.ResponseWriter, r *http.Request) {
 		Router:          h.Router,
 		Kind:            kind,
 		Addr:            addr,
+		Gateway:         pods.AddrText(env.Gateway()),
+		LiveAddrs:       live,
 		Image:           h.Notes.Base,
 		Family:          family,
 		CPU:             cpu,
 		FixCPU:          fixCPU,
 		Tags:            strings.Join(pods.Tags(h.Tags), ", "),
 		CDROM:           h.CDROM,
-		Warnings:        h.Warnings,
+		Warnings:        warnings,
 		Details:         details,
 		DetailsFromBase: fromBase,
 		Notes:           h.UserNotes,

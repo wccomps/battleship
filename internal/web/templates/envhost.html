@@ -10,6 +10,8 @@
 {{template "close" .Back}}
 </div>
 <div class="pb">
+{{- if or .Warnings .CDROM .FixCPU}}
+<div class="sec warnbox">
 {{- if .Warnings}}
 <ul class="reasons is-drifted" aria-label="Warnings">
 {{- range .Warnings}}
@@ -17,10 +19,40 @@
 {{- end}}
 </ul>
 {{- end}}
+{{- if or .CDROM .FixCPU}}
+<div class="acts">
+{{- if .CDROM}}
+<form method="post" action="/environments/edit/preview">
+{{template "csrf" $csrf}}
+<input type="hidden" name="vmid" value="{{.VMID}}">
+<input type="hidden" name="eject_cdrom" value="yes">
+<button type="submit" class="btn sm"{{if not .MayEdit}} disabled{{end}}>Eject CD-ROM</button>
+</form>
+{{- end}}
+{{- with .FixCPU}}
+<form method="post" action="/environments/edit/preview">
+{{template "csrf" $csrf}}
+<input type="hidden" name="vmid" value="{{$d.VMID}}">
+<input type="hidden" name="cpu" value="{{.}}">
+<button type="submit" class="btn sm"{{if not $d.MayEdit}} disabled{{end}}>Set CPU {{.}}</button>
+</form>
+{{- end}}
+</div>
+{{- end}}
+</div>
+{{- end}}
 <dl class="kv">
 <dt>Environment</dt><dd>{{if .Domain}}<span class="vm">{{.Domain}}</span> · {{end}}<span class="vm">{{.Slot}}</span></dd>
 <dt>VM</dt><dd>VMID <span class="vm">{{.VMID}}</span> · <span class="vm">{{.Node}}</span></dd>
-<dt>Address</dt><dd>{{if .Addr}}<code>{{.Addr}}</code>{{if .Router}} <span class="meta">· gateway</span>{{end}}{{else}}<span class="muted">none</span>{{end}}{{with .DNS}} <span class="meta">· DNS {{.}}</span>{{end}}</dd>
+<dt>Address</dt><dd>
+{{- if .Live -}}
+{{- if .LAN}}<code>{{.LAN}}</code>{{if .Differs}} <span class="chip differs">differs</span> <span class="meta">· {{if .Router}}expected {{.Gateway}}{{else}}assigned {{.Addr}}{{end}}</span>{{else if .Router}} <span class="meta">· gateway</span>{{end}}{{else}}<span class="muted">no live address</span>{{if .Differs}} <span class="meta">· {{if .Router}}expected {{.Gateway}}{{else}}assigned {{.Addr}}{{end}}</span>{{end}}{{end -}}
+{{- else -}}
+{{- if .Addr}}<code>{{.Addr}}</code>{{if .Router}} <span class="meta">· gateway</span>{{end}}{{else}}<span class="muted">none</span>{{end -}}
+{{- end -}}
+{{- with .WAN}} <span class="meta">· WAN</span> <code>{{.}}</code>{{end -}}
+{{- with .External}} <span class="meta">· external</span> <code>{{.}}</code>{{end -}}
+{{- with .DNS}} <span class="meta">· DNS {{.}}</span>{{end}}</dd>
 <dt>Base image</dt><dd>{{if .Image}}<code>{{.Image}}</code>{{with .Family}} · <a href="{{familyHref .}}">open {{.}}</a>{{end}}{{else}}<span class="muted">none</span>{{end}}</dd>
 {{- with .CPU}}
 <dt>CPU</dt><dd><code>{{.}}</code></dd>
@@ -30,8 +62,7 @@
 {{- end}}
 </dl>
 <div class="sec">
-<div class="sech"><h2 class="sub">Details</h2><span class="sp"></span>
-{{- if .MayEdit}}<a class="btn sm" href="{{.EditHref}}" data-panel-link>{{icon "edit"}}Edit host</a>{{else}}<button class="btn sm" type="button" disabled>{{icon "edit"}}Edit host</button>{{end}}</div>
+<h2 class="sub">Details</h2>
 {{- with .Details}}
 {{- if $d.DetailsFromBase}}<p class="meta">From base image <code>{{$d.Image}}</code>:</p>{{end}}
 {{template "details" .}}
@@ -63,6 +94,7 @@
 {{- end}}
 </div>
 <div class="pf start">
+{{- if .MayEdit}}<a class="btn" href="{{.EditHref}}" data-panel-link>{{icon "edit"}}Edit host</a>{{else}}<button class="btn" type="button" disabled>{{icon "edit"}}Edit host</button>{{end}}
 {{- if .MayPower}}
 <form method="post" action="/environments/power/preview">
 {{template "csrf" $csrf}}
@@ -70,22 +102,6 @@
 {{- range .PowerActions}}
 <button type="submit" class="btn{{if eq .Value "stop"}} bad{{end}}" name="action" value="{{.Value}}">{{icon .Value}}{{.Label}}</button>
 {{- end}}
-</form>
-{{- end}}
-{{- if .CDROM}}
-<form method="post" action="/environments/edit/preview">
-{{template "csrf" $csrf}}
-<input type="hidden" name="vmid" value="{{.VMID}}">
-<input type="hidden" name="eject_cdrom" value="yes">
-<button type="submit" class="btn"{{if not .MayEdit}} disabled{{end}}>Eject CD-ROM</button>
-</form>
-{{- end}}
-{{- with .FixCPU}}
-<form method="post" action="/environments/edit/preview">
-{{template "csrf" $csrf}}
-<input type="hidden" name="vmid" value="{{$d.VMID}}">
-<input type="hidden" name="cpu" value="{{.}}">
-<button type="submit" class="btn"{{if not $d.MayEdit}} disabled{{end}}>Set CPU {{.}}</button>
 </form>
 {{- end}}
 <form method="post" action="/environments/delete/preview">
