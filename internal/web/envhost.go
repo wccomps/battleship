@@ -36,19 +36,19 @@ func envHostBack(_ operation, in jobs.Inputs) string {
 
 // envHostView is the side-panel sheet for one environment host VM.
 type envHostView struct {
-	VMID            int
-	Name            string
-	Host            string
-	Domain          string
-	Slot            string
-	Node            string
-	Status          string
-	Running         bool
-	Router          bool
-	Kind            string
-	Addr            string
-	Gateway         string
-	DNS             string
+	VMID    int
+	Name    string
+	Host    string
+	Domain  string
+	Slot    string
+	Node    string
+	Status  string
+	Running bool
+	Router  bool
+	Kind    string
+	Addr    string
+	Gateway string
+	DNS     string
 	pods.LiveAddrs
 	Image           string
 	Family          string
