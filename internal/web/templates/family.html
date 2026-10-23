@@ -27,22 +27,25 @@
 <div class="sec next">
 <h2 class="sub">Next version · v{{.Next}}</h2>
 {{- with .Edit}}
-<div class="say">{{icon "done"}}<div><b><code>{{.Name}}</code> is open for editing</b> <span class="meta">(VMID {{.VMID}})</span><div class="meta">Register it when you've finished patching it.</div></div></div>
+<p class="meta"><code>{{.Name}}</code> is open for editing (VMID {{.VMID}}).</p>
 {{- if .Blocked}}
 <p class="fix">{{icon "warn"}}<span>{{names .Blocked}}</span></p>
-{{- else}}
+{{- end}}
+{{- end}}
+{{- if or (and .Edit (not .Edit.Blocked)) (and (not .Edit) .Current) .Source}}
+<div class="acts">
+{{- with .Edit}}{{if not .Blocked}}
 <form method="post" action="/images/register/preview">{{template "csrf" $csrf}}<input type="hidden" name="vmid" value="{{.VMID}}"><input type="hidden" name="family" value="{{$d.Family}}">
 <button class="btn pri" type="submit"{{if not $d.MayClone}} disabled{{end}}>Register {{.Name}} as v{{$d.Next}}</button></form>
-{{- end}}
-{{- else}}{{with .Current}}
-<div class="say">{{icon "copy"}}<div><div>Open <code>{{.Name}}</code> for editing</div><div class="meta">Copies it as <code>{{$d.Family}}-edit</code> on the edit network, for you to patch and register here.</div></div></div>
+{{- end}}{{else}}{{with .Current}}
 <form method="post" action="/images/edit/preview">{{template "csrf" $csrf}}<input type="hidden" name="family" value="{{$d.Family}}">
 <button class="btn{{if not $d.Source}} pri{{end}}" type="submit"{{if not $d.MayClone}} disabled{{end}}>Open for editing</button></form>
 {{- end}}{{end}}
 {{- with .Source}}
-<div class="say">{{icon "copy"}}<div><div>{{if $d.Edit}}Or copy{{else}}Copy{{end}} <code>{{.Name}}</code> in again</div><div class="meta">Use this after patching the build VM itself.</div></div></div>
 <form method="post" action="/images/register/preview">{{template "csrf" $csrf}}<input type="hidden" name="vmid" value="{{.VMID}}"><input type="hidden" name="family" value="{{$d.Family}}">
 <button class="btn{{if not $d.Edit}} pri{{end}}" type="submit"{{if not $d.MayClone}} disabled{{end}}>New version from {{.Name}}</button></form>
+{{- end}}
+</div>
 {{- end}}
 {{- if not (or .Edit .Current .Source)}}
 <p class="meta">Its build VM is gone and no version is current: register a new build VM into this family from Images.</p>

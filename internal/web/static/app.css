@@ -82,6 +82,7 @@ details[open]>.disc::before{transform:rotate(90deg)}
 .rrow .nm{font:600 var(--t3) var(--fm);overflow-wrap:anywhere}
 .rrow .becomes{font-size:var(--t2);overflow-wrap:anywhere}
 .rrow .act{justify-self:end}
+form.rrow:invalid .btn{opacity:.4}
 .rrow.blocked{background:repeating-linear-gradient(135deg,transparent 0 6px,var(--sf2) 6px 9px)}
 .kindq{display:grid;gap:4px;min-width:0;margin:0;padding:0;border:0}
 .kindq legend{padding:0;margin-bottom:4px;font-family:var(--f)}

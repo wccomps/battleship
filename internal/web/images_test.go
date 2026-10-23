@@ -183,7 +183,7 @@ func TestFamilyPageStates(t *testing.T) {
 		`action="/images/delete/preview"`, `name="image" value="debian-12-v1"`)
 
 	gw := h.get(&sess, "/images/family/gw").Body.String()
-	contains(t, "gw", gw, `<dt>Built from</dt><dd><code>gw-build</code> · VMID 140 · stopped</dd>`, "Copy <code>gw-build</code> in again",
+	contains(t, "gw", gw, `<dt>Built from</dt><dd><code>gw-build</code> · VMID 140 · stopped</dd>`,
 		`<input type="hidden" name="vmid" value="140"><input type="hidden" name="family" value="gw">`+"\n"+`<button class="btn pri" type="submit">New version from gw-build</button>`,
 		`action="/images/edit/preview"`, `<button class="btn" type="submit">Open for editing</button>`, "Next version · v2")
 	lacks(t, "gw", gw, "is open for editing", "Delete</button>")

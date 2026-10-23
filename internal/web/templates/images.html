@@ -7,7 +7,7 @@
 {{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
 {{- with .Ready}}
 <section class="sec" aria-labelledby="ready">
-<div class="sech"><h2 class="sub" id="ready">Ready to register</h2><span class="meta">Build VMs in the images pool, shut down and generalized</span></div>
+<h2 class="sub" id="ready">Ready to register</h2>
 {{- /* A row ready to register is its own form; data-panel shows its review in the panel. */}}
 <div class="rlist" data-panel>
 <div class="rhead" aria-hidden="true"><span>VM</span><span>Becomes</span><span>Kind</span><span></span></div>
@@ -41,11 +41,9 @@
 {{- end}}
 </div>
 {{- with $lacks}}<p class="lock">{{icon "lock"}}{{.}}</p>{{end}}
-<p class="meta">A build VM that is already an image's source isn't listed here: use its family's New version.</p>
 </section>
 {{- end}}
-<section class="sec" aria-labelledby="cat">
-<h2 class="sub" id="cat">Base images</h2>
+<section class="sec" id="cat" aria-label="Base images">
 {{- with .Groups}}
 <div class="tscroll">
 <table class="tbl fams">
