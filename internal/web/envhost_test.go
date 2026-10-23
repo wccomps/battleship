@@ -34,7 +34,7 @@ func TestEnvHostSheet(t *testing.T) {
 		`<dt>Base image</dt><dd><code>debian-12-v2</code> · <a href="/images/family/debian-12">open debian-12</a></dd>`,
 		`<dt>CPU</dt><dd><code>default (kvm64)</code></dd>`,
 		`<span class="name">CD-ROM</span> attached`,
-		`<a class="btn sm" href="/environments/edit?vmid=2101" data-panel-link>`,
+		`<a class="btn" href="/environments/edit?vmid=2101" data-panel-link>`,
 		`<div class="notes box">debian / Changeme1!</div>`,
 		`Eject CD-ROM</button>`,
 		`<input type="hidden" name="cpu" value="lab-baseline">`,
@@ -171,6 +171,8 @@ func TestBrowserEnvHostPanel(t *testing.T) {
 	h := browserHarness(t)
 	addCatalog(h)
 	addEnvs(h)
+	h.api.CPUModels = []string{"lab-baseline"}
+	h.api.VMs[2101].Config["ide0"] = "local:iso/debian.iso,media=cdrom"
 	lead := h.login(asLead)
 	b := newBrowser(t, h, &lead, 1280, 800, false)
 	defer b.clean()
@@ -179,6 +181,7 @@ func TestBrowserEnvHostPanel(t *testing.T) {
 	b.click(`a.fam[href="/environments/host?vmid=2101"]`)
 	b.waitFor("the host sheet", `document.querySelector("#panel[open] #host-title") !== null`)
 	b.noSideways("host sheet")
+	b.shot("envhost-panel")
 
 	b.click(`#panel a[href="/environments/edit?vmid=2101"]`)
 	b.waitFor("the edit host form", `document.querySelector("#panel[open] input[name=env_host]") !== null`)

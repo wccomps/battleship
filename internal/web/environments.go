@@ -3,6 +3,7 @@ package web
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -74,9 +75,10 @@ type envBlock struct {
 func (b envBlock) Acts() bool { return b.Domain != "" && b.Twin == "" }
 
 // envHostRow is a VM in a slot: its name (the host part, or the whole VM
-// name in a block without one domain), address, power, image, details and
-// notes. Its details are those of its own notes, which a clone copies from
-// its base image; else, while its base image is there, the image's.
+// name in a block without one domain), address, power, image, warning
+// count and one-line summary (What). Its details come from its own notes,
+// which a clone copies from its base image; else, while its base image is
+// there, the image's.
 //
 // Read says its live addresses were read (pods.LiveAddrs): its address cell
 // shows them, or that it isn't live.
@@ -90,14 +92,43 @@ type envHostRow struct {
 	Status      string
 	Image       string
 	Warnings    []string
-	Details     pods.ImageDetails
-	Unreadable  bool
-	Notes       string
+	What        string
 	Read        bool
 	HalfDeleted bool
-	MayEdit     bool
 	pods.LiveAddrs
 	octet int // of Addr on its LAN; 0 without one
+}
+
+// WarningCount is the badge text for the host's warnings (config warnings
+// plus any live SSH warning), or "" when there are none.
+func (r envHostRow) WarningCount() string {
+	n := len(r.Warnings)
+	if r.SSHWarning != "" {
+		n++
+	}
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return "1 warning"
+	default:
+		return fmt.Sprintf("%d warnings", n)
+	}
+}
+
+// hostWhat is the one-line summary for an environment host row: the first
+// non-empty line of its own freeform notes, else its details' OS or
+// Installed; when its details block is unreadable, that it is.
+func hostWhat(notes string, d pods.ImageDetails, unreadable bool) string {
+	if unreadable {
+		return "Details unreadable: open the host to see its notes."
+	}
+	for line := range strings.Lines(notes) {
+		if line = strings.TrimSpace(line); line != "" {
+			return line
+		}
+	}
+	return cmp.Or(d.OS, d.Installed)
 }
 
 // environmentsPage is the Environments page with each host's assigned
@@ -117,14 +148,6 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 			addrs, p.LiveRead = s.liveAddrs(ctx, envs), true
 		}
 		p.Envs = envBlocks(envs, s.hostBases(ctx, envs, vms), addrs)
-		for bi := range p.Envs {
-			for hi := range p.Envs[bi].Hosts {
-				h := &p.Envs[bi].Hosts[hi]
-				if !h.HalfDeleted {
-					h.MayEdit = s.mayOn(ctx, h.VMID, pods.OfferPrivileges(pods.KindEnvEdit)...)
-				}
-			}
-		}
 		open, queued, err := planner.OpenSlots(ctx, envs)
 		if err != nil {
 			p.FreeErr = "Couldn't tell which free slots queued jobs will fill: " + sentence(err.Error())
@@ -181,6 +204,9 @@ func (s *Server) environmentAddrs(w http.ResponseWriter, r *http.Request) {
 	for _, block := range envBlocks(envs, nil, s.liveAddrs(ctx, envs)) {
 		for _, row := range block.Hosts {
 			if !add("env-addr", row) {
+				return
+			}
+			if row.SSHWarning != "" && !add("env-si", row) {
 				return
 			}
 		}
@@ -247,12 +273,13 @@ func envBlocks(envs []pods.Environment, bases map[string]pods.BaseImage, addrs m
 		gw := pods.AddrText(e.Gateway())
 		for _, h := range e.Hosts {
 			octet, _ := e.LAN.Octet(h.Addr)
-			row := envHostRow{VMID: h.VMID, Name: h.Name, Router: h.Router, Addr: pods.AddrText(h.Addr), Gateway: gw, octet: octet, Running: h.Status == "running",
-				Status: cmp.Or(h.Status, "unknown"), Image: h.Notes.Base, Warnings: h.Warnings, Details: h.Details, Unreadable: h.Unreadable, Notes: h.UserNotes,
-				Read: addrs != nil, LiveAddrs: addrs[h.VMID]}
-			if base, ok := bases[h.Notes.Base]; ok && h.Details.Empty() && !h.Unreadable && !base.Unreadable {
-				row.Details = base.Details
+			details := h.Details
+			if base, ok := bases[h.Notes.Base]; ok && details.Empty() && !h.Unreadable && !base.Unreadable {
+				details = base.Details
 			}
+			row := envHostRow{VMID: h.VMID, Name: h.Name, Router: h.Router, Addr: pods.AddrText(h.Addr), Gateway: gw, octet: octet, Running: h.Status == "running",
+				Status: cmp.Or(h.Status, "unknown"), Image: h.Notes.Base, Warnings: h.Warnings, What: hostWhat(h.UserNotes, details, h.Unreadable),
+				Read: addrs != nil, LiveAddrs: addrs[h.VMID]}
 			if e.Domain != "" {
 				row.Name = h.Host
 			}

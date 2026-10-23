@@ -208,7 +208,7 @@ func TestNotesShowAsText(t *testing.T) {
 		map[string]string{"description": xssNotes, "agent": "1", "net0": "virtio=BC:24:11:00:80:03,bridge=vmbr0"})
 	sess := h.login(asLead)
 	pages := map[string]string{}
-	for _, path := range []string{"/images", "/images/family/debian-12", "/environments", "/environments/new", "/environments/kilo.alpha/add"} {
+	for _, path := range []string{"/images", "/images/family/debian-12", "/environments", "/environments/host?vmid=2100", "/environments/new", "/environments/kilo.alpha/add"} {
 		pages[path] = h.get(&sess, path).Body.String()
 		pages["panel "+path] = h.panelGet(&sess, path, nil).Body.String()
 	}
@@ -224,8 +224,8 @@ func TestNotesShowAsText(t *testing.T) {
 				t.Errorf("%s has unescaped notes %q", path, bad)
 			}
 		}
-		// The Images page shows only each family's first line, the login.
-		if !strings.HasSuffix(path, "/images") && !strings.Contains(body, "&lt;script&gt;alert(1)&lt;/script&gt;") {
+		// The Images and Environments tables show only each row's first line, the login.
+		if !strings.HasSuffix(path, "/images") && !strings.HasSuffix(path, "/environments") && !strings.Contains(body, "&lt;script&gt;alert(1)&lt;/script&gt;") {
 			t.Errorf("%s doesn't show the notes' markup as text", path)
 		}
 		if strings.Contains(body, "battleship: base=gw-v1") {

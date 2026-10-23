@@ -53,9 +53,6 @@ var funcs = template.FuncMap{"asset": assetURL, "names": keepNames, "icon": icon
 	"notesButton": func(family string, may bool) offer {
 		return offer{Href: notesHref(family), Label: "Edit notes of " + family, May: may}
 	},
-	"hostEditButton": func(vmid int, name string, may bool) offer {
-		return offer{Href: envEditHref(vmid), Label: "Edit " + name, May: may}
-	},
 	"details": detailsOf, "maxDetail": func() int { return pods.MaxDetail }, "maxNotes": func() int { return pods.MaxFreeNotes }}
 
 // nameRE matches a name in prose: letter/digit/_/* runs joined by '-' or '.'
