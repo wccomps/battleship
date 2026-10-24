@@ -279,9 +279,23 @@ func TestEnvironmentsLiveSSHWarnings(t *testing.T) {
 		2102: "SSH not running",
 		2105: `<span class="name">guest-exec</span> disabled`,
 	} {
-		h.api.FailOn("agent-ssh:2105", &proxmox.APIError{Status: 500, Message: "Command guest-exec has been disabled"})
+		before := h.api.agentReadCount()
 		sheet := h.get(&sess, envHostHref(vmid)).Body.String()
-		contains(t, strconv.Itoa(vmid)+" sheet", sheet, warn, `<code>10.50.12.`)
+		if got := h.api.agentReadCount() - before; got != 0 {
+			t.Errorf("GET %s read %d agents, want 0", envHostHref(vmid), got)
+		}
+		contains(t, strconv.Itoa(vmid)+" sheet", sheet, `data-fill="`+envHostAddrsHref(vmid)+`"`)
+		lacks(t, strconv.Itoa(vmid)+" sheet before fill", sheet, warn, `<code>10.50.12.`)
+
+		for _, path := range []string{envHostAddrsHref(vmid), envHostHref(vmid) + "&live=1"} {
+			h.api.FailOn("agent-ssh:2105", &proxmox.APIError{Status: 500, Message: "Command guest-exec has been disabled"})
+			beforeSSH := h.api.Called("agent-ssh:2100")
+			got := h.get(&sess, path).Body.String()
+			if n := h.api.Called("agent-ssh:2100") - beforeSSH; n != 0 {
+				t.Errorf("%s ran SSH check on router %d times, want 0", path, n)
+			}
+			contains(t, path, got, warn, `<code>10.50.12.`)
+		}
 	}
 }
 
@@ -316,6 +330,10 @@ func TestBrowserEnvironmentsLiveAddresses(t *testing.T) {
 			b.noSideways("live addresses")
 			b.shot("environments-live-" + size.name)
 			b.fullShot("environments-live-full-" + size.name)
+			if size.name == "laptop" {
+				b.click(`a.fam[href="/environments/host?vmid=2102"]`)
+				b.waitFor("yew's host sheet and live address", `document.querySelector("#panel[open] #host-addr:not([data-fill])") !== null && document.getElementById("host-addr").textContent.includes("differs") && document.getElementById("host-addr").textContent.includes("10.50.12.7")`)
+			}
 			b.clean()
 		})
 	}
@@ -380,6 +398,11 @@ func TestTemplateKnowsLiveAddrPaths(t *testing.T) {
 	}
 	contains(t, "catalog.html", string(html), `data-fill="`+envAddrsPath+`"`,
 		`<a href="`+envsPath+`?live=1">Read again</a>`, `<a href="`+envsPath+`?live=1">Show live addresses</a>`)
+	hostHTML, err := templateFS.ReadFile("templates/envhost.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, "envhost.html", string(hostHTML), `data-fill="`+envHostAddrsPath+`?vmid={{.VMID}}"`)
 }
 
 // A keyboard user on the line's link when the live addresses land stays on

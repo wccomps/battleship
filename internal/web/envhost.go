@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"slices"
@@ -17,10 +18,15 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// envHostsPath is where each environment host's sheet is served.
-const envHostsPath = envsPath + "/host"
+// envHostsPath is where each environment host's sheet is served, and
+// envHostAddrsPath where its live address and SSH state pieces are served.
+const (
+	envHostsPath     = envsPath + "/host"
+	envHostAddrsPath = envHostsPath + "/addresses"
+)
 
-func envHostHref(vmid int) string { return envHostsPath + "?vmid=" + strconv.Itoa(vmid) }
+func envHostHref(vmid int) string      { return envHostsPath + "?vmid=" + strconv.Itoa(vmid) }
+func envHostAddrsHref(vmid int) string { return envHostAddrsPath + "?vmid=" + strconv.Itoa(vmid) }
 
 func envEditHref(vmid int) string {
 	op, _ := operationFor(pods.KindEnvEdit)
@@ -36,19 +42,20 @@ func envHostBack(_ operation, in jobs.Inputs) string {
 
 // envHostView is the side-panel sheet for one environment host VM.
 type envHostView struct {
-	VMID    int
-	Name    string
-	Host    string
-	Domain  string
-	Slot    string
-	Node    string
-	Status  string
-	Running bool
-	Router  bool
-	Kind    string
-	Addr    string
-	Gateway string
-	DNS     string
+	VMID     int
+	Name     string
+	Host     string
+	Domain   string
+	Slot     string
+	Node     string
+	Status   string
+	Running  bool
+	Router   bool
+	Kind     string
+	Addr     string
+	Gateway  string
+	DNS      string
+	LiveFill bool
 	pods.LiveAddrs
 	Image           string
 	Family          string
@@ -113,7 +120,7 @@ func (s *Server) envHostPage(w http.ResponseWriter, r *http.Request) {
 	details := detailsOf(h.Details, h.Unreadable)
 	fromBase := false
 	if details == nil && h.Notes.Base != "" {
-		if base, ok := s.hostBases(ctx, []pods.Environment{env}, vms)[h.Notes.Base]; ok && !base.Unreadable {
+		if base, ok := s.hostBases(ctx, []pods.Environment{{Hosts: []pods.EnvHost{h}}}, vms)[h.Notes.Base]; ok && !base.Unreadable {
 			details = detailsOf(base.Details, false)
 			fromBase = details != nil
 		}
@@ -137,19 +144,15 @@ func (s *Server) envHostPage(w http.ResponseWriter, r *http.Request) {
 	}
 	warnings := slices.Clone(h.Warnings)
 	var live pods.LiveAddrs
-	if s.mayAnywhere(ctx, pods.LiveAddrsPrivilege) {
-		hosts := []pods.EnvHost{h}
-		if !h.Router {
-			for _, rh := range env.Hosts {
-				if rh.Router {
-					hosts = append(hosts, rh)
-					break
-				}
+	liveFill := false
+	if s.mayAnywhere(ctx, pods.LiveAddrsPrivilege) && pods.HostAsksAgent(env, h) {
+		if r.URL.Query().Get("live") == "1" {
+			live = s.hostLiveAddrs(ctx, env, h)
+			if live.SSHWarning != "" {
+				warnings = append(warnings, live.SSHWarning)
 			}
-		}
-		live = s.liveAddrs(ctx, []pods.Environment{{Slot: env.Slot, LAN: env.LAN, Hosts: hosts}})[h.VMID]
-		if live.SSHWarning != "" {
-			warnings = append(warnings, live.SSHWarning)
+		} else {
+			liveFill = true
 		}
 	}
 	p := envHostView{
@@ -165,6 +168,7 @@ func (s *Server) envHostPage(w http.ResponseWriter, r *http.Request) {
 		Kind:            kind,
 		Addr:            addr,
 		Gateway:         pods.AddrText(env.Gateway()),
+		LiveFill:        liveFill,
 		LiveAddrs:       live,
 		Image:           h.Notes.Base,
 		Family:          family,
@@ -204,6 +208,86 @@ func (s *Server) envHostPage(w http.ResponseWriter, r *http.Request) {
 		p.Lacks = append(p.Lacks, lacksOf(pods.KindEnvDeleteHost, h.Name))
 	}
 	s.render(w, r, http.StatusOK, "envhost", s.newView(w, r, h.Name, "environments", p))
+}
+
+func (s *Server) hostLiveAddrs(ctx context.Context, env pods.Environment, h pods.EnvHost) pods.LiveAddrs {
+	ctx, cancel := context.WithTimeout(ctx, s.addrWithin)
+	defer cancel()
+	return s.planner(ctx).HostLiveAddrs(ctx, env, h, s.addrTimeout)
+}
+
+// envHostAddrs serves a host sheet's live address cell and, when its SSH check
+// reports a warning, its updated warnings list, each in its own <template>.
+func (s *Server) envHostAddrs(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if !s.mayAnywhere(ctx, pods.LiveAddrsPrivilege) {
+		http.Error(w, noLiveAddrs, http.StatusForbidden)
+		return
+	}
+	vmid, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get(fieldVMID)))
+	if err != nil || vmid < 100 {
+		s.notFound(w, r)
+		return
+	}
+	planner := s.planner(ctx)
+	vms, err := planner.API.ClusterVMs(ctx)
+	var at pods.HostEdit
+	if err == nil {
+		at, err = planner.HostToEdit(ctx, vms, vmid)
+	}
+	if errors.Is(err, pods.ErrNoEnvHost) {
+		s.notFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Couldn't read the cluster: "+sentence(proxmox.Describe(err)), http.StatusBadGateway)
+		return
+	}
+	env, h := at.Env, at.Host
+	kind := cmp.Or(h.Notes.OS, pods.ImageOther)
+	addr := pods.AddrText(h.Addr)
+	if h.Router {
+		kind = pods.ImageRouter
+		addr = pods.AddrText(env.Gateway())
+	}
+	live := s.hostLiveAddrs(ctx, env, h)
+	warnings := slices.Clone(h.Warnings)
+	if live.SSHWarning != "" {
+		warnings = append(warnings, live.SSHWarning)
+	}
+	p := envHostView{
+		VMID:      h.VMID,
+		Router:    h.Router,
+		Addr:      addr,
+		Gateway:   pods.AddrText(env.Gateway()),
+		LiveAddrs: live,
+		Warnings:  warnings,
+	}
+	if !h.Router && (kind == pods.ImageWindows || kind == pods.ImageLinux) {
+		p.DNS = env.DNS()
+	}
+	var b strings.Builder
+	add := func(name string) bool {
+		frag, err := fragment("envhost", name, p)
+		if err != nil {
+			s.logf("web: %v", err)
+			http.Error(w, "internal error rendering the host address", http.StatusInternalServerError)
+			return false
+		}
+		b.WriteString(piece(frag))
+		return true
+	}
+	if !add("host-addr") {
+		return
+	}
+	if live.SSHWarning != "" && !add("host-warn") {
+		return
+	}
+	hdr := w.Header()
+	hdr.Set("Content-Type", "text/html; charset=utf-8")
+	hdr.Set("Cache-Control", "no-store")
+	hdr.Set(piecesHeader, "1")
+	_, _ = io.WriteString(w, b.String())
 }
 
 // hostEdit is what an Edit host form edits (pods.Planner.HostToEdit).

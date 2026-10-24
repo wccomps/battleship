@@ -351,6 +351,8 @@ func TestPropFragmentsEscapeHostileText(t *testing.T) {
 		{"jobs", "jobs-table", func(t *rapid.T) any { return drawHostile[jobsList](t, "jobs") }},
 		{"catalog", "env-addr", func(t *rapid.T) any { return drawHostile[envHostRow](t, "addr") }},
 		{"catalog", "env-live", func(t *rapid.T) any { return drawHostile[envsView](t, "envs") }},
+		{"envhost", "host-addr", func(t *rapid.T) any { return drawHostile[envHostView](t, "envhost") }},
+		{"envhost", "host-warn", func(t *rapid.T) any { return drawHostile[envHostView](t, "envhost") }},
 	}
 	rapid.Check(t, func(t *rapid.T) {
 		f := rapid.SampledFrom(frags).Draw(t, "fragment")

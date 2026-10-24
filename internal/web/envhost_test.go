@@ -30,7 +30,7 @@ func TestEnvHostSheet(t *testing.T) {
 		`<h1 id="host-title"><span class="vm">teak.kilo.alpha</span> <span class="chip">linux</span></h1>`,
 		`<dt>Environment</dt><dd><span class="vm">kilo.alpha</span> · <span class="vm">dev-01</span></dd>`,
 		`<dt>VM</dt><dd>VMID <span class="vm">2101</span> · <span class="vm">n1</span></dd>`,
-		`<dt>Address</dt><dd><code>192.168.100.10</code> <span class="meta">· DNS router</span></dd>`,
+		`<dt>Address</dt><dd id="host-addr"><code>192.168.100.10</code> <span class="meta">· DNS router</span></dd>`,
 		`<dt>Base image</dt><dd><code>debian-12-v2</code> · <a href="/images/family/debian-12">open debian-12</a></dd>`,
 		`<dt>CPU</dt><dd><code>default (kvm64)</code></dd>`,
 		`<span class="name">CD-ROM</span> attached`,

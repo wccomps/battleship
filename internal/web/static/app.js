@@ -420,6 +420,7 @@
     typedConfirm(sheet);
     machineRows(sheet);
     passwords(sheet);
+    each(sheet.querySelectorAll("[data-fill]"), fill);
     var typed = sheet.querySelector("input[data-typed], input[type=text]");
     var pb = sheet.querySelector(".pb");
     if (pb) pb.scrollTop = 0;

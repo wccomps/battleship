@@ -10,15 +10,8 @@
 {{template "close" .Back}}
 </div>
 <div class="pb">
-{{- if or .Warnings .CDROM .FixCPU}}
 <div class="sec warnbox">
-{{- if .Warnings}}
-<ul class="reasons is-drifted" aria-label="Warnings">
-{{- range .Warnings}}
-<li><i class="g" aria-hidden="true"></i><span>{{names .}}</span></li>
-{{- end}}
-</ul>
-{{- end}}
+{{template "host-warn" .}}
 {{- if or .CDROM .FixCPU}}
 <div class="acts">
 {{- if .CDROM}}
@@ -40,19 +33,10 @@
 </div>
 {{- end}}
 </div>
-{{- end}}
 <dl class="kv">
 <dt>Environment</dt><dd>{{if .Domain}}<span class="vm">{{.Domain}}</span> · {{end}}<span class="vm">{{.Slot}}</span></dd>
 <dt>VM</dt><dd>VMID <span class="vm">{{.VMID}}</span> · <span class="vm">{{.Node}}</span></dd>
-<dt>Address</dt><dd>
-{{- if .Live -}}
-{{- if .LAN}}<code>{{.LAN}}</code>{{if .Differs}} <span class="chip differs">differs</span> <span class="meta">· {{if .Router}}expected {{.Gateway}}{{else}}assigned {{.Addr}}{{end}}</span>{{else if .Router}} <span class="meta">· gateway</span>{{end}}{{else}}<span class="muted">no live address</span>{{if .Differs}} <span class="meta">· {{if .Router}}expected {{.Gateway}}{{else}}assigned {{.Addr}}{{end}}</span>{{end}}{{end -}}
-{{- else -}}
-{{- if .Addr}}<code>{{.Addr}}</code>{{if .Router}} <span class="meta">· gateway</span>{{end}}{{else}}<span class="muted">none</span>{{end -}}
-{{- end -}}
-{{- with .WAN}} <span class="meta">· WAN</span> <code>{{.}}</code>{{end -}}
-{{- with .External}} <span class="meta">· external</span> <code>{{.}}</code>{{end -}}
-{{- with .DNS}} <span class="meta">· DNS {{.}}</span>{{end}}</dd>
+<dt>Address</dt>{{template "host-addr" .}}
 <dt>Base image</dt><dd>{{if .Image}}<code>{{.Image}}</code>{{with .Family}} · <a href="{{familyHref .}}">open {{.}}</a>{{end}}{{else}}<span class="muted">none</span>{{end}}</dd>
 {{- with .CPU}}
 <dt>CPU</dt><dd><code>{{.}}</code></dd>
@@ -113,4 +97,28 @@
 </div>
 </div>
 {{- end}}
+{{- end}}
+
+{{define "host-warn" -}}
+{{- if .Warnings -}}
+<ul class="reasons is-drifted" id="host-warn" aria-label="Warnings">
+{{- range .Warnings}}
+<li><i class="g" aria-hidden="true"></i><span>{{names .}}</span></li>
+{{- end}}
+</ul>
+{{- else -}}
+<ul id="host-warn" hidden></ul>
+{{- end -}}
+{{- end}}
+
+{{define "host-addr" -}}
+<dd id="host-addr"{{if .LiveFill}} data-fill="/environments/host/addresses?vmid={{.VMID}}"{{end}}>
+{{- if .Live -}}
+{{- if .LAN}}<code>{{.LAN}}</code>{{if .Differs}} <span class="chip differs">differs</span> <span class="meta">· {{if .Router}}expected {{.Gateway}}{{else}}assigned {{.Addr}}{{end}}</span>{{else if .Router}} <span class="meta">· gateway</span>{{end}}{{else}}<span class="muted">no live address</span>{{if .Differs}} <span class="meta">· {{if .Router}}expected {{.Gateway}}{{else}}assigned {{.Addr}}{{end}}</span>{{end}}{{end -}}
+{{- else -}}
+{{- if .Addr}}<code>{{.Addr}}</code>{{if .Router}} <span class="meta">· gateway</span>{{end}}{{else}}<span class="muted">none</span>{{end -}}
+{{- end -}}
+{{- with .WAN}} <span class="meta">· WAN</span> <code>{{.}}</code>{{end -}}
+{{- with .External}} <span class="meta">· external</span> <code>{{.}}</code>{{end -}}
+{{- with .DNS}} <span class="meta">· DNS {{.}}</span>{{end}}</dd>
 {{- end}}
