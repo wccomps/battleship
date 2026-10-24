@@ -144,8 +144,13 @@ func (p Planner) envHostFrom(ctx context.Context, vms []proxmox.VM, vmid int) (H
 		}
 	}
 	cfgs := make([]map[string]string, len(inSlot))
+	var cpuModels []string
 	var g errgroup.Group
 	g.SetLimit(envReads)
+	g.Go(func() error {
+		cpuModels = p.customCPUModels(ctx, vm.Node)
+		return nil
+	})
 	for i, v := range inSlot {
 		g.Go(func() error {
 			cfg, err := p.API.VMConfig(ctx, v.Node, v.VMID)
@@ -162,7 +167,6 @@ func (p Planner) envHostFrom(ctx context.Context, vms []proxmox.VM, vmid int) (H
 	if err := g.Wait(); err != nil {
 		return HostEdit{}, proxmox.VM{}, err
 	}
-	cpuModels := p.customCPUModels(ctx, vm.Node)
 	env := Environment{Slot: slot, LAN: p.Cfg.Environments.Subnet}
 	for i, v := range inSlot {
 		if cfgs[i] != nil {

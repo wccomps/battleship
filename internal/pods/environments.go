@@ -118,6 +118,7 @@ type EnvHost struct {
 	CPUModels      []string          // custom CPU models on its node
 	Config         map[string]string // its Proxmox config as read
 	Warnings       []string          // discrepancies between its config or tags and its slot
+	skipSSH        bool
 }
 
 func (h EnvHost) desc() string { return h.Config["description"] }

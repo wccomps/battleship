@@ -134,6 +134,40 @@ func (h EnvHost) asksAgent() bool {
 	return h.Status == "running" && h.Agent && (h.LANMAC != "" || h.WANMAC != "")
 }
 
+// HostAsksAgent reports whether reading h's live addresses in env will ask any
+// guest agent: h's own, or env's router's for h's external NAT address.
+func HostAsksAgent(env Environment, h EnvHost) bool {
+	if h.asksAgent() {
+		return true
+	}
+	if !h.Router && h.Addr.IsValid() {
+		for _, rh := range env.Hosts {
+			if rh.Router {
+				return rh.asksAgent()
+			}
+		}
+	}
+	return false
+}
+
+// HostLiveAddrs is h's LiveAddrs in env, bounded by timeout. When h isn't a
+// router and may have an external address, env's router's interfaces are read
+// alongside h without running the SSH check on the router.
+func (p Planner) HostLiveAddrs(ctx context.Context, env Environment, h EnvHost, timeout time.Duration) LiveAddrs {
+	hosts := []EnvHost{h}
+	if !h.Router && (h.asksAgent() || h.Addr.IsValid()) {
+		for _, rh := range env.Hosts {
+			if rh.Router {
+				rh.skipSSH = true
+				hosts = append(hosts, rh)
+				break
+			}
+		}
+	}
+	e := Environment{Slot: env.Slot, LAN: env.LAN, Hosts: hosts}
+	return e.addrs(p.readAgents(ctx, []Environment{e}, 2, timeout))[h.VMID]
+}
+
 // LiveAddrs are envs' hosts' addresses and SSH state by VMID, read through
 // their guest agents, reads at a time (at least one), each host bounded by
 // timeout and all by ctx. A VM whose agent isn't asked (asksAgent), or whose
@@ -169,7 +203,10 @@ func (p Planner) readAgents(ctx context.Context, envs []Environment, reads int, 
 				if err != nil {
 					return nil
 				}
-				sshWarn := p.checkHostSSH(cctx, h, nics)
+				var sshWarn string
+				if !h.skipSSH {
+					sshWarn = p.checkHostSSH(cctx, h, nics)
+				}
 				mu.Lock()
 				out[h.VMID] = agentAddrs{lan: guestAddr(nics, h.LANMAC), wan: guestAddr(nics, h.WANMAC), sshWarning: sshWarn}
 				mu.Unlock()

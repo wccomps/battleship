@@ -265,6 +265,7 @@ func (s *Server) volunteerRoutes(mux *http.ServeMux) {
 	mux.Handle("GET "+envsPath, s.require(http.HandlerFunc(s.environmentsPage)))
 	mux.Handle("GET "+envAddrsPath, s.require(http.HandlerFunc(s.environmentAddrs)))
 	mux.Handle("GET "+envHostsPath, s.require(http.HandlerFunc(s.envHostPage)))
+	mux.Handle("GET "+envHostAddrsPath, s.require(http.HandlerFunc(s.envHostAddrs)))
 	mux.Handle("GET /images", s.require(http.HandlerFunc(s.imagesPage)))
 	mux.Handle("GET "+familiesPath+"{family}", s.require(http.HandlerFunc(s.familyPage)))
 	// A family's page was /images/{family}; the image operations' paths are
