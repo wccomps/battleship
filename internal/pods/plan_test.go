@@ -84,6 +84,7 @@ func TestDeployPlanReusesTemplateAndConvergesExistingVM(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "spruce"}, nil)
+	f.Add(proxmox.VM{VMID: 10110, Name: "team01-elmer", Node: "spruce"}, nil)
 
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{
 		Pattern: "teak.*", Teams: []string{"01"},
@@ -97,6 +98,19 @@ func TestDeployPlanReusesTemplateAndConvergesExistingVM(t *testing.T) {
 	it := plan.Items[0]
 	if it.Node != "spruce" || it.Steps[0] == StepClone {
 		t.Errorf("existing VM should converge without cloning: %+v", it)
+	}
+
+	// If team01-teak was torn down while team01's other VMs remain on spruce,
+	// redeploying teak places team01-teak back onto spruce with its pod.
+	delete(f.VMs, 10121)
+	plan, err = testPlanner(f).Deploy(context.Background(), DeployRequest{
+		Pattern: "teak.*", Teams: []string{"01"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := plan.Items[0]; it.Node != "spruce" || it.Steps[0] != StepClone {
+		t.Errorf("redeployed host should join its pod on spruce: %+v", it)
 	}
 }
 

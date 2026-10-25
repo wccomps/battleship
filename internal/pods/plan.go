@@ -539,6 +539,11 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		}
 	}
 	assign := AssignNodes(req.Teams, nodes, vms, podVMs...)
+	for _, vm := range vms {
+		if team, _, ok := p.Naming.TeamVM(vm); ok && slices.Contains(nodes, vm.Node) {
+			assign[team] = vm.Node
+		}
+	}
 	for _, team := range req.Teams {
 		for _, tpl := range plan.Templates {
 			plan.Items = append(plan.Items, p.deployItem(team, tpl, assign[team], req.Snapshot, byName, used))
