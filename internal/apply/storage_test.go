@@ -814,3 +814,100 @@ func TestOrphanedDisksAskEachVMID(t *testing.T) {
 		t.Errorf("items = %+v, want the orphan of VMID 10121", plan.Items)
 	}
 }
+
+// Rebuilding several templates queues their old-template destroys on
+// storage-ops. Once one rebuild finishes copying its master, its conversion
+// runs ahead of the queued destroys so its team VMs can start cloning.
+func TestConvertRunsAheadOfQueuedTemplateDeletes(t *testing.T) {
+	f := sevenMasters()
+	for i := 1; i <= 3; i++ {
+		f.Add(proxmox.VM{VMID: 9000 + i, Name: fmt.Sprintf("h%d.kilo.alpha.tpl", i), Node: "spruce", Template: true}, map[string]string{
+			"name": fmt.Sprintf("h%d.kilo.alpha.tpl", i), "template": "1", "scsi0": fmt.Sprintf("competitions:%d/base-%d-disk-0.qcow2,size=32G", 9000+i, 9000+i),
+		})
+	}
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{
+		Pattern: "*.kilo.alpha", Teams: []string{"01"}, Hosts: []string{"h1", "h2", "h3"}, Rebuild: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := testExecutor(f, &recorder{})
+	g := newTaskGate(t, f, 4, "", func(upid string) bool {
+		return strings.Contains(upid, ":qmdestroy:") || strings.Contains(upid, ":qmclone:") || strings.Contains(upid, ":qmtemplate:")
+	})
+	_, done := runAsync(t, ex, plan)
+
+	// Let the first template destroy finish so its master copy starts while the
+	// second destroy holds storage-ops and the third queues behind it.
+	del1 := g.next()
+	if !strings.Contains(del1.upid, ":qmdestroy:") {
+		t.Fatalf("first task = %s, want a template destroy", del1.upid)
+	}
+	g.releaseUPID(del1.upid, nil)
+
+	var copy1, del2 *gateWaiter
+	for copy1 == nil || del2 == nil {
+		w := g.next()
+		switch {
+		case strings.Contains(w.upid, ":qmclone:"):
+			copy1 = w
+		case strings.Contains(w.upid, ":qmdestroy:"):
+			del2 = w
+		default:
+			t.Fatalf("unexpected task %s while waiting for first copy and second destroy", w.upid)
+		}
+	}
+	for {
+		ex.lim.storageOps.mu.Lock()
+		lo := len(ex.lim.storageOps.lo)
+		ex.lim.storageOps.mu.Unlock()
+		if lo == 1 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Finish the first master copy while del2 still holds storage-ops and the
+	// third template's destroy is already waiting in storageOps.lo.
+	g.releaseUPID(copy1.upid, nil)
+	for {
+		ex.lim.storageOps.mu.Lock()
+		queued := len(ex.lim.storageOps.hi) + len(ex.lim.storageOps.lo)
+		ex.lim.storageOps.mu.Unlock()
+		if queued == 2 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Releasing del2 must wake the first template's conversion ahead of the
+	// third template's queued destroy.
+	g.releaseUPID(del2.upid, nil)
+	var conv1, copy2 *gateWaiter
+	for conv1 == nil {
+		w := g.next()
+		switch {
+		case strings.Contains(w.upid, ":qmtemplate:"):
+			conv1 = w
+		case strings.Contains(w.upid, ":qmclone:"):
+			copy2 = w
+		default:
+			t.Fatalf("task %s ran before the finished copy's conversion", w.upid)
+		}
+	}
+	g.releaseUPID(conv1.upid, nil)
+
+	// Drain the remaining tasks (team01-h1 clone, del3, copy2/copy3, conv2/conv3, team clones).
+	if copy2 != nil {
+		g.releaseUPID(copy2.upid, nil)
+	}
+	for len(g.released) < 12 {
+		if len(g.held) == 0 {
+			g.next()
+		}
+		g.releaseUPID(g.held[0].upid, nil)
+	}
+	if res := waitResult(t, done); len(res.Failed) != 0 || len(res.Succeeded) != 3 {
+		t.Fatalf("result = %+v", res)
+	}
+}

@@ -3,6 +3,8 @@ package apply
 import (
 	"context"
 	"fmt"
+	"slices"
+	"sync"
 
 	"github.com/wccomps/battleship/internal/config"
 )
@@ -14,9 +16,9 @@ import (
 // per process.
 //
 // Lock order: builds, clones, deletes, storageOps, config calls; never
-// wait for an earlier one while holding a later one. Clone slots are never
-// held with deletes or storageOps. A config-call slot covers one try of one
-// call (e.g. a read and its POST), never a task wait.
+// wait for an earlier one while holding a later one. Builds and clone slots
+// are never held with deletes or storageOps. A config-call slot covers one
+// try of one call (e.g. a read and its POST), never a task wait.
 type Limits struct {
 	calls  sem
 	builds sem
@@ -31,7 +33,10 @@ type Limits struct {
 	// Concurrent ones time out on the lock ("cfs-lock ... got lock request
 	// timeout"), which can leave a template half-converted or a disk behind.
 	// Held around those tasks and their config calls, never across a clone.
-	storageOps shared
+	// Template conversions take priority over destroys and disk frees so a
+	// finished copy can unblock its team clones before more old templates are
+	// deleted.
+	storageOps storageOps
 }
 
 // Slots are counting semaphores shared by every process that uses the same
@@ -55,7 +60,7 @@ func NewClusterLimits(c config.Concurrency, slots Slots) *Limits {
 		builds:     make(sem, max(1, c.TemplateBuilds)),
 		clones:     shared{local: make(sem, clones), slots: slots, name: "clones", n: clones},
 		deletes:    shared{local: make(sem, deletes), slots: slots, name: "deletes", n: deletes},
-		storageOps: shared{local: make(sem, 1), slots: slots, name: "storage-ops", n: 1},
+		storageOps: storageOps{slots: slots},
 	}
 }
 
@@ -96,14 +101,90 @@ func (s shared) do(ctx context.Context, fn func() error) error {
 		return fn() // no cap
 	}
 	return s.local.do(ctx, func() error {
-		if s.slots == nil {
-			return fn()
-		}
-		release, err := s.slots.AcquireSlot(ctx, s.name, s.n)
-		if err != nil {
-			return fmt.Errorf("waiting for a cluster-wide %s slot: %w", s.name, err)
-		}
-		defer release()
-		return fn()
+		return withClusterSlot(ctx, s.slots, s.name, s.n, fn)
 	})
+}
+
+func withClusterSlot(ctx context.Context, slots Slots, name string, n int, fn func() error) error {
+	if slots == nil {
+		return fn()
+	}
+	release, err := slots.AcquireSlot(ctx, name, n)
+	if err != nil {
+		return fmt.Errorf("waiting for a cluster-wide %s slot: %w", name, err)
+	}
+	defer release()
+	return fn()
+}
+
+// storageOps is a single-slot cap with two local FIFO queues: high-priority
+// callers wake before low-priority ones.
+type storageOps struct {
+	mu     sync.Mutex
+	held   bool
+	hi, lo []chan struct{}
+	slots  Slots
+}
+
+func (s *storageOps) do(ctx context.Context, high bool, fn func() error) error {
+	if err := s.acquire(ctx, high); err != nil {
+		return err
+	}
+	defer s.release()
+	return withClusterSlot(ctx, s.slots, "storage-ops", 1, fn)
+}
+
+func (s *storageOps) acquire(ctx context.Context, high bool) error {
+	s.mu.Lock()
+	if !s.held {
+		if err := ctx.Err(); err != nil {
+			s.mu.Unlock()
+			return err
+		}
+		s.held = true
+		s.mu.Unlock()
+		return nil
+	}
+	ready := make(chan struct{})
+	q := &s.lo
+	if high {
+		q = &s.hi
+	}
+	*q = append(*q, ready)
+	s.mu.Unlock()
+	select {
+	case <-ready:
+		if err := ctx.Err(); err != nil {
+			s.release()
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		s.mu.Lock()
+		i := slices.Index(*q, ready)
+		if i >= 0 {
+			*q = slices.Delete(*q, i, i+1)
+		}
+		s.mu.Unlock()
+		if i < 0 {
+			<-ready
+			s.release()
+		}
+		return ctx.Err()
+	}
+}
+
+func (s *storageOps) release() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case len(s.hi) > 0:
+		close(s.hi[0])
+		s.hi = s.hi[1:]
+	case len(s.lo) > 0:
+		close(s.lo[0])
+		s.lo = s.lo[1:]
+	default:
+		s.held = false
+	}
 }
