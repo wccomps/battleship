@@ -523,7 +523,22 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 	}
 	p.blockDuplicateHosts(plan.Templates, req.Teams[0])
 
-	assign := AssignNodes(req.Teams, nodes, vms)
+	byVMID := map[int]proxmox.VM{}
+	for _, vm := range vms {
+		byVMID[vm.VMID] = vm
+	}
+	var podVMs []proxmox.VM
+	for _, tpl := range plan.Templates {
+		if tpl.Blocked != "" {
+			continue
+		}
+		if !tpl.Builds() {
+			podVMs = append(podVMs, byVMID[tpl.VMID])
+		} else {
+			podVMs = append(podVMs, byVMID[tpl.MasterVMID])
+		}
+	}
+	assign := AssignNodes(req.Teams, nodes, vms, podVMs...)
 	for _, team := range req.Teams {
 		for _, tpl := range plan.Templates {
 			plan.Items = append(plan.Items, p.deployItem(team, tpl, assign[team], req.Snapshot, byName, used))

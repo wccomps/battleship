@@ -120,6 +120,7 @@ func TestAssignNodes(t *testing.T) {
 		teams      []string
 		nodes      []string
 		vms        []proxmox.VM
+		podVMs     []proxmox.VM
 		wantAssign map[string]string // team -> node
 	}{
 		{
@@ -136,6 +137,27 @@ func TestAssignNodes(t *testing.T) {
 				{Node: "b", VMID: 7},
 			},
 			wantAssign: map[string]string{"01": "b", "02": "a"},
+		},
+		{
+			name:  "balances by requested RAM and CPU of running VMs, ignoring stopped and templates",
+			teams: []string{"01", "02", "03"},
+			nodes: []string{"a", "b"},
+			vms: []proxmox.VM{
+				// Node a has 1 running VM with 16 GiB RAM + 8 vCPUs (load 24 GiB),
+				// and many stopped VMs / templates that don't count toward running load.
+				{Node: "a", VMID: 1, Status: "running", MaxMem: 16 << 30, MaxCPU: 8},
+				{Node: "a", VMID: 2, Status: "stopped", MaxMem: 64 << 30, MaxCPU: 16},
+				{Node: "a", VMID: 3, Status: "stopped", Template: true, MaxMem: 64 << 30, MaxCPU: 16},
+				// Node b has 4 running VMs with 2 GiB RAM + 1 vCPU each (load 12 GiB).
+				{Node: "b", VMID: 4, Status: "running", MaxMem: 2 << 30, MaxCPU: 1},
+				{Node: "b", VMID: 5, Status: "running", MaxMem: 2 << 30, MaxCPU: 1},
+				{Node: "b", VMID: 6, Status: "running", MaxMem: 2 << 30, MaxCPU: 1},
+				{Node: "b", VMID: 7, Status: "running", MaxMem: 2 << 30, MaxCPU: 1},
+			},
+			// Each pod adds 8 GiB RAM + 2 vCPUs (load 10 GiB):
+			// team 01 -> b (12 -> 22), team 02 -> b (22 -> 32), team 03 -> a (24 -> 34).
+			podVMs:     []proxmox.VM{{MaxMem: 8 << 30, MaxCPU: 2}},
+			wantAssign: map[string]string{"01": "b", "02": "b", "03": "a"},
 		},
 		{
 			name:  "weighting: +10 per assigned team",
@@ -237,7 +259,7 @@ func TestAssignNodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := AssignNodes(tt.teams, tt.nodes, tt.vms)
+			result := AssignNodes(tt.teams, tt.nodes, tt.vms, tt.podVMs...)
 			if !reflect.DeepEqual(result, tt.wantAssign) {
 				t.Errorf("AssignNodes: got %v, want %v", result, tt.wantAssign)
 			}
