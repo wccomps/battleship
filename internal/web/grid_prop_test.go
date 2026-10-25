@@ -170,7 +170,7 @@ func TestPropGridViewOfAnyCluster(t *testing.T) {
 		if len(v.Rows) != len(m.rows) {
 			t.Fatalf("%d rows for %d teams (%v)", len(v.Rows), len(m.rows), m.rows)
 		}
-		checkAllTeams(t, pods.FormatTeams(poller.Teams()), m)
+		checkAllTeams(t, pods.FormatTeams(g.Teams), m)
 
 		// Some VMs are busy with jobs, including missing ones a deploy
 		// is making.

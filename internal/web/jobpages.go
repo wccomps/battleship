@@ -411,13 +411,13 @@ type jobItemView struct {
 // stepView is one of an item's steps, drawn as a pip.
 type stepView struct {
 	Name  string
-	State string // a pip class: done, skip, fail, int, run or wait
+	State string // a pip class: done, fail, int, run or wait
 }
 
 // Title is the step and its state in words, e.g. "network: done".
 func (v stepView) Title() string { return v.Name + ": " + stepWords[v.State] }
 
-var stepWords = map[string]string{"done": "done", "skip": "skipped", "fail": "failed", "int": "interrupted", "run": "running", "wait": "waiting"}
+var stepWords = map[string]string{"done": "done", "fail": "failed", "int": "interrupted", "run": "running", "wait": "waiting"}
 
 // StepsText is the row's steps in words, for a screen reader.
 func (v jobItemView) StepsText() string {
@@ -495,18 +495,18 @@ func clockText(d time.Duration) string {
 	return fmt.Sprintf("%d:%02d", s/60, s%60)
 }
 
-// itemSteps is an item's planned steps: each one's reported outcome, the next
-// running unless one failed, the rest waiting. Skipped steps (and a done
-// item's unreported steps, which weren't needed, except in old jobs that kept
-// no outcomes) are left out.
+// On a done item, unreported steps were unneeded and are omitted, except in old
+// jobs that recorded no step outcomes.
 func itemSteps(planned []pods.Step, it store.Item) []stepView {
-	pips := map[string]string{"done": "done", "skipped": "skip", "failed": "fail", "interrupted": "int"}
+	pips := map[string]string{"done": "done", "failed": "fail", "interrupted": "int"}
 	out := make([]stepView, 0, len(planned))
 	running := it.Status == store.ItemRunning
 	for _, st := range planned {
 		v := stepView{Name: string(st), State: "wait"}
 		got, ok := it.Steps[string(st)]
 		switch {
+		case got == "skipped":
+			continue
 		case ok:
 			v.State = pips[got]
 			running = running && got != "failed"
@@ -515,11 +515,9 @@ func itemSteps(planned []pods.Step, it store.Item) []stepView {
 		case it.Status == store.ItemDone && len(it.Steps) == 0:
 			v.State = "done"
 		case it.Status == store.ItemDone:
-			v.State = "skip"
+			continue
 		}
-		if v.State != "skip" {
-			out = append(out, v)
-		}
+		out = append(out, v)
 	}
 	return out
 }
@@ -1158,7 +1156,7 @@ func (s *Server) retryJob(w http.ResponseWriter, r *http.Request) {
 		s.planRefused(w, r, op, retry, err)
 		return
 	}
-	s.showPreview(w, r, http.StatusOK, op, retry, plan, !op.Kind.Teamless() && s.coversAllTeams(ctx, plan.Teams), previewOptions{retryOf: id})
+	s.showPreview(w, r, http.StatusOK, op, retry, plan, previewOptions{retryOf: id})
 }
 
 // jobSnapTimeout bounds a shared job read.

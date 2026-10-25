@@ -48,9 +48,8 @@ func deployedText(d pods.DeployedSet) string {
 }
 
 // setStep is the teardown's step 2: what teams' pods hold among in's hosts,
-// set by set, a choice per set, then everything. The choice is in.Set if
-// chosen; else, when the pods hold one set alone, that set, and when they
-// hold no set it can tell, everything. Otherwise the person chooses.
+// set by set, a choice per set, and, unless one set is all they hold,
+// everything.
 func (s *Server) setStep(ctx context.Context, in jobs.Inputs, teams []string, chosen bool) *stepTwo {
 	step := &stepTwo{Legend: "Tear down", Button: "Preview teardown", Danger: true}
 	held := &heldView{Heading: "In " + podsText(teams), Empty: "No VMs in " + podsText(teams) + "."}
@@ -78,26 +77,18 @@ func (s *Server) setStep(ctx context.Context, in jobs.Inputs, teams []string, ch
 		step.Hints = append(step.Hints, "Battleship can't tell the set of "+countVMs(unknown)+", so only "+all+
 			" removes "+byCount(unknown, "it", "them")+".")
 	}
-	set := in.Set
-	switch {
-	case chosen || err != nil:
-	case len(deployed) == 1 && len(sets) == 1:
-		set, chosen = sets[0], true
-	case len(sets) == 0:
-		set, chosen = "", true // everything: nothing else to choose
-	}
 	found := false
 	for _, of := range sets {
-		checked := chosen && of == set
+		checked := chosen && of == in.Set
 		found = found || checked
 		step.Options = append(step.Options, stepOpt{Value: string(of), Label: string(of), Checked: checked})
 	}
-	if chosen && set != "" && !found {
+	if chosen && in.Set != "" && !found {
 		// Not a set the pods hold, e.g. a retry's after its VMs went.
-		step.Options = append(step.Options, stepOpt{Value: string(set), Label: string(set), Checked: true})
+		step.Options = append(step.Options, stepOpt{Value: string(in.Set), Label: string(in.Set), Checked: true})
 	}
-	if len(deployed) != 1 || len(sets) != 1 || (chosen && set == "") {
-		step.Options = append(step.Options, stepOpt{Label: all, Checked: chosen && set == "", Sans: true})
+	if len(deployed) != 1 || len(sets) != 1 || (chosen && !found) {
+		step.Options = append(step.Options, stepOpt{Label: all, Checked: chosen && in.Set == "", Sans: true})
 	}
 	return step
 }

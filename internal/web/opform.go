@@ -63,15 +63,14 @@ func hostOpts(names, ticked []string) []hostOpt {
 }
 
 // stepTwo is the second step of a two-step form (operation.Pick), once
-// pods and hosts are chosen (HasPicked): what the cluster holds for them,
-// and a choice among it.
+// pods and hosts are chosen: what the cluster holds for them, and a choice
+// among it.
 type stepTwo struct {
-	HasPicked bool
-	Held      *heldView // what the pods hold, if the step lists it
-	Legend    string    // the choice's: "Snapshot"
-	Options   []stepOpt
-	Hints     []string // under the choice
-	Note      string   // after it, e.g. why the list is short
+	Held    *heldView // what the pods hold, if the step lists it
+	Legend  string    // the choice's: "Snapshot"
+	Options []stepOpt
+	Hints   []string // under the choice
+	Note    string   // after it, e.g. why the list is short
 	// Button is the preview button's label; Danger marks it, with the
 	// operation's icon, as destroying something.
 	Button string
@@ -134,7 +133,7 @@ func (s *Server) opForm(op operation) http.Handler {
 		}
 		chosen := op.Pick != "" && q.Has(op.Pick)
 		p := s.newFormPage(r.Context(), op, in, q.Has(fieldTeams) || grid, chosen)
-		if op.Kind == pods.KindTeardown && !chosen && p.Step.Held != nil && p.Step.Held.Err == "" && len(p.Step.Options) == 1 {
+		if op.Kind == pods.KindTeardown && p.Step != nil && p.Step.Held.Err == "" && len(p.Step.Options) == 1 {
 			in.Set = pods.Set(p.Step.Options[0].Value)
 			s.reviewPage(w, r, op, in)
 			return
@@ -144,9 +143,6 @@ func (s *Server) opForm(op operation) http.Handler {
 	})
 }
 
-// reviewPage is a formless operation's page, such as an environment's
-// teardown, or a pod teardown with only one set option: it opens on its
-// review.
 func (s *Server) reviewPage(w http.ResponseWriter, r *http.Request, op operation, in jobs.Inputs) {
 	if err := in.Validate(); err != nil {
 		s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, sentence(err.Error()))
@@ -157,8 +153,7 @@ func (s *Server) reviewPage(w http.ResponseWriter, r *http.Request, op operation
 		s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, "Couldn't make a plan: "+sentence(proxmox.Describe(err)))
 		return
 	}
-	allTeams := !op.Kind.Teamless() && s.coversAllTeams(r.Context(), plan.Teams)
-	s.showPreview(w, r, http.StatusOK, op, in, plan, allTeams, previewOptions{})
+	s.showPreview(w, r, http.StatusOK, op, in, plan, previewOptions{})
 }
 
 // newFormPage prepares op's form for in. On a two-step form, picked shows
@@ -203,10 +198,11 @@ func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, 
 		}
 	}
 	if op.step != nil {
-		p.Step = &stepTwo{}
 		if teams, err := pods.ParseTeams(in.Teams); picked && err == nil {
 			p.Step = op.step(s, ctx, in, teams, chosen)
-			p.Step.HasPicked = op.Kind != pods.KindTeardown || len(p.Step.Options) > 1 || p.Step.Held.Err != ""
+			if op.Kind == pods.KindTeardown && chosen && len(p.Step.Options) == 1 && p.Step.Held.Err == "" {
+				p.Step = nil
+			}
 		}
 	}
 	if op.Kind != pods.KindDeploy {

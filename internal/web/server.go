@@ -121,7 +121,7 @@ type Server struct {
 	busy      busyCache
 	busyReads atomic.Int64 // reads of the busy VMs; tests read it
 
-	// firstPoll bounds the grid page's wait for a new view's first poll
+	// firstPoll bounds a request's wait for a new view's first poll
 	// (firstPollWait; tests set 0).
 	firstPoll time.Duration
 

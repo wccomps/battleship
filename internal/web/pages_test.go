@@ -369,9 +369,6 @@ func TestFleetHeadline(t *testing.T) {
 	}
 }
 
-// An item's step strip; skipped steps and a done item's unreported steps
-// (which weren't needed, unless it recorded no outcomes at all in older jobs)
-// are omitted.
 func TestItemSteps(t *testing.T) {
 	planned := []pods.Step{pods.StepClone, pods.StepNetwork, pods.StepCDROM, pods.StepStart}
 	states := func(it store.Item) string {

@@ -1,12 +1,16 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/wccomps/battleship/internal/auth/authtest"
 	"github.com/wccomps/battleship/internal/proxmox"
+	"github.com/wccomps/battleship/internal/status"
 )
 
 // withTeam00 is the harness (teams 01-03) with team 00, the test team,
@@ -88,8 +92,6 @@ func TestAllTeamsIsTeamsWithVMs(t *testing.T) {
 	_, _, body = h.preview(&lead, "/teardown", url.Values{"teams": {"1-3"}})
 	contains(t, "teardown of 1-3", body, "This covers every pod (01-03).")
 
-	// With no team VMs (or only one pod) on the grid, a single-pod operation
-	// does not warn that it covers every pod.
 	h.noTeamVMs()
 	h.poll()
 	contains(t, "teardown form", h.get(&lead, "/teardown").Body.String(), `<span class="hint" id="teams-hint">3,7 · 12-14</span>`)
@@ -157,5 +159,51 @@ func TestTeamWithVMsCellPage(t *testing.T) {
 	h.poll()
 	if rec := h.get(&op, "/vm/40/web"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "missing") {
 		t.Errorf("GET /vm/40/web (missing) = %d", rec.Code)
+	}
+}
+
+func TestColdViewWaitsForFirstPoll(t *testing.T) {
+	h := newHarness(t)
+	h.srv.firstPoll = 5 * time.Second
+	cold := func(subject string) authtest.Session {
+		cred := h.ticketWith(subject, allPrivileges)
+		sess := authtest.Login(t, h.st, h.cfg, authtest.User{Subject: subject, Name: subject, At: h.clock.Now(), Proxmox: cred})
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		go func() {
+			for ctx.Err() == nil {
+				var found *status.View
+				h.views.Each(func(v *status.View) {
+					if v.User == cred.User {
+						found = v
+					}
+				})
+				if found != nil {
+					time.Sleep(10 * time.Millisecond)
+					_ = found.Poll(ctx)
+					return
+				}
+				time.Sleep(time.Millisecond)
+			}
+		}()
+		return sess
+	}
+
+	s1 := cold("cold-form")
+	contains(t, "cold teardown form", h.get(&s1, "/teardown").Body.String(), `<span class="hint" id="teams-hint">1-3 · 3,7 · 12-14</span>`)
+
+	s2 := cold("cold-snapshots")
+	contains(t, "cold reset with VMs", h.get(&s2, "/reset?teams=1&vms=team01-dc,team01-web").Body.String(), `value="before-scoring"`, `The snapshots that <span class="name">team01-dc</span>, <span class="name">team01-web</span> all have.`)
+
+	s3 := cold("cold-reset")
+	contains(t, "cold reset step 2", h.get(&s3, "/reset?teams=1").Body.String(), `value="before-scoring"`, `The snapshots of <span class="name">team01-dc</span>, the first VM this covers.`)
+
+	s4 := cold("cold-preview")
+	body := h.post(&s4, "/power/preview", selection([]string{"team01-dc", "team02-dc", "team03-dc"}, "action", "start")).Body.String()
+	contains(t, "cold grid power preview", body, "This covers every pod (01-03).", "3 already running")
+
+	s5 := cold("cold-cell")
+	if rec := h.get(&s5, "/vm/01/dc"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "team01-dc") {
+		t.Fatalf("cold GET /vm/01/dc = %d\n%s", rec.Code, rec.Body)
 	}
 }
