@@ -65,20 +65,30 @@ func TestTeardownFormSteps(t *testing.T) {
 		`<label class="opt sans"><input type="radio" name="set" value="" required><span>Every matching VM in these pods</span>`,
 		`<span class="hint">Battleship can&#39;t tell the set of 1 VM, so only Every matching VM in these pods removes it.</span>`)
 
-	// One set alone is chosen for you; a "Change" link keeps its choice,
-	// everything too.
+	// One set alone skips step 2 and opens directly on the review; its Back
+	// link reopens step 1 without the redundant step 2 choice.
 	body = h.get(&lead, "/teardown?teams=1&hosts=web").Body.String()
-	contains(t, "pod 01's web", body, `<dd>1 host in pod 01</dd>`, `<input type="hidden" name="hosts" value="web">`,
-		`value="tango.delta" required checked>`)
+	contains(t, "pod 01's web", body,
+		`<h1 id="pv-title"><span class="eyebrow">Review ·</span> Tear down <span class="vm">tango.delta</span></h1>`,
+		`Tears down <span class="name">tango.delta</span> in pod 01: 1 VM.`,
+		`<a class="btn first" href="/teardown?hosts=web&amp;set=tango.delta&amp;teams=1"`)
+	lacks(t, "pod 01's web", body, `id="teardown-pick"`, "Every matching VM in these pods")
+	back := h.get(&lead, "/teardown?hosts=web&set=tango.delta&teams=1").Body.String()
+	contains(t, "back from single-set review", back, `id="teardown-which"`, `value="1"`, `value="web" checked`)
+	lacks(t, "back from single-set review", back, `id="teardown-pick"`, "Every matching VM in these pods")
+
 	body = h.get(&lead, "/teardown?teams=1-3&set=").Body.String()
 	contains(t, "everything chosen", body, `value="" required checked>`)
 	body = h.get(&lead, "/teardown?teams=1-3&set=Kilo.Alpha").Body.String()
 	contains(t, "kilo.alpha chosen", body, `value="kilo.alpha" required checked>`)
 	body = h.get(&lead, "/teardown?teams=1-3&set=kilo.bravo").Body.String()
 	contains(t, "a set the pods don't hold", body, `<input type="radio" name="set" value="kilo.bravo" required checked><span>kilo.bravo</span>`)
-	// Nothing deployed: everything, for disks a gone VM left.
+	// Nothing deployed: skips step 2 straight to the review.
 	body = h.get(&lead, "/teardown?teams=9").Body.String()
-	contains(t, "an empty pod", body, "No VMs in pod 09.", `value="" required checked>`)
+	contains(t, "an empty pod", body,
+		`<h1 id="pv-title"><span class="eyebrow">Review ·</span> Tear down <span class="vm">pod 09</span></h1>`,
+		"No VMs in these pods match these hosts.")
+	lacks(t, "an empty pod", body, `id="teardown-pick"`)
 }
 
 // The review names the set and the pods, lists the VMs it takes and says

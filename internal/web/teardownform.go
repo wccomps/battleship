@@ -96,6 +96,8 @@ func (s *Server) setStep(ctx context.Context, in jobs.Inputs, teams []string, ch
 		// Not a set the pods hold, e.g. a retry's after its VMs went.
 		step.Options = append(step.Options, stepOpt{Value: string(set), Label: string(set), Checked: true})
 	}
-	step.Options = append(step.Options, stepOpt{Label: all, Checked: chosen && set == "", Sans: true})
+	if len(deployed) != 1 || len(sets) != 1 || (chosen && set == "") {
+		step.Options = append(step.Options, stepOpt{Label: all, Checked: chosen && set == "", Sans: true})
+	}
 	return step
 }

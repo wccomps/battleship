@@ -303,14 +303,14 @@ func checkAllTeams(t *rapid.T, spec string, m clusterModel) {
 	if !slices.Equal(all, m.rows) {
 		t.Fatalf("all teams = %v, want the teams with VMs: %v", all, m.rows)
 	}
-	if !coversTeams(all, all) || !coversTeams(all, append(slices.Clone(all), "99")) {
-		t.Fatalf("all teams %v, or more, doesn't count as every team", all)
-	}
-	if len(all) == 0 {
-		if !coversTeams(all, nil) {
-			t.Fatal("with no teams, no range counts as every team")
+	if len(all) <= 1 {
+		if coversTeams(all, all) || coversTeams(all, nil) {
+			t.Fatalf("with %d teams (%v), coversTeams is true", len(all), all)
 		}
 		return
+	}
+	if !coversTeams(all, all) || !coversTeams(all, append(slices.Clone(all), "99")) {
+		t.Fatalf("all teams %v, or more, doesn't count as every team", all)
 	}
 	if left := rapid.SampledFrom(all).Draw(t, "a team left out"); coversTeams(all, slices.DeleteFunc(slices.Clone(all), func(x string) bool { return x == left })) {
 		t.Fatalf("all teams but %s counts as every team", left)

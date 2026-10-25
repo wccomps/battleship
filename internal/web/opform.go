@@ -132,14 +132,21 @@ func (s *Server) opForm(op operation) http.Handler {
 			}
 			in = s.selected(r.Context(), in)
 		}
-		p := s.newFormPage(r.Context(), op, in, q.Has(fieldTeams) || grid, op.Pick != "" && q.Has(op.Pick))
+		chosen := op.Pick != "" && q.Has(op.Pick)
+		p := s.newFormPage(r.Context(), op, in, q.Has(fieldTeams) || grid, chosen)
+		if op.Kind == pods.KindTeardown && !chosen && p.Step.Held != nil && p.Step.Held.Err == "" && len(p.Step.Options) == 1 {
+			in.Set = pods.Set(p.Step.Options[0].Value)
+			s.reviewPage(w, r, op, in)
+			return
+		}
 		p.FromGrid = grid
 		s.render(w, r, http.StatusOK, "opform", s.newView(w, r, op.Title, op.nav(), p))
 	})
 }
 
 // reviewPage is a formless operation's page, such as an environment's
-// teardown: it has nothing to fill in, so it opens on its review.
+// teardown, or a pod teardown with only one set option: it opens on its
+// review.
 func (s *Server) reviewPage(w http.ResponseWriter, r *http.Request, op operation, in jobs.Inputs) {
 	if err := in.Validate(); err != nil {
 		s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, sentence(err.Error()))
@@ -150,7 +157,8 @@ func (s *Server) reviewPage(w http.ResponseWriter, r *http.Request, op operation
 		s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, "Couldn't make a plan: "+sentence(proxmox.Describe(err)))
 		return
 	}
-	s.showPreview(w, r, http.StatusOK, op, in, plan, false, previewOptions{})
+	allTeams := !op.Kind.Teamless() && s.coversAllTeams(r.Context(), plan.Teams)
+	s.showPreview(w, r, http.StatusOK, op, in, plan, allTeams, previewOptions{})
 }
 
 // newFormPage prepares op's form for in. On a two-step form, picked shows
@@ -198,11 +206,11 @@ func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, 
 		p.Step = &stepTwo{}
 		if teams, err := pods.ParseTeams(in.Teams); picked && err == nil {
 			p.Step = op.step(s, ctx, in, teams, chosen)
-			p.Step.HasPicked = true
+			p.Step.HasPicked = op.Kind != pods.KindTeardown || len(p.Step.Options) > 1 || p.Step.Held.Err != ""
 		}
 	}
 	if op.Kind != pods.KindDeploy {
-		p.HostOpts, p.HostsAll = hostOpts(s.view(ctx).Grid().Hosts, in.Hosts), true
+		p.HostOpts, p.HostsAll = hostOpts(s.polledGrid(ctx).Hosts, in.Hosts), true
 	}
 	return p
 }
@@ -295,7 +303,7 @@ const pickerReads = 4
 // on step.
 func (s *Server) commonSnapshots(ctx context.Context, step *stepTwo, names []string) (_ []string, baseline string) {
 	var cells []status.Cell
-	for _, row := range s.view(ctx).Grid().Rows {
+	for _, row := range s.polledGrid(ctx).Rows {
 		for _, c := range row.Cells {
 			if c.State != status.StateMissing && slices.Contains(names, c.Name) {
 				cells = append(cells, c)
@@ -344,7 +352,7 @@ func (s *Server) commonSnapshots(ctx context.Context, step *stepTwo, names []str
 // firstVM is the first non-missing grid VM of teams whose host matches hosts
 // (as the planner matches them).
 func (s *Server) firstVM(ctx context.Context, teams, hosts []string) (team, host string, ok bool) {
-	g := s.view(ctx).Grid()
+	g := s.polledGrid(ctx)
 	for _, t := range teams {
 		for _, row := range g.Rows {
 			if row.Team != t {
