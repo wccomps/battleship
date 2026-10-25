@@ -396,7 +396,7 @@ type jobItemView struct {
 	// "Ready · 192.168.100.4".
 	Look statusLook
 	// Doing is a running VM's current step in words, and Note the info
-	// line it last logged on that step.
+	// line it (or the template build a pending VM waits for) last logged.
 	Doing, Note string
 	// For is how long it has been on that step ("2:31"), while the job
 	// runs; Since is when that step began, in Unix ms.
@@ -825,12 +825,20 @@ func jobItemsOf(j store.Job, items []store.Item, now time.Time) jobItems {
 				row.Doing, row.Note = doingOf(p.Steps[i], p), it.Note
 			}
 		}
+		if st == store.ItemPending && j.Status == store.StatusRunning {
+			row.Note = it.Note
+		}
 		if st == store.ItemRunning && j.Status == store.StatusRunning && !it.StepAt.IsZero() {
 			row.For, row.Since = clockText(now.Sub(it.StepAt)), it.StepAt.UnixMilli()
 		}
 		t.Rows = append(t.Rows, row)
 	}
-	sort.SliceStable(t.Rows, func(a, b int) bool { return itemRank(t.Rows[a].status) < itemRank(t.Rows[b].status) })
+	sort.SliceStable(t.Rows, func(a, b int) bool {
+		if ra, rb := itemRank(t.Rows[a].status), itemRank(t.Rows[b].status); ra != rb {
+			return ra < rb
+		}
+		return t.Rows[a].status == store.ItemPending && t.Rows[a].Note != "" && t.Rows[b].Note == ""
+	})
 	sort.SliceStable(order, func(a, b int) bool { return itemRank(order[a]) < itemRank(order[b]) })
 	for _, st := range order {
 		t.Tally = append(t.Tally, tallyPart{N: n[st], Label: lookOf(itemLooks, st).Label,

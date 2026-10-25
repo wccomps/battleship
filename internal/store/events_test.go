@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -403,5 +404,45 @@ func TestItemStepAtAndNote(t *testing.T) {
 	}
 	if it := item(); len(it.Steps) != 0 || !it.StepAt.Equal(at.Add(5*time.Minute)) {
 		t.Errorf("after a restart: steps %v, StepAt %v", it.Steps, it.StepAt)
+	}
+}
+
+// A template build's info lines set Note on the pending items that clone
+// from it, leaving them pending and untouched when the template finishes.
+func TestTemplateEventsNotePendingItems(t *testing.T) {
+	s := storetest.New(t)
+	nj := newJob("team:01")
+	nj.Plan = json.RawMessage(`{"kind":"deploy","items":[` +
+		`{"name":"team01-teak","template":"teak.tango.delta.tpl","steps":["clone","start"]},` +
+		`{"name":"team01-dc","template":"teak.tango.delta.tpl","steps":["network"]}]}`)
+	nj.Items = []store.NewItem{{Name: "team01-teak", Team: "01", VMID: 10121}, {Name: "team01-dc", Team: "01", VMID: 10101}}
+	id, err := s.CreateJob(ctx, nj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustClaim(t, s, "w")
+	at := time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
+	if err := s.AddEvent(ctx, id, store.Event{At: at, Item: "teak.tango.delta.tpl", Step: "clone", Status: "info", Message: "cloning master teak.tango.delta"}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.Items(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items[0].Status != store.ItemPending || items[0].Step != "" || items[0].Note != "cloning master teak.tango.delta" {
+		t.Errorf("team01-teak while its template builds = %+v", items[0])
+	}
+	if items[1].Note != "" {
+		t.Errorf("team01-dc (does not clone the template) note = %q, want empty", items[1].Note)
+	}
+	if err := s.AddEvent(ctx, id, store.Event{At: at.Add(time.Minute), Item: "teak.tango.delta.tpl", Step: "clone", Status: "done", Message: "template created"}); err != nil {
+		t.Fatal(err)
+	}
+	items, err = s.Items(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items[0].Status != store.ItemPending || items[0].Note != "" {
+		t.Errorf("team01-teak after its template is created = %+v, want pending with empty note", items[0])
 	}
 }

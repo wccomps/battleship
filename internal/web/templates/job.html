@@ -142,7 +142,7 @@
 {{- range $r := .Rows}}
 <tr{{if eq .Look.Class "s-fail"}} class="bad"{{else if .Fold}} class="fold"{{end}}><td><span class="vm">{{.Name}}</span></td><td class="muted c-vmid">{{.VMID}}</td><td class="wide">
 {{- if .Steps}}<span class="steps" role="img" aria-label="{{.StepsText}}">{{range .Steps}}<span class="pip {{.State}}" title="{{.Title}}"></span>{{end}}</span>{{end}}
-{{- if .Doing}}<span class="step">{{.Doing}}</span>{{with .Note}} <span class="meta">· {{names .}}</span>{{end}}{{else}}{{template "st" .Look}}{{end}}
+{{- if .Doing}}<span class="step">{{.Doing}}</span>{{else}}{{template "st" .Look}}{{end}}{{with .Note}} <span class="meta">· {{names .}}</span>{{end}}
 {{- with .Error}}<span class="err">{{names .}}</span>{{end}}</td><td class="c2 r">{{with .For}}<time data-tick="{{$r.Since}}">{{.}}</time>{{end}}</td></tr>
 {{- end}}
 {{- with .Fold}}
