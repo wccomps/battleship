@@ -99,7 +99,8 @@ type Item struct {
 	// clock, of its last event other than an info line; when it was created
 	// if it has none.
 	StepAt time.Time
-	// Note is its last info line since then, e.g. what a step waits for.
+	// Note is its last info line since then, e.g. what a step or its
+	// template build waits for.
 	Note string
 }
 
@@ -253,8 +254,9 @@ func (s *Store) Events(ctx context.Context, jobID, afterID int64, limit int) ([]
 var beforeEventCommit func(jobID int64, ev Event)
 
 // AddEvent records progress of a running job and moves its item to the
-// event's step and status (see the item statuses). One job's events are
-// serialized so their IDs follow commit order. ErrNotActive (nothing
+// event's step and status (see the item statuses), or notes a template
+// build's progress on the pending items waiting for it. One job's events
+// are serialized so their IDs follow commit order. ErrNotActive (nothing
 // stored) if the job isn't running.
 func (s *Store) AddEvent(ctx context.Context, jobID int64, ev Event) error {
 	tx, err := s.pool.Begin(ctx)
@@ -280,7 +282,7 @@ func (s *Store) AddEvent(ctx context.Context, jobID int64, ev Event) error {
 		return err
 	}
 	if ev.Item != "" {
-		if _, err := tx.Exec(ctx, `UPDATE job_items SET
+		tag, err := tx.Exec(ctx, `UPDATE job_items SET
 				step = CASE WHEN $3 <> '' THEN $3 ELSE step END,
 				steps = CASE WHEN $4 = 'started' THEN '{}'
 					WHEN $3 <> '' AND $4 IN ('done', 'skipped', 'failed', 'interrupted')
@@ -293,8 +295,19 @@ func (s *Store) AddEvent(ctx context.Context, jobID int64, ev Event) error {
 				error = CASE WHEN $4 = 'failed' THEN $5 WHEN $4 = 'started' THEN '' ELSE error END,
 				note = CASE WHEN $4 = 'info' THEN $5 ELSE '' END,
 				updated_at = CASE WHEN $4 = 'info' THEN updated_at ELSE $6 END
-			WHERE job_id = $1 AND name = $2`, jobID, ev.Item, ev.Step, ev.Status, ev.Message, ev.At); err != nil {
+			WHERE job_id = $1 AND name = $2`, jobID, ev.Item, ev.Step, ev.Status, ev.Message, ev.At)
+		if err != nil {
 			return err
+		}
+		if tag.RowsAffected() == 0 {
+			if _, err := tx.Exec(ctx, `UPDATE job_items i SET
+					note = CASE WHEN $3 = 'info' THEN $4 ELSE '' END
+				FROM jobs j, jsonb_to_recordset(CASE WHEN jsonb_typeof(j.plan->'items') = 'array' THEN j.plan->'items' ELSE '[]'::jsonb END) AS p(name text, template text, steps jsonb)
+				WHERE i.job_id = $1 AND j.id = $1 AND i.status = 'pending'
+					AND i.name = p.name AND p.template = $2 AND jsonb_typeof(p.steps) = 'array' AND p.steps ? 'clone'`,
+				jobID, ev.Item, ev.Status, ev.Message); err != nil {
+				return err
+			}
 		}
 	}
 	if err := notifyLog(ctx, tx, jobID); err != nil {

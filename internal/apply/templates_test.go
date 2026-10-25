@@ -411,3 +411,47 @@ func TestExistingTeamVMIgnoresFailedTemplateBuild(t *testing.T) {
 		t.Errorf("team02-teak did not fail; the build should have")
 	}
 }
+
+// Building a template logs each phase as it starts, before the Proxmox task
+// it waits for finishes.
+func TestTemplateBuildReportsProgress(t *testing.T) {
+	f := newCluster()
+	f.VMs[121].Status = "running"
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, map[string]string{
+		"name": "teak.tango.delta.tpl", "template": "1", "scsi0": "ceph:base-9021-disk-0",
+	})
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{
+		Pattern: "*.tango.delta", Teams: []string{"01"}, Hosts: []string{"teak"}, Rebuild: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	var atWait []string
+	f.WaitHook = func(_ context.Context, upid string) error {
+		for _, kind := range []string{"qmdestroy", "qmstop", "qmclone:121:", "qmstart:121:", "qmtemplate"} {
+			if strings.Contains(upid, ":"+kind) {
+				evs := rec.find("teak.tango.delta.tpl", EventInfo)
+				if len(evs) == 0 {
+					t.Errorf("no info event before waiting for %s", upid)
+				} else {
+					atWait = append(atWait, evs[len(evs)-1].Message)
+				}
+			}
+		}
+		return nil
+	}
+	if res := testExecutor(f, rec).Run(context.Background(), plan); len(res.Failed) != 0 {
+		t.Fatalf("result = %+v", res)
+	}
+	want := []string{
+		"deleting old template",
+		"stopping master teak.tango.delta",
+		"cloning master teak.tango.delta",
+		"restarting master teak.tango.delta",
+		"converting to template",
+	}
+	if !slices.Equal(atWait, want) {
+		t.Errorf("messages while waiting = %v, want %v", atWait, want)
+	}
+}

@@ -99,6 +99,7 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 			if node == "" {
 				node = spec.OldNode
 			}
+			e.emit(name, pods.StepDelete, EventInfo, "deleting old template")
 			if err := e.deleteVM(ctx, node, spec.VMID, name); err != nil {
 				if e.classifier.Classify(err) == proxmox.InUse {
 					return fmt.Errorf("deleting old template: linked-clone disks still use it; remove them in Proxmox and re-run: %w", err)
@@ -204,6 +205,7 @@ func (e *Executor) copyMaster(ctx context.Context, spec *pods.TemplateSpec) erro
 		e.restartMaster(ctx, wctx, spec, startedTask{"stop", stopUPID, stopErr}, startedTask{"clone", cloneUPID, cloneErr})
 	}()
 	if status == "running" {
+		e.emit(name, pods.StepClone, EventInfo, "stopping master "+spec.MasterName)
 		stopUPID, stopErr = e.taskUPID(ctx, 0, func() (string, error) {
 			return e.api.Power(ctx, spec.MasterNode, spec.MasterVMID, "stop")
 		}, nil)
@@ -212,6 +214,7 @@ func (e *Executor) copyMaster(ctx context.Context, spec *pods.TemplateSpec) erro
 		}
 	}
 
+	e.emit(name, pods.StepClone, EventInfo, "cloning master "+spec.MasterName)
 	cloneUPID, cloneErr = e.taskUPID(ctx, spec.VMID, func() (string, error) {
 		return e.startClone(ctx, true, proxmox.CloneRequest{
 			SourceNode: spec.MasterNode, SourceVMID: spec.MasterVMID, NewVMID: spec.VMID, Name: name,
@@ -292,6 +295,7 @@ func (e *Executor) restartMaster(ctx, wctx context.Context, spec *pods.TemplateS
 	if st, err := e.api.CurrentStatus(rctx, spec.MasterNode, spec.MasterVMID); err == nil && st == "running" {
 		return
 	}
+	e.emit(spec.Name, pods.StepClone, EventInfo, "restarting master "+spec.MasterName)
 	if err := e.taskOnce(rctx, func() (string, error) { return e.api.Power(rctx, spec.MasterNode, spec.MasterVMID, "start") }); err != nil {
 		leftStopped("restarting it failed: " + proxmox.Describe(err))
 	}
@@ -355,6 +359,7 @@ func (e *Executor) finishTemplate(ctx context.Context, spec *pods.TemplateSpec, 
 	}
 	// Conversion renames disks to base-*, which linked clones need; the result
 	// is checked below, not trusted.
+	e.emit(name, pods.StepClone, EventInfo, "converting to template")
 	convErr := e.convert(ctx, node, spec.VMID)
 	if convErr != nil && ctx.Err() != nil {
 		return fmt.Errorf("converting to template: %w", convErr)

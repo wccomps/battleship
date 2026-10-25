@@ -227,6 +227,35 @@ func TestJobRowsSayStepAndTime(t *testing.T) {
 	contains(t, "finished job", body, `succeeded · <time>`, `Ready · `+ips["oak.kilo.alpha"]+`</span>`)
 }
 
+// While a deploy builds a template, the pending VMs waiting to clone from it
+// show what the template build is doing and sort above idle pending VMs.
+func TestDeployRowsShowTemplateBuildProgress(t *testing.T) {
+	h := newHarness(t)
+	addMasters(h)
+	h.noTeamVMs()
+	h.poll()
+	id := h.submitJob(jobs.Inputs{Kind: pods.KindDeploy, Teams: "1", Pattern: "*.kilo.alpha"}, byLead)
+	h.startAt(id, 45*time.Second)
+	now := h.clock.Now()
+	// web's template starts building while dc's waits for a slot.
+	h.eventAt(id, now.Add(-20*time.Second), "web.kilo.alpha.tpl", string(pods.StepClone), string(apply.EventInfo), "cloning master web.kilo.alpha")
+	sess := h.login(asLead)
+	body := h.get(&sess, "/logs/"+itoa(id)).Body.String()
+	webRow := vmRowOf(t, body, "team01-web")
+	dcRow := vmRowOf(t, body, "team01-dc")
+	contains(t, "web's row while its template builds", webRow,
+		`Pending</span> <span class="meta">· cloning master <span class="name">web.kilo.alpha</span></span>`)
+	lacks(t, "dc's row while its template waits", dcRow, `class="meta"`)
+	if strings.Index(body, `>team01-web<`) > strings.Index(body, `>team01-dc<`) {
+		t.Errorf("team01-web (building its template) sorted below idle team01-dc")
+	}
+
+	// Once the template is created, the note clears.
+	h.eventAt(id, now, "web.kilo.alpha.tpl", string(pods.StepClone), string(apply.EventDone), "template created")
+	webRow = vmRowOf(t, h.get(&sess, "/logs/"+itoa(id)).Body.String(), "team01-web")
+	lacks(t, "web's row after its template finishes", webRow, "cloning master")
+}
+
 // Done rows read as what the job's kind makes of them.
 func TestDoneRowsByKind(t *testing.T) {
 	h := newHarness(t)
