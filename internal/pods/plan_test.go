@@ -473,9 +473,9 @@ func TestWillStopMasterOnlyWhenBuildingFromRunningMaster(t *testing.T) {
 func TestDeployMasterAndUntaggedWarnings(t *testing.T) {
 	f := podstest.New("cedar")
 	f.CPUModels = []string{"baseline"}
-	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "cedar", Pool: "dev-01", Tags: "dev;kilo.alpha"},
+	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "cedar", Pool: "dev-01", Tags: "dev;kilo.alpha", MaxMem: 16 << 30},
 		map[string]string{"net0": "virtio=BC:24:11:00:00:01,bridge=devint02", "net1": "virtio=BC:24:11:00:00:02,bridge=devext01",
-			"cpu": "x86-64-v2-AES", "agent": "0", "ide2": "local:iso/debian.iso,media=cdrom"})
+			"cpu": "x86-64-v2-AES", "agent": "0", "ide2": "local:iso/debian.iso,media=cdrom", "ostype": "win11"})
 	f.Add(proxmox.VM{VMID: 2102, Name: "elm.kilo.alpha", Node: "cedar", Pool: "dev-01", Tags: ""},
 		map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint01"})
 
@@ -486,7 +486,7 @@ func TestDeployMasterAndUntaggedWarnings(t *testing.T) {
 	}
 	want := []string{
 		`Left out: elm.kilo.alpha in dev-01 lacks tag "dev".`,
-		"teak.kilo.alpha: net0 on devint02, expected devint01; 2 NICs, expected 1; CPU x86-64-v2-AES, expected baseline; guest agent off; CD-ROM attached.",
+		"teak.kilo.alpha: net0 on devint02, expected devint01; 2 NICs, expected 1; CPU x86-64-v2-AES, expected baseline; guest agent off; CD-ROM attached; 16 GiB of memory (Windows VMs are usually at most 12 GiB).",
 	}
 	if !reflect.DeepEqual(plan.Notices, want) {
 		t.Errorf("Notices = %v, want %v", plan.Notices, want)

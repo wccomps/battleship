@@ -342,7 +342,7 @@ func (p Planner) buildEnvHost(vm proxmox.VM, cfg map[string]string, slot Slot, c
 	h.CDROM = len(CDROMChanges(cfg)) > 0
 	h.CPUModels = cpuModels
 	h.Config = cfg
-	h.Warnings = p.hostWarnings(vm, cfg, slot, h.Router, cpuModels)
+	h.Warnings = p.hostWarnings(vm, cfg, slot, h.Router, n.OS, cpuModels)
 	return h
 }
 
@@ -508,7 +508,32 @@ func (p Planner) customCPUModels(ctx context.Context, node string) []string {
 	return models
 }
 
-func vmHardwareWarnings(cfg map[string]string, cpuModels []string, warnNoAgent bool) []string {
+const (
+	maxWindowsMem = 12 << 30
+	maxLinuxMem   = 8 << 30
+)
+
+func memoryWarning(mem int64, cfg map[string]string, kind string) string {
+	if mem <= 0 {
+		head, _ := splitOptions(cfg["memory"])
+		if mib, err := strconv.ParseInt(strings.TrimPrefix(head, "current="), 10, 64); err == nil && mib > 0 {
+			mem = mib << 20
+		}
+	}
+	switch kind {
+	case ImageWindows:
+		if mem > maxWindowsMem {
+			return fmt.Sprintf("%s of memory (Windows VMs are usually at most %s)", GiB(mem), GiB(maxWindowsMem))
+		}
+	case ImageLinux:
+		if mem > maxLinuxMem {
+			return fmt.Sprintf("%s of memory (Linux VMs are usually at most %s)", GiB(mem), GiB(maxLinuxMem))
+		}
+	}
+	return ""
+}
+
+func vmHardwareWarnings(mem int64, cfg map[string]string, kind string, cpuModels []string, warnNoAgent bool) []string {
 	var out []string
 	if w := cpuWarning(cfg["cpu"], cpuModels); w != "" {
 		out = append(out, w)
@@ -519,11 +544,29 @@ func vmHardwareWarnings(cfg map[string]string, cpuModels []string, warnNoAgent b
 	if len(CDROMChanges(cfg)) > 0 {
 		out = append(out, "CD-ROM attached")
 	}
+	if w := memoryWarning(mem, cfg, kind); w != "" {
+		out = append(out, w)
+	}
 	return out
 }
 
+func vmKind(vm proxmox.VM, cfg map[string]string, osNote string) string {
+	tags := Tags(vm.Tags)
+	switch {
+	case slices.Contains(tags, ImageRouter):
+		return ImageRouter
+	case osNote == ImageWindows || osNote == ImageLinux:
+		return osNote
+	case slices.Contains(tags, ImageWindows):
+		return ImageWindows
+	case slices.Contains(tags, ImageLinux):
+		return ImageLinux
+	}
+	return KindForOSType(cfg["ostype"])
+}
+
 // hostWarnings checks a slot VM's tags and config for discrepancies.
-func (p Planner) hostWarnings(vm proxmox.VM, cfg map[string]string, s Slot, router bool, cpuModels []string) []string {
+func (p Planner) hostWarnings(vm proxmox.VM, cfg map[string]string, s Slot, router bool, osNote string, cpuModels []string) []string {
 	var out []string
 	tags := Tags(vm.Tags)
 	var missing []string
@@ -539,7 +582,7 @@ func (p Planner) hostWarnings(vm proxmox.VM, cfg map[string]string, s Slot, rout
 		out = append(out, "missing tags "+strings.Join(missing, ", "))
 	}
 	out = append(out, slotNICWarnings(cfg, s, router)...)
-	return append(out, vmHardwareWarnings(cfg, cpuModels, cfg["agent"] != "" || len(DiskVolumes(cfg)) > 0)...)
+	return append(out, vmHardwareWarnings(vm.MaxMem, cfg, vmKind(vm, cfg, osNote), cpuModels, cfg["agent"] != "" || len(DiskVolumes(cfg)) > 0)...)
 }
 
 // masterWarnings checks a deploy master VM's config for discrepancies.
@@ -552,13 +595,15 @@ func (p Planner) masterWarnings(vm proxmox.VM, cfg map[string]string, slotByPool
 	} else {
 		out = append(out, vlanWarnings(cfg)...)
 	}
-	return append(out, vmHardwareWarnings(cfg, cpuModels, cfg["agent"] != "" || (inSlot && len(DiskVolumes(cfg)) > 0))...)
+	n, _ := ParseNotes(cfg["description"])
+	n = n.Checked(p.Cfg.Environments.Subnet)
+	return append(out, vmHardwareWarnings(vm.MaxMem, cfg, vmKind(vm, cfg, n.OS), cpuModels, cfg["agent"] != "" || (inSlot && len(DiskVolumes(cfg)) > 0))...)
 }
 
 // registerWarnings checks a register source VM's config for discrepancies
 // that don't block registration.
-func (p Planner) registerWarnings(cfg map[string]string, kind string, cpuModels []string) []string {
+func (p Planner) registerWarnings(vm proxmox.VM, cfg map[string]string, kind string, cpuModels []string) []string {
 	out := slotNICWarnings(cfg, Slot{}, kind == ImageRouter)
 	warnNoAgent := (kind == ImageRouter || kind == ImageOther) && (cfg["agent"] != "" || len(DiskVolumes(cfg)) > 0)
-	return append(out, vmHardwareWarnings(cfg, cpuModels, warnNoAgent)...)
+	return append(out, vmHardwareWarnings(vm.MaxMem, cfg, kind, cpuModels, warnNoAgent)...)
 }
