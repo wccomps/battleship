@@ -39,10 +39,6 @@ type tplBuild struct {
 // startTemplates builds, each in its own goroutine, every template pending
 // items need; each ready channel closes when that build ends, and wait
 // blocks until all have.
-//
-// A build holds a template_builds slot throughout, bounding how many
-// masters are stopped at once; the copy also takes a clone slot (see
-// ensureTemplate).
 func (e *Executor) startTemplates(ctx context.Context, specs []pods.TemplateSpec, builds map[string]*tplBuild, pending []pods.Item) (wait func()) {
 	var wg sync.WaitGroup
 	for _, spec := range specs {
@@ -56,7 +52,7 @@ func (e *Executor) startTemplates(ctx context.Context, specs []pods.TemplateSpec
 		go func() {
 			defer wg.Done()
 			defer close(b.ready)
-			b.err = e.lim.builds.do(ctx, func() error { return e.ensureTemplate(ctx, b) })
+			b.err = e.ensureTemplate(ctx, b)
 			b.done = b.err == nil
 			if b.err != nil {
 				e.emit(spec.Name, "", EventFailed, proxmox.Describe(b.err))
@@ -147,9 +143,12 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 		return fmt.Errorf("VMID %d is now used by %s", spec.VMID, other.Name)
 	}
 
-	// The copy takes a clone slot like team clones. It is taken
+	// The copy holds a template_builds slot, bounding how many masters are
+	// stopped at once, and a clone slot like team clones. Both are taken
 	// before stopping the master so the master isn't down while waiting.
-	if err := e.lim.clones.do(ctx, func() error { return e.copyMaster(ctx, spec) }); err != nil {
+	if err := e.lim.builds.do(ctx, func() error {
+		return e.lim.clones.do(ctx, func() error { return e.copyMaster(ctx, spec) })
+	}); err != nil {
 		return err
 	}
 	e.setPresent(proxmox.VM{VMID: spec.VMID, Name: name, Node: spec.MasterNode}, true)
@@ -399,7 +398,7 @@ const convertWait = 2 * time.Minute
 // unknown, convert waits up to convertWait for the rename and returns nil if
 // template: 1; the caller checks the disks.
 func (e *Executor) convert(ctx context.Context, node string, vmid int) error {
-	return e.lim.storageOps.do(ctx, func() error {
+	return e.lim.storageOps.do(ctx, true, func() error {
 		upid, err := e.taskUPID(ctx, 0, func() (string, error) {
 			cfg, err := e.api.VMConfig(ctx, node, vmid)
 			switch {

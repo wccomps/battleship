@@ -64,7 +64,7 @@ func (e *Executor) deleteVM(ctx context.Context, node string, vmid int, name str
 		if template {
 			// Destroying a template frees base disks under the storage lock, like a
 			// conversion: one at a time (see Limits).
-			return e.lim.storageOps.do(ctx, destroy)
+			return e.lim.storageOps.do(ctx, false, destroy)
 		}
 		return destroy()
 	})
@@ -167,7 +167,7 @@ func (e *Executor) freeLeftovers(ctx context.Context, vmid int, name string, l l
 		}
 		var err error
 		if l.template {
-			err = e.lim.storageOps.do(ctx, free)
+			err = e.lim.storageOps.do(ctx, false, free)
 		} else {
 			err = free()
 		}

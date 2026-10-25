@@ -315,3 +315,90 @@ func TestClonesTakeClusterSlots(t *testing.T) {
 		t.Errorf("clone slots taken %d times (%v), want 3", clones, slots.taken)
 	}
 }
+
+func TestStorageOpsPriorityAndCancel(t *testing.T) {
+	var s storageOps
+	holding, release := make(chan struct{}), make(chan struct{})
+	first := make(chan error, 1)
+	go func() {
+		first <- s.do(context.Background(), false, func() error { close(holding); <-release; return nil })
+	}()
+	<-holding
+
+	var order []string
+	var wg sync.WaitGroup
+	enqueue := func(ctx context.Context, high bool, label string, errs chan<- error) {
+		queueLen := func() int {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if high {
+				return len(s.hi)
+			}
+			return len(s.lo)
+		}
+		wantLen := queueLen() + 1
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- s.do(ctx, high, func() error { order = append(order, label); return nil })
+		}()
+		for queueLen() < wantLen {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	errs := make(chan error, 6)
+	enqueue(context.Background(), false, "lo1", errs)
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	enqueue(cancelCtx, true, "hi-cancel", errs)
+	enqueue(context.Background(), false, "lo2", errs)
+	enqueue(context.Background(), true, "hi1", errs)
+	enqueue(context.Background(), true, "hi2", errs)
+
+	cancel()
+	if err := <-errs; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled waiter err = %v, want context.Canceled", err)
+	}
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("waiter error = %v", err)
+		}
+	}
+	if want := []string{"hi1", "hi2", "lo1", "lo2"}; !slices.Equal(order, want) {
+		t.Errorf("wake order = %v, want %v", order, want)
+	}
+
+	// When a wakeup wins select over a done ctx, the slot is passed on without running fn.
+	hold2, rel2 := make(chan struct{}), make(chan struct{})
+	go func() { _ = s.do(context.Background(), false, func() error { close(hold2); <-rel2; return nil }) }()
+	<-hold2
+	ran := false
+	woke := make(chan error, 1)
+	go func() {
+		woke <- s.do(slotWins{context.Background()}, true, func() error { ran = true; return nil })
+	}()
+	for {
+		s.mu.Lock()
+		n := len(s.hi)
+		s.mu.Unlock()
+		if n == 1 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(rel2)
+	if err := <-woke; !errors.Is(err, context.Canceled) || ran {
+		t.Errorf("do when wakeup won over done ctx = %v (ran %v), want context.Canceled without running", err, ran)
+	}
+	s.mu.Lock()
+	held := s.held
+	s.mu.Unlock()
+	if held {
+		t.Error("storageOps still held after cancelled waiter released")
+	}
+}

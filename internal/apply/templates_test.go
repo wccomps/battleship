@@ -79,7 +79,7 @@ func newTaskGate(t *testing.T, f *podstest.Fake, capacity int, kind string, hold
 }
 
 func (g *cloneGate) wait(ctx context.Context, upid string) error {
-	if !strings.Contains(upid, ":"+g.kind+":") || !g.hold(upid) {
+	if (g.kind != "" && !strings.Contains(upid, ":"+g.kind+":")) || !g.hold(upid) {
 		return nil
 	}
 	g.mu.Lock()
@@ -453,5 +453,66 @@ func TestTemplateBuildReportsProgress(t *testing.T) {
 	}
 	if !slices.Equal(atWait, want) {
 		t.Errorf("messages while waiting = %v, want %v", atWait, want)
+	}
+}
+
+// Reused templates never take a template_builds slot, and a building
+// template releases its slot once its master copy ends (before converting),
+// so neither existing templates nor conversions block the next master copy.
+func TestTemplateBuildSlotOnlyCoversMasterCopy(t *testing.T) {
+	f := sevenMasters()
+	f.Add(proxmox.VM{VMID: 9002, Name: "h2.kilo.alpha.tpl", Node: "spruce", Template: true}, map[string]string{
+		"name": "h2.kilo.alpha.tpl", "template": "1", "scsi0": "competitions:9002/base-9002-disk-0.qcow2,size=32G",
+	})
+	plan := deploySeven(t, f, "h1", "h2", "h3")
+	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Concurrency.TemplateBuilds = 1
+	g := newTaskGate(t, f, 3, "", func(upid string) bool {
+		return strings.Contains(upid, ":qmclone:") || strings.Contains(upid, ":qmtemplate:")
+	})
+	_, done := runAsync(t, ex, plan)
+
+	// With TemplateBuilds=1, one of h1/h3 starts copying its master while h2's
+	// existing template immediately unblocks team01-h2's clone.
+	var firstCopy, h2Clone *gateWaiter
+	for firstCopy == nil || h2Clone == nil {
+		w := g.next()
+		switch {
+		case w.upid == itemClone(2):
+			h2Clone = w
+		case strings.Contains(w.upid, ":qmclone:") && cloneSource(w.upid) < 9000:
+			firstCopy = w
+		default:
+			t.Fatalf("unexpected task %s while first master copy and team01-h2 clone should run", w.upid)
+		}
+	}
+	g.releaseUPID(h2Clone.upid, nil)
+
+	// Once the first master copy finishes, its template_builds slot is freed
+	// before qmtemplate finishes, so the other master copy starts while
+	// qmtemplate is still held.
+	g.releaseUPID(firstCopy.upid, nil)
+	var firstConv, secondCopy *gateWaiter
+	for firstConv == nil || secondCopy == nil {
+		w := g.next()
+		switch {
+		case strings.Contains(w.upid, ":qmtemplate:"):
+			firstConv = w
+		case strings.Contains(w.upid, ":qmclone:") && cloneSource(w.upid) < 9000:
+			secondCopy = w
+		default:
+			t.Fatalf("unexpected task %s while first conversion and second master copy should overlap", w.upid)
+		}
+	}
+	g.releaseUPID(firstConv.upid, nil)
+	g.releaseUPID(secondCopy.upid, nil)
+
+	// Drain first team clone, second conversion, and second team clone.
+	for range 3 {
+		w := g.next()
+		g.releaseUPID(w.upid, nil)
+	}
+	if res := waitResult(t, done); len(res.Failed) != 0 || len(res.Succeeded) != 3 {
+		t.Fatalf("result = %+v", res)
 	}
 }
