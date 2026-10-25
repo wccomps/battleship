@@ -807,14 +807,15 @@ func TestInterruptedOnlyOutcomeHasFailures(t *testing.T) {
 	}
 }
 
-// A preview made under other config (here, teardown shutdown wait) is stale
-// in the claiming process: nothing runs.
+// A preview made under other config (here, deploy pool) is stale in the
+// claiming process: nothing runs.
 func TestWorkerRefusesPlanUnderOtherConfig(t *testing.T) {
 	st := storetest.New(t)
-	f := teamVMs()
-	id := submit(t, st, f, Inputs{Kind: pods.KindTeardown, Teams: "1"})
+	f := twoTeams()
+	f.addVM(proxmox.VM{VMID: 5001, Name: "dc.kilo.alpha", Node: "n1", Status: "stopped", Tags: "dev"})
+	id := submit(t, st, f, Inputs{Kind: pods.KindDeploy, Teams: "1", Pattern: "*.kilo.alpha"})
 	w := newWorker(st, f)
-	w.Cfg.Teardown.ShutdownTimeout = 5 * time.Minute
+	w.Cfg.Naming.Pool = "other-{team}"
 
 	w.runJob(bg, claim(t, st))
 
@@ -822,17 +823,15 @@ func TestWorkerRefusesPlanUnderOtherConfig(t *testing.T) {
 	if j.Status != store.StatusStale || !strings.Contains(j.Error, "config") {
 		t.Fatalf("job = %s: %s", j.Status, j.Error)
 	}
-	if len(f.DeletedIDs()) != 0 {
-		t.Errorf("a stale job deleted %v", f.DeletedIDs())
-	}
 }
 
 // A job stored before plans carried their config's hash can't show that it
 // was previewed under this config, so it is stale, and says so.
 func TestWorkerRefusesJobStoredWithoutConfigHash(t *testing.T) {
 	st := storetest.New(t)
-	f := teamVMs()
-	in := Inputs{Kind: pods.KindTeardown, Teams: "1"}
+	f := twoTeams()
+	f.addVM(proxmox.VM{VMID: 5001, Name: "dc.kilo.alpha", Node: "n1", Status: "stopped", Tags: "dev"})
+	in := Inputs{Kind: pods.KindDeploy, Teams: "1", Pattern: "*.kilo.alpha"}
 	cfg := testCfg()
 	p, err := BuildPlan(bg, pods.NewPlanner(f, cfg), in)
 	if err != nil {

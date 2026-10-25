@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/pods/podstest"
@@ -197,9 +196,8 @@ func TestDeletesShareLimitsAcrossExecutors(t *testing.T) {
 	}
 }
 
-// Teardown shuts VMs down cleanly so routers release their DHCP leases, with
-// Proxmox hard-stopping them after the timeout.
-func TestTeardownShutsDownGracefully(t *testing.T) {
+// Teardown hard-stops running VMs before deleting them.
+func TestTeardownStopsHard(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
 	plan := teardownTeam01(t, f)
@@ -208,36 +206,11 @@ func TestTeardownShutsDownGracefully(t *testing.T) {
 	if len(res.Failed) != 0 || len(res.Succeeded) != 1 {
 		t.Fatalf("result = %+v", res)
 	}
-	if n := f.Called("shutdown:10121:1m0s:true"); n != 1 {
-		t.Errorf("graceful shutdown with 60s timeout and forceStop sent %d times, want 1; calls=%v", n, f.Calls)
-	}
-	if n := f.Called("power:10121:stop"); n != 0 {
-		t.Errorf("hard stop sent %d times, want 0", n)
-	}
-	if _, ok := f.VMs[10121]; ok {
-		t.Error("VM not deleted")
-	}
-}
-
-func TestTeardownHardStopsWhenShutdownFails(t *testing.T) {
-	f := newCluster()
-	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
-	plan := teardownTeam01(t, f)
-	f.StuckShutdown = map[int]bool{10121: true}
-	f.FailOn("wait:"+podstest.UPID("cedar", "qmshutdown", 10121),
-		&proxmox.TaskError{UPID: podstest.UPID("cedar", "qmshutdown", 10121), ExitStatus: "VM quit/powerdown failed - got timeout"})
-	ex := testExecutor(f, &recorder{})
-	ex.Cfg.Teardown.ShutdownTimeout = 5 * time.Second
-
-	res := ex.Run(context.Background(), plan)
-	if len(res.Failed) != 0 || len(res.Succeeded) != 1 {
-		t.Fatalf("result = %+v", res)
-	}
-	if n := f.Called("shutdown:10121:5s:true"); n != 1 {
-		t.Errorf("shutdown sent %d times, want 1; calls=%v", n, f.Calls)
-	}
 	if n := f.Called("power:10121:stop"); n != 1 {
-		t.Errorf("hard stop sent %d times, want 1 after the failed shutdown", n)
+		t.Errorf("hard stop sent %d times, want 1; calls=%v", n, f.Calls)
+	}
+	if n := f.Called("shutdown:"); n != 0 {
+		t.Errorf("graceful shutdown sent %d times, want 0", n)
 	}
 	if _, ok := f.VMs[10121]; ok {
 		t.Error("VM not deleted")
@@ -349,8 +322,8 @@ func TestTeardownPlansHalfDeletedVMs(t *testing.T) {
 }
 
 // An environment's teardown runs as a team teardown does: each of its VMs
-// is shut down cleanly and deleted with its disks, and its slot is empty
-// afterwards. A VM on its networks from outside its pool is left running.
+// is stopped and deleted with its disks, and its slot is empty afterwards.
+// A VM on its networks from outside its pool is left running.
 func TestEnvTeardownEmptiesTheSlot(t *testing.T) {
 	f := podstest.New("cedar", "birch")
 	for _, vm := range []proxmox.VM{
@@ -377,8 +350,8 @@ func TestEnvTeardownEmptiesTheSlot(t *testing.T) {
 		t.Errorf("web's events = %+v", ev)
 	}
 	for _, id := range []int{2300, 2301} {
-		if f.Called(fmt.Sprintf("shutdown:%d:", id)) != 1 {
-			t.Errorf("VM %d wasn't shut down cleanly: calls %v", id, f.Calls)
+		if f.Called(fmt.Sprintf("power:%d:stop", id)) != 1 {
+			t.Errorf("VM %d wasn't stopped: calls %v", id, f.Calls)
 		}
 	}
 	envs, _, err := p.Environments(context.Background())

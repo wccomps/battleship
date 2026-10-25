@@ -82,7 +82,7 @@ type spec struct {
 
 var specs = map[Kind]spec{
 	KindDeploy:   {subject: subjectTeams, offer: []string{"VM.Clone"}, config: deployConfigHash, retry: retryNarrowed},
-	KindTeardown: {subject: subjectTeams, offer: []string{"VM.Allocate"}, config: teardownConfigHash, tearsDown: true, retry: retryNarrowed},
+	KindTeardown: {subject: subjectTeams, offer: []string{"VM.Allocate"}, tearsDown: true, retry: retryNarrowed},
 	KindReset:    {subject: subjectTeams, offer: []string{"VM.Snapshot", "VM.Snapshot.Rollback"}, retry: retryNarrowed},
 	KindPower:    {subject: subjectTeams, offer: []string{"VM.PowerMgmt"}, retry: retryNarrowed},
 	KindSnapshot: {subject: subjectTeams, offer: []string{"VM.Snapshot"}, retry: retryNarrowed},
@@ -95,10 +95,10 @@ var specs = map[Kind]spec{
 
 	KindEnvCreate:     {subject: subjectNewEnvironment, offer: []string{"VM.Clone"}, config: envConfigHash, retry: retryNarrowed},
 	KindEnvAdd:        {subject: subjectEnvironment, offer: []string{"VM.Clone"}, config: envConfigHash, retry: retryNarrowed},
-	KindEnvTeardown:   {subject: subjectEnvironment, offer: []string{"VM.Allocate"}, config: teardownConfigHash, tearsDown: true, retry: retryWhole},
+	KindEnvTeardown:   {subject: subjectEnvironment, offer: []string{"VM.Allocate"}, tearsDown: true, retry: retryWhole},
 	KindEnvEdit:       {subject: subjectEnvHost, offer: []string{"VM.Config.Options"}, config: envConfigHash},
 	KindEnvPower:      {subject: subjectEnvHost, offer: []string{"VM.PowerMgmt"}},
-	KindEnvDeleteHost: {subject: subjectEnvHost, offer: []string{"VM.Allocate"}, config: teardownConfigHash, tearsDown: true},
+	KindEnvDeleteHost: {subject: subjectEnvHost, offer: []string{"VM.Allocate"}, tearsDown: true},
 }
 
 // Teamless reports whether kind acts on base images or environments rather
@@ -109,9 +109,8 @@ func (k Kind) Teamless() bool { return specs[k].subject != subjectTeams }
 // by its domain.
 func (k Kind) OnEnvironment() bool { return specs[k].subject == subjectEnvironment }
 
-// TearsDown is whether the kind deletes VMs with stop and delete steps: its
-// stop is a clean shutdown, and a VM already gone at its delete has only its
-// leftover disks freed.
+// TearsDown is whether the kind deletes VMs with stop and delete steps: a VM
+// already gone at its delete has only its leftover disks freed.
 func (k Kind) TearsDown() bool { return specs[k].tearsDown }
 
 type Step string
@@ -390,8 +389,6 @@ func deployConfigHash(c config.Config) any {
 	}{c.Network, c.Deploy.Storage, c.Deploy.Linked, c.Deploy.DiskMBpsRead, c.Deploy.DiskMBpsWrite,
 		c.Deploy.SnapshotName, c.Deploy.BaselinePatterns, c.Naming.Pool, c.Images.Pool}
 }
-
-func teardownConfigHash(c config.Config) any { return c.Teardown.ShutdownTimeout }
 
 func imageConfigHash(c config.Config) any {
 	return struct {

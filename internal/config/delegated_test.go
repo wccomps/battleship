@@ -165,3 +165,10 @@ func TestLoadRefusesClonesPerNode(t *testing.T) {
 		t.Fatalf("Load with clones_per_node = %v", err)
 	}
 }
+
+func TestLoadRefusesTeardownShutdownTimeout(t *testing.T) {
+	path := writeFile(t, "[proxmox]\nurl = \"https://pve.example:8006\"\n\n[teardown]\nshutdown_timeout = \"60s\"\n")
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "these settings were removed: teardown.shutdown_timeout. Teardown stops VMs immediately without a graceful shutdown; delete the [teardown] section") {
+		t.Fatalf("Load with teardown.shutdown_timeout = %v", err)
+	}
+}

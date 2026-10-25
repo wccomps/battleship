@@ -249,10 +249,7 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 	case pods.StepStart:
 		return e.power(ctx, it, "start")
 	case pods.StepStop:
-		if kind.TearsDown() {
-			return e.shutdownForDelete(ctx, it)
-		}
-		return e.power(ctx, it, "stop") // reset: the rollback discards the state anyway
+		return e.power(ctx, it, "stop")
 	case pods.StepPower:
 		return e.power(ctx, it, it.Action)
 
@@ -289,30 +286,6 @@ func (e *Executor) checkVMIDFree(ctx context.Context, vmid int) error {
 		return &halfDeletedError{vmid: vmid, node: vm.Node}
 	}
 	return nil
-}
-
-// shutdownForDelete shuts a running VM down cleanly before deletion, so
-// routers release their DHCP lease (udhcpc -R) for the next deploy.
-// Proxmox hard-stops it after teardown.shutdown_timeout (forceStop); if the
-// task fails and it is still running, it is hard-stopped here.
-func (e *Executor) shutdownForDelete(ctx context.Context, it *pods.Item) (bool, error) {
-	status, err := e.status(ctx, it)
-	if err != nil || status == "stopped" {
-		return false, err
-	}
-	timeout := e.Cfg.Teardown.ShutdownTimeout
-	err = e.taskOnce(ctx, func() (string, error) { return e.api.Shutdown(ctx, it.Node, it.VMID, timeout, true) })
-	if err == nil || ctx.Err() != nil {
-		return true, err
-	}
-	if st, serr := e.status(ctx, it); serr == nil && st == "stopped" {
-		return true, nil
-	}
-	e.emit(it.Name, pods.StepStop, EventInfo, "clean shutdown failed, stopping it hard: "+proxmox.Describe(err))
-	if serr := e.taskOnce(ctx, func() (string, error) { return e.api.Power(ctx, it.Node, it.VMID, "stop") }); serr != nil {
-		return true, fmt.Errorf("hard stop after a failed shutdown (%s): %w", proxmox.Describe(err), serr)
-	}
-	return true, nil
 }
 
 func (e *Executor) status(ctx context.Context, it *pods.Item) (string, error) {

@@ -92,8 +92,6 @@ type Fake struct {
 	// Unseen lists VMIDs held by VMs ClusterVMs doesn't show, as for a
 	// user without VM.Audit on them.
 	Unseen map[int]bool
-	// StuckShutdown lists VMIDs whose shutdown task leaves them running.
-	StuckShutdown map[int]bool
 	// ConvertLeavesDisk makes a ConvertToTemplate of these VMIDs act like a
 	// qmtemplate task that set template: 1 and then timed out on the storage
 	// lock before renaming the disks to base-*. The test queues the task's
@@ -658,9 +656,7 @@ func (f *Fake) Shutdown(ctx context.Context, node string, vmid int, timeout time
 	if err != nil {
 		return "", err
 	}
-	if !f.StuckShutdown[vmid] {
-		vm.Status = "stopped"
-	}
+	vm.Status = "stopped"
 	return UPID(node, "qmshutdown", vmid), nil
 }
 

@@ -56,9 +56,6 @@ config_calls = 3                   # executor and drift-scan API calls at once, 
 template_builds = 2                # templates built at once, per replica
 deletes = 2                        # VM deletes at once, across all replicas; more time out on Proxmox's user.cfg lock
 
-[teardown]
-shutdown_timeout = "60s"           # clean shutdown (routers release DHCP leases), then Proxmox hard-stops
-
 [retry]
 transient_patterns = ["file exists", "does not exist", "got no worker upid", "can't lock file", "is locked", "timeout"]
 attempts = 7

@@ -19,9 +19,6 @@ config_calls = 3
 template_builds = 2
 deletes = 2                            # avoids Proxmox user.cfg lock timeouts
 
-[teardown]
-shutdown_timeout = "60s"
-
 [web]
 base_url = "https://battleship.example.org"  # must match the Ingress host
 trusted_proxies = ["10.42.0.0/16"]     # CHANGE ME: ingress controller pod CIDR

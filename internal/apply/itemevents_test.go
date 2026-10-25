@@ -3,7 +3,6 @@ package apply
 import (
 	"context"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -30,7 +29,7 @@ func TestEveryAttemptStartsAndSuccessEnds(t *testing.T) {
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
 	plan := teardownTeam01(t, f)
 	f.OnRecord = func(key string) {
-		if strings.HasPrefix(key, "shutdown:10121:") {
+		if key == "power:10121:stop" {
 			delete(f.VMs, 10121) // deleted by hand while the job stopped it
 		}
 	}

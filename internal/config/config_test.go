@@ -85,17 +85,17 @@ func TestExampleConfigLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, section := range []string{"[proxmox]", "[naming]", "[network]", "[deploy]", "[images]", "[environments]", "[concurrency]", "[teardown]", "[retry]", "[database]", "[jobs]", "[web]", "[oidc]"} {
+	for _, section := range []string{"[proxmox]", "[naming]", "[network]", "[deploy]", "[images]", "[environments]", "[concurrency]", "[retry]", "[database]", "[jobs]", "[web]", "[oidc]"} {
 		if !strings.Contains(string(raw), section) {
 			t.Errorf("battleship.example.toml missing section %s", section)
 		}
 	}
 }
 
-func TestTeardownAndDeleteDefaults(t *testing.T) {
+func TestDeleteDefaults(t *testing.T) {
 	d := Default()
-	if d.Concurrency.Deletes != 4 || d.Teardown.ShutdownTimeout != 60*time.Second {
-		t.Errorf("deletes = %d, teardown.shutdown_timeout = %v; want 4 and 60s", d.Concurrency.Deletes, d.Teardown.ShutdownTimeout)
+	if d.Concurrency.Deletes != 4 {
+		t.Errorf("deletes = %d; want 4", d.Concurrency.Deletes)
 	}
 	path := writeFile(t, `
 [proxmox]
@@ -103,16 +103,13 @@ url = "https://pve.example:8006"
 
 [concurrency]
 deletes = 2
-
-[teardown]
-shutdown_timeout = "90s"
 `)
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Concurrency.Deletes != 2 || cfg.Teardown.ShutdownTimeout != 90*time.Second {
-		t.Errorf("deletes = %d, teardown.shutdown_timeout = %v; want 2 and 90s", cfg.Concurrency.Deletes, cfg.Teardown.ShutdownTimeout)
+	if cfg.Concurrency.Deletes != 2 {
+		t.Errorf("deletes = %d; want 2", cfg.Concurrency.Deletes)
 	}
 }
 
@@ -254,13 +251,6 @@ func TestValidateRanges(t *testing.T) {
 				c.Concurrency.Deletes = 0
 			},
 			wantErr: "concurrency.deletes must be at least 1",
-		},
-		{
-			name: "teardown shutdown_timeout too short",
-			mutate: func(c *Config) {
-				c.Teardown.ShutdownTimeout = 500 * time.Millisecond
-			},
-			wantErr: "teardown.shutdown_timeout must be at least 1s",
 		},
 		{
 			name: "clone_vmid_team_stride zero",
