@@ -171,8 +171,7 @@ func (s *Server) opPreview(op operation) http.Handler {
 			s.planRefused(w, r, op, in, err)
 			return
 		}
-		allTeams := !op.Kind.Teamless() && s.coversAllTeams(r.Context(), plan.Teams)
-		s.showPreview(w, r, http.StatusOK, op, in, plan, allTeams, previewOptions{fromGrid: fromGrid(form)})
+		s.showPreview(w, r, http.StatusOK, op, in, plan, previewOptions{fromGrid: fromGrid(form)})
 	})
 }
 
@@ -195,7 +194,7 @@ func (s *Server) planRefused(w http.ResponseWriter, r *http.Request, op operatio
 // showPreview renders plan's preview. If anything can run, it adds a confirm
 // form backed by a stored preview: new, or opts.nonce's when re-shown.
 func (s *Server) showPreview(w http.ResponseWriter, r *http.Request, code int, op operation, in jobs.Inputs,
-	plan *pods.Plan, allTeams bool, opts previewOptions) {
+	plan *pods.Plan, opts previewOptions) {
 	if len(plan.Runnable()) > 0 {
 		// Advice only, read fresh and never fingerprinted: capacity changes constantly
 		// and mustn't make a preview stale.
@@ -205,7 +204,7 @@ func (s *Server) showPreview(w http.ResponseWriter, r *http.Request, code int, o
 		}
 		opts.capacity = c
 	}
-	p := s.newPreviewPage(r.Context(), op, in, plan, allTeams, opts)
+	p := s.newPreviewPage(r.Context(), op, in, plan, opts)
 	if p.Nothing == "" && p.Confirm == nil {
 		fp := jobs.Fingerprint(plan)
 		nonce := opts.nonce
@@ -301,7 +300,7 @@ func previewTitle(op operation, in jobs.Inputs) opLabel {
 }
 
 // newPreviewPage describes plan for people.
-func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Inputs, plan *pods.Plan, allTeams bool, opts previewOptions) previewPage {
+func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Inputs, plan *pods.Plan, opts previewOptions) previewPage {
 	p := previewPage{
 		Op:        op,
 		Title:     previewTitle(op, in),
@@ -375,8 +374,10 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 	default:
 		p.Warnings = append(p.Warnings, fmt.Sprintf("Building the templates stops %d running masters, each until its copy finishes.", len(stopped)))
 	}
-	if allTeams {
-		p.Warnings = append(p.Warnings, s.everyTeamNote(ctx))
+	if !op.Kind.Teamless() {
+		if all := s.polledGrid(ctx).Teams; coversTeams(all, plan.Teams) {
+			p.Warnings = append(p.Warnings, fmt.Sprintf("This covers every pod (%s).", teamsText(pods.FormatTeams(all))))
+		}
 	}
 	if missing := jobs.MissingVMs(in, plan); len(missing) > 0 {
 		p.Warnings = append(p.Warnings, fmt.Sprintf("%d of the %d VMs asked for by name no longer exist or match the pods and hosts, so they are left out: %s.",
@@ -707,12 +708,6 @@ func stepsText(it pods.Item) string {
 		}
 	}
 	return strings.Join(parts, " · ")
-}
-
-// everyTeamNote notes that a plan covers every team on the grid.
-func (s *Server) everyTeamNote(ctx context.Context) string {
-	all := s.polledTeams(ctx)
-	return fmt.Sprintf("This covers every pod (%s).", teamsText(pods.FormatTeams(all)))
 }
 
 // teamsText shows a team range with two-digit teams: "1-3,7" reads "01-03, 07".

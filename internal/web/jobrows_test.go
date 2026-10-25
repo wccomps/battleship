@@ -160,10 +160,15 @@ func TestJobRowsSayStepAndTime(t *testing.T) {
 		t.Fatalf("plan: oak's steps %v, ash's address %q; want a wait for the agent after the clone, and an address", oak, ips["ash.kilo.alpha"])
 	}
 	now := h.clock.Now()
-	// oak got to the agent wait 2:31 ago, and has logged why it waits.
+	// oak got to the agent wait 2:31 ago (with a skipped step along the
+	// way), and has logged why it waits.
 	h.eventAt(id, now.Add(-5*time.Minute), "oak.kilo.alpha", string(oak[0]), "started", "")
-	for _, st := range oak[:wait] {
-		h.eventAt(id, now.Add(-151*time.Second), "oak.kilo.alpha", string(st), "done", "")
+	for i, st := range oak[:wait] {
+		ev := "done"
+		if i == 1 {
+			ev = "skipped"
+		}
+		h.eventAt(id, now.Add(-151*time.Second), "oak.kilo.alpha", string(st), ev, "")
 	}
 	h.eventAt(id, now.Add(-30*time.Second), "oak.kilo.alpha", string(pods.StepWaitAgent), "info", "first boot <b>slow</b>")
 	// ash is done; elm started its clone 12 s ago.

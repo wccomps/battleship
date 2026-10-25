@@ -9,10 +9,10 @@
 {{- if not .FromGrid}}
 <form method="get" action="{{.Op.Path}}" class="stack" id="{{.Op.Kind}}-which">
 {{template "team-fields" .}}
-<div><button type="submit" class="btn">{{if .Step.HasPicked}}Choose again{{else}}Next{{end}}</button></div>
+<div><button type="submit" class="btn">{{if .Step}}Choose again{{else}}Next{{end}}</button></div>
 </form>
 {{- end}}
-{{- with .Step}}{{if .HasPicked}}
+{{- with .Step}}
 <form method="post" action="{{$.Data.Op.Path}}/preview" class="stack" id="{{$.Data.Op.Kind}}-pick">
 {{template "csrf" $csrf}}
 {{- if $.Data.FromGrid}}
@@ -59,13 +59,13 @@
 <p class="say">{{icon "stale"}}<span>{{names .}}</span></p>
 {{- end}}
 </form>
-{{- end}}{{end}}
+{{- end}}
 </div>
 <div class="pf">
 <a class="btn" href="/" data-close>Cancel</a>
-{{- with .Step}}{{if .HasPicked}}
+{{- with .Step}}
 <button type="submit" class="btn pri{{if .Danger}} bad{{end}}" form="{{$.Data.Op.Kind}}-pick">{{if .Danger}}{{icon $.Data.Op.Icon}}{{end}}{{.Button}}</button>
-{{- end}}{{end}}
+{{- end}}
 </div>
 </div>
 {{- else if eq .Op.Kind "snapshot"}}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"slices"
 	"sync"
 	"time"
 
@@ -120,14 +119,6 @@ func (p *Poller) Grid() Grid {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.grid.clone()
-}
-
-// Teams is the current grid's rows: teams with VMs in the last good poll,
-// sorted.
-func (p *Poller) Teams() []string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return slices.Clone(p.grid.Teams)
 }
 
 // Version is the current grid's version, without copying the grid.

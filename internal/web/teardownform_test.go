@@ -65,8 +65,6 @@ func TestTeardownFormSteps(t *testing.T) {
 		`<label class="opt sans"><input type="radio" name="set" value="" required><span>Every matching VM in these pods</span>`,
 		`<span class="hint">Battleship can&#39;t tell the set of 1 VM, so only Every matching VM in these pods removes it.</span>`)
 
-	// One set alone skips step 2 and opens directly on the review; its Back
-	// link reopens step 1 without the redundant step 2 choice.
 	body = h.get(&lead, "/teardown?teams=1&hosts=web").Body.String()
 	contains(t, "pod 01's web", body,
 		`<h1 id="pv-title"><span class="eyebrow">Review ·</span> Tear down <span class="vm">tango.delta</span></h1>`,
@@ -83,7 +81,16 @@ func TestTeardownFormSteps(t *testing.T) {
 	contains(t, "kilo.alpha chosen", body, `value="kilo.alpha" required checked>`)
 	body = h.get(&lead, "/teardown?teams=1-3&set=kilo.bravo").Body.String()
 	contains(t, "a set the pods don't hold", body, `<input type="radio" name="set" value="kilo.bravo" required checked><span>kilo.bravo</span>`)
-	// Nothing deployed: skips step 2 straight to the review.
+	body = h.get(&lead, "/teardown?teams=1&hosts=web&set=kilo.bravo").Body.String()
+	contains(t, "single-set pod with an unheld set", body,
+		`<input type="radio" name="set" value="tango.delta" required><span>tango.delta</span>`,
+		`<input type="radio" name="set" value="kilo.bravo" required checked><span>kilo.bravo</span>`,
+		`<input type="radio" name="set" value="" required><span>Every matching VM in these pods</span>`)
+	body = h.get(&lead, "/teardown?teams=3").Body.String()
+	contains(t, "a pod with only unknown-set VMs", body,
+		`<h1 id="pv-title"><span class="eyebrow">Review ·</span> Tear down <span class="vm">pod 03</span></h1>`,
+		`<a class="btn first" href="/teardown?set=&amp;teams=3"`)
+	lacks(t, "a pod with only unknown-set VMs", body, `id="teardown-pick"`)
 	body = h.get(&lead, "/teardown?teams=9").Body.String()
 	contains(t, "an empty pod", body,
 		`<h1 id="pv-title"><span class="eyebrow">Review ·</span> Tear down <span class="vm">pod 09</span></h1>`,

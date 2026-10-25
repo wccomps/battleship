@@ -73,12 +73,11 @@ func (s *Server) opConfirm(op operation) http.Handler {
 				formQuery(op, in), "Back to "+op.Title)
 			return
 		}
-		allTeams := !op.Kind.Teamless() && s.coversAllTeams(ctx, plan.Teams)
 
 		// expired re-shows the plan as a new preview when the preview expired, here
 		// or in the store.
 		expired := func() {
-			s.showPreview(w, r, http.StatusConflict, op, in, plan, allTeams, previewOptions{retryOf: retryOf, fromGrid: grid, problem: &banner{
+			s.showPreview(w, r, http.StatusConflict, op, in, plan, previewOptions{retryOf: retryOf, fromGrid: grid, problem: &banner{
 				Level: "warn", Title: "This preview had expired",
 				Text: []string{fmt.Sprintf("Previews can be confirmed for %s. Here is the plan again, read from the cluster just now. Nothing was submitted; check it and confirm again.", spoken(previewTTL))},
 			}})
@@ -89,7 +88,7 @@ func (s *Server) opConfirm(op operation) http.Handler {
 			expired()
 			return
 		case fp != prev.Fingerprint:
-			s.showPreview(w, r, http.StatusConflict, op, in, plan, allTeams, previewOptions{retryOf: retryOf, fromGrid: grid, problem: &banner{
+			s.showPreview(w, r, http.StatusConflict, op, in, plan, previewOptions{retryOf: retryOf, fromGrid: grid, problem: &banner{
 				Level: "bad", Title: "The cluster changed since your preview; check it again",
 				Text: []string{"Nothing was submitted. Below is the plan as it is now. Read it again, and confirm if it is still right."},
 			}})
@@ -102,7 +101,7 @@ func (s *Server) opConfirm(op operation) http.Handler {
 				if typed != "" {
 					msg = fmt.Sprintf("You typed %q, which isn't %s. Type it exactly as shown: %s.", typed, what, want)
 				}
-				s.showPreview(w, r, http.StatusUnprocessableEntity, op, in, plan, allTeams, previewOptions{nonce: nonce, retryOf: retryOf, fromGrid: grid, problem: &banner{
+				s.showPreview(w, r, http.StatusUnprocessableEntity, op, in, plan, previewOptions{nonce: nonce, retryOf: retryOf, fromGrid: grid, problem: &banner{
 					Level: "bad", Title: "Type " + what + " to confirm", Text: []string{msg + " Nothing was submitted."},
 				}})
 				return
@@ -134,7 +133,7 @@ func (s *Server) opConfirm(op operation) http.Handler {
 			s.serverError(w, r, "finding the job of a submitted preview", err)
 			return
 		case errors.Is(err, jobs.ErrNothingToRun):
-			s.showPreview(w, r, http.StatusConflict, op, in, plan, allTeams, previewOptions{retryOf: retryOf, fromGrid: grid})
+			s.showPreview(w, r, http.StatusConflict, op, in, plan, previewOptions{retryOf: retryOf, fromGrid: grid})
 			return
 		case err != nil:
 			s.serverError(w, r, "submitting a job", err)

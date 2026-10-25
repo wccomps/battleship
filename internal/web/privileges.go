@@ -86,9 +86,10 @@ func (s *Server) require(next http.Handler) http.Handler {
 
 // requestView is a request's hold on its user's grid.
 type requestView struct {
-	once sync.Once
-	v    *status.View
-	done func()
+	once   sync.Once
+	polled sync.Once
+	v      *status.View
+	done   func()
 }
 
 type requestViewKey struct{}
@@ -113,4 +114,20 @@ func (s *Server) view(ctx context.Context) *status.View {
 		rv.v, rv.done = s.views.Open(cred.User, cred)
 	})
 	return rv.v
+}
+
+// polledView is view after waiting at most once per request (up to
+// s.firstPoll) for its first poll.
+func (s *Server) polledView(ctx context.Context) *status.View {
+	rv, ok := ctx.Value(requestViewKey{}).(*requestView)
+	if !ok {
+		panic("web: view outside require")
+	}
+	v := s.view(ctx)
+	rv.polled.Do(func() {
+		wctx, cancel := context.WithTimeout(ctx, s.firstPoll)
+		_ = v.WaitFirstPoll(wctx)
+		cancel()
+	})
+	return v
 }

@@ -334,7 +334,7 @@ func inputFields(in jobs.Inputs) []field {
 			fs = append(fs, field{fieldBaseline, yes})
 		}
 	case pods.KindTeardown:
-		// Always, "" too: a "Change" link then has everything chosen.
+		// Always, "" too, so Back and retries mark the set as chosen.
 		fs = append(fs, field{fieldSet, string(in.Set)})
 	case pods.KindReset:
 		if in.Snapshot != "" {
@@ -410,7 +410,7 @@ func (s *Server) selected(ctx context.Context, in jobs.Inputs) jobs.Inputs {
 		return in
 	}
 	var teams, hosts []string
-	grid := s.polledTeams(ctx)
+	grid := s.polledGrid(ctx).Teams
 	for _, name := range in.VMs {
 		if team, host, ok := s.naming.ParseVMName(name); ok && slices.Contains(grid, team) {
 			teams = append(teams, team)
