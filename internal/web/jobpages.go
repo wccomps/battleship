@@ -496,9 +496,9 @@ func clockText(d time.Duration) string {
 }
 
 // itemSteps is an item's planned steps: each one's reported outcome, the next
-// running unless one failed, the rest waiting. A done item's unreported
-// steps weren't needed (an already-deleted VM's stop), except in old jobs
-// that kept no outcomes.
+// running unless one failed, the rest waiting. Skipped steps (and a done
+// item's unreported steps, which weren't needed, except in old jobs that kept
+// no outcomes) are left out.
 func itemSteps(planned []pods.Step, it store.Item) []stepView {
 	pips := map[string]string{"done": "done", "skipped": "skip", "failed": "fail", "interrupted": "int"}
 	out := make([]stepView, 0, len(planned))
@@ -517,7 +517,9 @@ func itemSteps(planned []pods.Step, it store.Item) []stepView {
 		case it.Status == store.ItemDone:
 			v.State = "skip"
 		}
-		out = append(out, v)
+		if v.State != "skip" {
+			out = append(out, v)
+		}
 	}
 	return out
 }
@@ -820,9 +822,9 @@ func jobItemsOf(j store.Job, items []store.Item, now time.Time) jobItems {
 			}
 		}
 		row.Look = look
-		for i, sv := range steps {
+		for _, sv := range steps {
 			if sv.State == "run" {
-				row.Doing, row.Note = doingOf(p.Steps[i], p), it.Note
+				row.Doing, row.Note = doingOf(pods.Step(sv.Name), p), it.Note
 			}
 		}
 		if st == store.ItemPending && j.Status == store.StatusRunning {

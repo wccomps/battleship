@@ -88,19 +88,21 @@ func TestAllTeamsIsTeamsWithVMs(t *testing.T) {
 	_, _, body = h.preview(&lead, "/teardown", url.Values{"teams": {"1-3"}})
 	contains(t, "teardown of 1-3", body, "This covers every pod (01-03).")
 
-	// With no team VMs on the grid, any range counts as every team, so the
-	// catch asks (here a VM was made since the grid's last read).
+	// With no team VMs (or only one pod) on the grid, a single-pod operation
+	// does not warn that it covers every pod.
 	h.noTeamVMs()
 	h.poll()
 	contains(t, "teardown form", h.get(&lead, "/teardown").Body.String(), `<span class="hint" id="teams-hint">3,7 · 12-14</span>`)
 	h.api.add(teamVM("01", "dc", 10101), cleanConfig("01"), "initial")
 	op := h.login(asOperator)
 	_, fields, body := h.preview(&op, "/power", url.Values{"teams": {"1"}, "action": {"start"}})
-	contains(t, "power of 1 with no team VMs on the grid", body, "No pod has VMs on the grid, so this counts as every pod.")
-	lacks(t, "power of 1 with no team VMs on the grid", body, `name="typed"`) // only a teardown is typed
+	lacks(t, "power of 1 with no team VMs on the grid", body, "every pod", `name="typed"`)
 	if fields.Get("teams") != "1" {
 		t.Errorf("confirm fields = %v", fields)
 	}
+	h.poll()
+	_, _, body = h.preview(&lead, "/teardown", url.Values{"teams": {"1"}})
+	lacks(t, "teardown of the only pod on the grid", body, "every pod")
 	h.noJobs("after previews")
 }
 

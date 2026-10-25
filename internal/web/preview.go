@@ -577,7 +577,7 @@ func (s *Server) alreadyDone(ctx context.Context, action string, items []pods.It
 		names[it.Name] = true
 	}
 	n := 0
-	for _, row := range s.view(ctx).Grid().Rows {
+	for _, row := range s.polledGrid(ctx).Rows {
 		for _, c := range row.Cells {
 			if names[c.Name] && c.Power == want {
 				n++
@@ -709,13 +709,9 @@ func stepsText(it pods.Item) string {
 	return strings.Join(parts, " · ")
 }
 
-// everyTeamNote notes that a plan covers every team: which teams have VMs, or
-// that none does yet.
+// everyTeamNote notes that a plan covers every team on the grid.
 func (s *Server) everyTeamNote(ctx context.Context) string {
-	all := s.view(ctx).Teams()
-	if len(all) == 0 {
-		return "No pod has VMs on the grid, so this counts as every pod."
-	}
+	all := s.polledTeams(ctx)
 	return fmt.Sprintf("This covers every pod (%s).", teamsText(pods.FormatTeams(all)))
 }
 

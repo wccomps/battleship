@@ -369,8 +369,9 @@ func TestFleetHeadline(t *testing.T) {
 	}
 }
 
-// An item's step strip; a done item's unreported steps weren't needed,
-// unless it recorded no outcomes at all (older jobs).
+// An item's step strip; skipped steps and a done item's unreported steps
+// (which weren't needed, unless it recorded no outcomes at all in older jobs)
+// are omitted.
 func TestItemSteps(t *testing.T) {
 	planned := []pods.Step{pods.StepClone, pods.StepNetwork, pods.StepCDROM, pods.StepStart}
 	states := func(it store.Item) string {
@@ -386,9 +387,10 @@ func TestItemSteps(t *testing.T) {
 	}{
 		{store.Item{Status: store.ItemPending}, "wait wait wait wait"},
 		{store.Item{Status: store.ItemRunning, Steps: map[string]string{"clone": "done", "network": "done"}}, "done done run wait"},
+		{store.Item{Status: store.ItemRunning, Steps: map[string]string{"clone": "done", "network": "skipped"}}, "done run wait"},
 		{store.Item{Status: store.ItemFailed, Steps: map[string]string{"clone": "done", "network": "failed"}}, "done fail wait wait"},
-		{store.Item{Status: store.ItemDone, Steps: map[string]string{"clone": "done", "network": "done", "cdrom": "skipped", "start": "done"}}, "done done skip done"},
-		{store.Item{Status: store.ItemDone, Steps: map[string]string{"start": "skipped"}}, "skip skip skip skip"},
+		{store.Item{Status: store.ItemDone, Steps: map[string]string{"clone": "done", "network": "done", "cdrom": "skipped", "start": "done"}}, "done done done"},
+		{store.Item{Status: store.ItemDone, Steps: map[string]string{"start": "skipped"}}, ""},
 		{store.Item{Status: store.ItemDone}, "done done done done"},
 		{store.Item{Status: store.ItemInterrupted, Steps: map[string]string{"clone": "interrupted"}}, "int wait wait wait"},
 	} {

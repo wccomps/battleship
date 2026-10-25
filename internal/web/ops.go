@@ -410,7 +410,7 @@ func (s *Server) selected(ctx context.Context, in jobs.Inputs) jobs.Inputs {
 		return in
 	}
 	var teams, hosts []string
-	grid := s.view(ctx).Teams()
+	grid := s.polledTeams(ctx)
 	for _, name := range in.VMs {
 		if team, host, ok := s.naming.ParseVMName(name); ok && slices.Contains(grid, team) {
 			teams = append(teams, team)

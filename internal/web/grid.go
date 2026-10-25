@@ -327,18 +327,21 @@ func (s *Server) startOf(g status.Grid, canDeploy bool) startView {
 // allTeamsSpec is every team the viewer can see (teams with VMs in their grid's
 // last good poll), as a typed range.
 func (s *Server) allTeamsSpec(ctx context.Context) string {
-	return pods.FormatTeams(s.view(ctx).Teams())
+	return pods.FormatTeams(s.polledTeams(ctx))
 }
 
 // coversAllTeams reports whether teams cover every team on the viewer's grid,
-// for the typed confirmation (a safety catch, not authorization). With no
-// teams it is true, so the catch errs towards asking.
+// when the grid has more than one team.
 func (s *Server) coversAllTeams(ctx context.Context, teams []string) bool {
-	return coversTeams(s.view(ctx).Teams(), teams)
+	return coversTeams(s.polledTeams(ctx), teams)
 }
 
-// coversTeams reports whether teams include every team of all.
+// coversTeams reports whether teams include every team of all, when all has
+// more than one team.
 func coversTeams(all, teams []string) bool {
+	if len(all) <= 1 {
+		return false
+	}
 	for _, t := range all {
 		if !slices.Contains(teams, t) {
 			return false
@@ -370,6 +373,16 @@ func (s *Server) polledGrid(ctx context.Context) status.Grid {
 	_ = view.WaitFirstPoll(wctx)
 	cancel()
 	return view.Grid()
+}
+
+// polledTeams are the viewer's grid teams once its first poll is in, or after
+// s.firstPoll.
+func (s *Server) polledTeams(ctx context.Context) []string {
+	view := s.view(ctx)
+	wctx, cancel := context.WithTimeout(ctx, s.firstPoll)
+	_ = view.WaitFirstPoll(wctx)
+	cancel()
+	return view.Teams()
 }
 
 // gridPage is the status grid: teams × hosts, as a form whose ticked VMs the
