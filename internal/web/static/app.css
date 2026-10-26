@@ -13,7 +13,7 @@
 :root{
   --f:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
   --fm:"IBM Plex Mono",ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
-  --t1:12px;--t2:13px;--t3:14px;--t4:16px;--t5:20px;
+  --t1:.75rem;--t2:.8125rem;--t3:.875rem;--t4:1rem;--t5:1.25rem;
   --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;
   --r1:3px;--r2:6px;--r3:10px;
   --cw:64px;--ch:15px;--tc:36px;--panel:480px;
@@ -22,7 +22,7 @@
   --tx:#15181c;--tx2:#4b535d;--tx3:#5f6872;--sel:#15181c;--focus:#1a5fd0;
   --run:#18713d;--run-bg:#e3f2e8;--stop:#5f6872;--stop-bg:#e6e9ec;
   --drift:#a64a07;--drift-bg:#fcebd9;--busy:#6a44d4;--busy-bg:#ece7fb;
-  --stale:#9a5b00;--stale-bg:#fbf0d9;--bad:#b42318;--bad-bg:#fdecea;--bad-inv:#ff8a7e;
+  --stale:#9a5b00;--stale-bg:#fbf0d9;--bad:#b42318;--bad-bg:#fdecea;--bad-inv:#ff8a7e;--bad-btn:#b42318;
   --shadow:0 8px 24px rgb(16 20 24/.12),0 1px 2px rgb(16 20 24/.08);
 }
 @media (prefers-color-scheme:dark){:root{
@@ -31,9 +31,9 @@
   --tx:#e7e9ec;--tx2:#b2b9c2;--tx3:#939ca7;--sel:#e7e9ec;--focus:#6ea2ff;
   --run:#43b874;--run-bg:#132a1d;--stop:#939ca7;--stop-bg:#22262c;
   --drift:#f08a3c;--drift-bg:#33200f;--busy:#a68cff;--busy-bg:#241b42;
-  --stale:#e0a325;--stale-bg:#33270c;--bad:#ff7b6e;--bad-bg:#3a1714;--bad-inv:#b42318;
+  --stale:#e0a325;--stale-bg:#33270c;--bad:#ff7b6e;--bad-bg:#3a1714;--bad-inv:#b42318;--bad-btn:#c8281c;
   --shadow:0 12px 32px rgb(0 0 0/.55),0 0 0 1px var(--ln);
-}}
+}p,.say,.warn,.fix{letter-spacing:.005em}}
 
 /* ---------- base ---------- */
 *,*::before,*::after{box-sizing:border-box}
@@ -41,9 +41,11 @@
 ::placeholder{color:var(--tx3);opacity:1}
 ::selection{background:color-mix(in srgb,var(--focus) 22%,transparent)}
 body{margin:0;background:var(--bg);color:var(--tx);font:var(--t3)/1.45 var(--f);font-variant-numeric:tabular-nums}
-.app{container:app/inline-size;min-height:100vh;min-height:100dvh;overflow-x:clip} /* dvh: the visible height, without mobile toolbars */
+.app{container:app/inline-size;min-height:100vh;min-height:100dvh;overflow-x:clip}
 a{color:inherit}
 h1,h2,h3,p{margin:0}
+h1,h2,h3{text-wrap:balance}
+p,.say,.warn,.fix{text-wrap:pretty}
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 a.skip{position:absolute;left:-999px;z-index:50}
@@ -125,13 +127,12 @@ form.rrow:invalid .btn{opacity:.4}
 .is-missing .g{background:none;border:1px dashed var(--c);border-radius:1px}
 .is-busy .g,.spin{width:9px;height:9px;background:none;border:2px solid var(--busy);border-right-color:transparent;border-radius:50%;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(1turn)}}
-.gl{display:inline-flex;align-items:center;gap:8px}
+.gl{display:inline-flex;align-items:center;gap:6px}
 .dots{display:flex;gap:3px}
 
 /* ---------- header ---------- */
 .top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:var(--s4);min-height:48px;padding:0 var(--s5);background:var(--sf);border-bottom:1px solid var(--ln)}
-.brand{display:flex;align-items:center;gap:var(--s2);font:600 15px var(--fm);text-decoration:none}
-/* A Battleship board: peg holes, a ship with a hit on it, and a miss. */
+.brand{display:flex;align-items:center;gap:6px;font:600 15px var(--fm);text-decoration:none}
 .mark{width:18px;height:18px;flex:none}
 .mark .hole{fill:currentColor;opacity:.4}
 .mark .ship{fill:currentColor}
@@ -141,9 +142,9 @@ form.rrow:invalid .btn{opacity:.4}
 .nav a{padding:5px 10px;border-radius:var(--r2);color:var(--tx2);text-decoration:none;font-weight:500}
 .nav a:hover,.nav a[aria-current]{background:var(--sf2);color:var(--tx)}
 .legend{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s4);margin:0;padding:0;list-style:none;font-size:var(--t2);color:var(--tx2)}
-.legend li{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.legend li{display:flex;align-items:center;gap:5px;white-space:nowrap}
 .legend b{font-weight:600;color:var(--tx)}
-.lead-ops{display:flex;gap:var(--s2)}
+.lead-ops{display:flex;gap:10px}
 .lead-ops .btn[aria-current]{background:var(--sf2)}
 .lead-ops .btn.bad{border-color:color-mix(in srgb,var(--bad) 45%,var(--ln))}
 
@@ -172,9 +173,10 @@ form.rrow:invalid .btn{opacity:.4}
 /* ---------- buttons ---------- */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:32px;padding:0 12px;border:1px solid var(--ln);border-radius:var(--r2);background:var(--sf);color:var(--tx);font:500 var(--t3)/1.1 var(--f);text-decoration:none;white-space:nowrap;cursor:pointer}
 .btn:hover{background:var(--sf2)}
+.btn:not(:disabled):active{transform:translateY(.5px)}
 .btn.pri{background:var(--tx);border-color:var(--tx);color:var(--bg)}
 .btn.bad{color:var(--bad)}
-.btn.pri.bad{background:#b42318;border-color:#b42318;color:#fff}
+.btn.pri.bad{background:var(--bad-btn);border-color:var(--bad-btn);color:#fff}
 .btn.pri:hover{opacity:.88}
 .btn.ghost{background:none;border-color:transparent}
 .btn.sq{width:32px;padding:0}
@@ -184,8 +186,7 @@ form.rrow:invalid .btn{opacity:.4}
 
 /* ---------- grid ---------- */
 .gwrap{padding:var(--s3) var(--s5) 96px}
-/* The grid sits on a board, like the game's. */
-.gscroll{position:relative;width:fit-content;max-width:100%;overflow-x:auto;overflow-y:hidden;padding:2px;background:var(--sf2);border-radius:var(--r2);transition:opacity .3s,filter .3s}
+.gscroll{position:relative;width:fit-content;max-width:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;padding:2px;background:var(--sf2);border-radius:var(--r2);transition:opacity .3s,filter .3s}
 .grid{display:table;border-collapse:separate;border-spacing:2px;margin:-2px}
 .gr{display:table-row}
 .gc,.gh{display:table-cell;padding:0;vertical-align:middle}
@@ -223,14 +224,14 @@ form.rrow:invalid .btn{opacity:.4}
 [data-live=stale] .gscroll{opacity:.5;filter:grayscale(1)}
 [data-live=off] .gscroll{opacity:.3;filter:grayscale(1)}
 
-/* ---------- action bar (CSS counts the ticks until the script writes the count; hidden until something is checked) ---------- */
+/* ---------- action bar ---------- */
 .gform{counter-reset:sel}
 .cell input:checked{counter-increment:sel}
 .ab{position:fixed;left:var(--s5);bottom:var(--s4);z-index:30;display:flex;flex-wrap:wrap;align-items:center;gap:2px;max-width:calc(100% - 2*var(--s5));padding:6px;border-radius:12px;background:var(--tx);color:var(--bg);box-shadow:var(--shadow)}
 @supports selector(:has(*)){.gform:not(:has(.cell input:checked)) .ab{display:none}}
 .ab-n{display:flex;align-items:center;gap:6px;padding:0 6px 0 10px;font-weight:600;white-space:nowrap}
 .ab-c:empty::before{content:counter(sel)}
-.ab-ops{display:flex;gap:2px}
+.ab-ops{display:flex;align-items:center;gap:2px}
 .ab .btn{background:none;border-color:transparent;color:inherit}
 .ab .btn:hover{background:color-mix(in srgb,var(--bg) 14%,transparent)}
 .ab .btn.bad{color:var(--bad-inv)}
@@ -241,28 +242,28 @@ form.rrow:invalid .btn{opacity:.4}
 [data-live=stale] .ab-why .stale-i,[data-live=off] .ab-why .stale-i{display:block}
 body:has(.panel[open]) .ab{display:none}
 
-/* ---------- panel (side sheet; full page on phones and without JS) ---------- */
+/* ---------- panel ---------- */
 .panel{position:fixed;inset:0 0 0 auto;z-index:40;display:flex;flex-direction:column;width:min(var(--panel),100%);height:100%;max-width:none;max-height:none;margin:0;padding:0;border:0;border-left:1px solid var(--ln);background:var(--sf);color:var(--tx);box-shadow:var(--shadow)}
 dialog.panel:not([open]){display:none}
 .panel::backdrop{background:rgb(0 0 0/.12)}
 .sheet{display:flex;flex-direction:column;min-height:0;margin:0}
 .panel>.sheet{flex:1}
 main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
-.ph{display:flex;align-items:center;gap:var(--s2);padding:var(--s3) var(--s3) var(--s3) var(--s5);border-bottom:1px solid var(--ln)}
-.ph h1{display:flex;align-items:center;gap:var(--s2);min-width:0;font-size:18px;font-weight:600}
+.ph{display:flex;align-items:center;gap:10px;padding:var(--s3) var(--s3) var(--s3) var(--s5);border-bottom:1px solid var(--ln)}
+.ph h1{display:flex;align-items:center;gap:10px;min-width:0;font-size:18px;font-weight:600}
 .ph .vm{font-size:16px}
 .pb{flex:1;display:flex;flex-direction:column;gap:var(--s4);padding:var(--s4) var(--s5);overflow:auto;scrollbar-width:thin}
 .pb>*{flex-shrink:0}
 .pb.form{gap:22px}
-.pf{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:var(--s2);padding:var(--s3) var(--s5);border-top:1px solid var(--ln)}
+.pf{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px;padding:var(--s3) var(--s5);border-top:1px solid var(--ln)}
 .pf.start{justify-content:flex-start}
 .pf .first{margin-right:auto}
 .pf form{display:contents}
-.pf-acts{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2)}
+.pf-acts{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .pf-acts:empty{display:none}
 .pf-acts form{display:contents}
 .sub{font-size:var(--t1);font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--tx3)}
-.sec{display:flex;flex-direction:column;gap:8px;min-width:0}
+.sec{display:flex;flex-direction:column;gap:10px;min-width:0}
 
 /* chips, statuses */
 .chips{display:flex;flex-wrap:wrap;gap:6px}
@@ -294,7 +295,7 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .say ul{margin:0;padding-left:16px}
 
 /* tables */
-.tscroll{position:relative;max-width:100%;overflow:auto;border:1px solid var(--ln);border-radius:var(--r2)}
+.tscroll{position:relative;max-width:100%;overflow:auto;scrollbar-width:thin;border:1px solid var(--ln);border-radius:var(--r2)}
 .tscroll.short{max-height:214px}
 .tscroll.long{max-height:420px}
 .tbl{width:100%;border-collapse:collapse;font-size:var(--t2)}
@@ -304,22 +305,21 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .tbl tr.blk td{background:repeating-linear-gradient(135deg,transparent 0 6px,var(--sf2) 6px 9px);color:var(--tx2)}
 .tbl tr.blk .vm{text-decoration:line-through;text-decoration-color:var(--tx3)}
 .tbl tr.bad td{background:var(--bad-bg)}
+.tbl tr.bad .muted,.warn .meta{color:color-mix(in srgb,var(--bad) 65%,var(--tx))}
 .tbl .r{text-align:right}
 .rvw .st{white-space:normal}
 .more td{color:var(--tx3);text-align:center}
-/* the job panel folds done rows into one; the job page shows them all */
 .panel tr.fold,.page#job-live .fold-n,.panel .c-vmid{display:none}
 
 /* job progress: one pip per VM */
 .pips{display:flex;flex-wrap:wrap;gap:3px}
 .pip{width:10px;height:10px;border-radius:50%;background:var(--ln)}
 .pip.done{background:var(--run)}
-.pip.fail{border-radius:0;background:var(--bad);clip-path:polygon(20% 0,50% 30%,80% 0,100% 20%,70% 50%,100% 80%,80% 100%,50% 70%,20% 100%,0 80%,30% 50%,0 20%)}
-.pip.run{background:var(--busy)} /* still: only the job's status spins */
+.pip.fail{border-radius:0;background:linear-gradient(45deg,transparent 40%,var(--bad) 40% 60%,transparent 60%),linear-gradient(-45deg,transparent 40%,var(--bad) 40% 60%,transparent 60%)}
+.pip.run{background:var(--busy)}
 .pip.wait{background:none;border:1.5px solid var(--ln2)}
 .pip.skip{height:3px;margin-block:3.5px;border-radius:1px;background:var(--ln2)}
 .pip.int{background:var(--stale)}
-/* A VM's row: a pip per planned step, the step in words, time on it. */
 .steps{display:inline-flex;gap:3px;margin-right:8px;vertical-align:middle}
 .jobt .step{font-weight:500}
 .jobt .err{display:block;margin-top:2px}
@@ -328,7 +328,6 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .tally{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:var(--t2);color:var(--tx2)}
 .tally b{color:var(--tx);font-weight:600}
 .tally .bad,.tally .bad b{color:var(--bad)}
-/* The log runs its full length; the page or panel scrolls. */
 .log{margin:0;padding:8px 0;list-style:none;border-radius:var(--r2);background:var(--sf2);font:var(--t1)/1.65 var(--fm);overflow-wrap:anywhere}
 .log li{display:flex;gap:10px;padding:0 12px}
 .log time{flex:none;color:var(--tx3)}
@@ -340,8 +339,9 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .bar{display:flex;height:10px;border-radius:var(--r1);overflow:hidden;background:var(--sf2)}
 .bar .u{background:var(--ln2)}
 .bar .n{background:var(--run)}
-.cap-near .n{background:var(--stale)}
+.cap-near .n{background:repeating-linear-gradient(135deg,var(--stale) 0 4px,transparent 4px 6px)}
 .cap-over .n{background:var(--bad)}
+.cap-over .bar{outline:1px solid var(--bad)}
 .cap-over .cap-text{color:var(--bad);font-weight:500}
 .cap-text{color:var(--tx2)}
 .w0{width:0%}.w5{width:5%}.w10{width:10%}.w15{width:15%}.w20{width:20%}.w25{width:25%}.w30{width:30%}.w35{width:35%}.w40{width:40%}.w45{width:45%}.w50{width:50%}.w55{width:55%}.w60{width:60%}.w65{width:65%}.w70{width:70%}.w75{width:75%}.w80{width:80%}.w85{width:85%}.w90{width:90%}.w95{width:95%}.w100{width:100%}
@@ -379,13 +379,13 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 /* ---------- jobs list: one link per job; columns on laptop, two lines on phone ---------- */
 .jobs{border:1px solid var(--ln);border-radius:var(--r2);background:var(--sf);overflow:hidden}
 .jobs ol{margin:0;padding:0;list-style:none}
-.jobs-h,.job{display:grid;grid-template-columns:minmax(0,1.5fr) 52px minmax(0,1.5fr) 80px minmax(0,1fr) 64px 64px;gap:var(--s3);align-items:center;padding:9px var(--s4)}
+.jobs-h,.job{display:grid;grid-template-columns:minmax(0,1.5fr) 52px minmax(0,1.5fr) 80px minmax(0,1fr) 64px 64px;gap:var(--s3);align-items:center;padding:11px var(--s4)}
 .jobs-h{background:var(--sf2);color:var(--tx2);font-size:var(--t1);font-weight:500}
 .job{border-top:1px solid var(--ln);font-size:var(--t2);text-decoration:none}
 .jobs-h+ol>li:first-child .job{border-top:0}
 .job:hover{background:var(--sf2)}
 .job small{display:block;color:var(--tx3);font-size:var(--t1)}
-.j-op{display:flex;align-items:center;gap:8px;font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.j-op{display:flex;align-items:center;gap:5px;font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .j-op .i{color:var(--tx2)}
 .j-op .vm{font-weight:400;overflow:hidden;text-overflow:ellipsis}
 .j-id,.j-when,.j-took{color:var(--tx2)}
@@ -407,13 +407,12 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .jhead{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .jhead form{display:contents}
 .back{align-self:flex-start;margin-left:-10px}
-.field{display:grid;gap:8px;min-width:0;margin:0;padding:0;border:0}
-/* environment forms: domain and slot, then a row per machine */
+.field{display:grid;gap:5px;min-width:0;margin:0;padding:0;border:0}
 .frow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,13rem);gap:16px;align-items:start}
 .ferr{font-size:var(--t1);color:var(--bad)}
 .inp[aria-invalid=true],.addr:has([aria-invalid=true]){border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
-.mgrid{display:grid;gap:8px}
-.mhead,.mrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr) 168px 32px;gap:8px;align-items:center}
+.mgrid{display:grid;gap:6px}
+.mhead,.mrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr) 168px 32px;gap:6px;align-items:center}
 .mhead{font-size:var(--t1);color:var(--tx3);font-weight:500}
 .mrow.router{padding-bottom:10px;border-bottom:1px dashed var(--ln)}
 .mrow .ferr{grid-column:1/-1}
@@ -424,10 +423,10 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .addr input{flex:1;min-width:0;height:100%;padding:0 8px 0 0;border:0;outline:0;background:none;color:var(--tx);font:var(--t3) var(--fm)}
 .addr.fixed{background:var(--sf2);border-color:var(--ln)}
 .addr.fixed b{padding-right:8px;font:var(--t3) var(--fm)}
-.madd{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.madd{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
 .here{display:flex;flex-wrap:wrap;gap:4px}
 .here span{padding:2px 7px;border-radius:4px;background:var(--sf2);color:var(--tx2);font:var(--t1) var(--fm)}
-.field>legend,.lbl{padding:0;margin-bottom:8px;font-size:var(--t2);font-weight:500}
+.field>legend,.lbl{padding:0;margin-bottom:5px;font-size:var(--t2);font-weight:500}
 .field>.lbl{margin-bottom:0}
 .field>legend .muted{font-weight:400}
 .hint{font:var(--t1) var(--fm);color:var(--tx3)}
@@ -535,7 +534,7 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .gwrap{padding:var(--s3) 0 168px}
   .gscroll{padding:2px var(--s4)}
   .gwrap .start{padding:0 var(--s4)}
-  .grid{--cw:48px;--ch:30px}
+  .grid{--cw:48px;--ch:32px}
   .rh{position:sticky;left:0;z-index:1;background:var(--bg)}
   .ab{left:0;right:0;bottom:0;max-width:none;padding:var(--s2) var(--s2) calc(var(--s2) + env(safe-area-inset-bottom));border-radius:14px 14px 0 0}
   .ab-ops{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;order:3}
@@ -545,12 +544,13 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .panel{border-left:0}
   .ph{padding-left:var(--s4)}
   .pb{padding:var(--s4)}
-  .pf{padding:var(--s3) var(--s4)}
+  .pf{padding:var(--s3) var(--s4) calc(var(--s3) + env(safe-area-inset-bottom))}
   .pf .btn{flex:1}
+  .inp,.addr input{font-size:var(--t4)}
   main>.sheet{padding:0}
   .page{padding:var(--s4)}
   .jobs-h,.j-took,.j-teams small,.j-by .role{display:none}
-  .job{grid-template-columns:minmax(0,1fr) auto auto;grid-template-areas:"op teams when" "st by id";gap:4px var(--s3);padding:10px var(--s3)}
+  .job{grid-template-columns:minmax(0,1fr) auto auto;grid-template-areas:"op teams when" "st by id";gap:4px var(--s3);padding:11px var(--s3)}
   .j-op{grid-area:op}.j-teams{grid-area:teams;max-width:11ch}.j-when{grid-area:when;text-align:right}.j-st{grid-area:st}.j-by{grid-area:by;max-width:11ch}.j-id{grid-area:id;text-align:right}
   .j-st .st{max-width:100%;overflow:hidden;text-overflow:ellipsis}
   .j-st small{display:inline;margin-left:6px}
@@ -576,5 +576,5 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .rvw tr.blk td{background:none}
   .env{scroll-margin-top:92px} /* the header wraps to two rows */
 }
-@media (pointer:coarse){.grid{--ch:30px}.hb,.all{height:28px}.all input{width:18px;height:18px}.btn{min-height:36px}.opt span{height:34px}}
-@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}.is-busy .g,.spin{animation:spin 4s steps(8) infinite!important}}
+@media (pointer:coarse){.grid{--ch:32px}.hb,.all{height:32px}.all input{width:18px;height:18px}.btn,.inp{min-height:40px}.inp,.addr input{font-size:var(--t4)}.opt span{height:36px}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}.is-busy .g,.spin{animation:none!important}}
