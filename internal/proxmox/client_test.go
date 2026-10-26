@@ -532,18 +532,18 @@ func TestClientVerifiesWithRootCAs(t *testing.T) {
 	}
 }
 
-func TestShutdownSendsTimeoutAndForceStop(t *testing.T) {
+func TestShutdownSendsTimeout(t *testing.T) {
 	f, c := newFake(t)
 	f.routes["POST /nodes/cedar/qemu/10121/status/shutdown"] = jsonData(`"UPID:cedar:1:2:3:qmshutdown:10121:battleship@pve!app:"`)
 
-	upid, err := c.Shutdown(context.Background(), "cedar", 10121, 90*time.Second, true)
+	upid, err := c.Shutdown(context.Background(), "cedar", 10121, 90*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if upid != "UPID:cedar:1:2:3:qmshutdown:10121:battleship@pve!app:" {
 		t.Errorf("upid = %q", upid)
 	}
-	want := "forceStop=1&timeout=90"
+	want := "timeout=90"
 	if got := f.bodies["POST /nodes/cedar/qemu/10121/status/shutdown"]; got != want {
 		t.Errorf("body = %q, want %q", got, want)
 	}

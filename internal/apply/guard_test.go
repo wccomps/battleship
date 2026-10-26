@@ -204,7 +204,7 @@ func (c *ctxAPI) Power(ctx context.Context, node string, vmid int, action string
 	return "", nil
 }
 
-func (c *ctxAPI) Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration, forceStop bool) (string, error) {
+func (c *ctxAPI) Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration) (string, error) {
 	c.see(ctx)
 	return "", nil
 }

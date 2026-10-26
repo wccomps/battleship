@@ -373,7 +373,6 @@ func TestStorageOpsPriorityAndCancel(t *testing.T) {
 		t.Errorf("wake order = %v, want %v", order, want)
 	}
 
-	// When a wakeup wins select over a done ctx, the slot is passed on without running fn.
 	hold2, rel2 := make(chan struct{}), make(chan struct{})
 	go func() { _ = s.do(context.Background(), false, func() error { close(hold2); <-rel2; return nil }) }()
 	<-hold2

@@ -815,9 +815,6 @@ func TestOrphanedDisksAskEachVMID(t *testing.T) {
 	}
 }
 
-// Rebuilding several templates queues their old-template destroys on
-// storage-ops. Once one rebuild finishes copying its master, its conversion
-// runs ahead of the queued destroys so its team VMs can start cloning.
 func TestConvertRunsAheadOfQueuedTemplateDeletes(t *testing.T) {
 	f := sevenMasters()
 	for i := 1; i <= 3; i++ {
@@ -837,8 +834,6 @@ func TestConvertRunsAheadOfQueuedTemplateDeletes(t *testing.T) {
 	})
 	_, done := runAsync(t, ex, plan)
 
-	// Let the first template destroy finish so its master copy starts while the
-	// second destroy holds storage-ops and the third queues behind it.
 	del1 := g.next()
 	if !strings.Contains(del1.upid, ":qmdestroy:") {
 		t.Fatalf("first task = %s, want a template destroy", del1.upid)
@@ -867,8 +862,6 @@ func TestConvertRunsAheadOfQueuedTemplateDeletes(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	// Finish the first master copy while del2 still holds storage-ops and the
-	// third template's destroy is already waiting in storageOps.lo.
 	g.releaseUPID(copy1.upid, nil)
 	for {
 		ex.lim.storageOps.mu.Lock()
@@ -880,8 +873,6 @@ func TestConvertRunsAheadOfQueuedTemplateDeletes(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	// Releasing del2 must wake the first template's conversion ahead of the
-	// third template's queued destroy.
 	g.releaseUPID(del2.upid, nil)
 	var conv1, copy2 *gateWaiter
 	for conv1 == nil {
@@ -897,7 +888,6 @@ func TestConvertRunsAheadOfQueuedTemplateDeletes(t *testing.T) {
 	}
 	g.releaseUPID(conv1.upid, nil)
 
-	// Drain the remaining tasks (team01-h1 clone, del3, copy2/copy3, conv2/conv3, team clones).
 	if copy2 != nil {
 		g.releaseUPID(copy2.upid, nil)
 	}

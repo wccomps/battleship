@@ -70,9 +70,9 @@ func (c *changeLog) Power(ctx context.Context, node string, vmid int, action str
 	c.saw(vmid)
 	return c.changes.Power(ctx, node, vmid, action)
 }
-func (c *changeLog) Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration, force bool) (string, error) {
+func (c *changeLog) Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration) (string, error) {
 	c.saw(vmid)
-	return c.changes.Shutdown(ctx, node, vmid, timeout, force)
+	return c.changes.Shutdown(ctx, node, vmid, timeout)
 }
 func (c *changeLog) DeleteVM(ctx context.Context, node string, vmid int) (string, error) {
 	c.saw(vmid)

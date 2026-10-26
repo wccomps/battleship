@@ -166,9 +166,9 @@ func (g guardedAPI) Power(ctx context.Context, node string, vmid int, action str
 	return guard(ctx, g, func(ctx context.Context) (string, error) { return g.changes.Power(ctx, node, vmid, action) })
 }
 
-func (g guardedAPI) Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration, forceStop bool) (string, error) {
+func (g guardedAPI) Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration) (string, error) {
 	return guard(ctx, g, func(ctx context.Context) (string, error) {
-		return g.changes.Shutdown(ctx, node, vmid, timeout, forceStop)
+		return g.changes.Shutdown(ctx, node, vmid, timeout)
 	})
 }
 

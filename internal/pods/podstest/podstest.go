@@ -640,8 +640,8 @@ func (f *Fake) Power(ctx context.Context, node string, vmid int, action string) 
 	return UPID(node, "qm"+action, vmid), nil
 }
 
-func (f *Fake) Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration, forceStop bool) (string, error) {
-	key := fmt.Sprintf("shutdown:%d:%s:%t", vmid, timeout, forceStop)
+func (f *Fake) Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration) (string, error) {
+	key := fmt.Sprintf("shutdown:%d:%s", vmid, timeout)
 	done, err := f.enter(ctx, key)
 	defer done()
 	if err != nil {

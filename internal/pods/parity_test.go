@@ -126,12 +126,14 @@ func TestParityCDROM(t *testing.T) {
 }
 
 func TestParityNodes(t *testing.T) {
+	n := NewNaming(config.Default().Naming)
+	pod := make([]proxmox.VM, 10)
 	for _, c := range loadParity(t).Nodes {
 		var vms []proxmox.VM
-		for _, n := range c.VMNodes {
-			vms = append(vms, proxmox.VM{Node: n})
+		for _, node := range c.VMNodes {
+			vms = append(vms, proxmox.VM{Node: node, Status: "running"})
 		}
-		if got := AssignNodes(c.Teams, c.Nodes, vms); !reflect.DeepEqual(got, c.Assigned) {
+		if got := n.AssignNodes(c.Teams, c.Nodes, vms, pod); !reflect.DeepEqual(got, c.Assigned) {
 			t.Errorf("%s: got %v, want %v", c.Name, got, c.Assigned)
 		}
 	}

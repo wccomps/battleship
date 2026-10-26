@@ -33,9 +33,7 @@ type Limits struct {
 	// Concurrent ones time out on the lock ("cfs-lock ... got lock request
 	// timeout"), which can leave a template half-converted or a disk behind.
 	// Held around those tasks and their config calls, never across a clone.
-	// Template conversions take priority over destroys and disk frees so a
-	// finished copy can unblock its team clones before more old templates are
-	// deleted.
+	// Conversions take priority so finished copies unblock team clones ahead of queued destroys.
 	storageOps storageOps
 }
 
@@ -117,8 +115,6 @@ func withClusterSlot(ctx context.Context, slots Slots, name string, n int, fn fu
 	return fn()
 }
 
-// storageOps is a single-slot cap with two local FIFO queues: high-priority
-// callers wake before low-priority ones.
 type storageOps struct {
 	mu     sync.Mutex
 	held   bool

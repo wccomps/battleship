@@ -334,7 +334,7 @@ func inputFields(in jobs.Inputs) []field {
 			fs = append(fs, field{fieldBaseline, yes})
 		}
 	case pods.KindTeardown:
-		// Always, "" too, so Back and retries mark the set as chosen.
+		// Always, "" too: a "Change" link then has everything chosen.
 		fs = append(fs, field{fieldSet, string(in.Set)})
 	case pods.KindReset:
 		if in.Snapshot != "" {

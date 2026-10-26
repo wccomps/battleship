@@ -43,7 +43,7 @@ func TestWindowsGuestRenamesAndReboots(t *testing.T) {
 	if len(res.Succeeded) != 1 {
 		t.Fatalf("result = %+v", res)
 	}
-	if f.Called("shutdown:2101:10m0s:false") != 1 || f.Called("power:2101:start") != 1 || f.Called("power:2101:reboot") != 0 {
+	if f.Called("shutdown:2101:10m0s") != 1 || f.Called("power:2101:start") != 1 || f.Called("power:2101:reboot") != 0 {
 		t.Errorf("want one patient shutdown and one start after a rename; calls %v", f.Calls)
 	}
 	if len(f.Execs) != 1 || f.Execs[0].Command[0] != "powershell.exe" {

@@ -319,7 +319,7 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .pip.wait{background:none;border:1.5px solid var(--ln2)}
 .pip.skip{height:3px;margin-block:3.5px;border-radius:1px;background:var(--ln2)}
 .pip.int{background:var(--stale)}
-/* A VM's row: step pips, the step in words, time on it. */
+/* A VM's row: a pip per planned step, the step in words, time on it. */
 .steps{display:inline-flex;gap:3px;margin-right:8px;vertical-align:middle}
 .jobt .step{font-weight:500}
 .jobt .err{display:block;margin-top:2px}

@@ -342,7 +342,7 @@ func (p Planner) buildEnvHost(vm proxmox.VM, cfg map[string]string, slot Slot, c
 	h.CDROM = len(CDROMChanges(cfg)) > 0
 	h.CPUModels = cpuModels
 	h.Config = cfg
-	h.Warnings = p.hostWarnings(vm, cfg, slot, h.Router, n.OS, cpuModels)
+	h.Warnings = p.hostWarnings(vm, cfg, slot, h.Router, cpuModels)
 	return h
 }
 
@@ -508,29 +508,25 @@ func (p Planner) customCPUModels(ctx context.Context, node string) []string {
 	return models
 }
 
-const (
-	maxWindowsMem = 12 << 30
-	maxLinuxMem   = 8 << 30
-)
-
-func memoryWarning(mem int64, cfg map[string]string, kind string) string {
-	if mem <= 0 {
-		head, _ := splitOptions(cfg["memory"])
-		if mib, err := strconv.ParseInt(strings.TrimPrefix(head, "current="), 10, 64); err == nil && mib > 0 {
-			mem = mib << 20
-		}
-	}
+func memoryWarning(mem int64, kind string) string {
+	var maxMem int64
+	var label string
 	switch kind {
 	case ImageWindows:
-		if mem > maxWindowsMem {
-			return fmt.Sprintf("%s of memory (Windows VMs are usually at most %s)", GiB(mem), GiB(maxWindowsMem))
-		}
+		maxMem, label = 12<<30, "Windows"
 	case ImageLinux:
-		if mem > maxLinuxMem {
-			return fmt.Sprintf("%s of memory (Linux VMs are usually at most %s)", GiB(mem), GiB(maxLinuxMem))
-		}
+		maxMem, label = 8<<30, "Linux"
+	default:
+		return ""
 	}
-	return ""
+	if mem <= maxMem {
+		return ""
+	}
+	got := GiB(mem)
+	if mem%(1<<30) != 0 {
+		got = fmt.Sprintf("%d MiB", mem>>20)
+	}
+	return fmt.Sprintf("%s of memory (%s VMs are usually at most %s)", got, label, GiB(maxMem))
 }
 
 func vmHardwareWarnings(mem int64, cfg map[string]string, kind string, cpuModels []string, warnNoAgent bool) []string {
@@ -544,29 +540,24 @@ func vmHardwareWarnings(mem int64, cfg map[string]string, kind string, cpuModels
 	if len(CDROMChanges(cfg)) > 0 {
 		out = append(out, "CD-ROM attached")
 	}
-	if w := memoryWarning(mem, cfg, kind); w != "" {
+	if w := memoryWarning(mem, kind); w != "" {
 		out = append(out, w)
 	}
 	return out
 }
 
-func vmKind(vm proxmox.VM, cfg map[string]string, osNote string) string {
-	tags := Tags(vm.Tags)
-	switch {
-	case slices.Contains(tags, ImageRouter):
+func vmKind(vm proxmox.VM, cfg map[string]string) string {
+	if slices.Contains(Tags(vm.Tags), ImageRouter) {
 		return ImageRouter
-	case osNote == ImageWindows || osNote == ImageLinux:
-		return osNote
-	case slices.Contains(tags, ImageWindows):
-		return ImageWindows
-	case slices.Contains(tags, ImageLinux):
-		return ImageLinux
+	}
+	if n, ok := ParseNotes(cfg["description"]); ok {
+		return cmp.Or(n.OS, ImageOther)
 	}
 	return KindForOSType(cfg["ostype"])
 }
 
 // hostWarnings checks a slot VM's tags and config for discrepancies.
-func (p Planner) hostWarnings(vm proxmox.VM, cfg map[string]string, s Slot, router bool, osNote string, cpuModels []string) []string {
+func (p Planner) hostWarnings(vm proxmox.VM, cfg map[string]string, s Slot, router bool, cpuModels []string) []string {
 	var out []string
 	tags := Tags(vm.Tags)
 	var missing []string
@@ -582,7 +573,7 @@ func (p Planner) hostWarnings(vm proxmox.VM, cfg map[string]string, s Slot, rout
 		out = append(out, "missing tags "+strings.Join(missing, ", "))
 	}
 	out = append(out, slotNICWarnings(cfg, s, router)...)
-	return append(out, vmHardwareWarnings(vm.MaxMem, cfg, vmKind(vm, cfg, osNote), cpuModels, cfg["agent"] != "" || len(DiskVolumes(cfg)) > 0)...)
+	return append(out, vmHardwareWarnings(vm.MaxMem, cfg, vmKind(vm, cfg), cpuModels, cfg["agent"] != "" || len(DiskVolumes(cfg)) > 0)...)
 }
 
 // masterWarnings checks a deploy master VM's config for discrepancies.
@@ -595,9 +586,7 @@ func (p Planner) masterWarnings(vm proxmox.VM, cfg map[string]string, slotByPool
 	} else {
 		out = append(out, vlanWarnings(cfg)...)
 	}
-	n, _ := ParseNotes(cfg["description"])
-	n = n.Checked(p.Cfg.Environments.Subnet)
-	return append(out, vmHardwareWarnings(vm.MaxMem, cfg, vmKind(vm, cfg, n.OS), cpuModels, cfg["agent"] != "" || (inSlot && len(DiskVolumes(cfg)) > 0))...)
+	return append(out, vmHardwareWarnings(vm.MaxMem, cfg, vmKind(vm, cfg), cpuModels, cfg["agent"] != "" || (inSlot && len(DiskVolumes(cfg)) > 0))...)
 }
 
 // registerWarnings checks a register source VM's config for discrepancies

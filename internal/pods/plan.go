@@ -109,8 +109,6 @@ func (k Kind) Teamless() bool { return specs[k].subject != subjectTeams }
 // by its domain.
 func (k Kind) OnEnvironment() bool { return specs[k].subject == subjectEnvironment }
 
-// TearsDown is whether the kind deletes VMs with stop and delete steps: a VM
-// already gone at its delete has only its leftover disks freed.
 func (k Kind) TearsDown() bool { return specs[k].tearsDown }
 
 type Step string
@@ -529,21 +527,15 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 	}
 	var podVMs []proxmox.VM
 	for _, tpl := range plan.Templates {
-		if tpl.Blocked != "" {
-			continue
-		}
-		if !tpl.Builds() {
-			podVMs = append(podVMs, byVMID[tpl.VMID])
-		} else {
-			podVMs = append(podVMs, byVMID[tpl.MasterVMID])
-		}
-	}
-	assign := AssignNodes(req.Teams, nodes, vms, podVMs...)
-	for _, vm := range vms {
-		if team, _, ok := p.Naming.TeamVM(vm); ok && slices.Contains(nodes, vm.Node) {
-			assign[team] = vm.Node
+		if tpl.Blocked == "" {
+			id := tpl.VMID
+			if tpl.Builds() {
+				id = tpl.MasterVMID
+			}
+			podVMs = append(podVMs, byVMID[id])
 		}
 	}
+	assign := p.Naming.AssignNodes(req.Teams, nodes, vms, podVMs)
 	for _, team := range req.Teams {
 		for _, tpl := range plan.Templates {
 			plan.Items = append(plan.Items, p.deployItem(team, tpl, assign[team], req.Snapshot, byName, used))

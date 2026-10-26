@@ -456,9 +456,6 @@ func TestTemplateBuildReportsProgress(t *testing.T) {
 	}
 }
 
-// Reused templates never take a template_builds slot, and a building
-// template releases its slot once its master copy ends (before converting),
-// so neither existing templates nor conversions block the next master copy.
 func TestTemplateBuildSlotOnlyCoversMasterCopy(t *testing.T) {
 	f := sevenMasters()
 	f.Add(proxmox.VM{VMID: 9002, Name: "h2.kilo.alpha.tpl", Node: "spruce", Template: true}, map[string]string{
@@ -472,8 +469,6 @@ func TestTemplateBuildSlotOnlyCoversMasterCopy(t *testing.T) {
 	})
 	_, done := runAsync(t, ex, plan)
 
-	// With TemplateBuilds=1, one of h1/h3 starts copying its master while h2's
-	// existing template immediately unblocks team01-h2's clone.
 	var firstCopy, h2Clone *gateWaiter
 	for firstCopy == nil || h2Clone == nil {
 		w := g.next()
@@ -488,9 +483,6 @@ func TestTemplateBuildSlotOnlyCoversMasterCopy(t *testing.T) {
 	}
 	g.releaseUPID(h2Clone.upid, nil)
 
-	// Once the first master copy finishes, its template_builds slot is freed
-	// before qmtemplate finishes, so the other master copy starts while
-	// qmtemplate is still held.
 	g.releaseUPID(firstCopy.upid, nil)
 	var firstConv, secondCopy *gateWaiter
 	for firstConv == nil || secondCopy == nil {
@@ -507,7 +499,6 @@ func TestTemplateBuildSlotOnlyCoversMasterCopy(t *testing.T) {
 	g.releaseUPID(firstConv.upid, nil)
 	g.releaseUPID(secondCopy.upid, nil)
 
-	// Drain first team clone, second conversion, and second team clone.
 	for range 3 {
 		w := g.next()
 		g.releaseUPID(w.upid, nil)

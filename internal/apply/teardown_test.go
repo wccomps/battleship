@@ -196,7 +196,6 @@ func TestDeletesShareLimitsAcrossExecutors(t *testing.T) {
 	}
 }
 
-// Teardown hard-stops running VMs before deleting them.
 func TestTeardownStopsHard(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
@@ -321,9 +320,6 @@ func TestTeardownPlansHalfDeletedVMs(t *testing.T) {
 	}
 }
 
-// An environment's teardown runs as a team teardown does: each of its VMs
-// is stopped and deleted with its disks, and its slot is empty afterwards.
-// A VM on its networks from outside its pool is left running.
 func TestEnvTeardownEmptiesTheSlot(t *testing.T) {
 	f := podstest.New("cedar", "birch")
 	for _, vm := range []proxmox.VM{

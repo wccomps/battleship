@@ -408,10 +408,9 @@ type jobItemView struct {
 	status string // for ordering
 }
 
-// stepView is one of an item's steps, drawn as a pip.
 type stepView struct {
 	Name  string
-	State string // a pip class: done, fail, int, run or wait
+	State string
 }
 
 // Title is the step and its state in words, e.g. "network: done".
@@ -495,8 +494,7 @@ func clockText(d time.Duration) string {
 	return fmt.Sprintf("%d:%02d", s/60, s%60)
 }
 
-// On a done item, unreported steps were unneeded and are omitted, except in old
-// jobs that recorded no step outcomes.
+// Old jobs recorded no step outcomes (empty it.Steps); otherwise a done item's unreported steps were unneeded.
 func itemSteps(planned []pods.Step, it store.Item) []stepView {
 	pips := map[string]string{"done": "done", "failed": "fail", "interrupted": "int"}
 	out := make([]stepView, 0, len(planned))
