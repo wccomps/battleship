@@ -118,6 +118,8 @@ func TestGridIsASelectionForm(t *testing.T) {
 	h.api.setStatus(10102, "stopped")
 	body = h.get(&lead, "/?select=host:ftp").Body.String()
 	contains(t, "one VM selected", body, `<a class="btn" id="ab-details" href="/vm/03/ftp" data-panel-link>Details</a>`)
+	body = h.get(&lead, "/?select=team01-web").Body.String()
+	contains(t, "one VM selected by name", body, `value="team01-web" data-team="01" data-host="web" checked>`, `<a class="btn" id="ab-details" href="/vm/01/web" data-panel-link>Details</a>`)
 
 	// The script handles shift-click ranges, Esc and the panel.
 	js, err := staticFS.ReadFile("static/app.js")

@@ -98,7 +98,7 @@
 {{- with .Confirm}}{{if .Typed}}
 <div class="confirm">
 <label for="typed">Type <code>{{.Typed}}</code> to confirm</label>
-<input class="inp" type="text" id="typed" name="typed" required pattern="\s*{{.TypedRE}}\s*" autocomplete="off" spellcheck="false" placeholder="{{.Typed}}" data-typed="{{.Typed}}">
+<input class="inp" type="text" id="typed" name="typed" required pattern="\s*{{.TypedRE}}\s*" autocomplete="off" spellcheck="false" data-typed="{{.Typed}}">
 </div>
 {{- end}}{{end}}
 </div>

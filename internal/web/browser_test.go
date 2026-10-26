@@ -459,6 +459,23 @@ func TestBrowserGridSelection(t *testing.T) {
 			if n := b.text("#sel-count"); n != "0" {
 				t.Errorf("after Escape, count = %q", n)
 			}
+
+			// Arrow keys move across the grid, Enter jumps to the action bar,
+			// and double-clicking a cell opens its VM panel directly.
+			b.eval(`(function(){var el=document.querySelector('#cell-01-dc input');el.focus();el.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown",bubbles:true}));})()`, nil)
+			if !b.is(`document.activeElement === document.querySelector('#cell-02-dc input')`) {
+				t.Error("ArrowDown from 01-dc didn't focus 02-dc")
+			}
+			b.click(`#cell-02-dc label`)
+			b.eval(`(function(){var el=document.querySelector('#cell-02-dc input');el.focus();el.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}));})()`, nil)
+			if !b.is(`document.activeElement === document.querySelector('#actionbar .ab-ops button:not(:disabled)')`) {
+				t.Error("Enter on a checked cell didn't focus the action bar")
+			}
+			b.run("escape", chromedp.KeyEvent("\x1b"))
+			b.eval(`document.querySelector('#cell-09-web label').dispatchEvent(new MouseEvent("dblclick",{bubbles:true}))`, nil)
+			b.waitFor("the VM panel from dblclick", `!!document.querySelector("#panel[open] #vm-title")`)
+			b.click(`#panel [data-close]`)
+			b.waitFor("the panel to close", `!document.querySelector("#panel[open]")`)
 			b.clean()
 		})
 	}
@@ -669,6 +686,9 @@ func TestBrowserStaleAndDisconnected(t *testing.T) {
 	h.api.setListErr(&proxmox.APIError{Status: 503, Message: "proxy timeout"})
 	_ = h.poller.Poll(context.Background())
 	b.waitFor("the stale grid", `document.getElementById("app").dataset.live === "stale"`)
+	if !b.is(`document.querySelector("details.live > summary").title.includes("ago")`) {
+		t.Error("stale dot title doesn't include the staleness age")
+	}
 	if got := b.text("#ab-why"); got != "Waiting for live data" {
 		t.Errorf("lock reason = %q", got)
 	}

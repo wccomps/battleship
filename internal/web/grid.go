@@ -249,15 +249,15 @@ func (v *gridView) markBusy(jobs map[string]int64) {
 	v.count()
 }
 
-// markSelected ticks the boxes ?select asks for ("all", "team:07", "host:dc"),
-// so selection works without the script. Missing and busy VMs have no box.
-// It returns how many it ticked, and the last one.
+// markSelected ticks the boxes ?select asks for ("all", "team:07", "host:dc",
+// or a VM's name or "07/dc"), so selection works without the script. Missing
+// and busy VMs have no box. It returns how many it ticked, and the last one.
 func (v *gridView) markSelected(sel []string) (n int, last *cellView) {
 	for i := range v.Rows {
 		for j := range v.Rows[i].Cells {
 			c := &v.Rows[i].Cells[j]
 			for _, s := range sel {
-				if c.Pick != "" && c.Busy == 0 && (s == "all" || s == "team:"+c.Team || s == "host:"+c.Host) {
+				if c.Pick != "" && c.Busy == 0 && (s == "all" || s == "team:"+c.Team || s == "host:"+c.Host || s == c.Name || s == c.Team+"/"+c.Host) {
 					c.Checked = true
 				}
 			}
