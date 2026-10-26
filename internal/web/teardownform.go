@@ -47,9 +47,6 @@ func deployedText(d pods.DeployedSet) string {
 	return countVMs(d.VMs) + " in " + podsText(list)
 }
 
-// setStep is the teardown's step 2: what teams' pods hold among in's hosts,
-// set by set, a choice per set, and, unless one set is all they hold,
-// everything.
 func (s *Server) setStep(ctx context.Context, in jobs.Inputs, teams []string, chosen bool) *stepTwo {
 	step := &stepTwo{Legend: "Tear down", Button: "Preview teardown", Danger: true}
 	held := &heldView{Heading: "In " + podsText(teams), Empty: "No VMs in " + podsText(teams) + "."}
@@ -89,6 +86,9 @@ func (s *Server) setStep(ctx context.Context, in jobs.Inputs, teams []string, ch
 	}
 	if len(deployed) != 1 || len(sets) != 1 || (chosen && !found) {
 		step.Options = append(step.Options, stepOpt{Label: all, Checked: chosen && in.Set == "", Sans: true})
+	}
+	if chosen && len(step.Options) == 1 && held.Err == "" {
+		return nil
 	}
 	return step
 }

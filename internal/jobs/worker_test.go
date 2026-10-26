@@ -807,8 +807,6 @@ func TestInterruptedOnlyOutcomeHasFailures(t *testing.T) {
 	}
 }
 
-// A preview made under other config (here, deploy pool) is stale in the
-// claiming process: nothing runs.
 func TestWorkerRefusesPlanUnderOtherConfig(t *testing.T) {
 	st := storetest.New(t)
 	f := twoTeams()

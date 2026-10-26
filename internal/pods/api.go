@@ -46,7 +46,7 @@ type Changes interface {
 	CreateSnapshot(ctx context.Context, node string, vmid int, r proxmox.SnapshotRequest) (string, error)
 	Rollback(ctx context.Context, node string, vmid int, snapshot string) (string, error)
 	Power(ctx context.Context, node string, vmid int, action string) (string, error)
-	Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration, forceStop bool) (string, error)
+	Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration) (string, error)
 	DeleteVM(ctx context.Context, node string, vmid int) (string, error)
 	DeleteVolume(ctx context.Context, node, storage, volid string) (string, error)
 }

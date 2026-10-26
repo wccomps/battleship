@@ -353,7 +353,6 @@ func (s *Server) liveGridView(ctx context.Context, g status.Grid, now time.Time)
 	return v
 }
 
-// firstPollWait bounds how long a request waits for a new view's first poll.
 const firstPollWait = 5 * time.Second
 
 // polledGrid is the viewer's grid once its first poll is in, or after

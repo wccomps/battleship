@@ -115,27 +115,29 @@ func TestMatchesHostBlankFilters(t *testing.T) {
 }
 
 func TestAssignNodes(t *testing.T) {
+	n := NewNaming(config.Default().Naming)
 	tests := []struct {
 		name       string
 		teams      []string
 		nodes      []string
 		vms        []proxmox.VM
 		podVMs     []proxmox.VM
-		wantAssign map[string]string // team -> node
+		wantAssign map[string]string
 	}{
 		{
 			name:  "least loaded wins",
 			teams: []string{"01", "02"},
 			nodes: []string{"a", "b"},
 			vms: []proxmox.VM{
-				{Node: "a", VMID: 1},
-				{Node: "a", VMID: 2},
-				{Node: "a", VMID: 3},
-				{Node: "a", VMID: 4},
-				{Node: "a", VMID: 5},
-				{Node: "b", VMID: 6},
-				{Node: "b", VMID: 7},
+				{Node: "a", VMID: 1, Status: "running"},
+				{Node: "a", VMID: 2, Status: "running"},
+				{Node: "a", VMID: 3, Status: "running"},
+				{Node: "a", VMID: 4, Status: "running"},
+				{Node: "a", VMID: 5, Status: "running"},
+				{Node: "b", VMID: 6, Status: "running"},
+				{Node: "b", VMID: 7, Status: "running"},
 			},
+			podVMs:     make([]proxmox.VM, 10),
 			wantAssign: map[string]string{"01": "b", "02": "a"},
 		},
 		{
@@ -143,44 +145,55 @@ func TestAssignNodes(t *testing.T) {
 			teams: []string{"01", "02", "03"},
 			nodes: []string{"a", "b"},
 			vms: []proxmox.VM{
-				// Node a has 1 running VM with 16 GiB RAM + 8 vCPUs (load 24 GiB),
-				// and many stopped VMs / templates that don't count toward running load.
 				{Node: "a", VMID: 1, Status: "running", MaxMem: 16 << 30, MaxCPU: 8},
 				{Node: "a", VMID: 2, Status: "stopped", MaxMem: 64 << 30, MaxCPU: 16},
 				{Node: "a", VMID: 3, Status: "stopped", Template: true, MaxMem: 64 << 30, MaxCPU: 16},
-				// Node b has 4 running VMs with 2 GiB RAM + 1 vCPU each (load 12 GiB).
 				{Node: "b", VMID: 4, Status: "running", MaxMem: 2 << 30, MaxCPU: 1},
 				{Node: "b", VMID: 5, Status: "running", MaxMem: 2 << 30, MaxCPU: 1},
 				{Node: "b", VMID: 6, Status: "running", MaxMem: 2 << 30, MaxCPU: 1},
 				{Node: "b", VMID: 7, Status: "running", MaxMem: 2 << 30, MaxCPU: 1},
 			},
-			// Each pod adds 8 GiB RAM + 2 vCPUs (load 10 GiB):
-			// team 01 -> b (12 -> 22), team 02 -> b (22 -> 32), team 03 -> a (24 -> 34).
 			podVMs:     []proxmox.VM{{MaxMem: 8 << 30, MaxCPU: 2}},
 			wantAssign: map[string]string{"01": "b", "02": "b", "03": "a"},
 		},
 		{
-			name:  "weighting: +10 per assigned team",
+			name:  "pins existing pod to its majority online node without skewing new pod placement",
 			teams: []string{"01", "02"},
 			nodes: []string{"a", "b"},
 			vms: []proxmox.VM{
-				{Node: "b", VMID: 1},
-				{Node: "b", VMID: 2},
-				{Node: "b", VMID: 3},
-				{Node: "b", VMID: 4},
-				{Node: "b", VMID: 5},
-				{Node: "b", VMID: 6},
-				{Node: "b", VMID: 7},
-				{Node: "b", VMID: 8},
-				{Node: "b", VMID: 9},
-				{Node: "b", VMID: 10},
-				{Node: "b", VMID: 11},
-				{Node: "b", VMID: 12},
-				{Node: "b", VMID: 13},
-				{Node: "b", VMID: 14},
-				{Node: "b", VMID: 15},
+				{Node: "a", VMID: 10101, Name: "team01-elmer", Status: "running", MaxMem: 8 << 30, MaxCPU: 2},
+				{Node: "a", VMID: 10102, Name: "team01-bugs", Status: "running", MaxMem: 8 << 30, MaxCPU: 2},
+				{Node: "b", VMID: 10199, Name: "team01-gpu", Status: "running", MaxMem: 8 << 30, MaxCPU: 2},
 			},
-			wantAssign: map[string]string{"01": "a", "02": "a"},
+			podVMs:     []proxmox.VM{{Name: "elmer.kilo.alpha", MaxMem: 8 << 30, MaxCPU: 2}},
+			wantAssign: map[string]string{"01": "a", "02": "b"},
+		},
+		{
+			name:  "counts stopped existing pod load on its pinned node even when GPU host runs elsewhere",
+			teams: []string{"01", "02"},
+			nodes: []string{"a", "b"},
+			vms: []proxmox.VM{
+				{Node: "a", VMID: 10101, Name: "team01-elmer", Status: "stopped", MaxMem: 8 << 30, MaxCPU: 2},
+				{Node: "a", VMID: 10102, Name: "team01-bugs", Status: "stopped", MaxMem: 8 << 30, MaxCPU: 2},
+				{Node: "b", VMID: 10199, Name: "team01-gpu", Status: "running", MaxMem: 8 << 30, MaxCPU: 2},
+			},
+			podVMs: []proxmox.VM{
+				{Name: "elmer.kilo.alpha", MaxMem: 8 << 30, MaxCPU: 2},
+				{Name: "bugs.kilo.alpha", MaxMem: 8 << 30, MaxCPU: 2},
+			},
+			wantAssign: map[string]string{"01": "a", "02": "b"},
+		},
+		{
+			name:  "charges new host load on pinned node when adding a host to existing running pods",
+			teams: []string{"01", "02", "03"},
+			nodes: []string{"a", "b"},
+			vms: []proxmox.VM{
+				{Node: "a", VMID: 10101, Name: "team01-elmer", Status: "running", MaxMem: 8 << 30, MaxCPU: 2},
+				{Node: "a", VMID: 10201, Name: "team02-elmer", Status: "running", MaxMem: 8 << 30, MaxCPU: 2},
+				{Node: "b", VMID: 1, Status: "running", MaxMem: 20 << 30, MaxCPU: 5},
+			},
+			podVMs:     []proxmox.VM{{Name: "daffy.kilo.alpha", MaxMem: 8 << 30, MaxCPU: 2}},
+			wantAssign: map[string]string{"01": "a", "02": "a", "03": "b"},
 		},
 		{
 			name:       "ties go alphabetically",
@@ -194,57 +207,8 @@ func TestAssignNodes(t *testing.T) {
 			teams: []string{"01"},
 			nodes: []string{"a", "b"},
 			vms: []proxmox.VM{
-				{Node: "c", VMID: 1},
-				{Node: "c", VMID: 2},
-				{Node: "c", VMID: 3},
-				{Node: "c", VMID: 4},
-				{Node: "c", VMID: 5},
-				{Node: "c", VMID: 6},
-				{Node: "c", VMID: 7},
-				{Node: "c", VMID: 8},
-				{Node: "c", VMID: 9},
-				{Node: "c", VMID: 10},
-				{Node: "c", VMID: 11},
-				{Node: "c", VMID: 12},
-				{Node: "c", VMID: 13},
-				{Node: "c", VMID: 14},
-				{Node: "c", VMID: 15},
-				{Node: "c", VMID: 16},
-				{Node: "c", VMID: 17},
-				{Node: "c", VMID: 18},
-				{Node: "c", VMID: 19},
-				{Node: "c", VMID: 20},
-				{Node: "c", VMID: 21},
-				{Node: "c", VMID: 22},
-				{Node: "c", VMID: 23},
-				{Node: "c", VMID: 24},
-				{Node: "c", VMID: 25},
-				{Node: "c", VMID: 26},
-				{Node: "c", VMID: 27},
-				{Node: "c", VMID: 28},
-				{Node: "c", VMID: 29},
-				{Node: "c", VMID: 30},
-				{Node: "c", VMID: 31},
-				{Node: "c", VMID: 32},
-				{Node: "c", VMID: 33},
-				{Node: "c", VMID: 34},
-				{Node: "c", VMID: 35},
-				{Node: "c", VMID: 36},
-				{Node: "c", VMID: 37},
-				{Node: "c", VMID: 38},
-				{Node: "c", VMID: 39},
-				{Node: "c", VMID: 40},
-				{Node: "c", VMID: 41},
-				{Node: "c", VMID: 42},
-				{Node: "c", VMID: 43},
-				{Node: "c", VMID: 44},
-				{Node: "c", VMID: 45},
-				{Node: "c", VMID: 46},
-				{Node: "c", VMID: 47},
-				{Node: "c", VMID: 48},
-				{Node: "c", VMID: 49},
-				{Node: "c", VMID: 50},
-				{Node: "b", VMID: 51},
+				{Node: "c", VMID: 1, Status: "running", MaxMem: 64 << 30},
+				{Node: "b", VMID: 51, Status: "running", MaxMem: 4 << 30},
 			},
 			wantAssign: map[string]string{"01": "a"},
 		},
@@ -259,7 +223,7 @@ func TestAssignNodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := AssignNodes(tt.teams, tt.nodes, tt.vms, tt.podVMs...)
+			result := n.AssignNodes(tt.teams, tt.nodes, tt.vms, tt.podVMs)
 			if !reflect.DeepEqual(result, tt.wantAssign) {
 				t.Errorf("AssignNodes: got %v, want %v", result, tt.wantAssign)
 			}

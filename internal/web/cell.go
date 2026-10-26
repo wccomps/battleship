@@ -177,7 +177,7 @@ const cellReadTimeout = time.Minute
 // lifetime, bounded by s.cellTimeout; the caller stops waiting when ctx ends.
 // A failed read's Detail still carries the grid's copy.
 func (s *Server) detail(ctx context.Context, team, host string) (status.Detail, error) {
-	view := s.polledView(ctx) // the viewer's: their ticket, their grid
+	view := s.polledView(ctx)
 	ch := s.cellFlight.DoChan(view.User+"\x00"+team+"/"+host, func() (any, error) {
 		rctx, cancel := context.WithTimeout(s.life, s.cellTimeout)
 		defer cancel()

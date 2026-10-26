@@ -143,9 +143,7 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 		return fmt.Errorf("VMID %d is now used by %s", spec.VMID, other.Name)
 	}
 
-	// The copy holds a template_builds slot, bounding how many masters are
-	// stopped at once, and a clone slot like team clones. Both are taken
-	// before stopping the master so the master isn't down while waiting.
+	// builds bounds stopped masters; take both slots before stopping a running master.
 	if err := e.lim.builds.do(ctx, func() error {
 		return e.lim.clones.do(ctx, func() error { return e.copyMaster(ctx, spec) })
 	}); err != nil {

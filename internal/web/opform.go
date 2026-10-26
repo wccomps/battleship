@@ -62,15 +62,12 @@ func hostOpts(names, ticked []string) []hostOpt {
 	return out
 }
 
-// stepTwo is the second step of a two-step form (operation.Pick), once
-// pods and hosts are chosen: what the cluster holds for them, and a choice
-// among it.
 type stepTwo struct {
-	Held    *heldView // what the pods hold, if the step lists it
-	Legend  string    // the choice's: "Snapshot"
+	Held    *heldView
+	Legend  string
 	Options []stepOpt
-	Hints   []string // under the choice
-	Note    string   // after it, e.g. why the list is short
+	Hints   []string
+	Note    string
 	// Button is the preview button's label; Danger marks it, with the
 	// operation's icon, as destroying something.
 	Button string
@@ -200,9 +197,6 @@ func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, 
 	if op.step != nil {
 		if teams, err := pods.ParseTeams(in.Teams); picked && err == nil {
 			p.Step = op.step(s, ctx, in, teams, chosen)
-			if op.Kind == pods.KindTeardown && chosen && len(p.Step.Options) == 1 && p.Step.Held.Err == "" {
-				p.Step = nil
-			}
 		}
 	}
 	if op.Kind != pods.KindDeploy {

@@ -181,11 +181,11 @@ func (b *boundFake) Power(ctx context.Context, node string, vmid int, action str
 	}
 	return b.Fake.Power(ctx, node, vmid, action)
 }
-func (b *boundFake) Shutdown(ctx context.Context, node string, vmid int, d time.Duration, force bool) (string, error) {
+func (b *boundFake) Shutdown(ctx context.Context, node string, vmid int, d time.Duration) (string, error) {
 	if err := b.check(); err != nil {
 		return "", err
 	}
-	return b.Fake.Shutdown(ctx, node, vmid, d, force)
+	return b.Fake.Shutdown(ctx, node, vmid, d)
 }
 func (b *boundFake) DeleteVM(ctx context.Context, node string, vmid int) (string, error) {
 	if err := b.check(); err != nil {

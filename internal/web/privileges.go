@@ -105,6 +105,20 @@ func (rv *requestView) release() {
 // ticket. It lingers after the request so the page's event stream can take it
 // over. Only requests through require have one.
 func (s *Server) view(ctx context.Context) *status.View {
+	return s.openView(ctx).v
+}
+
+func (s *Server) polledView(ctx context.Context) *status.View {
+	rv := s.openView(ctx)
+	rv.polled.Do(func() {
+		wctx, cancel := context.WithTimeout(ctx, s.firstPoll)
+		_ = rv.v.WaitFirstPoll(wctx)
+		cancel()
+	})
+	return rv.v
+}
+
+func (s *Server) openView(ctx context.Context) *requestView {
 	rv, ok := ctx.Value(requestViewKey{}).(*requestView)
 	if !ok {
 		panic("web: view outside require")
@@ -113,21 +127,5 @@ func (s *Server) view(ctx context.Context) *status.View {
 		cred, _ := auth.ProxmoxCredential(ctx)
 		rv.v, rv.done = s.views.Open(cred.User, cred)
 	})
-	return rv.v
-}
-
-// polledView is view after waiting at most once per request (up to
-// s.firstPoll) for its first poll.
-func (s *Server) polledView(ctx context.Context) *status.View {
-	rv, ok := ctx.Value(requestViewKey{}).(*requestView)
-	if !ok {
-		panic("web: view outside require")
-	}
-	v := s.view(ctx)
-	rv.polled.Do(func() {
-		wctx, cancel := context.WithTimeout(ctx, s.firstPoll)
-		_ = v.WaitFirstPoll(wctx)
-		cancel()
-	})
-	return v
+	return rv
 }

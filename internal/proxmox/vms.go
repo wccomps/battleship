@@ -23,7 +23,7 @@ type VM struct {
 	Template bool
 	Tags     string // semicolon-separated
 	Pool     string
-	MaxCPU   int   // configured vCPUs
+	MaxCPU   int
 	MaxMem   int64 // configured memory, bytes
 	MaxDisk  int64 // boot disk size, bytes
 	// Lock is the config's lock, e.g. "clone", or "destroyed" for a VM a
@@ -369,13 +369,8 @@ func (c *Client) Power(ctx context.Context, node string, vmid int, action string
 	return requireUPID(upid, err, "power "+action)
 }
 
-// Shutdown asks the guest to shut down, waiting up to timeout (whole
-// seconds); with forceStop Proxmox then hard-stops it.
-func (c *Client) Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration, forceStop bool) (string, error) {
+func (c *Client) Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration) (string, error) {
 	params := url.Values{"timeout": {strconv.Itoa(int(timeout / time.Second))}}
-	if forceStop {
-		params.Set("forceStop", "1")
-	}
 	var upid string
 	err := c.do(ctx, http.MethodPost, vmPath(node, vmid)+"/status/shutdown", params, &upid)
 	return requireUPID(upid, err, "shutdown")

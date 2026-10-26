@@ -100,8 +100,6 @@ func TestDeployPlanReusesTemplateAndConvergesExistingVM(t *testing.T) {
 		t.Errorf("existing VM should converge without cloning: %+v", it)
 	}
 
-	// If team01-teak was torn down while team01's other VMs remain on spruce,
-	// redeploying teak places team01-teak back onto spruce with its pod.
 	delete(f.VMs, 10121)
 	plan, err = testPlanner(f).Deploy(context.Background(), DeployRequest{
 		Pattern: "teak.*", Teams: []string{"01"},

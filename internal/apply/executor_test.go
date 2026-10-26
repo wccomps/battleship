@@ -232,8 +232,6 @@ func TestReset(t *testing.T) {
 	}
 }
 
-// cancelTeardownDuringStop tears down team01-teak and stops the run with
-// cause mid-stop; finish says how the task ends and may block.
 func cancelTeardownDuringStop(t *testing.T, grace time.Duration, cause error, finish func(ctx context.Context) error, halt ...chan struct{}) (*podstest.Fake, *recorder, Result) {
 	t.Helper()
 	f := newCluster()
@@ -281,7 +279,6 @@ func TestCancelLetsTheStepUnderWayFinish(t *testing.T) {
 	if ev := rec.find("team01-teak", EventInterrupted); len(ev) != 1 || ev[0].Step != "" || ev[0].Message != "cancelled before delete" {
 		t.Errorf("interrupted events = %+v", ev)
 	}
-	// Only a stop ran: the VM's config is as the job before left it.
 	if left := LeftBy(res.Interrupted["team01-teak"]); left != LeftUntouched {
 		t.Errorf("left = %q, want untouched", left)
 	}
