@@ -27,7 +27,6 @@ type Config struct {
 	Naming       Naming       `toml:"naming"`
 	Network      Network      `toml:"network"`
 	Deploy       Deploy       `toml:"deploy"`
-	Teardown     Teardown     `toml:"teardown"`
 	Images       Images       `toml:"images"`
 	Environments Environments `toml:"environments"`
 	Concurrency  Concurrency  `toml:"concurrency"`
@@ -181,13 +180,6 @@ func ParseRange(s string) (lo, hi int, err error) {
 	return lo, hi, nil
 }
 
-// Teardown configures how team VMs are taken down before they are deleted.
-type Teardown struct {
-	// ShutdownTimeout is how long a VM gets to shut down before a hard stop.
-	// A clean shutdown lets a router release its DHCP lease for the next deploy.
-	ShutdownTimeout time.Duration `toml:"shutdown_timeout"`
-}
-
 type Retry struct {
 	TransientPatterns []string      `toml:"transient_patterns"` // case-insensitive substrings
 	Attempts          int           `toml:"attempts"`           // tries per API call; also the most times a task that failed transiently is started
@@ -291,7 +283,6 @@ func Default() Config {
 			SDNZone: "devnet", VMIDBase: 2000, Subnet: LAN{netip.MustParsePrefix("192.168.100.0/24")}, AgentTimeout: 15 * time.Minute,
 		},
 		Concurrency: Concurrency{Workers: 20, ConfigCalls: 5, TemplateBuilds: 4, Deletes: 4},
-		Teardown:    Teardown{ShutdownTimeout: 60 * time.Second},
 		Jobs:        Jobs{Heartbeat: 10 * time.Second, StaleAfter: 60 * time.Second, Poll: 2 * time.Second, CancelGrace: 30 * time.Second},
 		Database:    Database{MaxConns: 16},
 		Retry: Retry{
@@ -367,6 +358,7 @@ var removedKeys = map[string]string{
 	"web.teams":                   "Battleship shows the pods that have VMs; delete the line",
 	"concurrency.clones_per_node": "Clones are now capped across the cluster when there is a database; use concurrency.clones",
 	"oidc.groups_claim":           "Battleship doesn't use groups; delete the line",
+	"teardown.shutdown_timeout":   "Teardown stops VMs immediately without a graceful shutdown; delete the [teardown] section",
 }
 
 const removedToken = "Battleship holds no Proxmox token or roles of its own. " +
@@ -555,11 +547,6 @@ func (c Config) Validate() error {
 	}
 	if c.Concurrency.Deletes < 1 {
 		errs = append(errs, errors.New("concurrency.deletes must be at least 1"))
-	}
-
-	// Teardown: Proxmox takes the timeout in whole seconds.
-	if c.Teardown.ShutdownTimeout < time.Second {
-		errs = append(errs, errors.New("teardown.shutdown_timeout must be at least 1s"))
 	}
 
 	const minDuration = 100 * time.Millisecond

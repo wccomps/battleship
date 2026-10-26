@@ -123,22 +123,30 @@ func MatchesHost(host string, filters []string) bool {
 	return false
 }
 
-// AssignNodes gives each team the node with the fewest VMs, which then
-// counts 10 more. Ties go to the alphabetically first node.
-func AssignNodes(teams, nodes []string, vms []proxmox.VM) map[string]string {
+// AssignNodes gives each team the node with the lowest requested memory and
+// CPU load among running VMs, adding podVMs' load (or 10 when unknown) as
+// each team is placed. Ties go to the alphabetically first node.
+func AssignNodes(teams, nodes []string, vms []proxmox.VM, podVMs ...proxmox.VM) map[string]string {
 	if len(nodes) == 0 {
 		return map[string]string{}
 	}
 	sorted := append([]string(nil), nodes...)
 	sort.Strings(sorted)
-	load := map[string]int{}
+	load := map[string]int64{}
 	for _, n := range sorted {
 		load[n] = 0
 	}
 	for _, vm := range vms {
-		if _, ok := load[vm.Node]; ok {
-			load[vm.Node]++
+		if _, ok := load[vm.Node]; ok && !vm.Template && (vm.Status == "running" || vm.Status == "") {
+			load[vm.Node] += vmLoad(vm)
 		}
+	}
+	var podLoad int64
+	for _, vm := range podVMs {
+		podLoad += vmLoad(vm)
+	}
+	if podLoad <= 0 {
+		podLoad = 10
 	}
 	out := map[string]string{}
 	for _, team := range teams {
@@ -149,9 +157,19 @@ func AssignNodes(teams, nodes []string, vms []proxmox.VM) map[string]string {
 			}
 		}
 		out[team] = best
-		load[best] += 10
+		load[best] += podLoad
 	}
 	return out
+}
+
+// vmLoad is a VM's requested memory and CPU weight (in MiB, with 1 vCPU
+// weighted at 1 GiB), or 1 when neither is reported.
+func vmLoad(vm proxmox.VM) int64 {
+	w := (vm.MaxMem >> 20) + int64(vm.MaxCPU)<<10
+	if w <= 0 {
+		return 1
+	}
+	return w
 }
 
 // MasterSet is the masters of one set (SplitMaster), e.g. dc.kilo.alpha

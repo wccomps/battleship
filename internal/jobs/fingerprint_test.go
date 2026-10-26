@@ -3,7 +3,6 @@ package jobs
 import (
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/pods"
@@ -161,27 +160,12 @@ func TestFingerprintCoversExecutionConfig(t *testing.T) {
 	}
 	teardown := Inputs{Kind: pods.KindTeardown, Teams: "1"}
 	base := planUnder(testCfg(), teardown)
-	for name, mut := range map[string]func(*config.Config){
-		"shutdown timeout": func(c *config.Config) { c.Teardown.ShutdownTimeout = 5 * time.Minute },
-	} {
-		cfg := testCfg()
-		mut(&cfg)
-		if planUnder(cfg, teardown) == base {
-			t.Errorf("teardown: changing the %s didn't change the fingerprint", name)
-		}
-	}
 	cfg := testCfg()
 	cfg.Retry.Attempts = 9
 	cfg.Concurrency.Workers = 3
+	cfg.Naming.Pool = "team-{team}"
 	if planUnder(cfg, teardown) != base {
-		t.Error("teardown: retry and concurrency settings changed the fingerprint")
-	}
-
-	power := Inputs{Kind: pods.KindPower, Teams: "1", Action: "start"}
-	cfg = testCfg()
-	cfg.Teardown.ShutdownTimeout = 5 * time.Minute
-	if planUnder(testCfg(), power) != planUnder(cfg, power) {
-		t.Error("power: the teardown shutdown timeout changed the fingerprint")
+		t.Error("teardown: retry, concurrency, or naming settings changed the fingerprint")
 	}
 
 	cfg = testCfg()

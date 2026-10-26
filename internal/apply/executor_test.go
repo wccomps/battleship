@@ -200,8 +200,8 @@ func TestTeardown(t *testing.T) {
 	if len(res.Failed) != 0 || len(res.Succeeded) != 2 {
 		t.Fatalf("result = %+v", res)
 	}
-	if _, ok := f.VMs[10121]; ok || f.Called("shutdown:10121:") != 1 {
-		t.Errorf("team01-teak not shut down and deleted: calls=%v", f.Calls)
+	if _, ok := f.VMs[10121]; ok || f.Called("power:10121:stop") != 1 {
+		t.Errorf("team01-teak not stopped and deleted: calls=%v", f.Calls)
 	}
 	if ev := rec.find("team01-oak", EventSkipped); len(ev) != 1 || ev[0].Message != "already deleted" {
 		t.Errorf("oak events = %+v", ev)
@@ -232,9 +232,9 @@ func TestReset(t *testing.T) {
 	}
 }
 
-// cancelTeardownDuringShutdown tears down team01-teak and stops the run with
-// cause mid-shutdown; finish says how the task ends and may block.
-func cancelTeardownDuringShutdown(t *testing.T, grace time.Duration, cause error, finish func(ctx context.Context) error, halt ...chan struct{}) (*podstest.Fake, *recorder, Result) {
+// cancelTeardownDuringStop tears down team01-teak and stops the run with
+// cause mid-stop; finish says how the task ends and may block.
+func cancelTeardownDuringStop(t *testing.T, grace time.Duration, cause error, finish func(ctx context.Context) error, halt ...chan struct{}) (*podstest.Fake, *recorder, Result) {
 	t.Helper()
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
@@ -245,7 +245,7 @@ func cancelTeardownDuringShutdown(t *testing.T, grace time.Duration, cause error
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
 	f.WaitGate = func(sctx context.Context, upid string) error {
-		if !strings.Contains(upid, ":qmshutdown:") {
+		if !strings.Contains(upid, ":qmstop:") {
 			return nil
 		}
 		cancel(cause)
@@ -263,7 +263,7 @@ func cancelTeardownDuringShutdown(t *testing.T, grace time.Duration, cause error
 // A step under way at cancel finishes and is recorded; the next doesn't
 // start and nothing reads as failed.
 func TestCancelLetsTheStepUnderWayFinish(t *testing.T) {
-	f, rec, res := cancelTeardownDuringShutdown(t, time.Hour, ErrCancelRequested, func(ctx context.Context) error {
+	f, rec, res := cancelTeardownDuringStop(t, time.Hour, ErrCancelRequested, func(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -281,7 +281,7 @@ func TestCancelLetsTheStepUnderWayFinish(t *testing.T) {
 	if ev := rec.find("team01-teak", EventInterrupted); len(ev) != 1 || ev[0].Step != "" || ev[0].Message != "cancelled before delete" {
 		t.Errorf("interrupted events = %+v", ev)
 	}
-	// Only a shutdown ran: the VM's config is as the job before left it.
+	// Only a stop ran: the VM's config is as the job before left it.
 	if left := LeftBy(res.Interrupted["team01-teak"]); left != LeftUntouched {
 		t.Errorf("left = %q, want untouched", left)
 	}
@@ -299,7 +299,7 @@ func TestCancelLetsTheStepUnderWayFinish(t *testing.T) {
 // A step still running when the grace ends is cut off and says its task
 // may still be running.
 func TestCancelCutsAStepOffAfterTheGrace(t *testing.T) {
-	_, rec, res := cancelTeardownDuringShutdown(t, 20*time.Millisecond, ErrCancelRequested, func(ctx context.Context) error {
+	_, rec, res := cancelTeardownDuringStop(t, 20*time.Millisecond, ErrCancelRequested, func(ctx context.Context) error {
 		<-ctx.Done()
 		return ctx.Err()
 	})
@@ -413,7 +413,7 @@ func TestCancelSaysHowItLeftTheConfig(t *testing.T) {
 func TestHaltEndsTheGrace(t *testing.T) {
 	halt := make(chan struct{})
 	start := time.Now()
-	_, _, res := cancelTeardownDuringShutdown(t, time.Hour, ErrCancelRequested, func(ctx context.Context) error {
+	_, _, res := cancelTeardownDuringStop(t, time.Hour, ErrCancelRequested, func(ctx context.Context) error {
 		close(halt)
 		<-ctx.Done()
 		return ctx.Err()
@@ -454,7 +454,7 @@ func TestCancelSeesAnEarlierRoundConverged(t *testing.T) {
 // Other stops, such as a shutdown, cut the step off at once.
 func TestOtherStopsDontWait(t *testing.T) {
 	start := time.Now()
-	_, _, res := cancelTeardownDuringShutdown(t, time.Hour, context.Canceled, func(ctx context.Context) error {
+	_, _, res := cancelTeardownDuringStop(t, time.Hour, context.Canceled, func(ctx context.Context) error {
 		<-ctx.Done()
 		return ctx.Err()
 	})

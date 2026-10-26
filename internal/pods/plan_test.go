@@ -84,6 +84,7 @@ func TestDeployPlanReusesTemplateAndConvergesExistingVM(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "spruce"}, nil)
+	f.Add(proxmox.VM{VMID: 10110, Name: "team01-elmer", Node: "spruce"}, nil)
 
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{
 		Pattern: "teak.*", Teams: []string{"01"},
@@ -97,6 +98,19 @@ func TestDeployPlanReusesTemplateAndConvergesExistingVM(t *testing.T) {
 	it := plan.Items[0]
 	if it.Node != "spruce" || it.Steps[0] == StepClone {
 		t.Errorf("existing VM should converge without cloning: %+v", it)
+	}
+
+	// If team01-teak was torn down while team01's other VMs remain on spruce,
+	// redeploying teak places team01-teak back onto spruce with its pod.
+	delete(f.VMs, 10121)
+	plan, err = testPlanner(f).Deploy(context.Background(), DeployRequest{
+		Pattern: "teak.*", Teams: []string{"01"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := plan.Items[0]; it.Node != "spruce" || it.Steps[0] != StepClone {
+		t.Errorf("redeployed host should join its pod on spruce: %+v", it)
 	}
 }
 
@@ -473,9 +487,9 @@ func TestWillStopMasterOnlyWhenBuildingFromRunningMaster(t *testing.T) {
 func TestDeployMasterAndUntaggedWarnings(t *testing.T) {
 	f := podstest.New("cedar")
 	f.CPUModels = []string{"baseline"}
-	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "cedar", Pool: "dev-01", Tags: "dev;kilo.alpha"},
+	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "cedar", Pool: "dev-01", Tags: "dev;kilo.alpha", MaxMem: 16 << 30},
 		map[string]string{"net0": "virtio=BC:24:11:00:00:01,bridge=devint02", "net1": "virtio=BC:24:11:00:00:02,bridge=devext01",
-			"cpu": "x86-64-v2-AES", "agent": "0", "ide2": "local:iso/debian.iso,media=cdrom"})
+			"cpu": "x86-64-v2-AES", "agent": "0", "ide2": "local:iso/debian.iso,media=cdrom", "ostype": "win11"})
 	f.Add(proxmox.VM{VMID: 2102, Name: "elm.kilo.alpha", Node: "cedar", Pool: "dev-01", Tags: ""},
 		map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint01"})
 
@@ -486,7 +500,7 @@ func TestDeployMasterAndUntaggedWarnings(t *testing.T) {
 	}
 	want := []string{
 		`Left out: elm.kilo.alpha in dev-01 lacks tag "dev".`,
-		"teak.kilo.alpha: net0 on devint02, expected devint01; 2 NICs, expected 1; CPU x86-64-v2-AES, expected baseline; guest agent off; CD-ROM attached.",
+		"teak.kilo.alpha: net0 on devint02, expected devint01; 2 NICs, expected 1; CPU x86-64-v2-AES, expected baseline; guest agent off; CD-ROM attached; 16 GiB of memory (Windows VMs are usually at most 12 GiB).",
 	}
 	if !reflect.DeepEqual(plan.Notices, want) {
 		t.Errorf("Notices = %v, want %v", plan.Notices, want)

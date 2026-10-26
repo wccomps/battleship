@@ -23,6 +23,7 @@ type VM struct {
 	Template bool
 	Tags     string // semicolon-separated
 	Pool     string
+	MaxCPU   int   // configured vCPUs
 	MaxMem   int64 // configured memory, bytes
 	MaxDisk  int64 // boot disk size, bytes
 	// Lock is the config's lock, e.g. "clone", or "destroyed" for a VM a
@@ -68,6 +69,7 @@ type resource struct {
 	Pool     string      `json:"pool"`
 	Storage  string      `json:"storage"`
 	Shared   json.Number `json:"shared"`
+	MaxCPU   json.Number `json:"maxcpu"`
 	Mem      json.Number `json:"mem"`
 	MaxMem   json.Number `json:"maxmem"`
 	Disk     json.Number `json:"disk"`
@@ -83,7 +85,7 @@ func (r resource) vm() (VM, error) {
 	return VM{
 		VMID: int(id), Name: r.Name, Node: r.Node, Status: r.Status,
 		Template: r.Template.String() == "1", Tags: r.Tags, Pool: r.Pool,
-		MaxMem: int64Of(r.MaxMem), MaxDisk: int64Of(r.MaxDisk), Lock: r.Lock,
+		MaxCPU: int(int64Of(r.MaxCPU)), MaxMem: int64Of(r.MaxMem), MaxDisk: int64Of(r.MaxDisk), Lock: r.Lock,
 	}, nil
 }
 

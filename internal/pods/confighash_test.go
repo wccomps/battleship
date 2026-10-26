@@ -37,9 +37,6 @@ var hashedFor = map[string]map[string][]Kind{
 		"Slots": envKinds, "Pool": envKinds, "IntBridge": envKinds, "ExtBridge": envKinds, "SDNZone": envKinds,
 		"VMIDBase": envKinds, "Subnet": envKinds, "AgentTimeout": envKinds, "OpsCAKey": envKinds,
 	},
-	"Teardown": {
-		"ShutdownTimeout": {KindTeardown, KindEnvTeardown, KindEnvDeleteHost},
-	},
 }
 
 func TestEveryRunConfigFieldIsClassified(t *testing.T) {

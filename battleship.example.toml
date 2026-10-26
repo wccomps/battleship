@@ -70,10 +70,6 @@ url = "https://192.0.2.123:8006"
 # template_builds = 4            # templates built at once; each copy also takes a clone slot
 # deletes = 4                    # VM deletes at once; more time out on Proxmox's user.cfg lock and leave VMs half-deleted
 
-# Teardown shuts VMs down cleanly first so routers release their DHCP lease.
-# [teardown]
-# shutdown_timeout = "60s"       # then Proxmox hard-stops the VM
-
 # [retry]
 # transient_patterns = ["file exists", "does not exist", "got no worker upid", "can't lock file", "is locked", "timeout"]
 # attempts = 7

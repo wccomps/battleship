@@ -11,8 +11,8 @@ import (
 func TestClusterResourcesReadsVMsNodesAndStorageInOneCall(t *testing.T) {
 	f, c := newFake(t)
 	f.routes["GET /cluster/resources"] = jsonData(`[
-		{"type":"qemu","vmid":9005,"name":"teak.x.tpl","node":"cedar","status":"stopped","template":1,"maxmem":8589934592,"maxdisk":34359738368},
-		{"type":"qemu","vmid":10105,"name":"team01-teak","node":"cedar","status":"running","maxmem":4294967296,"maxdisk":1.073741824e+10},
+		{"type":"qemu","vmid":9005,"name":"teak.x.tpl","node":"cedar","status":"stopped","template":1,"maxcpu":4,"maxmem":8589934592,"maxdisk":34359738368},
+		{"type":"qemu","vmid":10105,"name":"team01-teak","node":"cedar","status":"running","maxcpu":2,"maxmem":4294967296,"maxdisk":1.073741824e+10},
 		{"type":"lxc","vmid":300,"name":"ct","node":"cedar"},
 		{"type":"node","node":"cedar","status":"online","mem":68719476736,"maxmem":274877906944},
 		{"type":"node","node":"spruce","status":"offline"},
@@ -28,7 +28,7 @@ func TestClusterResourcesReadsVMsNodesAndStorageInOneCall(t *testing.T) {
 	if n := len(f.requests); n != 1 || f.requests[0] != "GET /cluster/resources?" {
 		t.Errorf("requests = %v, want one unfiltered /cluster/resources", f.requests)
 	}
-	if len(res.VMs) != 2 || res.VMs[0].MaxMem != 8<<30 || res.VMs[0].MaxDisk != 32<<30 || res.VMs[1].MaxDisk != 10<<30 || !res.VMs[0].Template {
+	if len(res.VMs) != 2 || res.VMs[0].MaxCPU != 4 || res.VMs[0].MaxMem != 8<<30 || res.VMs[0].MaxDisk != 32<<30 || res.VMs[1].MaxCPU != 2 || res.VMs[1].MaxDisk != 10<<30 || !res.VMs[0].Template {
 		t.Errorf("VMs = %+v", res.VMs)
 	}
 	wantNodes := []NodeResource{{Node: "cedar", Status: "online", Mem: 64 << 30, MaxMem: 256 << 30}, {Node: "spruce", Status: "offline"}}

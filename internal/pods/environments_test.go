@@ -105,19 +105,22 @@ func TestEnvironmentHostWarnings(t *testing.T) {
 	f.CPUModels = []string{"baseline", "baseline-nested"}
 	cfg := envConfig()
 
-	// Clean router and host: no warnings.
-	f.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;router"},
+	// Clean router and host: no warnings (including 12 GiB Windows and 8 GiB Linux at the limits).
+	f.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;router", MaxMem: 16 << 30},
 		map[string]string{"net0": "virtio=BC:24:11:00:00:01,bridge=devext01", "net1": "virtio=BC:24:11:00:00:02,bridge=devint01",
 			"cpu": "custom-baseline", "agent": "1", "scsi0": "competitions:2100/vm-2100-disk-0.qcow2"})
-	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha"},
+	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", MaxMem: 8 << 30},
 		map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint01",
 			"cpu": "cputype=custom-baseline-nested", "agent": "1,fstrim_cloned_disks=1", "scsi0": "competitions:2101/vm-2101-disk-0.qcow2",
-			"ide2": "competitions:vm-2101-cloudinit,media=cdrom"})
-	// Drifted host: missing tags, wrong bridge, extra NIC, VLAN tag, wrong CPU, guest agent off, CD-ROM attached.
-	f.Add(proxmox.VM{VMID: 2102, Name: "elm.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: ""},
+			"ide2": "competitions:vm-2101-cloudinit,media=cdrom", "ostype": "l26"})
+	f.Add(proxmox.VM{VMID: 2103, Name: "win.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", MaxMem: 12 << 30},
+		map[string]string{"net0": "virtio=BC:24:11:00:00:08,bridge=devint01",
+			"cpu": "custom-baseline", "agent": "1", "scsi0": "competitions:2103/vm-2103-disk-0.qcow2", "ostype": "win11"})
+	// Drifted host: missing tags, wrong bridge, extra NIC, VLAN tag, wrong CPU, guest agent off, CD-ROM attached, >8 GiB Linux memory.
+	f.Add(proxmox.VM{VMID: 2102, Name: "elm.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "", MaxMem: 10 << 30},
 		map[string]string{"net0": "virtio=BC:24:11:00:00:04,bridge=devint02,tag=10", "net1": "virtio=BC:24:11:00:00:05,bridge=devext01",
 			"cpu": "x86-64-v2-AES", "agent": "0", "scsi0": "competitions:2102/vm-2102-disk-0.qcow2",
-			"ide2": "local:iso/debian.iso,media=cdrom"})
+			"ide2": "local:iso/debian.iso,media=cdrom", "ostype": "l26"})
 	// Drifted router: swapped bridges and default CPU.
 	f.Add(proxmox.VM{VMID: 2200, Name: "gw.oscar.lima", Node: "alder", Pool: "dev-02", Tags: "dev;oscar.lima;router"},
 		map[string]string{"net0": "virtio=BC:24:11:00:00:06,bridge=devint02", "net1": "virtio=BC:24:11:00:00:07,bridge=devext02",
@@ -129,8 +132,9 @@ func TestEnvironmentHostWarnings(t *testing.T) {
 	}
 	gw, _ := envs[0].Host("gw.kilo.alpha")
 	teak, _ := envs[0].Host("teak.kilo.alpha")
-	if len(gw.Warnings) != 0 || len(teak.Warnings) != 0 {
-		t.Errorf("clean hosts have warnings: gw=%v teak=%v", gw.Warnings, teak.Warnings)
+	win, _ := envs[0].Host("win.kilo.alpha")
+	if len(gw.Warnings) != 0 || len(teak.Warnings) != 0 || len(win.Warnings) != 0 {
+		t.Errorf("clean hosts have warnings: gw=%v teak=%v win=%v", gw.Warnings, teak.Warnings, win.Warnings)
 	}
 	elm, _ := envs[0].Host("elm.kilo.alpha")
 	wantElm := []string{
@@ -141,6 +145,7 @@ func TestEnvironmentHostWarnings(t *testing.T) {
 		"CPU x86-64-v2-AES, expected baseline or baseline-nested",
 		"guest agent off",
 		"CD-ROM attached",
+		"10 GiB of memory (Linux VMs are usually at most 8 GiB)",
 	}
 	if !slices.Equal(elm.Warnings, wantElm) {
 		t.Errorf("elm.Warnings = %v, want %v", elm.Warnings, wantElm)
