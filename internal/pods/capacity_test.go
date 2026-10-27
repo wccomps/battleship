@@ -85,13 +85,8 @@ func TestCapacityOvercommitWarns(t *testing.T) {
 	if !reflect.DeepEqual(c.Usage, want) {
 		t.Errorf("usage =\n %+v\nwant\n %+v", c.Usage, want)
 	}
-	ws := c.Warnings()
-	wantWarn := []CapacityWarning{
-		{Over: true, Text: "cedar: needs 96 GiB of memory, 40 GiB free"},
-		{Over: true, Text: "competitions on cedar: needs 416 GiB of disk, 100 GiB free"},
-	}
-	if !reflect.DeepEqual(ws, wantWarn) {
-		t.Errorf("warnings = %+v, want %+v", ws, wantWarn)
+	if c.Usage[0].Over() || !c.Usage[1].Over() || !c.Usage[2].Over() {
+		t.Errorf("over = [%v %v %v], want [false true true]", c.Usage[0].Over(), c.Usage[1].Over(), c.Usage[2].Over())
 	}
 	if len(c.Notes) != 0 {
 		t.Errorf("notes = %q, want none for full clones", c.Notes)
@@ -113,8 +108,10 @@ func TestCapacityWithoutOvercommitIsQuiet(t *testing.T) {
 	if !reflect.DeepEqual(c.Usage, want) {
 		t.Errorf("usage = %+v, want %+v", c.Usage, want)
 	}
-	if ws := c.Warnings(); len(ws) != 0 {
-		t.Errorf("warnings = %+v, want none", ws)
+	for _, u := range c.Usage {
+		if u.Over() || u.Near() {
+			t.Errorf("usage %+v is tight", u)
+		}
 	}
 	if len(c.Notes) != 0 {
 		t.Errorf("notes = %q, want none", c.Notes)
@@ -130,9 +127,8 @@ func TestCapacityNearFullIsASofterNotice(t *testing.T) {
 		res.VMs = append(res.VMs, proxmox.VM{VMID: 20000 + i, Node: "birch", Status: "stopped", MaxMem: 8 * gib})
 	}
 	c := EstimateCapacity(p, res, deployCfg(true))
-	ws := c.Warnings()
-	if len(ws) != 1 || ws[0].Over || ws[0].Text != "birch: memory would be 91% used (needs 32 GiB, 56 GiB free)" {
-		t.Errorf("warnings = %+v", ws)
+	if len(c.Usage) != 1 || c.Usage[0].Over() || !c.Usage[0].Near() {
+		t.Errorf("usage = %+v, want one near-full usage", c.Usage)
 	}
 }
 

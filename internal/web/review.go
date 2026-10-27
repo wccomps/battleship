@@ -24,6 +24,8 @@ type reviewView struct {
 	// Rows are the VMs, in the plan's order; Image and Addr say whether the
 	// table has those columns.
 	Rows        []reviewRow
+	RowsFold    bool
+	RowsSummary string
 	Image, Addr bool
 	Set         bool   // a teardown of everything: each VM's set
 	Note        string // a line after the rows
@@ -89,12 +91,16 @@ func review(op operation, in jobs.Inputs, plan *pods.Plan, nothing string, lan c
 	if r != nil && nothing != "" && !r.Blocked {
 		r.Say, r.Blocked = nothing, true
 	}
+	if r != nil && len(r.Rows) > 8 && !slices.ContainsFunc(r.Rows, func(row reviewRow) bool { return row.Blocked != "" }) {
+		r.RowsFold = true
+		r.RowsSummary = countVMs(len(r.Rows))
+	}
 	return r
 }
 
 // registerReview describes registering a base image: the source VM, the
-// image it becomes and how, its kind, where the template lands, the details
-// it writes, and the source's notes, which the copy keeps.
+// image it becomes and how, its kind, the details it writes, and the
+// source's notes, which the copy keeps.
 func registerReview(op operation, in jobs.Inputs, plan *pods.Plan, _ config.LAN) *reviewView {
 	if len(plan.Items) != 1 {
 		return nil
@@ -113,13 +119,12 @@ func registerReview(op operation, in jobs.Inputs, plan *pods.Plan, _ config.LAN)
 	}
 	r.Facts = append(r.Facts,
 		reviewFact{Label: "From", Code: src.Name, Text: "VMID " + strconv.Itoa(src.VMID) + " · " + src.Node},
-		reviewFact{Label: "Becomes", Code: it.Name, Meta: how, Change: formQuery(op, in)})
+		reviewFact{Label: "Becomes", Code: it.Name, Text: "VMID " + strconv.Itoa(it.VMID) + " · " + it.Node, Meta: how, Change: formQuery(op, in)})
 	for _, k := range pods.Tags(it.Tags) {
 		if use, ok := kindUses[k]; ok {
 			r.Facts = append(r.Facts, reviewFact{Label: "Kind", Text: k, Meta: use})
 		}
 	}
-	r.Facts = append(r.Facts, reviewFact{Label: "Template", Text: "VMID " + strconv.Itoa(it.VMID) + " on " + it.Node})
 	if it.Supersedes != nil {
 		r.Facts = append(r.Facts, reviewFact{Label: "Replaces", Code: it.Supersedes.Name, Meta: "deprecated once this is registered"})
 	}
@@ -328,7 +333,6 @@ func envPowerReview(_ operation, in jobs.Inputs, plan *pods.Plan, _ config.LAN) 
 	}
 	it := plan.Items[0]
 	r := &reviewView{Verb: powerLabel(in.Action), Subject: it.Name, Deletes: in.Action == "stop"}
-	r.Rows = []reviewRow{{Name: it.Name, Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}}
 	if it.Blocked != "" {
 		r.Say, r.Blocked = sentence(it.Blocked), true
 	} else {
@@ -338,25 +342,13 @@ func envPowerReview(_ operation, in jobs.Inputs, plan *pods.Plan, _ config.LAN) 
 }
 
 // envDeleteHostReview describes stopping and deleting one environment host.
-func envDeleteHostReview(op operation, _ jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
+func envDeleteHostReview(op operation, _ jobs.Inputs, plan *pods.Plan, _ config.LAN) *reviewView {
 	if len(plan.Items) != 1 {
 		return nil
 	}
 	it := plan.Items[0]
 	pool := poolOf(plan.Items)
-	r := &reviewView{Verb: op.Verb, Subject: it.Name, Image: true, Addr: true, Deletes: true}
-	row := reviewRow{Name: it.Name, Router: slices.Contains(pods.Tags(it.Tags), pods.ImageRouter),
-		Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}
-	if it.Notes != nil {
-		row.Image = it.Notes.Base
-		if it.Notes.IP.IsValid() {
-			row.Addr = lanOctet(lan, it.Notes.IP)
-		}
-	}
-	if row.Router {
-		row.Addr = "." + strconv.Itoa(pods.GatewayOctet)
-	}
-	r.Rows = []reviewRow{row}
+	r := &reviewView{Verb: op.Verb, Subject: it.Name, Deletes: true}
 	if it.Blocked != "" {
 		r.Say, r.Blocked = sentence(it.Blocked), true
 	} else {
@@ -445,8 +437,11 @@ func podTeardownReview(op operation, in jobs.Inputs, plan *pods.Plan, _ config.L
 			what = "every matching VM"
 		}
 	}
-	for _, f := range previewFacts(in, false, 0) {
-		r.Facts = append(r.Facts, reviewFact{Label: f.Label, Text: f.Value})
+	if len(in.Hosts) > 0 {
+		r.Facts = append(r.Facts, reviewFact{Label: "Hosts", Text: hostsText(in.Hosts)})
+	}
+	if len(in.VMs) > 0 {
+		r.Facts = append(r.Facts, reviewFact{Label: "Only these VMs", Text: strings.Join(in.VMs, ", ")})
 	}
 	deletes, diskSay := r.tallyTeardown(plan, func(it pods.Item, row *reviewRow) {
 		if it.Host != "" {
@@ -473,20 +468,17 @@ func lanOctet(lan config.LAN, a netip.Addr) string {
 // imageReview describes opening a base image for editing, deprecating it
 // or deleting it.
 func imageReview(op operation, in jobs.Inputs, plan *pods.Plan, _ config.LAN) *reviewView {
-	r := &reviewView{Verb: op.Verb, Subject: cmp.Or(in.Image, in.Family)}
-	for _, it := range plan.Items {
-		row := reviewRow{Name: it.Name, Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}
-		if it.Source != nil {
-			row.Image, r.Image = it.Source.Name, true
-		}
-		r.Rows = append(r.Rows, row)
+	r := &reviewView{Verb: op.Verb, Subject: cmp.Or(in.Image, in.Family), Deletes: op.Kind == pods.KindImageDelete}
+	if len(plan.Items) == 1 && plan.Items[0].Blocked != "" {
+		r.Say, r.Blocked = sentence(plan.Items[0].Blocked), true
+		return r
 	}
 	names := itemNames(plan.Items)
 	switch op.Kind {
 	case pods.KindImageEdit:
 		from := "the newest version"
-		if len(r.Rows) == 1 && r.Rows[0].Image != "" {
-			from = r.Rows[0].Image
+		if len(plan.Items) == 1 && plan.Items[0].Source != nil && plan.Items[0].Source.Name != "" {
+			from = plan.Items[0].Source.Name
 		}
 		r.Say = "Copies " + from + " as " + names + " on the edit network, for you to patch and register as the next version."
 	case pods.KindImageDeprecate:

@@ -45,13 +45,12 @@ func TestPreviewWarnsAboutCapacity(t *testing.T) {
 	action, form, body := h.preview(&lead, "/power", url.Values{"teams": {"1"}, "action": {"start"}})
 	contains(t, "over capacity", body,
 		`<h2 class="sub">Capacity</h2>`,
-		"n1: needs 12 GiB of memory, 4 GiB free.",
-		"You can still confirm if the overcommit is deliberate.",
+		"Over capacity: you can still confirm if the overcommit is deliberate.",
 		`<li class="cap-over">`,
 		`<span class="bar" aria-hidden="true"><span class="u w95"></span><span class="n w5"></span></span>`,
 		"60 GiB used of 64 GiB, needs 12 GiB, 4 GiB free",
 	)
-	lacks(t, "over capacity", body, ` style=`)
+	lacks(t, "over capacity", body, ` style=`, "n1: needs 12 GiB of memory")
 	if action != "/power/confirm" {
 		t.Fatalf("no confirm form over capacity: %q", action)
 	}
@@ -60,16 +59,16 @@ func TestPreviewWarnsAboutCapacity(t *testing.T) {
 	*res = *capacityResources(60)
 	_, form, body = h.preview(&lead, "/power", url.Values{"teams": {"1"}, "action": {"start"}})
 	contains(t, "plenty of room", body, `<details class="logbox">`, `<summary class="disc"><h2 class="sub">Capacity</h2><span class="meta">· fits on 1 node</span></summary>`, `<li class="cap-ok">`, "4 GiB used of 64 GiB, needs 12 GiB, 60 GiB free")
-	lacks(t, "plenty of room", body, "needs 12 GiB of memory", "overcommit", `<details class="logbox" open>`)
+	lacks(t, "plenty of room", body, "overcommit", `<details class="logbox" open>`)
 	if fp := form.Get("fingerprint"); fp != overFP {
 		t.Errorf("fingerprint changed with capacity: %s vs %s", fp, overFP)
 	}
 
-	// Near full is a softer notice, outside the warnings.
+	// Near full is shown directly on the row without a duplicate notice below.
 	*res = *capacityResources(16)
 	_, _, body = h.preview(&lead, "/power", url.Values{"teams": {"1"}, "action": {"start"}})
-	contains(t, "near full", body, `<li class="cap-near">`, `<p class="meta">n1: memory would be 94% used (needs 12 GiB, 16 GiB free)</p>`)
-	lacks(t, "near full", body, "overcommit")
+	contains(t, "near full", body, `<li class="cap-near">`, "48 GiB used of 64 GiB, needs 12 GiB, 16 GiB free (94% used)")
+	lacks(t, "near full", body, "overcommit", "memory would be")
 
 	// Stopping needs nothing, so there is no capacity section.
 	_, _, body = h.preview(&lead, "/power", url.Values{"teams": {"1"}, "action": {"stop"}})

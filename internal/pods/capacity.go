@@ -68,39 +68,6 @@ type Capacity struct {
 	Notes []string `json:"notes"`
 }
 
-// CapacityWarning is one preview warning: Over means more than is free,
-// otherwise it would be over 90% used.
-type CapacityWarning struct {
-	Over bool
-	Text string
-}
-
-// Warnings lists usages over, then near full, e.g.
-// "cedar: needs 96 GiB of memory, 40 GiB free".
-func (c *Capacity) Warnings() []CapacityWarning {
-	if c == nil {
-		return nil
-	}
-	var over, near []CapacityWarning
-	for _, u := range c.Usage {
-		what := "of memory"
-		word := "memory"
-		if u.Kind == UsageStorage {
-			what, word = "of disk", "disk"
-		}
-		switch {
-		case u.Over():
-			over = append(over, CapacityWarning{Over: true,
-				Text: fmt.Sprintf("%s: needs %s %s, %s free", u.Label(), GiB(u.Needed), what, GiB(u.Free()))})
-		case u.Near():
-			pct := float64(u.Used+u.Needed) * 100 / float64(u.Total)
-			near = append(near, CapacityWarning{
-				Text: fmt.Sprintf("%s: %s would be %.0f%% used (needs %s, %s free)", u.Label(), word, pct, GiB(u.Needed), GiB(u.Free()))})
-		}
-	}
-	return append(over, near...)
-}
-
 // GiB formats a size in GiB: whole if 10 or more or integral, else one
 // decimal.
 func GiB(b int64) string {
