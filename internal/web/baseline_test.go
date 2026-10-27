@@ -28,7 +28,8 @@ func TestOldToolBaselines(t *testing.T) {
 
 	_, form, body := h.preview(&op, "/reset", url.Values{"teams": {"1"}})
 	contains(t, "reset preview", body,
-		"2 will run</span>", "<dt>Snapshot</dt><dd>baseline</dd>",
+		"<dt>Snapshot</dt><dd>baseline</dd>",
+		"2 VMs roll back to their baseline snapshots and start.",
 		"<td>stop · rollback to baseline (fresh_clone_20261002034615) · start</td>",
 		"<td>stop · rollback to baseline (fresh_clone_20260901000000) · start</td>")
 	if form.Get("snapshot") != "" {

@@ -38,9 +38,8 @@
 {{- if .Nothing}}
 <p class="say">{{icon "blocked"}}<span>{{.Nothing}}</span></p>
 {{- end}}
-{{- if and .Items (or .Blocked (ne (printf "%s" .Op.Kind) "deploy"))}}
+{{- if or .Blocked .AlreadyN}}
 <div class="chips">
-{{- if .Runnable}}<span class="chip is-running">{{icon "done"}}{{.Runnable}} will run</span>{{end}}
 {{- if .Blocked}}<span class="chip">{{icon "blocked"}}{{.Blocked}} blocked</span>{{end}}
 {{- if .AlreadyN}}<span class="chip">{{icon "dash"}}{{.AlreadyN}} already {{.AlreadyWord}}</span>{{end}}
 </div>
