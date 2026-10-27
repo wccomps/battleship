@@ -329,19 +329,18 @@ func TestRegisterReview(t *testing.T) {
 	contains(t, "the review", body, `<span class="eyebrow">Review ·</span> Register <span class="vm">elm-build</span>`,
 		"Copies <span class=\"name\">elm-build</span> into a new template, <span class=\"name\">elm-v1</span>. The build VM stays as it is.",
 		`<dt>From</dt><dd><code>elm-build</code> · VMID 152 · n1</dd>`,
-		`<dt>Becomes</dt><dd><code>elm-v1</code> <span class="meta">· new family</span> <a class="btn sm" href="/images/register?family=elm&amp;image_kind=router&amp;vmid=152">Change</a></dd>`,
+		`<dt>Becomes</dt><dd><code>elm-v1</code> · VMID 8004 · n1 <span class="meta">· new family</span> <a class="btn sm" href="/images/register?family=elm&amp;image_kind=router&amp;vmid=152">Change</a></dd>`,
 		`<dt>Kind</dt><dd>router <span class="meta">· offered as the router when creating environments</span></dd>`,
-		`<dt>Template</dt><dd>VMID 8004 on n1</dd>`,
 		`<h2 class="sub">Notes</h2><div class="notes box">root / opnsense`+"\nLAN .2</div>",
 		`<a class="btn first" href="/images" data-close>Back</a>`, "Register elm-v1</button>")
-	lacks(t, "the review", body, "will run", "<table")
+	lacks(t, "the review", body, "will run", "<table", "<dt>Template</dt>")
 	if rec := h.post(&sess, action, fields); rec.Code != http.StatusSeeOther {
 		t.Fatalf("confirm = %d\n%s", rec.Code, rec.Body)
 	}
 
 	// An edit copy says so, and that it replaces the current version.
 	_, _, body = h.preview(&sess, "/images/register", url.Values{"vmid": {"141"}, "family": {"debian-12"}})
-	contains(t, "the edit copy's review", body, `<code>debian-12-v3</code> <span class="meta">· edit copy of v2</span>`,
+	contains(t, "the edit copy's review", body, `<code>debian-12-v3</code> · VMID 8005 · n1 <span class="meta">· edit copy of v2</span>`,
 		`<dt>Replaces</dt><dd><code>debian-12-v2</code> <span class="meta">· deprecated once this is registered</span></dd>`, "Register debian-12-v3</button>")
 
 	// Blocked: the reason, and nothing to confirm.

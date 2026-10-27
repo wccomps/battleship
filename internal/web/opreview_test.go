@@ -109,38 +109,33 @@ func TestImageReviews(t *testing.T) {
 		{"/images/deprecate", url.Values{"image": {"debian-12-v2"}}, []string{
 			`<span class="eyebrow">Review ·</span> Deprecate <span class="vm">debian-12-v2</span></h1>`,
 			`<span><span class="name">debian-12-v2</span> will no longer be offered for new hosts. Hosts made from it keep working.</span>`,
-			`<thead><tr><th scope="col">VM</th><th scope="col" class="r">VMID · node</th></tr></thead>`,
-			`<tr><td><span class="vm">debian-12-v2</span></td><td class="r wide meta">8002 · n1</td></tr>`,
 			`<a class="btn first" href="/images/family/debian-12" data-panel-link>Back</a>`,
 			`<button type="submit" class="btn pri">`, "Deprecate debian-12-v2</button>"}},
 		{"/images/delete", url.Values{"image": {"debian-12-v1"}}, []string{
 			`<span class="eyebrow">Review ·</span> Delete <span class="vm">debian-12-v1</span></h1>`,
 			"will be deleted. Hosts made from it keep working: they are full copies. This can&#39;t be undone.",
-			`<tr><td><span class="vm">debian-12-v1</span></td><td class="r wide meta">8001 · n1</td></tr>`,
 			`<a class="btn first" href="/images/family/debian-12" data-panel-link>Back</a>`,
 			`<button type="submit" class="btn pri bad">`, "Delete debian-12-v1</button>"}},
 		{"/images/edit", url.Values{"family": {"gw"}}, []string{
 			`<span class="eyebrow">Review ·</span> Edit <span class="vm">gw</span></h1>`,
 			`<span>Copies <span class="name">gw-v1</span> as <span class="name">gw-edit</span> on the edit network, for you to patch and register as the next version.</span>`,
-			`<thead><tr><th scope="col">VM</th><th scope="col">Image</th><th scope="col" class="r">VMID · node</th></tr></thead>`,
-			`<tr><td><span class="vm">gw-edit</span></td><td class="wide"><code>gw-v1</code></td><td class="r wide meta">`,
 			`<a class="btn first" href="/images/family/gw" data-panel-link>Back</a>`,
 			"Copy as gw-edit</button>"}},
 	} {
 		_, _, body := h.preview(&sess, c.path, c.form)
 		contains(t, c.path, body, append(c.want, `<a class="btn ghost sq" href="/images" data-close aria-label="Close">`)...)
-		lacks(t, c.path, body, "will run", ">Steps<", "<dt>", `class="blk"`)
+		lacks(t, c.path, body, "will run", ">Steps<", "<dt>", "<table", `class="blk"`)
 	}
 
-	// Blocked: the row striped with its reason, and nothing to confirm.
+	// Blocked: the reason in the summary, and nothing to confirm.
 	for path, form := range map[string]url.Values{
 		"/images/deprecate": {"image": {"debian-12-v1"}},
 		"/images/edit":      {"family": {"debian-12"}},
 	} {
 		rec := h.post(&sess, path+"/preview", form)
 		body := rec.Body.String()
-		contains(t, path+" blocked", body, `<p class="say bad">`, "Every VM is blocked: nothing can run.", `<tr class="blk">`)
-		lacks(t, path+" blocked", body, "/confirm", `class="btn pri`)
+		contains(t, path+" blocked", body, `<p class="say bad">`)
+		lacks(t, path+" blocked", body, "/confirm", `class="btn pri`, "<table")
 	}
 }
 

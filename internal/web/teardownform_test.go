@@ -113,13 +113,12 @@ func TestTeardownReviewOfASet(t *testing.T) {
 	contains(t, "set review", body,
 		`<h1 id="pv-title"><span class="eyebrow">Review ·</span> Tear down <span class="vm">kilo.alpha</span></h1>`,
 		`Tears down <span class="name">kilo.alpha</span> in pods 01-03: 2 VMs. Each is stopped and deleted with its disks. This can&#39;t be undone.`,
-		`<dt>Pods</dt><dd>01-03</dd>`, `<dt>Hosts</dt><dd>all</dd>`,
 		`<span class="vm">team01-dc</span>`, `<span class="vm">team02-dc</span>`,
 		`<h2 class="sub">Not touched</h2>`,
 		`<span class="name">team01-web</span> and <span class="name">team02-web</span> are of <span class="name">tango.delta</span>.`,
 		`<span class="name">team03-dc</span> and <span class="name">team03-web</span> are of an unknown set, with no single set tag, which only a teardown that names no set removes.`,
 		`Type <code>1-3</code> to confirm`, "Delete 2 VMs</button>")
-	lacks(t, "set review", body, `<span class="vm">team01-web</span></td>`, `<th scope="col">Set</th>`)
+	lacks(t, "set review", body, `<span class="vm">team01-web</span></td>`, `<th scope="col">Set</th>`, "<dt>Pods</dt>", "<dt>Hosts</dt>")
 	if form.Get("set") != "kilo.alpha" || form.Has("pattern") {
 		t.Errorf("confirm fields = %v", form)
 	}

@@ -489,8 +489,8 @@ func TestRetryFollowsPrivileges(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("lead's retry = %d\n%s", rec.Code, rec.Body)
 	}
-	contains(t, "lead's retry", rec.Body.String(), "<span class=\"vm\">team01-web</span>", "<dt>Rebuild templates</dt><dd>off</dd>")
-	lacks(t, "lead's retry", rec.Body.String(), "<span class=\"vm\">team01-dc</span>")
+	contains(t, "lead's retry", rec.Body.String(), "<span class=\"vm\">team01-web</span>", "<dt>Retry of</dt><dd>#"+itoa(id)+"</dd>")
+	lacks(t, "lead's retry", rec.Body.String(), "<span class=\"vm\">team01-dc</span>", "Rebuild templates")
 
 	// A job that succeeded has nothing to retry.
 	ok := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "2", Action: "start"}, byOperator)

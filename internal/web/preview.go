@@ -73,13 +73,12 @@ type previewPage struct {
 }
 
 // capacityView is the preview's resource summary: a row per node memory or
-// clone storage used, plus notices. Over-capacity warnings go in Warnings.
+// clone storage used, plus notes.
 type capacityView struct {
 	Rows    []capacityRow
 	Tight   bool     // any row is near or over capacity
 	Summary string   // short summary when all rows fit
-	Notices []string // more than 90% used afterwards
-	Notes   []string // e.g. linked clones grow
+	Notes   []string // e.g. nodes without Sys.Audit
 }
 
 // capacityRow is one usage bar: Used and Need are widths in 5% steps (classes
@@ -458,7 +457,7 @@ func previewFacts(in jobs.Inputs, fromGrid bool, retryOf int64) []fact {
 		return nil // its review says it all
 	case !fromGrid:
 		fs = append(fs, fact{"Pods", teamsText(in.Teams)})
-		if len(in.Hosts) > 0 || in.Kind == pods.KindDeploy || in.Kind == pods.KindTeardown {
+		if len(in.Hosts) > 0 {
 			fs = append(fs, fact{"Hosts", hostsText(in.Hosts)})
 		}
 		if len(in.VMs) > 0 {
@@ -512,13 +511,18 @@ func teamlessFacts(in jobs.Inputs, pool string) []fact {
 	return fs
 }
 
-// askedFacts are the inputs beyond teams and hosts that the title (opLabelOf)
-// doesn't say.
+// askedFacts are the non-default inputs beyond teams and hosts that the title
+// (opLabelOf) doesn't say.
 func askedFacts(in jobs.Inputs) []fact {
 	var fs []fact
 	switch in.Kind {
 	case pods.KindDeploy:
-		fs = append(fs, fact{"Rebuild templates", onOff(in.Rebuild)}, fact{"Baseline snapshot", onOff(!in.NoSnapshot)})
+		if in.Rebuild {
+			fs = append(fs, fact{"Rebuild templates", "on"})
+		}
+		if in.NoSnapshot {
+			fs = append(fs, fact{"Baseline snapshot", "off"})
+		}
 	case pods.KindReset:
 		if in.Snapshot == "" {
 			fs = append(fs, fact{"Snapshot", "baseline"})
@@ -527,43 +531,37 @@ func askedFacts(in jobs.Inputs) []fact {
 		if in.Description != "" {
 			fs = append(fs, fact{"Description", in.Description})
 		}
-		fs = append(fs, fact{"Include RAM", onOff(in.VMState)})
+		if in.VMState {
+			fs = append(fs, fact{"Include RAM", "on"})
+		}
 	}
 	return fs
 }
 
-func onOff(b bool) string {
-	if b {
-		return "on"
-	}
-	return "off"
-}
-
-// capacityOf describes c for the page, appending a warning per usage that
-// would go over. It is nil if c lists nothing.
+// capacityOf describes c for the page, warning when any usage goes over. It is
+// nil if c lists nothing.
 func capacityOf(c *pods.Capacity, warnings *[]string) *capacityView {
 	if c == nil || len(c.Usage)+len(c.Notes) == 0 {
 		return nil
 	}
 	v := &capacityView{Notes: c.Notes}
 	over := false
-	for _, w := range c.Warnings() {
-		if w.Over {
-			*warnings = append(*warnings, w.Text+".")
-			over = true
-		} else {
-			v.Notices = append(v.Notices, w.Text)
-		}
-	}
-	if over {
-		*warnings = append(*warnings, "You can still confirm if the overcommit is deliberate.")
-	}
-	v.Tight = over || len(v.Notices) > 0
 	var nodes, storages int
 	var lastStorage string
 	for _, u := range c.Usage {
-		row := capacityRow{Label: u.Label(), Level: "ok",
-			Text: fmt.Sprintf("%s used of %s, needs %s, %s free", pods.GiB(u.Used), pods.GiB(u.Total), pods.GiB(u.Needed), pods.GiB(u.Free()))}
+		text := fmt.Sprintf("%s used of %s, needs %s, %s free", pods.GiB(u.Used), pods.GiB(u.Total), pods.GiB(u.Needed), pods.GiB(u.Free()))
+		level := "ok"
+		switch {
+		case u.Over():
+			level = "over"
+			over = true
+		case u.Near():
+			level = "near"
+			pct := float64(u.Used+u.Needed) * 100 / float64(u.Total)
+			text += fmt.Sprintf(" (%.0f%% used)", pct)
+		}
+		v.Tight = v.Tight || level != "ok"
+		row := capacityRow{Label: u.Label(), Level: level, Text: text}
 		if u.Kind == pods.UsageMemory {
 			row.Label += " memory"
 			nodes++
@@ -571,18 +569,15 @@ func capacityOf(c *pods.Capacity, warnings *[]string) *capacityView {
 			storages++
 			lastStorage = u.Label()
 		}
-		switch {
-		case u.Over():
-			row.Level = "over"
-		case u.Near():
-			row.Level = "near"
-		}
 		row.Used = step5(u.Used, u.Total)
 		row.Need = min(step5(u.Needed, u.Total), 100-row.Used)
 		if row.Need == 0 && u.Needed > 0 && row.Used < 100 {
 			row.Need = 5 // small, but there
 		}
 		v.Rows = append(v.Rows, row)
+	}
+	if over {
+		*warnings = append(*warnings, "Over capacity: you can still confirm if the overcommit is deliberate.")
 	}
 	if !v.Tight {
 		var where []string
