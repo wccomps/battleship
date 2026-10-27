@@ -88,6 +88,44 @@ type rowView struct {
 	Cells []cellView
 }
 
+// Pressed reports whether every selectable cell in the row is ticked.
+func (r rowView) Pressed() bool {
+	any := false
+	for _, c := range r.Cells {
+		if c.Pick == "" || c.Busy != 0 {
+			continue
+		}
+		if !c.Checked {
+			return false
+		}
+		any = true
+	}
+	return any
+}
+
+// HostPressed reports whether every selectable cell in host's column is ticked.
+func (v gridView) HostPressed(host string) bool {
+	col := slices.Index(v.Hosts, host)
+	if col < 0 {
+		return false
+	}
+	any := false
+	for _, r := range v.Rows {
+		if col >= len(r.Cells) {
+			continue
+		}
+		c := r.Cells[col]
+		if c.Pick == "" || c.Busy != 0 {
+			continue
+		}
+		if !c.Checked {
+			return false
+		}
+		any = true
+	}
+	return any
+}
+
 // stateCount is how many cells show a state.
 type stateCount struct {
 	State string

@@ -198,7 +198,8 @@ func TestGridEmptyDeployClickThrough(t *testing.T) {
 	form.Set("teams", "4-5")
 	confirm, fields, body := h.preview(&lead, "/deploy", form)
 	contains(t, "deploy preview from the grid", body,
-		`Deploy <span class="vm">kilo.alpha</span></h1>`, "4 will run</span>",
+		`Deploy <span class="vm">kilo.alpha</span></h1>`,
+		`<summary class="disc"><h2 class="sub">VMs</h2><span class="meta">· 4 VMs</span></summary>`,
 		`<dt>Pods</dt><dd><span class="vm">04-05</span></dd>`,
 		"team04-dc", "team04-web", "team05-dc", "team05-web",
 		"Building its template stops master <span class=\"name\">dc.kilo.alpha</span>, which is running, until the copy finishes.")

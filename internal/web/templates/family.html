@@ -43,7 +43,7 @@
 {{- end}}{{end}}
 {{- with .Source}}
 <form method="post" action="/images/register/preview">{{template "csrf" $csrf}}<input type="hidden" name="vmid" value="{{.VMID}}"><input type="hidden" name="family" value="{{$d.Family}}">
-<button class="btn{{if not $d.Edit}} pri{{end}}" type="submit"{{if not $d.MayClone}} disabled{{end}}>New version from {{.Name}}</button></form>
+<button class="btn{{if or (not $d.Edit) $d.Edit.Blocked}} pri{{end}}" type="submit"{{if not $d.MayClone}} disabled{{end}}>New version from {{.Name}}</button></form>
 {{- end}}
 </div>
 {{- end}}

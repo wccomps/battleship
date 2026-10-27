@@ -30,10 +30,14 @@
     if (!cur || cur.outerHTML === fresh.outerHTML) return;
     var box = cur.querySelector("input[type=checkbox]"), freshBox = fresh.querySelector("input[type=checkbox]");
     if (box && freshBox) freshBox.checked = box.checked;
-    var focused = cur.contains(document.activeElement), onBox = box && document.activeElement === box;
+    var focused = cur.contains(document.activeElement);
+    var idx = focused ? Array.prototype.indexOf.call(cur.querySelectorAll("a, button, input"), document.activeElement) : -1;
     cur.replaceWith(fresh);
-    var target = onBox ? freshBox : fresh.querySelector("a, button, input");
-    if (focused && target) target.focus();
+    if (focused) {
+      var controls = fresh.querySelectorAll("a, button, input");
+      var target = controls[idx] || controls[0];
+      if (target) target.focus();
+    }
   }
 
   // -- The live dot
@@ -77,7 +81,6 @@
       }
     });
   }
-  setInterval(ages, 1000);
   ages();
 
   // A job's running times: data-tick is when each began (Unix ms), reckoned
@@ -93,7 +96,7 @@
       });
     });
   }
-  setInterval(ticks, 1000);
+  setInterval(function () { ages(); ticks(); }, 1000);
 
   // -- Live updates
 
@@ -442,7 +445,7 @@
     machineRows(sheet);
     passwords(sheet);
     each(sheet.querySelectorAll("[data-fill]"), fill);
-    var typed = sheet.querySelector("input[data-typed], input[type=text]");
+    var typed = sheet.querySelector("input[data-typed], input[type=text], input[type=number]");
     var pb = sheet.querySelector(".pb");
     if (typed) typed.focus({ preventScroll: true });
     if (pb) pb.scrollTop = 0;
@@ -503,6 +506,20 @@
   document.addEventListener("submit", function (e) {
     var f = e.target, sub = e.submitter || (clicked && (clicked.form === f) ? clicked : null);
     clicked = null;
+    var which = f.id && /-pick$/.test(f.id) && $(f.id.replace(/-pick$/, "-which"));
+    if (which) {
+      var wt = which.querySelector('input[name="teams"]'), pt = f.querySelector('input[name="teams"]');
+      if (wt && pt) pt.value = wt.value;
+      var wh = Array.prototype.map.call(which.querySelectorAll('input[name="hosts"]:checked'), function (b) { return b.value; }).join(",");
+      var ph = f.querySelector('input[name="hosts"]');
+      if (wh && !ph) {
+        ph = document.createElement("input");
+        ph.type = "hidden";
+        ph.name = "hosts";
+        f.appendChild(ph);
+      }
+      if (ph) ph.value = wh;
+    }
     var restore = f.hasAttribute("data-deploy") ? deployHosts(f) : null;
     var method = ((sub && sub.getAttribute("formmethod")) || f.getAttribute("method") || "get").toLowerCase();
     if (!panel || !f.closest("[data-panel], #panel")) {

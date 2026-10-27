@@ -1,6 +1,4 @@
-/* battleship's one stylesheet. CSP-safe: no inline styles anywhere. Layout
-   switches on the .app container width (≤640px = phone), not the viewport.
-   Fonts are IBM Plex, served from /static (see OFL.txt). */
+/* battleship stylesheet (CSP-safe, IBM Plex from /static). */
 
 @font-face{font-family:"IBM Plex Sans";font-weight:400;font-display:swap;src:url(plex-sans-400.woff2) format("woff2")}
 @font-face{font-family:"IBM Plex Sans";font-weight:500;font-display:swap;src:url(plex-sans-500.woff2) format("woff2")}
@@ -9,7 +7,6 @@
 @font-face{font-family:"IBM Plex Mono";font-weight:500;font-display:swap;src:url(plex-mono-500.woff2) format("woff2")}
 @font-face{font-family:"IBM Plex Mono";font-weight:600;font-display:swap;src:url(plex-mono-600.woff2) format("woff2")}
 
-/* ---------- tokens ---------- */
 :root{
   --f:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
   --fm:"IBM Plex Mono",ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
@@ -33,15 +30,14 @@
   --drift:#f08a3c;--drift-bg:#33200f;--busy:#a68cff;--busy-bg:#241b42;
   --stale:#e0a325;--stale-bg:#33270c;--bad:#ff7b6e;--bad-bg:#3a1714;--bad-inv:#b42318;--bad-btn:#c8281c;
   --shadow:0 12px 32px rgb(0 0 0/.55),0 0 0 1px var(--ln);
-}p,.say,.warn,.fix{letter-spacing:.005em}}
+}p,.say,.warn,.fix{letter-spacing:.005em}.panel::backdrop{background:rgb(0 0 0/.45)}}
 
-/* ---------- base ---------- */
 *,*::before,*::after{box-sizing:border-box}
 [hidden]{display:none!important}
 ::placeholder{color:var(--tx3);opacity:1}
 ::selection{background:color-mix(in srgb,var(--focus) 22%,transparent)}
 body{margin:0;background:var(--bg);color:var(--tx);font:var(--t3)/1.45 var(--f);font-variant-numeric:tabular-nums}
-.app{container:app/inline-size;min-height:100vh;min-height:100dvh;overflow-x:clip}
+.app{container:app/inline-size;min-height:100dvh;overflow-x:clip}
 a{color:inherit}
 h1,h2,h3,p{margin:0}
 h1,h2,h3{text-wrap:balance}
@@ -194,33 +190,28 @@ form.rrow:invalid .btn{opacity:.4}
 .grp .gc,.grp .gh{padding-top:6px}
 .hb{display:flex;align-items:center;justify-content:center;width:100%;height:22px;padding:0 4px;border:0;border-radius:var(--r1);background:none;color:var(--tx2);font:500 var(--t1) var(--fm);white-space:nowrap;text-decoration:none;cursor:pointer}
 .rh .hb{height:var(--ch);justify-content:flex-end}
-.hb:hover{background:var(--sf2);color:var(--tx)}
-.hb[aria-pressed=true]{background:var(--tx);color:var(--bg)}
+.hb:hover,.gr:hover>.rh .hb{background:var(--sf);color:var(--tx)}
+.gr .hb[aria-pressed=true]{background:var(--tx);color:var(--bg)}
 .cell{position:relative;display:block;min-width:var(--cw);cursor:pointer;text-decoration:none}
 .cell input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
 .cv{display:flex;align-items:center;justify-content:center;height:var(--ch);border:1px solid transparent;border-radius:var(--r1);background:var(--cb)}
-.is-missing .cv{border:1px dashed var(--ln2);background:radial-gradient(circle,var(--ln2) 1.5px,transparent 2px)} /* an empty peg hole */
+.is-missing .cv{border:1px dashed var(--ln2);background:radial-gradient(circle,var(--ln2) 1.5px,transparent 2px)}
 .is-missing .cv .g{display:none}
 .cell:hover .cv{border-color:var(--tx3)}
 .cell input:checked+.cv{box-shadow:inset 0 0 0 2px var(--sel),inset 0 0 0 3px var(--bg)}
 .cell input:focus-visible+.cv,.cell:focus-visible .cv{outline:2px solid var(--focus);outline-offset:1px}
 .cell:focus-visible{outline:none}
-/* hovered row: its team number lights up so you can read across wide grids */
-.gr:hover>.rh .hb{background:var(--sf2);color:var(--tx)}
-/* sizing: cols-m 13–16 hosts · cols-l 17–24 · cols-xl 25+ · rows-s ≤16 teams;
-   .tall (>36 teams) scrolls on its own with the host row (.hr) pinned. */
 @container app (min-width:641px){
   .grid.cols-m{--cw:48px}
   .grid.cols-l{--cw:38px}
   .grid.cols-xl{--cw:34px}
   .grid.rows-s{--ch:22px}
-  .gscroll.tall{max-height:calc(100vh - 160px);max-height:calc(100dvh - 160px);overflow:auto}
+  .gscroll.tall{max-height:calc(100dvh - 160px);overflow:auto}
 }
-.tall .hr .gh{position:sticky;top:0;z-index:2;background:var(--bg)}
-/* select-all corner */
+.tall .hr .gh{position:sticky;top:0;z-index:2;background:var(--sf2)}
+.tall .hr .rh{left:0;z-index:3}
 .all{display:grid;place-items:center;height:22px}
 .all input{width:14px;height:14px;margin:0;accent-color:var(--tx)}
-/* stale / disconnected: the grid fades so nobody acts on it */
 [data-live=stale] .gscroll{opacity:.5;filter:grayscale(1)}
 [data-live=off] .gscroll{opacity:.3;filter:grayscale(1)}
 
@@ -311,20 +302,20 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .more td{color:var(--tx3);text-align:center}
 .panel tr.fold,.page#job-live .fold-n,.panel .c-vmid{display:none}
 
-/* job progress: one pip per VM */
 .pips{display:flex;flex-wrap:wrap;gap:3px}
 .pip{width:10px;height:10px;border-radius:50%;background:var(--ln)}
 .pip.done{background:var(--run)}
 .pip.fail{border-radius:0;background:linear-gradient(45deg,transparent 40%,var(--bad) 40% 60%,transparent 60%),linear-gradient(-45deg,transparent 40%,var(--bad) 40% 60%,transparent 60%)}
-.pip.run{background:var(--busy)}
+.pip.run{background:none;border:3px solid var(--busy)}
 .pip.wait{background:none;border:1.5px solid var(--ln2)}
 .pip.skip{height:3px;margin-block:3.5px;border-radius:1px;background:var(--ln2)}
-.pip.int{background:var(--stale)}
+.pip.int{width:8px;height:8px;margin:1px;border-radius:1px;background:var(--stale);transform:rotate(45deg)}
 .steps{display:inline-flex;gap:3px;margin-right:8px;vertical-align:middle}
 .jobt .step{font-weight:500}
 .jobt .err{display:block;margin-top:2px}
-.jobt time{font-variant-numeric:tabular-nums}
 .logbox[open]>.disc{margin-bottom:var(--s2)}
+.disc>.sub{color:inherit}
+.logbox>.meta{margin-top:6px}
 .tally{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:var(--t2);color:var(--tx2)}
 .tally b{color:var(--tx);font-weight:600}
 .tally .bad,.tally .bad b{color:var(--bad)}
@@ -535,7 +526,7 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .gscroll{padding:2px var(--s4)}
   .gwrap .start{padding:0 var(--s4)}
   .grid{--cw:48px;--ch:32px}
-  .rh{position:sticky;left:0;z-index:1;background:var(--bg)}
+  .rh{position:sticky;left:0;z-index:1;background:var(--sf2)}
   .ab{left:0;right:0;bottom:0;max-width:none;padding:var(--s2) var(--s2) calc(var(--s2) + env(safe-area-inset-bottom));border-radius:14px 14px 0 0}
   .ab-ops{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;order:3}
   .ab-ops .btn{flex-direction:column;gap:3px;height:48px;padding:0 4px;font-size:11px;white-space:normal;text-align:center}
@@ -576,5 +567,5 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .rvw tr.blk td{background:none}
   .env{scroll-margin-top:92px} /* the header wraps to two rows */
 }
-@media (pointer:coarse){.grid{--ch:32px}.hb,.all{height:32px}.all input{width:18px;height:18px}.btn,.inp{min-height:40px}.inp,.addr input{font-size:var(--t4)}.opt span{height:36px}}
+@media (pointer:coarse){.grid{--ch:32px}.hb,.all{height:32px}.all input{width:18px;height:18px}.btn,.inp{min-height:40px}.btn.sm{min-height:32px}.btn.sq{width:40px}.inp,.addr input{font-size:var(--t4)}.opt span{height:36px}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}.is-busy .g,.spin{animation:none!important}}

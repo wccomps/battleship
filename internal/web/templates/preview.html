@@ -38,7 +38,7 @@
 {{- if .Nothing}}
 <p class="say">{{icon "blocked"}}<span>{{.Nothing}}</span></p>
 {{- end}}
-{{- if .Items}}
+{{- if and .Items (or .Blocked (ne (printf "%s" .Op.Kind) "deploy"))}}
 <div class="chips">
 {{- if .Runnable}}<span class="chip is-running">{{icon "done"}}{{.Runnable}} will run</span>{{end}}
 {{- if .Blocked}}<span class="chip">{{icon "blocked"}}{{.Blocked}} blocked</span>{{end}}
@@ -56,20 +56,20 @@
 <div class="say caution">{{icon "warn"}}<ul>{{range .}}<li>{{names .}}</li>{{end}}</ul></div>
 {{- end}}
 {{- with .Capacity}}
-<div class="sec">
-<h2 class="sub">Capacity</h2>
+<details class="logbox"{{if .Tight}} open{{end}}>
+<summary class="disc"><h2 class="sub">Capacity</h2>{{with .Summary}}<span class="meta">· {{.}}</span>{{end}}</summary>
 <ul class="cap">
 {{- range .Rows}}
-<li class="cap-{{.Level}}"><span class="vm">{{.Label}}</span><span class="bar" aria-hidden="true"><span class="u w{{.Used}}"></span><span class="n w{{.Need}}"></span></span><span class="cap-text">{{.Text}}</span></li>
+<li class="cap-{{.Level}}"><span class="vm">{{.Label}}</span> <span class="bar" aria-hidden="true"><span class="u w{{.Used}}"></span><span class="n w{{.Need}}"></span></span><span class="cap-text">{{.Text}}</span></li>
 {{- end}}
 </ul>
 {{- range .Notices}}<p class="meta">{{.}}</p>{{end}}
 {{- range .Notes}}<p class="meta">{{.}}</p>{{end}}
-</div>
+</details>
 {{- end}}
 {{- if .Templates}}
-<div class="sec">
-<h2 class="sub">Templates</h2>
+<details class="logbox"{{if .TemplatesOpen}} open{{end}}>
+<summary class="disc"><h2 class="sub">Templates</h2>{{with .TemplateSummary}}<span class="meta">· {{.}}</span>{{end}}</summary>
 <div class="tscroll short">
 <table class="tbl">
 <thead><tr><th scope="col">Template</th><th scope="col">Node</th><th scope="col">Steps</th><th scope="col">Blocked</th></tr></thead>
@@ -80,19 +80,17 @@
 </tbody>
 </table>
 </div>
-</div>
+</details>
 {{- end}}
 {{- if .Items}}
-<div class="tscroll{{if gt (len .Items) 8}} short{{end}}">
-<table class="tbl">
-<thead><tr><th scope="col">VM</th><th scope="col">Node</th><th scope="col">Steps</th><th scope="col">Blocked</th></tr></thead>
-<tbody>
-{{- range .Items}}
-<tr{{if .Blocked}} class="blk"{{end}}><td><span class="vm">{{.Name}}</span></td><td><span class="vm">{{.Node}}</span></td><td>{{if .Blocked}}—{{else}}{{.Steps}}{{end}}</td><td>{{with .Blocked}}<span class="st s-cancel">{{icon "blocked"}}{{names .}}</span>{{end}}</td></tr>
+{{- if .ItemsFold}}
+<details class="logbox">
+<summary class="disc"><h2 class="sub">VMs</h2><span class="meta">· {{.ItemsSummary}}</span></summary>
+{{template "preview-items" .}}
+</details>
+{{- else}}
+{{template "preview-items" .}}
 {{- end}}
-</tbody>
-</table>
-</div>
 {{- end}}
 {{- end}}
 {{- with .Confirm}}{{if .Typed}}
@@ -119,4 +117,17 @@
 </div>
 </form>
 {{- end}}
+{{- end}}
+
+{{define "preview-items" -}}
+<div class="tscroll{{if gt (len .Items) 8}} short{{end}}">
+<table class="tbl">
+<thead><tr><th scope="col">VM</th><th scope="col">Node</th><th scope="col">Steps</th><th scope="col">Blocked</th></tr></thead>
+<tbody>
+{{- range .Items}}
+<tr{{if .Blocked}} class="blk"{{end}}><td><span class="vm">{{.Name}}</span></td><td><span class="vm">{{.Node}}</span></td><td>{{if .Blocked}}—{{else}}{{.Steps}}{{end}}</td><td>{{with .Blocked}}<span class="st s-cancel">{{icon "blocked"}}{{names .}}</span>{{end}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</div>
 {{- end}}

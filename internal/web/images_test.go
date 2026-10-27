@@ -190,6 +190,15 @@ func TestFamilyPageStates(t *testing.T) {
 		`action="/images/edit/preview"`, `<button class="btn" type="submit">Open for editing</button>`, "Next version · v2")
 	lacks(t, "gw", gw, "is open for editing", "Delete</button>")
 
+	// When an open edit copy is running (blocked) and the source build VM exists,
+	// "New version from ..." becomes the primary button.
+	h.api.Add(proxmox.VM{VMID: 142, Name: "gw-edit", Node: "n1", Pool: h.cfg.Images.Pool, Status: "running"}, map[string]string{"ostype": "other", "description": "battleship: base=gw-v1"})
+	gwBlockedEdit := h.get(&sess, "/images/family/gw").Body.String()
+	contains(t, "gw with running edit copy", gwBlockedEdit,
+		`<code>gw-edit</code> is open for editing`,
+		`<button class="btn pri" type="submit">New version from gw-build</button>`)
+	lacks(t, "gw with running edit copy", gwBlockedEdit, "Register gw-edit")
+
 	// An older version that isn't deprecated has neither action.
 	h.api.Add(proxmox.VM{VMID: 8006, Name: "alder-v1", Node: "n1", Template: true, Tags: "base;linux"}, nil)
 	h.api.Add(proxmox.VM{VMID: 8007, Name: "alder-v2", Node: "n1", Template: true, Tags: "base;linux"}, nil)

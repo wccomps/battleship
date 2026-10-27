@@ -59,8 +59,8 @@ func TestPreviewWarnsAboutCapacity(t *testing.T) {
 
 	*res = *capacityResources(60)
 	_, form, body = h.preview(&lead, "/power", url.Values{"teams": {"1"}, "action": {"start"}})
-	contains(t, "plenty of room", body, `<h2 class="sub">Capacity</h2>`, `<li class="cap-ok">`, "4 GiB used of 64 GiB, needs 12 GiB, 60 GiB free")
-	lacks(t, "plenty of room", body, "needs 12 GiB of memory", "overcommit")
+	contains(t, "plenty of room", body, `<details class="logbox">`, `<summary class="disc"><h2 class="sub">Capacity</h2><span class="meta">· fits on 1 node</span></summary>`, `<li class="cap-ok">`, "4 GiB used of 64 GiB, needs 12 GiB, 60 GiB free")
+	lacks(t, "plenty of room", body, "needs 12 GiB of memory", "overcommit", `<details class="logbox" open>`)
 	if fp := form.Get("fingerprint"); fp != overFP {
 		t.Errorf("fingerprint changed with capacity: %s vs %s", fp, overFP)
 	}
