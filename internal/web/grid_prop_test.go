@@ -319,7 +319,7 @@ func checkAllTeams(t *rapid.T, spec string, m clusterModel) {
 
 // checkRowHeader checks a row's header: it selects the team.
 func checkRowHeader(t *rapid.T, row rowView) {
-	h, err := execute("grid-row-head", row)
+	h, err := fragment("grid", "grid-row-head", row)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func checkCellWords(t *rapid.T, c cellView, why []string) {
 // checkCellMarkup checks a rendered cell: a busy one is a link to its
 // job, a missing one is a link to its VM page, and only the others have a box.
 func checkCellMarkup(t *rapid.T, c cellView) {
-	h, err := execute("grid-cell", c)
+	h, err := fragment("grid", "grid-cell", c)
 	if err != nil {
 		t.Fatal(err)
 	}

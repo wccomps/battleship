@@ -74,16 +74,7 @@ func (s *Store) DueCredentials(ctx context.Context, now time.Time, limit int) ([
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+	return pgx.CollectRows(rows, pgx.RowTo[int64])
 }
 
 // Renewal is what a renewal decided.

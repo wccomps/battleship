@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -82,10 +81,7 @@ func (r rules) grid(in inputs) (teams, hosts []string, rows []Row) {
 			seen[host] = true
 		}
 	}
-	for h := range seen {
-		hosts = append(hosts, h)
-	}
-	sort.Strings(hosts)
+	hosts = slices.Sorted(maps.Keys(seen))
 
 	rows = make([]Row, len(teams))
 	for i, team := range teams {

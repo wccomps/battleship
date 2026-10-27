@@ -280,10 +280,8 @@ func (p Planner) checkHostSSH(ctx context.Context, h EnvHost, nics []proxmox.Gue
 			}
 			return CheckSSHOutput(st.Out, p.Cfg.Environments.OpsCAKey)
 		}
-		select {
-		case <-ctx.Done():
+		if proxmox.SleepContext(ctx, sshPollInterval) != nil {
 			return ""
-		case <-time.After(sshPollInterval):
 		}
 	}
 }

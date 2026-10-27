@@ -167,34 +167,6 @@ func (c *Client) ClusterResources(ctx context.Context) (Resources, error) {
 	return res, nil
 }
 
-// ClusterNode is a node entry from /cluster/status.
-type ClusterNode struct {
-	Name   string
-	IP     string
-	Online bool
-}
-
-// ClusterNodes lists the cluster's nodes, online or not, sorted by name.
-func (c *Client) ClusterNodes(ctx context.Context) ([]ClusterNode, error) {
-	var raw []struct {
-		Type   string      `json:"type"`
-		Name   string      `json:"name"`
-		IP     string      `json:"ip"`
-		Online json.Number `json:"online"`
-	}
-	if err := c.do(ctx, http.MethodGet, "/cluster/status", nil, &raw); err != nil {
-		return nil, err
-	}
-	var nodes []ClusterNode
-	for _, r := range raw {
-		if r.Type == "node" {
-			nodes = append(nodes, ClusterNode{Name: r.Name, IP: r.IP, Online: r.Online.String() == "1"})
-		}
-	}
-	sort.Slice(nodes, func(i, j int) bool { return nodes[i].Name < nodes[j].Name })
-	return nodes, nil
-}
-
 // OnlineNodes returns online node names sorted alphabetically.
 func (c *Client) OnlineNodes(ctx context.Context) ([]string, error) {
 	var raw []struct {

@@ -32,8 +32,7 @@ type previewPage struct {
 	Heading string  // the page's title, e.g. "Force stop"
 	Title   opLabel // the sheet's title: the verb, e.g. Deploy kilo.alpha
 	// Consequence says in one sentence what confirming does to running VMs. Calm
-	// shows it as a note, not a warning, when nothing on the VMs changes (a
-	// snapshot).
+	// shows it as a note, not a warning, when the operation isn't destructive.
 	Consequence string
 	Calm        bool
 	// AlreadyN VMs are already as the power action leaves them (e.g. 2 already
@@ -47,7 +46,6 @@ type previewPage struct {
 	Items           []itemRow // blocked ones first
 	ItemsFold       bool      // fold the VM table behind a summary when nothing is blocked
 	ItemsSummary    string    // e.g. "429 VMs"
-	Runnable        int
 	Blocked         int
 	Warnings        []string
 	// Capacity compares what the plan starts with the cluster's free resources;
@@ -88,7 +86,7 @@ type capacityRow struct {
 	Level string // ok, near or over
 	Used  int
 	Need  int
-	Text  string // "60 GiB used of 64 GiB, needs 12 GiB, 4 GiB free", as the CLI says it
+	Text  string // "60 GiB used of 64 GiB, needs 12 GiB, 4 GiB free"
 }
 
 // fact is a labelled value, e.g. "Pods: 1-3".
@@ -268,8 +266,8 @@ func newNonce() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// confirmLabel is the confirm button's text, e.g. "Force stop 2 VMs", or
-// for an image operation the image it makes or acts on: "Register teak-v2".
+// confirmLabel is the confirm button's text, e.g. "Force stop 2 VMs" or
+// "Register teak-v2".
 func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
 	n := len(runnable)
 	if n == 1 && op.ConfirmVerb != "" {
@@ -299,18 +297,13 @@ func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
 	}
 }
 
-// previewTitle is a preview's title, e.g. Force stop, Deploy kilo.alpha.
-func previewTitle(op operation, in jobs.Inputs) opLabel {
-	return opLabelOf(string(op.Kind), in)
-}
-
 // newPreviewPage describes plan for people.
 func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Inputs, plan *pods.Plan, opts previewOptions) previewPage {
+	runnable := len(plan.Runnable())
 	p := previewPage{
 		Op:        op,
-		Title:     previewTitle(op, in),
+		Title:     opLabelOf(string(op.Kind), in),
 		Asked:     previewFacts(in, opts.fromGrid, opts.retryOf),
-		Runnable:  len(plan.Runnable()),
 		Problem:   opts.problem,
 		EditHref:  formQuery(op, in),
 		FromGrid:  opts.fromGrid,
@@ -330,7 +323,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 			p.Reselect = "Change"
 		}
 	}
-	p.Blocked = len(plan.Items) - p.Runnable
+	p.Blocked = len(plan.Items) - runnable
 	for _, it := range plan.Items {
 		row := itemRow{Name: it.Name, Node: orDashString(it.Node), Steps: stepsText(it), Blocked: it.Blocked}
 		if op.Kind == pods.KindPower {
@@ -348,7 +341,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		return 0
 	})
 	var rebuilt, stopped []string
-	var nCreate, nRebuild, nReuse, nBlocked int
+	var nCreate, nReuse, nBlocked int
 	for _, t := range plan.Templates {
 		row := templateRow{Name: t.Name, Node: orDashString(t.Node), State: "create", Blocked: t.Blocked}
 		switch {
@@ -358,7 +351,6 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		case t.Rebuild:
 			row.State = "rebuild"
 			rebuilt = append(rebuilt, t.Name)
-			nRebuild++
 		case t.Exists:
 			row.State = "reuse"
 			nReuse++
@@ -375,7 +367,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 	for _, c := range []struct {
 		n    int
 		word string
-	}{{nCreate, "to create"}, {nRebuild, "to rebuild"}, {nReuse, "reused"}, {nBlocked, "blocked"}} {
+	}{{nCreate, "to create"}, {len(rebuilt), "to rebuild"}, {nReuse, "reused"}, {nBlocked, "blocked"}} {
 		if c.n > 0 {
 			tplParts = append(tplParts, fmt.Sprintf("%d %s", c.n, c.word))
 		}
@@ -383,22 +375,26 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 	p.TemplateSummary = strings.Join(tplParts, ", ")
 	p.ItemsFold = p.Blocked == 0 && (op.Kind == pods.KindDeploy || len(p.Items) > 8)
 	p.ItemsSummary = countVMs(len(p.Items))
-	switch {
-	case len(rebuilt) > 0 && len(stopped) > 0:
+	if len(rebuilt) > 0 && len(stopped) > 0 && nCreate == 0 {
 		if len(rebuilt) == 1 && len(stopped) == 1 {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("Rebuilding %s deletes the old template and stops master %s, which is running, until the copy finishes.", rebuilt[0], stopped[0]))
 		} else {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("Rebuilding %d %s deletes the old %s and stops %d running %s, each until its copy finishes.",
 				len(rebuilt), byCount(len(rebuilt), "template", "templates"), byCount(len(rebuilt), "one", "ones"), len(stopped), byCount(len(stopped), "master", "masters")))
 		}
-	case len(rebuilt) == 1:
-		p.Warnings = append(p.Warnings, fmt.Sprintf("Template %s will be deleted and built again from its master.", rebuilt[0]))
-	case len(rebuilt) > 1:
-		p.Warnings = append(p.Warnings, fmt.Sprintf("%d templates will be deleted and built again from their masters.", len(rebuilt)))
-	case len(stopped) == 1:
-		p.Warnings = append(p.Warnings, fmt.Sprintf("Building its template stops master %s, which is running, until the copy finishes.", stopped[0]))
-	case len(stopped) > 1:
-		p.Warnings = append(p.Warnings, fmt.Sprintf("Building the templates stops %d running masters, each until its copy finishes.", len(stopped)))
+	} else {
+		switch {
+		case len(rebuilt) == 1:
+			p.Warnings = append(p.Warnings, fmt.Sprintf("Template %s will be deleted and built again from its master.", rebuilt[0]))
+		case len(rebuilt) > 1:
+			p.Warnings = append(p.Warnings, fmt.Sprintf("%d templates will be deleted and built again from their masters.", len(rebuilt)))
+		}
+		switch {
+		case len(stopped) == 1:
+			p.Warnings = append(p.Warnings, fmt.Sprintf("Building its template stops master %s, which is running, until the copy finishes.", stopped[0]))
+		case len(stopped) > 1:
+			p.Warnings = append(p.Warnings, fmt.Sprintf("Building the templates stops %d running masters, each until its copy finishes.", len(stopped)))
+		}
 	}
 	if !op.Kind.Teamless() && op.Kind != pods.KindDeploy {
 		if all := s.polledGrid(ctx).Teams; coversTeams(all, plan.Teams) {
@@ -421,7 +417,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		if op.Kind == pods.KindTeardown && in.Set != "" {
 			p.Nothing = "No VMs of " + string(in.Set) + " are in these pods and hosts."
 		}
-	case p.Runnable == 0:
+	case runnable == 0:
 		p.Nothing = "Every VM is blocked: nothing can run."
 	}
 	if p.Nothing != "" {
@@ -631,7 +627,7 @@ func (s *Server) alreadyDone(ctx context.Context, action string, items []pods.It
 	return n, want
 }
 
-// consequence says in one sentence what confirming does to running VMs, e.g.
+// consequence says what confirming does to the VMs, e.g.
 // "2 VMs lose power at once. Unsaved work is lost."
 func consequence(kind pods.Kind, in jobs.Inputs, items []pods.Item) string {
 	n := len(items)

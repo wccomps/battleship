@@ -49,7 +49,7 @@ func parsePages() map[string]*template.Template {
 // funcs are the template helpers. Times are formatted in Go against the
 // server's clock before they reach a template.
 var funcs = template.FuncMap{"asset": assetURL, "names": keepNames, "icon": icon, "opIcon": opIcon, "needs": needs,
-	"hasPrefix": strings.HasPrefix, "imageKinds": func() []string { return pods.ImageKinds }, "familyHref": familyHref, "envHostHref": envHostHref,
+	"imageKinds": func() []string { return pods.ImageKinds }, "familyHref": familyHref, "envHostHref": envHostHref,
 	"notesButton": func(family string, may bool) offer {
 		return offer{Href: notesHref(family), Label: "Edit notes of " + family, May: may}
 	},
@@ -154,9 +154,9 @@ func nav(u *auth.User) []navItem {
 	return []navItem{{"grid", "Grid", "/"}, {"environments", "Environments", "/environments"}, {"images", "Images", "/images"}, {"logs", "Logs", logsPath}}
 }
 
-// leadOps is the header's create/deploy and teardown buttons for section
-// ("" for the grid's pod operations, sectionEnvironments for environments)
-// that the user holds a privilege for somewhere.
+// leadOps is the header's operation buttons for section ("" for the grid's pod
+// operations, sectionEnvironments or sectionImages) that the user holds a
+// privilege for somewhere.
 func (s *Server) leadOps(ctx context.Context, section string) []navItem {
 	var items []navItem
 	for _, op := range operations {

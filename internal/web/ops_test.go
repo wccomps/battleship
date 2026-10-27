@@ -276,9 +276,20 @@ func TestPreviewOfDeploy(t *testing.T) {
 		t.Errorf("confirm fields = %v", form)
 	}
 
-	// Rebuilding existing templates combines the rebuild and stop-master notice into one line.
+	// When one template is rebuilt (stopped master) and another is newly created (running master),
+	// the rebuild and stop-master warnings stay separate so the rebuilt template isn't blamed for stopping the other master.
 	h.noTeamVMs()
 	h.api.add(proxmox.VM{VMID: 9001, Name: "dc.kilo.alpha.tpl", Node: "n1", Template: true}, nil)
+	h.api.setStatus(5001, "stopped")
+	_, _, mixedBody := h.preview(&lead, "/deploy", url.Values{"teams": {"1"}, "pattern": {"*.kilo.alpha"}, "baseline": {"yes"}, "rebuild": {"yes"}})
+	contains(t, "deploy mixed create+rebuild preview", mixedBody,
+		"Template <span class=\"name\">dc.kilo.alpha.tpl</span> will be deleted and built again from its master.",
+		"Building its template stops master <span class=\"name\">web.kilo.alpha</span>, which is running, until the copy finishes.",
+	)
+	lacks(t, "deploy mixed create+rebuild preview", mixedBody, "Rebuilding <span class=\"name\">dc.kilo.alpha.tpl</span> deletes the old template and stops")
+
+	// Rebuilding existing templates combines the rebuild and stop-master notice into one line.
+	h.api.setStatus(5001, "running")
 	h.api.add(proxmox.VM{VMID: 9002, Name: "web.kilo.alpha.tpl", Node: "n1", Template: true}, nil)
 	_, _, rebuildBody := h.preview(&lead, "/deploy", url.Values{"teams": {"1-3"}, "pattern": {"*.kilo.alpha"}, "baseline": {"yes"}, "rebuild": {"yes"}})
 	contains(t, "deploy rebuild preview", rebuildBody,

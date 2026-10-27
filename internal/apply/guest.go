@@ -168,8 +168,7 @@ func (e *Executor) waitReady(ctx context.Context, it *pods.Item) error {
 	return e.waitGuest(ctx, it, true)
 }
 
-// restart shuts the guest down, waiting for it to finish applying the
-// rename, and starts it again.
+// restart shuts the guest down and starts it again so its rename takes effect.
 func (e *Executor) restart(ctx context.Context, it *pods.Item) error {
 	if err := e.taskOnce(ctx, func() (string, error) { return e.api.Shutdown(ctx, it.Node, it.VMID, restartShutdown) }); err != nil {
 		return err

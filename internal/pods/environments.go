@@ -123,6 +123,24 @@ type EnvHost struct {
 
 func (h EnvHost) desc() string { return h.Config["description"] }
 
+// Kind is the host's kind: router when tagged router, else its notes' OS,
+// else other.
+func (h EnvHost) Kind() string {
+	if h.Router {
+		return ImageRouter
+	}
+	return cmp.Or(h.Notes.OS, ImageOther)
+}
+
+// LANAddr is the host's expected LAN address in env: the gateway for a router,
+// else its assigned address.
+func (h EnvHost) LANAddr(env Environment) netip.Addr {
+	if h.Router {
+		return env.Gateway()
+	}
+	return h.Addr
+}
+
 // Environment is what a slot holds.
 type Environment struct {
 	Slot   Slot
@@ -274,23 +292,8 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			read = append(read, vm)
 		}
 	}
-	cfgs := make([]map[string]string, len(read))
-	var g errgroup.Group
-	g.SetLimit(envReads)
-	for i, vm := range read {
-		g.Go(func() error {
-			cfg, err := p.API.VMConfig(ctx, vm.Node, vm.VMID)
-			switch {
-			case proxmox.IsNotFound(err):
-				return nil // gone since the listing
-			case err != nil:
-				return fmt.Errorf("reading %s (%d): %w", vm.Name, vm.VMID, err)
-			}
-			cfgs[i] = cfg
-			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
+	cfgs, err := p.readConfigs(ctx, read)
+	if err != nil {
 		return nil, nil, err
 	}
 	cpuByNode := map[string][]string{}
@@ -300,12 +303,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			continue
 		}
 		if si, ok := byPool[vm.Pool]; ok {
-			cpuModels, seen := cpuByNode[vm.Node]
-			if !seen {
-				cpuModels = p.customCPUModels(ctx, vm.Node)
-				cpuByNode[vm.Node] = cpuModels
-			}
-			envs[si].Hosts = append(envs[si].Hosts, p.buildEnvHost(vm, cfg, envs[si].Slot, cpuModels))
+			envs[si].Hosts = append(envs[si].Hosts, p.buildEnvHost(vm, cfg, envs[si].Slot, p.nodeCPUModels(ctx, cpuByNode, vm.Node)))
 			continue
 		}
 		if vm.Template {
@@ -324,6 +322,35 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 		setEnvDomain(e)
 	}
 	return envs, vms, nil
+}
+
+func (p Planner) readConfigs(ctx context.Context, vms []proxmox.VM) ([]map[string]string, error) {
+	cfgs := make([]map[string]string, len(vms))
+	var g errgroup.Group
+	g.SetLimit(envReads)
+	for i, vm := range vms {
+		g.Go(func() error {
+			cfg, err := p.API.VMConfig(ctx, vm.Node, vm.VMID)
+			switch {
+			case proxmox.IsNotFound(err):
+				return nil // gone since the listing
+			case err != nil:
+				return fmt.Errorf("reading %s (%d): %w", vm.Name, vm.VMID, err)
+			}
+			cfgs[i] = cfg
+			return nil
+		})
+	}
+	return cfgs, g.Wait()
+}
+
+func (p Planner) nodeCPUModels(ctx context.Context, cache map[string][]string, node string) []string {
+	if models, ok := cache[node]; ok {
+		return models
+	}
+	models := p.customCPUModels(ctx, node)
+	cache[node] = models
+	return models
 }
 
 func (p Planner) buildEnvHost(vm proxmox.VM, cfg map[string]string, slot Slot, cpuModels []string) EnvHost {

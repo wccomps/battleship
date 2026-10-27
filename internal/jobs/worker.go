@@ -25,8 +25,8 @@ var (
 	errAuthLapsed = errors.New("authorization lapsed")
 )
 
-// DBCallTimeout bounds each worker claim/reap, the recording of a job's
-// outcome and each CLI database call, so a dead connection can't stall them.
+// DBCallTimeout bounds each worker claim/reap and the recording of a job's
+// outcome, so a dead connection can't stall them.
 const DBCallTimeout = 30 * time.Second
 
 // eventTimeoutFloor keeps a very short heartbeat interval (tests use 20ms) from
@@ -323,7 +323,7 @@ func (w *Worker) execute(ctx, bg context.Context, halt <-chan struct{}, job *sto
 	plan, err := BuildPlan(ctx, planner, in)
 	if err != nil {
 		if ctx.Err() != nil {
-			// Stopped, not failed: runJob records why.
+			// Stopped, not failed: claimAndRun records why.
 			return store.Outcome{Status: store.StatusInterrupted, Error: "stopped before anything ran; nothing was changed"}, false
 		}
 		return store.Outcome{Status: store.StatusFailed, Error: "planning: " + proxmox.Describe(err)}, false

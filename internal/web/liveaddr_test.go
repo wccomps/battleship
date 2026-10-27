@@ -247,6 +247,8 @@ func siCell(t *testing.T, body string, vmid int) string {
 	return m
 }
 
+func envHostAddrsHref(vmid int) string { return envHostAddrsPath + "?vmid=" + strconv.Itoa(vmid) }
+
 // Live address reads also check whether SSH and the ops CA key are ready on
 // each answering host, counting the warning in the row's status cell and
 // showing the full warning text in the host's side sheet.

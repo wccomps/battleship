@@ -80,6 +80,23 @@ func (c cellView) Label() string {
 	return c.Name + ", " + c.State
 }
 
+// selectable reports whether the cell has an active checkbox on the grid.
+func (c cellView) selectable() bool { return c.Pick != "" && c.Busy == 0 }
+
+func allChecked(cells []cellView) bool {
+	any := false
+	for _, c := range cells {
+		if !c.selectable() {
+			continue
+		}
+		if !c.Checked {
+			return false
+		}
+		any = true
+	}
+	return any
+}
+
 // rowView is one team's row.
 type rowView struct {
 	Team string
@@ -89,19 +106,7 @@ type rowView struct {
 }
 
 // Pressed reports whether every selectable cell in the row is ticked.
-func (r rowView) Pressed() bool {
-	any := false
-	for _, c := range r.Cells {
-		if c.Pick == "" || c.Busy != 0 {
-			continue
-		}
-		if !c.Checked {
-			return false
-		}
-		any = true
-	}
-	return any
-}
+func (r rowView) Pressed() bool { return allChecked(r.Cells) }
 
 // HostPressed reports whether every selectable cell in host's column is ticked.
 func (v gridView) HostPressed(host string) bool {
@@ -109,21 +114,13 @@ func (v gridView) HostPressed(host string) bool {
 	if col < 0 {
 		return false
 	}
-	any := false
+	var cells []cellView
 	for _, r := range v.Rows {
-		if col >= len(r.Cells) {
-			continue
+		if col < len(r.Cells) {
+			cells = append(cells, r.Cells[col])
 		}
-		c := r.Cells[col]
-		if c.Pick == "" || c.Busy != 0 {
-			continue
-		}
-		if !c.Checked {
-			return false
-		}
-		any = true
 	}
-	return any
+	return allChecked(cells)
 }
 
 // stateCount is how many cells show a state.
@@ -295,7 +292,7 @@ func (v *gridView) markSelected(sel []string) (n int, last *cellView) {
 		for j := range v.Rows[i].Cells {
 			c := &v.Rows[i].Cells[j]
 			for _, s := range sel {
-				if c.Pick != "" && c.Busy == 0 && (s == "all" || s == "team:"+c.Team || s == "host:"+c.Host || s == c.Name || s == c.Team+"/"+c.Host) {
+				if c.selectable() && (s == "all" || s == "team:"+c.Team || s == "host:"+c.Host || s == c.Name || s == c.Team+"/"+c.Host) {
 					c.Checked = true
 				}
 			}
@@ -433,18 +430,13 @@ func initial(name string) string {
 func gridFragment(v gridView) (string, error) {
 	var b strings.Builder
 	for _, name := range []string{"grid-live", "grid-status", "grid-counts"} {
-		h, err := execute(name, v)
+		h, err := fragment("grid", name, v)
 		if err != nil {
 			return "", err
 		}
 		b.WriteString(piece(h))
 	}
 	return b.String(), nil
-}
-
-// execute renders one template of the grid page.
-func execute(name string, data any) (string, error) {
-	return fragment("grid", name, data)
 }
 
 // gridParts is the live grid rendered piece by piece: each element the script
@@ -460,7 +452,7 @@ func renderParts(v gridView) (gridParts, error) {
 	var shape strings.Builder
 	fmt.Fprintf(&shape, "stale=%v empty=%v class=%q tall=%v hosts=%q teams=", v.Stale, v.Empty, v.GridClass, v.Tall, v.Hosts)
 	add := func(id, tmpl string, data any) error {
-		h, err := execute(tmpl, data)
+		h, err := fragment("grid", tmpl, data)
 		if err != nil {
 			return err
 		}

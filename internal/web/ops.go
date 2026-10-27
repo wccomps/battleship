@@ -26,7 +26,7 @@ type operation struct {
 	// snapshot", not "Reset".
 	Label string
 	// Verb is its review's heading verb ("Create", "Tear down"); ConfirmVerb
-	// is a single-item image operation's confirm button verb ("Copy as").
+	// is a single-item operation's confirm button verb ("Copy as", "Save changes to").
 	Verb, ConfirmVerb string
 	Icon              string // its icon (opIcon)
 	Noun              string // e.g. "reset", for the confirm's summary: "reset of pod 01"

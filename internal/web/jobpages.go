@@ -597,10 +597,11 @@ func (s *Server) jobID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return id, true
 }
 
-// jobSnap is a job page's data apart from the log: the job, its items and,
-// while pending, the jobs it waits for.
+// jobSnap is a job page's data apart from the log: the job, its unmarshaled
+// plan, its items and, while pending, the jobs it waits for.
 type jobSnap struct {
 	job     store.Job
+	plan    pods.Plan
 	items   []store.Item
 	waiting []int64
 	// itemsHTML is the rendered job-items fragment, shared by every viewer; ""
@@ -618,6 +619,7 @@ func (s *Server) readJobSnap(ctx context.Context, id int64) (jobSnap, error) {
 		return jobSnap{}, err
 	}
 	snap := jobSnap{job: j, items: items}
+	_ = json.Unmarshal(j.Plan, &snap.plan)
 	if j.Status == store.StatusPending {
 		if snap.waiting, err = s.st.Blockers(ctx, id); err != nil {
 			return jobSnap{}, err
@@ -677,9 +679,8 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 	if in.Kind.Teamless() {
 		v.Teamless, v.Asked = true, teamlessFacts(in, s.cfg.Environments.Pool)
 	}
-	var plan pods.Plan
-	if json.Unmarshal(j.Plan, &plan) == nil && len(plan.Items) == 1 && plan.Items[0].Details != nil {
-		d := plan.Items[0].Details
+	if len(snap.plan.Items) == 1 && snap.plan.Items[0].Details != nil {
+		d := snap.plan.Items[0].Details
 		v.Details = detailsOf(d.ImageDetails, false)
 		if d.Free != nil {
 			v.Notes = *d.Free
@@ -706,12 +707,12 @@ func (s *Server) jobViewOf(r *http.Request, snap jobSnap) jobView {
 		v.Open = op.result(in)
 	}
 	v.Summary = readSummary(j.Summary)
-	v.Items = jobItemsOf(j, items, now)
+	v.Items = jobItemsOf(j, snap.plan, items, now)
 	v.Headline = fleetHeadline(j.Kind, j.Status, items, v.Summary)
 
 	u, _ := auth.UserFrom(ctx)
 	mayOp := s.mayAnywhere(ctx, pods.OfferPrivileges(pods.Kind(j.Kind))...)
-	v.CanCancel = j.Active() && !j.CancelRequested && s.mayCancel(ctx, j, items, u)
+	v.CanCancel = j.Active() && !j.CancelRequested && s.mayCancel(ctx, j, snap.plan, items, u)
 	v.AskCancel = j.Active() && !j.CancelRequested && !v.CanCancel
 	// A stale, failed, interrupted or cancelled job is restarted from a new
 	// preview when retry isn't offered.
@@ -787,10 +788,8 @@ const foldAbove = 12
 
 // jobItemsOf is job j's VM table at now: rows (needing attention first),
 // pips and the tally by status. It is the same for every viewer.
-func jobItemsOf(j store.Job, items []store.Item, now time.Time) jobItems {
+func jobItemsOf(j store.Job, plan pods.Plan, items []store.Item, now time.Time) jobItems {
 	t := jobItems{JobID: j.ID}
-	var plan pods.Plan
-	_ = json.Unmarshal(j.Plan, &plan) // unreadable: the rows show no steps
 	planned := map[string]pods.Item{}
 	for _, it := range plan.Items {
 		planned[it.Name] = it
@@ -932,8 +931,8 @@ func readSummary(raw json.RawMessage) *summaryView {
 const eventBatch = 500
 
 // jobEventsAfter reads the job's log after event ID after, and the last ID
-// read (after if none). It shows the events the CLI does (apply.Logged), but
-// the IDs of the rest still count.
+// read (after if none). Unlogged events (apply.Logged) are skipped, but their
+// IDs still advance after.
 func (s *Server) jobEventsAfter(ctx context.Context, id, after int64) ([]eventView, int64, error) {
 	now := s.now()
 	var out []eventView
@@ -1058,7 +1057,7 @@ func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 	}
 	j, id := snap.job, snap.job.ID
 	u, _ := auth.UserFrom(r.Context())
-	if !s.mayCancel(r.Context(), j, snap.items, u) {
+	if !s.mayCancel(r.Context(), j, snap.plan, snap.items, u) {
 		s.logf("web: cancel refused: job=%d subject=%q: not its creator, and no %s", id, u.Subject, strings.Join(pods.OfferPrivileges(pods.Kind(j.Kind)), " or "))
 		s.errorPage(w, r, http.StatusForbidden, "Not allowed", "Only whoever started this job, or someone who holds "+strings.Join(pods.OfferPrivileges(pods.Kind(j.Kind)), " or ")+
 			" on each of its VMs in Proxmox, can cancel it.", logHref(id), "Back to the job")
@@ -1084,7 +1083,7 @@ func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 // mayCancel reports whether u may cancel j: its starter, or anyone holding the
 // operation's privilege on every VM of the job (on the VM or its pool, for VMs
 // yet to be created), as Proxmox resolves it.
-func (s *Server) mayCancel(ctx context.Context, j store.Job, items []store.Item, u auth.User) bool {
+func (s *Server) mayCancel(ctx context.Context, j store.Job, plan pods.Plan, items []store.Item, u auth.User) bool {
 	if j.CreatedBy == actor(u) {
 		return true
 	}
@@ -1092,8 +1091,6 @@ func (s *Server) mayCancel(ctx context.Context, j store.Job, items []store.Item,
 	if acc == nil {
 		return true // a test fake that can't read privileges
 	}
-	var plan pods.Plan
-	_ = json.Unmarshal(j.Plan, &plan)
 	kind := pods.Kind(j.Kind)
 	for _, it := range items {
 		if !pods.HoldsOffered(ctx, acc, kind, it.VMID, plan.ItemPool(s.naming, it.Name, it.Team)) {
@@ -1175,7 +1172,7 @@ func (s *Server) sharedJobSnap(ctx context.Context, id int64, need uint64) (jobS
 		// Every viewer's VM table is the same: render it once. Its times go
 		// stale, but each carries when it began, from which the script ticks.
 		var v jobView
-		v.Items = jobItemsOf(snap.job, snap.items, s.now())
+		v.Items = jobItemsOf(snap.job, snap.plan, snap.items, s.now())
 		snap.itemsHTML, err = fragment("job", "job-items", v)
 		return snap, err
 	})

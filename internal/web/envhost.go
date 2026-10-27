@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -15,7 +14,6 @@ import (
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
-	"github.com/wccomps/battleship/internal/store"
 )
 
 // envHostsPath is where each environment host's sheet is served, and
@@ -25,8 +23,7 @@ const (
 	envHostAddrsPath = envHostsPath + "/addresses"
 )
 
-func envHostHref(vmid int) string      { return envHostsPath + "?vmid=" + strconv.Itoa(vmid) }
-func envHostAddrsHref(vmid int) string { return envHostAddrsPath + "?vmid=" + strconv.Itoa(vmid) }
+func envHostHref(vmid int) string { return envHostsPath + "?vmid=" + strconv.Itoa(vmid) }
 
 func envEditHref(vmid int) string {
 	op, _ := operationFor(pods.KindEnvEdit)
@@ -44,7 +41,6 @@ func envHostBack(_ operation, in jobs.Inputs) string {
 type envHostView struct {
 	VMID     int
 	Name     string
-	Host     string
 	Domain   string
 	Slot     string
 	Node     string
@@ -78,21 +74,56 @@ type envHostView struct {
 	Lacks           []string
 }
 
+func (s *Server) readEnvHost(r *http.Request) (pods.HostEdit, []proxmox.VM, int, error) {
+	vmid, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get(fieldVMID)))
+	if err != nil || vmid < 100 {
+		return pods.HostEdit{}, nil, 0, pods.ErrNoEnvHost
+	}
+	planner := s.planner(r.Context())
+	vms, err := planner.API.ClusterVMs(r.Context())
+	if err != nil {
+		return pods.HostEdit{}, nil, vmid, err
+	}
+	at, err := planner.HostToEdit(r.Context(), vms, vmid)
+	return at, vms, vmid, err
+}
+
+func newEnvHostView(env pods.Environment, h pods.EnvHost, live pods.LiveAddrs) envHostView {
+	kind := h.Kind()
+	warnings := slices.Clone(h.Warnings)
+	if live.SSHWarning != "" {
+		warnings = append(warnings, live.SSHWarning)
+	}
+	p := envHostView{
+		VMID:      h.VMID,
+		Name:      h.Name,
+		Domain:    cmp.Or(env.Domain, pods.Domain(h.Name)),
+		Slot:      env.Slot.Pool,
+		Node:      h.Node,
+		Status:    cmp.Or(h.Status, "unknown"),
+		Running:   h.Status == "running",
+		Router:    h.Router,
+		Kind:      kind,
+		Addr:      pods.AddrText(h.LANAddr(env)),
+		Gateway:   pods.AddrText(env.Gateway()),
+		LiveAddrs: live,
+		Warnings:  warnings,
+	}
+	if !h.Router && (kind == pods.ImageWindows || kind == pods.ImageLinux) {
+		p.DNS = env.DNS()
+	}
+	return p
+}
+
 // envHostPage serves an environment host's side-panel sheet.
 func (s *Server) envHostPage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	vmid, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get(fieldVMID)))
-	if err != nil || vmid < 100 {
-		s.notFound(w, r)
-		return
-	}
-	planner := s.planner(ctx)
-	vms, err := planner.API.ClusterVMs(ctx)
-	var at pods.HostEdit
-	if err == nil {
-		at, err = planner.HostToEdit(ctx, vms, vmid)
-	}
+	at, vms, vmid, err := s.readEnvHost(r)
 	if errors.Is(err, pods.ErrNoEnvHost) {
+		if vmid == 0 {
+			s.notFound(w, r)
+			return
+		}
 		s.errorPage(w, r, http.StatusNotFound, "No such host",
 			fmt.Sprintf("There's no environment host with VMID %d. It may have been deleted.", vmid), envsPath, "Back to Environments")
 		return
@@ -103,14 +134,6 @@ func (s *Server) envHostPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	env, h := at.Env, at.Host
-	kind := cmp.Or(h.Notes.OS, pods.ImageOther)
-	if h.Router {
-		kind = pods.ImageRouter
-	}
-	addr := pods.AddrText(h.Addr)
-	if h.Router {
-		addr = pods.AddrText(env.Gateway())
-	}
 	var family string
 	if f, _, ok := pods.ParseImageName(h.Notes.Base); ok {
 		if _, exists := pods.Latest(pods.BaseImages(vms), f); exists {
@@ -125,12 +148,6 @@ func (s *Server) envHostPage(w http.ResponseWriter, r *http.Request) {
 			fromBase = details != nil
 		}
 	}
-	var netRows []configRow
-	for _, k := range slices.Sorted(maps.Keys(h.Config)) {
-		if networkKey.MatchString(k) {
-			netRows = append(netRows, configRow{k, h.Config[k]})
-		}
-	}
 	back := envsPath
 	if env.Domain != "" {
 		back = envHref(env.Domain)
@@ -142,62 +159,34 @@ func (s *Server) envHostPage(w http.ResponseWriter, r *http.Request) {
 	if len(h.CPUModels) > 0 && pods.CPUModel(h.Config["cpu"], h.CPUModels) == "" {
 		fixCPU = h.CPUModels[0]
 	}
-	warnings := slices.Clone(h.Warnings)
 	var live pods.LiveAddrs
 	liveFill := false
 	if s.mayAnywhere(ctx, pods.LiveAddrsPrivilege) && pods.HostAsksAgent(env, h) {
 		if r.URL.Query().Get("live") == "1" {
 			live = s.hostLiveAddrs(ctx, env, h)
-			if live.SSHWarning != "" {
-				warnings = append(warnings, live.SSHWarning)
-			}
 		} else {
 			liveFill = true
 		}
 	}
-	p := envHostView{
-		VMID:            h.VMID,
-		Name:            h.Name,
-		Host:            h.Host,
-		Domain:          cmp.Or(env.Domain, pods.Domain(h.Name)),
-		Slot:            env.Slot.Pool,
-		Node:            h.Node,
-		Status:          cmp.Or(h.Status, "unknown"),
-		Running:         h.Status == "running",
-		Router:          h.Router,
-		Kind:            kind,
-		Addr:            addr,
-		Gateway:         pods.AddrText(env.Gateway()),
-		LiveFill:        liveFill,
-		LiveAddrs:       live,
-		Image:           h.Notes.Base,
-		Family:          family,
-		CPU:             cpu,
-		FixCPU:          fixCPU,
-		Tags:            strings.Join(pods.Tags(h.Tags), ", "),
-		CDROM:           h.CDROM,
-		Warnings:        warnings,
-		Details:         details,
-		DetailsFromBase: fromBase,
-		Notes:           h.UserNotes,
-		Network:         netRows,
-		Back:            back,
-		EditHref:        envEditHref(h.VMID),
-		MayEdit:         s.mayOn(ctx, h.VMID, pods.OfferPrivileges(pods.KindEnvEdit)...),
-		MayPower:        s.mayOn(ctx, h.VMID, pods.OfferPrivileges(pods.KindEnvPower)...),
-		MayDelete:       s.mayOn(ctx, h.VMID, pods.OfferPrivileges(pods.KindEnvDeleteHost)...),
-		PowerActions:    powerActionsFor(h.Status),
-	}
-	if !h.Router && (kind == pods.ImageWindows || kind == pods.ImageLinux) {
-		p.DNS = env.DNS()
-	}
-	if j, it, err := s.st.LastJobOf(ctx, h.Name); err == nil {
-		now := s.now()
-		p.LastJob = &lastJobView{ID: j.ID, Op: opLabelOf(j.Kind, readInputs(j)), Look: lastJobLook(j, it),
-			When: minuteTime(now, j.CreatedAt), At: clockTime(now, j.CreatedAt)}
-	} else if !errors.Is(err, store.ErrNotFound) {
-		s.logf("web: reading the last job of %s: %v", h.Name, err)
-	}
+	p := newEnvHostView(env, h, live)
+	p.LiveFill = liveFill
+	p.Image = h.Notes.Base
+	p.Family = family
+	p.CPU = cpu
+	p.FixCPU = fixCPU
+	p.Tags = strings.Join(pods.Tags(h.Tags), ", ")
+	p.CDROM = h.CDROM
+	p.Details = details
+	p.DetailsFromBase = fromBase
+	p.Notes = h.UserNotes
+	p.Network = networkRows(h.Config)
+	p.LastJob = s.lastJobView(ctx, h.Name)
+	p.Back = back
+	p.EditHref = envEditHref(h.VMID)
+	p.MayEdit = s.mayOn(ctx, h.VMID, pods.OfferPrivileges(pods.KindEnvEdit)...)
+	p.MayPower = s.mayOn(ctx, h.VMID, pods.OfferPrivileges(pods.KindEnvPower)...)
+	p.MayDelete = s.mayOn(ctx, h.VMID, pods.OfferPrivileges(pods.KindEnvDeleteHost)...)
+	p.PowerActions = powerActionsFor(h.Status)
 	if !p.MayEdit {
 		p.Lacks = append(p.Lacks, lacksOf(pods.KindEnvEdit, h.Name))
 	}
@@ -224,17 +213,7 @@ func (s *Server) envHostAddrs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, noLiveAddrs, http.StatusForbidden)
 		return
 	}
-	vmid, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get(fieldVMID)))
-	if err != nil || vmid < 100 {
-		s.notFound(w, r)
-		return
-	}
-	planner := s.planner(ctx)
-	vms, err := planner.API.ClusterVMs(ctx)
-	var at pods.HostEdit
-	if err == nil {
-		at, err = planner.HostToEdit(ctx, vms, vmid)
-	}
+	at, _, _, err := s.readEnvHost(r)
 	if errors.Is(err, pods.ErrNoEnvHost) {
 		s.notFound(w, r)
 		return
@@ -244,28 +223,7 @@ func (s *Server) envHostAddrs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	env, h := at.Env, at.Host
-	kind := cmp.Or(h.Notes.OS, pods.ImageOther)
-	addr := pods.AddrText(h.Addr)
-	if h.Router {
-		kind = pods.ImageRouter
-		addr = pods.AddrText(env.Gateway())
-	}
-	live := s.hostLiveAddrs(ctx, env, h)
-	warnings := slices.Clone(h.Warnings)
-	if live.SSHWarning != "" {
-		warnings = append(warnings, live.SSHWarning)
-	}
-	p := envHostView{
-		VMID:      h.VMID,
-		Router:    h.Router,
-		Addr:      addr,
-		Gateway:   pods.AddrText(env.Gateway()),
-		LiveAddrs: live,
-		Warnings:  warnings,
-	}
-	if !h.Router && (kind == pods.ImageWindows || kind == pods.ImageLinux) {
-		p.DNS = env.DNS()
-	}
+	p := newEnvHostView(env, h, s.hostLiveAddrs(ctx, env, h))
 	var b strings.Builder
 	add := func(name string) bool {
 		frag, err := fragment("envhost", name, p)
@@ -280,14 +238,18 @@ func (s *Server) envHostAddrs(w http.ResponseWriter, r *http.Request) {
 	if !add("host-addr") {
 		return
 	}
-	if live.SSHWarning != "" && !add("host-warn") {
+	if p.SSHWarning != "" && !add("host-warn") {
 		return
 	}
+	writePieces(w, b.String())
+}
+
+func writePieces(w http.ResponseWriter, body string) {
 	hdr := w.Header()
 	hdr.Set("Content-Type", "text/html; charset=utf-8")
 	hdr.Set("Cache-Control", "no-store")
 	hdr.Set(piecesHeader, "1")
-	_, _ = io.WriteString(w, b.String())
+	_, _ = io.WriteString(w, body)
 }
 
 // hostEdit is what an Edit host form edits (pods.Planner.HostToEdit).
