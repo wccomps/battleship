@@ -38,14 +38,18 @@ type previewPage struct {
 	Calm        bool
 	// AlreadyN VMs are already as the power action leaves them (e.g. 2 already
 	// running); the job checks each VM first and skips those.
-	AlreadyN    int
-	AlreadyWord string // "running" or "stopped"
-	Asked       []fact // the inputs worth a last look
-	Templates   []templateRow
-	Items       []itemRow // blocked ones first
-	Runnable    int
-	Blocked     int
-	Warnings    []string
+	AlreadyN        int
+	AlreadyWord     string // "running" or "stopped"
+	Asked           []fact // the inputs worth a last look
+	Templates       []templateRow
+	TemplatesOpen   bool      // any template is blocked
+	TemplateSummary string    // e.g. "13 to rebuild"
+	Items           []itemRow // blocked ones first
+	ItemsFold       bool      // fold the VM table behind a summary when nothing is blocked
+	ItemsSummary    string    // e.g. "429 VMs"
+	Runnable        int
+	Blocked         int
+	Warnings        []string
 	// Capacity compares what the plan starts with the cluster's free resources;
 	// nil if it starts nothing or the cluster couldn't be read.
 	Capacity *capacityView
@@ -72,6 +76,8 @@ type previewPage struct {
 // clone storage used, plus notices. Over-capacity warnings go in Warnings.
 type capacityView struct {
 	Rows    []capacityRow
+	Tight   bool     // any row is near or over capacity
+	Summary string   // short summary when all rows fit
 	Notices []string // more than 90% used afterwards
 	Notes   []string // e.g. linked clones grow
 }
@@ -343,16 +349,22 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		return 0
 	})
 	var rebuilt, stopped []string
+	var nCreate, nRebuild, nReuse, nBlocked int
 	for _, t := range plan.Templates {
 		row := templateRow{Name: t.Name, Node: orDashString(t.Node), State: "create", Blocked: t.Blocked}
 		switch {
+		case t.Blocked != "":
+			p.TemplatesOpen = true
+			nBlocked++
 		case t.Rebuild:
 			row.State = "rebuild"
-			if t.Blocked == "" {
-				rebuilt = append(rebuilt, t.Name)
-			}
+			rebuilt = append(rebuilt, t.Name)
+			nRebuild++
 		case t.Exists:
 			row.State = "reuse"
+			nReuse++
+		default:
+			nCreate++
 		}
 		if t.WillStopMaster {
 			row.State += " · stops its master"
@@ -360,21 +372,36 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		}
 		p.Templates = append(p.Templates, row)
 	}
-	switch len(rebuilt) {
-	case 0:
-	case 1:
-		p.Warnings = append(p.Warnings, fmt.Sprintf("Template %s will be deleted and built again from its master.", rebuilt[0]))
-	default:
-		p.Warnings = append(p.Warnings, fmt.Sprintf("%d templates will be deleted and built again from their masters.", len(rebuilt)))
+	var tplParts []string
+	for _, c := range []struct {
+		n    int
+		word string
+	}{{nCreate, "to create"}, {nRebuild, "to rebuild"}, {nReuse, "reused"}, {nBlocked, "blocked"}} {
+		if c.n > 0 {
+			tplParts = append(tplParts, fmt.Sprintf("%d %s", c.n, c.word))
+		}
 	}
-	switch len(stopped) {
-	case 0:
-	case 1:
+	p.TemplateSummary = strings.Join(tplParts, ", ")
+	p.ItemsFold = p.Blocked == 0 && (op.Kind == pods.KindDeploy || len(p.Items) > 8)
+	p.ItemsSummary = countVMs(len(p.Items))
+	switch {
+	case len(rebuilt) > 0 && len(stopped) > 0:
+		if len(rebuilt) == 1 && len(stopped) == 1 {
+			p.Warnings = append(p.Warnings, fmt.Sprintf("Rebuilding %s deletes the old template and stops master %s, which is running, until the copy finishes.", rebuilt[0], stopped[0]))
+		} else {
+			p.Warnings = append(p.Warnings, fmt.Sprintf("Rebuilding %d %s deletes the old %s and stops %d running %s, each until its copy finishes.",
+				len(rebuilt), byCount(len(rebuilt), "template", "templates"), byCount(len(rebuilt), "one", "ones"), len(stopped), byCount(len(stopped), "master", "masters")))
+		}
+	case len(rebuilt) == 1:
+		p.Warnings = append(p.Warnings, fmt.Sprintf("Template %s will be deleted and built again from its master.", rebuilt[0]))
+	case len(rebuilt) > 1:
+		p.Warnings = append(p.Warnings, fmt.Sprintf("%d templates will be deleted and built again from their masters.", len(rebuilt)))
+	case len(stopped) == 1:
 		p.Warnings = append(p.Warnings, fmt.Sprintf("Building its template stops master %s, which is running, until the copy finishes.", stopped[0]))
-	default:
+	case len(stopped) > 1:
 		p.Warnings = append(p.Warnings, fmt.Sprintf("Building the templates stops %d running masters, each until its copy finishes.", len(stopped)))
 	}
-	if !op.Kind.Teamless() {
+	if !op.Kind.Teamless() && op.Kind != pods.KindDeploy {
 		if all := s.polledGrid(ctx).Teams; coversTeams(all, plan.Teams) {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("This covers every pod (%s).", teamsText(pods.FormatTeams(all))))
 		}
@@ -403,7 +430,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 	} else {
 		p.Capacity = capacityOf(opts.capacity, &p.Warnings)
 		p.Consequence = consequence(op.Kind, in, plan.Runnable())
-		p.Calm = op.Kind == pods.KindSnapshot
+		p.Calm = !destructive(in)
 		if op.Kind == pods.KindPower {
 			p.AlreadyN, p.AlreadyWord = s.alreadyDone(ctx, in.Action, plan.Runnable())
 		}
@@ -531,11 +558,18 @@ func capacityOf(c *pods.Capacity, warnings *[]string) *capacityView {
 	if over {
 		*warnings = append(*warnings, "You can still confirm if the overcommit is deliberate.")
 	}
+	v.Tight = over || len(v.Notices) > 0
+	var nodes, storages int
+	var lastStorage string
 	for _, u := range c.Usage {
 		row := capacityRow{Label: u.Label(), Level: "ok",
 			Text: fmt.Sprintf("%s used of %s, needs %s, %s free", pods.GiB(u.Used), pods.GiB(u.Total), pods.GiB(u.Needed), pods.GiB(u.Free()))}
 		if u.Kind == pods.UsageMemory {
 			row.Label += " memory"
+			nodes++
+		} else {
+			storages++
+			lastStorage = u.Label()
 		}
 		switch {
 		case u.Over():
@@ -549,6 +583,20 @@ func capacityOf(c *pods.Capacity, warnings *[]string) *capacityView {
 			row.Need = 5 // small, but there
 		}
 		v.Rows = append(v.Rows, row)
+	}
+	if !v.Tight {
+		var where []string
+		if nodes > 0 {
+			where = append(where, fmt.Sprintf("%d %s", nodes, byCount(nodes, "node", "nodes")))
+		}
+		if storages == 1 {
+			where = append(where, lastStorage)
+		} else if storages > 1 {
+			where = append(where, fmt.Sprintf("%d storages", storages))
+		}
+		if len(where) > 0 {
+			v.Summary = "fits on " + strings.Join(where, " and ")
+		}
 	}
 	return v
 }

@@ -262,18 +262,30 @@ func TestPreviewOfDeploy(t *testing.T) {
 	_, form, body := h.preview(&lead, "/deploy", url.Values{"teams": {"1"}, "pattern": {"*.kilo.alpha"}, "baseline": {"yes"}})
 	contains(t, "deploy preview", body,
 		`<h1 id="pv-title">`, `Deploy <span class="vm">kilo.alpha</span></h1>`,
-		"2 will run</span>", "<dt>Baseline snapshot</dt><dd>on</dd>", "<dt>Rebuild templates</dt><dd>off</dd>",
-		`<h2 class="sub">Templates</h2>`,
+		"<dt>Baseline snapshot</dt><dd>on</dd>", "<dt>Rebuild templates</dt><dd>off</dd>",
+		`<summary class="disc"><h2 class="sub">Templates</h2><span class="meta">· 2 to create</span></summary>`,
+		`<summary class="disc"><h2 class="sub">VMs</h2><span class="meta">· 2 VMs</span></summary>`,
 		"<tr><td><span class=\"vm\">dc.kilo.alpha.tpl</span></td><td><span class=\"vm\">n1</span></td><td>create · stops its master</td><td></td></tr>",
 		"Building the templates stops 2 running masters, each until its copy finishes.",
 		"2 VMs will be created or repaired from <span class=\"name\">kilo.alpha</span> on n1.",
 		"<td>network · disk-limits · cdrom · clear-notes · tag-set · snapshot · start</td>",
 		"Deploy 2 VMs</button>",
 	)
-	lacks(t, "deploy preview", body, `name="typed"`) // only a teardown is typed
+	lacks(t, "deploy preview", body, `name="typed"`, "will run</span>", `<p class="say bad">`) // calm summary, no redundant chip or typed confirm
 	if form.Get("baseline") != "yes" || form.Get("pattern") != "*.kilo.alpha" || form.Has("rebuild") {
 		t.Errorf("confirm fields = %v", form)
 	}
+
+	// Rebuilding existing templates combines the rebuild and stop-master notice into one line.
+	h.noTeamVMs()
+	h.api.add(proxmox.VM{VMID: 9001, Name: "dc.kilo.alpha.tpl", Node: "n1", Template: true}, nil)
+	h.api.add(proxmox.VM{VMID: 9002, Name: "web.kilo.alpha.tpl", Node: "n1", Template: true}, nil)
+	_, _, rebuildBody := h.preview(&lead, "/deploy", url.Values{"teams": {"1-3"}, "pattern": {"*.kilo.alpha"}, "baseline": {"yes"}, "rebuild": {"yes"}})
+	contains(t, "deploy rebuild preview", rebuildBody,
+		`<summary class="disc"><h2 class="sub">Templates</h2><span class="meta">· 2 to rebuild</span></summary>`,
+		"Rebuilding 2 templates deletes the old ones and stops 2 running masters, each until its copy finishes.",
+	)
+	lacks(t, "deploy rebuild preview", rebuildBody, "will be deleted and built again", "This covers every pod")
 }
 
 func TestPreviewRefusesBadInputs(t *testing.T) {

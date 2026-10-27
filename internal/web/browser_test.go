@@ -809,6 +809,9 @@ func TestBrowserEmptyGridAndDeploy(t *testing.T) {
 			if got := b.text(`main button.pri`); got != "Deploy 384 VMs" {
 				t.Errorf("deploy button = %q", got)
 			}
+			if !b.is(`document.querySelectorAll("main details.logbox").length === 2 && [...document.querySelectorAll("main details.logbox")].every(d => !d.open) && !document.querySelector("main .say.bad")`) {
+				t.Error("healthy deploy preview didn't fold its Templates and VMs tables or showed a danger callout")
+			}
 			b.noSideways("deploy preview")
 			b.shot("preview-deploy-" + size.name)
 			b.clean()

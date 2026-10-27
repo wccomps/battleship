@@ -104,11 +104,21 @@ func TestGridIsASelectionForm(t *testing.T) {
 
 	// ?select ticks boxes: a team's row, a host's column, or everything.
 	body = h.get(&lead, "/?select=team:01").Body.String()
-	contains(t, "row selected", body, `value="team01-dc" data-team="01" data-host="dc" checked>`, `value="team01-web" data-team="01" data-host="web" checked>`)
-	lacks(t, "row selected", body, `value="team02-dc" data-team="02" data-host="dc" checked>`)
+	contains(t, "row selected", body,
+		`data-select="team:01" role="button" aria-pressed="true"`,
+		`value="team01-dc" data-team="01" data-host="dc" checked>`,
+		`value="team01-web" data-team="01" data-host="web" checked>`)
+	lacks(t, "row selected", body,
+		`data-select="team:02" role="button" aria-pressed="true"`,
+		`value="team02-dc" data-team="02" data-host="dc" checked>`)
 	body = h.get(&lead, "/?select=host:web").Body.String()
-	contains(t, "column selected", body, `value="team01-web" data-team="01" data-host="web" checked>`, `value="team03-web" data-team="03" data-host="web" checked>`)
-	lacks(t, "column selected", body, `value="team01-dc" data-team="01" data-host="dc" checked>`)
+	contains(t, "column selected", body,
+		`data-select="host:web" role="button" aria-pressed="true"`,
+		`value="team01-web" data-team="01" data-host="web" checked>`,
+		`value="team03-web" data-team="03" data-host="web" checked>`)
+	lacks(t, "column selected", body,
+		`data-select="host:dc" role="button" aria-pressed="true"`,
+		`value="team01-dc" data-team="01" data-host="dc" checked>`)
 	body = h.get(&lead, "/?select=all").Body.String()
 	if n := strings.Count(body, ` checked>`); n != 7 {
 		t.Errorf("select=all ticked %d boxes, want 7", n)
