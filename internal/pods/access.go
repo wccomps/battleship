@@ -420,7 +420,9 @@ func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Co
 		if err != nil {
 			return err
 		}
-		t.Blocked, unpermitted[t.Name] = why, why != ""
+		if why != "" {
+			t.Blocked, t.WillStopMaster, unpermitted[t.Name] = why, false, true
+		}
 	}
 	var tags proxmox.TagAccess
 	if tr, ok := acc.(tagAccessReader); ok {

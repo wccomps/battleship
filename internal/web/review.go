@@ -13,8 +13,7 @@ import (
 )
 
 // reviewView is the review of an image or environment operation, or of a
-// pods teardown: what will happen, then the facts of what will exist (a
-// register) or a row per VM it acts on.
+// pods teardown: what will happen, then any facts, details, changes or VM rows.
 type reviewView struct {
 	Verb, Subject string // the title: "Register teak-build"
 	Say           string // what confirming does, or why it can't
@@ -27,8 +26,7 @@ type reviewView struct {
 	RowsFold    bool
 	RowsSummary string
 	Image, Addr bool
-	Set         bool   // a teardown of everything: each VM's set
-	Note        string // a line after the rows
+	Set         bool // a teardown of everything: each VM's set
 	// Kept are VMs a teardown leaves alone, each with why.
 	Kept []string
 	// Retry says which job this retries, and what of it.

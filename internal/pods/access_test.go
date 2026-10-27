@@ -497,3 +497,15 @@ func TestHoldsOfferedSkipsEmptyPool(t *testing.T) {
 		t.Fatal("HoldsOffered missed the privilege on /pool/dev-01")
 	}
 }
+
+func TestBlockUnpermittedClearsWillStopMaster(t *testing.T) {
+	plan := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{
+		{Name: "teak.x.tpl", VMID: 9021, MasterVMID: 121, MasterName: "teak.x", WillStopMaster: true},
+	}}
+	if err := BlockUnpermitted(context.Background(), plan, grants{}, config.Default()); err != nil {
+		t.Fatal(err)
+	}
+	if plan.Templates[0].Blocked == "" || plan.Templates[0].WillStopMaster {
+		t.Fatalf("template = %+v, want Blocked set and WillStopMaster cleared", plan.Templates[0])
+	}
+}

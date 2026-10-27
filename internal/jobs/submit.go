@@ -16,7 +16,7 @@ var ErrNothingToRun = errors.New("nothing to run: the plan has no runnable VMs")
 
 // Submitter is who submits a job, as the job records it.
 type Submitter struct {
-	User string // who: a login name from the CLI, an email address from the web
+	User string // who: an email address or subject from the web
 	// Preview, from the web app, is the confirmed preview; the job consumes
 	// it (see store.NewJob.Preview).
 	Preview *store.PreviewClaim

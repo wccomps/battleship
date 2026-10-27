@@ -44,22 +44,6 @@ func TestClusterResourcesReadsVMsNodesAndStorageInOneCall(t *testing.T) {
 	}
 }
 
-func TestClusterNodesReadsClusterStatus(t *testing.T) {
-	f, c := newFake(t)
-	f.routes["GET /cluster/status"] = jsonData(`[
-		{"type":"cluster","name":"lab","nodes":3,"quorate":1},
-		{"type":"node","name":"spruce","ip":"192.0.2.126","online":0,"nodeid":3},
-		{"type":"node","name":"cedar","ip":"192.0.2.123","online":1,"local":1,"nodeid":1}]`)
-	nodes, err := c.ClusterNodes(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []ClusterNode{{Name: "cedar", IP: "192.0.2.123", Online: true}, {Name: "spruce", IP: "192.0.2.126"}}
-	if len(nodes) != 2 || nodes[0] != want[0] || nodes[1] != want[1] {
-		t.Errorf("nodes = %+v, want %+v (sorted by name)", nodes, want)
-	}
-}
-
 func TestSnapshotsReadsNamesAndTimes(t *testing.T) {
 	f, c := newFake(t)
 	f.routes["GET /nodes/n1/qemu/10101/snapshot"] = jsonData(`[

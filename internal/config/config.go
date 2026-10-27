@@ -190,8 +190,7 @@ type Retry struct {
 	TaskPoll          time.Duration `toml:"task_poll"`   // longest wait between task status polls; they start at 100ms and double
 }
 
-// Database stores jobs. serve and -queue need it; when set, every CLI run
-// is queued as a job.
+// Database stores jobs, previews and sessions.
 type Database struct {
 	URL string `toml:"url"` // postgres://...; overridden by BATTLESHIP_DATABASE_URL
 	// MaxConns caps the main connection pool (min 4, default 16). A process
@@ -243,7 +242,7 @@ func redactURL(raw string) string {
 type Jobs struct {
 	Heartbeat  time.Duration `toml:"heartbeat"`   // how often a running job proves it's alive
 	StaleAfter time.Duration `toml:"stale_after"` // a running job silent this long is marked interrupted
-	Poll       time.Duration `toml:"poll"`        // how often the CLI checks a job it follows
+	Poll       time.Duration `toml:"poll"`        // how often a job poll checks status
 	// CancelGrace is how long a canceled step waits for a Proxmox task it
 	// already started, so the job records what it did.
 	CancelGrace time.Duration `toml:"cancel_grace"`

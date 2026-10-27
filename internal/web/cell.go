@@ -117,18 +117,8 @@ func (s *Server) cellPage(w http.ResponseWriter, r *http.Request) {
 	if p.Baseline == "" {
 		p.Baseline = s.cfg.Deploy.SnapshotName
 	}
-	for _, k := range slices.Sorted(maps.Keys(d.Config)) {
-		if networkKey.MatchString(k) {
-			p.Network = append(p.Network, configRow{k, d.Config[k]})
-		}
-	}
-	if j, it, err := s.st.LastJobOf(r.Context(), c.Name); err == nil {
-		now := s.now()
-		p.LastJob = &lastJobView{ID: j.ID, Op: opLabelOf(j.Kind, readInputs(j)), Look: lastJobLook(j, it),
-			When: minuteTime(now, j.CreatedAt), At: clockTime(now, j.CreatedAt)}
-	} else if !errors.Is(err, store.ErrNotFound) {
-		s.logf("web: reading the last job of %s: %v", c.Name, err)
-	}
+	p.Network = networkRows(d.Config)
+	p.LastJob = s.lastJobView(r.Context(), c.Name)
 
 	ctx := r.Context()
 	if !p.Missing {
@@ -147,6 +137,29 @@ func (s *Server) cellPage(w http.ResponseWriter, r *http.Request) {
 
 // webTemplates is web.templates, the set the grid shows, as a pattern.
 func (s *Server) webTemplates() string { return strings.TrimSpace(s.cfg.Web.Templates) }
+
+func networkRows(cfg map[string]string) []configRow {
+	var rows []configRow
+	for _, k := range slices.Sorted(maps.Keys(cfg)) {
+		if networkKey.MatchString(k) {
+			rows = append(rows, configRow{k, cfg[k]})
+		}
+	}
+	return rows
+}
+
+func (s *Server) lastJobView(ctx context.Context, name string) *lastJobView {
+	j, it, err := s.st.LastJobOf(ctx, name)
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			s.logf("web: reading the last job of %s: %v", name, err)
+		}
+		return nil
+	}
+	now := s.now()
+	return &lastJobView{ID: j.ID, Op: opLabelOf(j.Kind, readInputs(j)), Look: lastJobLook(j, it),
+		When: minuteTime(now, j.CreatedAt), At: clockTime(now, j.CreatedAt)}
+}
 
 // lastJobLook shows a VM's last job by the job's status while active or if it
 // never touched the VM, else by how it left this VM.

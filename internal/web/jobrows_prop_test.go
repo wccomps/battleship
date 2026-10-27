@@ -106,7 +106,7 @@ func TestPropJobRowsEscapeAndTime(t *testing.T) {
 		if j.Plan, err = json.Marshal(plan); err != nil {
 			t.Fatal(err)
 		}
-		tbl := jobItemsOf(j, items, now)
+		tbl := jobItemsOf(j, plan, items, now)
 		h, err := fragment("job", "job-items", jobView{Items: tbl})
 		if err != nil {
 			t.Fatal(err)

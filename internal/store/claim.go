@@ -17,13 +17,6 @@ const claimLockID = 727071
 // beforeClaimUpdate is a test hook between Claim's SELECT and UPDATE.
 var beforeClaimUpdate func(id int64)
 
-// Claim starts the oldest pending job nothing blocks (see blocksSQL), or
-// returns nil. Overlapping jobs run in creation order. ReapStale reaps it
-// once it has no heartbeat for staleAfter, which must be positive.
-func (s *Store) Claim(ctx context.Context, worker string, staleAfter time.Duration) (*Job, error) {
-	return s.claim(ctx, worker, staleAfter)
-}
-
 // blocksSQL holds when job o keeps pending job j waiting: their lock keys
 // conflict and o is running, or pending and older. Keys conflict when they
 // are equal, except that two "read:" keys never do: "read:K" conflicts only
@@ -31,8 +24,10 @@ func (s *Store) Claim(ctx context.Context, worker string, staleAfter time.Durati
 const blocksSQL = `(o.lock_writes && j.lock_writes OR o.lock_writes && j.lock_reads OR o.lock_reads && j.lock_writes)
 	AND (o.status = 'running' OR (o.status = 'pending' AND o.id < j.id))`
 
-// claim starts the oldest runnable pending job.
-func (s *Store) claim(ctx context.Context, worker string, staleAfter time.Duration) (*Job, error) {
+// Claim starts the oldest pending job nothing blocks (see blocksSQL), or
+// returns nil. Overlapping jobs run in creation order. ReapStale reaps it
+// once it has no heartbeat for staleAfter, which must be positive.
+func (s *Store) Claim(ctx context.Context, worker string, staleAfter time.Duration) (*Job, error) {
 	if staleAfter <= 0 {
 		return nil, fmt.Errorf("claiming a job: stale_after %v isn't positive", staleAfter)
 	}
@@ -174,17 +169,8 @@ func (s *Store) ReapStale(ctx context.Context, after time.Duration) ([]int64, er
 	if err != nil {
 		return nil, err
 	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
 		return nil, err
 	}
 	if err := endItems(ctx, tx, ids, true); err != nil {
@@ -205,16 +191,7 @@ func (s *Store) Blockers(ctx context.Context, jobID int64) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+	return pgx.CollectRows(rows, pgx.RowTo[int64])
 }
 
 // BlockersOf is Blockers for many jobs in one query. Jobs that wait for

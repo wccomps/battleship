@@ -76,8 +76,8 @@
       var text = s < 120 ? s + " s ago" : Math.round(s / 60) + " min ago";
       if (out.textContent !== text) out.textContent = text;
       if (el.id === "grid-status" && liveState() === "stale") {
-        var sum = document.querySelector("details.live > summary");
-        if (sum) sum.title = sum.setAttribute("aria-label", "Stale: no fresh data (" + text + ")") || "Stale: no fresh data (" + text + ")";
+        var sum = document.querySelector("details.live > summary"), label = "Stale: no fresh data (" + text + ")";
+        if (sum) { sum.setAttribute("aria-label", label); sum.title = label; }
       }
     });
   }
@@ -149,7 +149,7 @@
       changed();
     }
 
-    // "patch" is the pieces that changed; "log", new log lines.
+    // "patch" is the pieces that changed.
     function patch(html) {
       Array.prototype.slice.call(parse(html).children).forEach(swap);
       changed();
@@ -258,10 +258,6 @@
     var last = null; // the last box clicked, where a shift-click range starts
 
     var boxes = function () { return Array.prototype.slice.call(form.querySelectorAll('input[name="vms"]')); };
-    var matches = function (what, b) {
-      var kind = what.split(":")[0], value = what.slice(kind.length + 1);
-      return kind === "all" || kind === "none" || (kind === "team" && b.dataset.team === value) || (kind === "host" && b.dataset.host === value);
-    };
 
     updateBar = function () {
       var all = boxes(), on = all.filter(function (b) { return b.checked; });
@@ -314,7 +310,10 @@
     // select ticks what a row, column or "all" names, or unticks it if
     // all ticked; "none" unticks all.
     var select = function (what) {
-      var hit = boxes().filter(function (b) { return matches(what, b); });
+      var kind = what.split(":")[0], value = what.slice(kind.length + 1);
+      var hit = boxes().filter(function (b) {
+        return kind === "all" || kind === "none" || (kind === "team" && b.dataset.team === value) || (kind === "host" && b.dataset.host === value);
+      });
       var on = what !== "none" && !hit.every(function (b) { return b.checked; });
       hit.forEach(function (b) { b.checked = on; });
       updateBar();
@@ -501,8 +500,8 @@
     clicked = e.target.closest ? e.target.closest("button[type=submit]") : null;
   }, true);
 
-  // Posts from the grid and the panel show their answer in the panel, as
-  // do the panel's own GET forms.
+  // Forms inside [data-panel] or #panel submit via fetch and show their
+  // response in the panel; full-page forms submit natively.
   document.addEventListener("submit", function (e) {
     var f = e.target, sub = e.submitter || (clicked && (clicked.form === f) ? clicked : null);
     clicked = null;
@@ -510,6 +509,8 @@
     if (which) {
       var wt = which.querySelector('input[name="teams"]'), pt = f.querySelector('input[name="teams"]');
       if (wt && pt) pt.value = wt.value;
+      var wv = which.querySelector('input[name="vms"]'), pv = f.querySelector('input[name="vms"]');
+      if (wv && pv) pv.value = wv.value;
       var wh = Array.prototype.map.call(which.querySelectorAll('input[name="hosts"]:checked'), function (b) { return b.value; }).join(",");
       var ph = f.querySelector('input[name="hosts"]');
       if (wh && !ph) {
@@ -523,6 +524,7 @@
     var restore = f.hasAttribute("data-deploy") ? deployHosts(f) : null;
     var method = ((sub && sub.getAttribute("formmethod")) || f.getAttribute("method") || "get").toLowerCase();
     if (!panel || !f.closest("[data-panel], #panel")) {
+      if (restore) setTimeout(restore, 0);
       if (sub && method === "post") setTimeout(function () { sub.disabled = true; }, 0);
       return;
     }

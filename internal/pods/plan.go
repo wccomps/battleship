@@ -141,9 +141,9 @@ const (
 	StepVerify    Step = "verify"
 )
 
-// TypedConfirm reports whether kind k needs what it deletes typed to confirm
-// (CLI and web): a teardown's team range, an environment's domain, or an
-// environment host's VM name.
+// TypedConfirm reports whether kind k needs what it deletes typed to confirm:
+// a teardown's team range, an environment's domain, or an environment host's
+// VM name.
 func (k Kind) TypedConfirm() bool { return specs[k].tearsDown }
 
 // Retryable reports whether a job of kind k can be retried with RetryInputs

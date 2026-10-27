@@ -1,6 +1,7 @@
 package pods
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -304,7 +305,7 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		tags := p.Cfg.Deploy.MasterTag + ";" + env.Domain
 		notes := Notes{Base: im.Name, DNS: dnsChoice}
 		if resumed {
-			notes.Base = orString(existing.Notes.Base, im.Name)
+			notes.Base = cmp.Or(existing.Notes.Base, im.Name)
 		}
 		switch im.Kind {
 		case ImageRouter:
@@ -378,22 +379,11 @@ func (p Planner) planGuest(env Environment, os, host, domain string, ip, dns net
 // resumeMismatch says how an existing host differs from the requested image,
 // or "" when it can be resumed.
 func resumeMismatch(existing EnvHost, im BaseImage, family string) string {
-	kind := existing.Notes.OS
-	if existing.Router {
-		kind = ImageRouter
-	}
-	if kind != "" && kind != im.Kind || kind == "" && im.Kind != ImageOther {
+	if existing.Kind() != im.Kind {
 		return "as a different kind of host than " + family + " (" + im.Kind + ")"
 	}
 	if f, _, ok := ParseImageName(existing.Notes.Base); ok && f != family {
 		return "from image family " + f + ", not " + family
 	}
 	return ""
-}
-
-func orString(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }

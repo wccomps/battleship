@@ -60,7 +60,6 @@ a:not([class]){text-underline-offset:2px}
 details[open]>.disc::before{transform:rotate(90deg)}
 .notes{white-space:pre-wrap;overflow-wrap:anywhere;font:var(--t1)/1.5 var(--fm);color:var(--tx);background:var(--sf2);border-radius:var(--r1);padding:6px 8px;margin-top:4px;max-width:60ch}
 .btn.sm{min-height:26px;padding:0 9px;font-size:var(--t2)}
-.tbl .chips{margin:4px 0 2px;gap:4px}
 .tbl .chip{height:20px;padding:0 7px}
 .tbl .meta,.imgnotes .meta{color:var(--tx3);font-size:var(--t1)}
 .olds{font-size:var(--t2)}

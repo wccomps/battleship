@@ -147,7 +147,6 @@ func TestPropClientSurvivesAnyAnswer(t *testing.T) {
 	calls := map[string]func(ctx context.Context){
 		"ClusterResources": func(ctx context.Context) { c.ClusterResources(ctx) },
 		"ClusterVMs":       func(ctx context.Context) { c.ClusterVMs(ctx) },
-		"ClusterNodes":     func(ctx context.Context) { c.ClusterNodes(ctx) },
 		"OnlineNodes":      func(ctx context.Context) { c.OnlineNodes(ctx) },
 		"CustomCPUModels":  func(ctx context.Context) { c.CustomCPUModels(ctx, "n1") },
 		"VMConfig":         func(ctx context.Context) { c.VMConfig(ctx, "n1", 101) },

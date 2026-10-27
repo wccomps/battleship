@@ -9,8 +9,6 @@ import (
 	"slices"
 	"strings"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -31,12 +29,7 @@ type HostEdit struct {
 
 // Kind is the host's kind: router when tagged router, else its notes' OS,
 // else other.
-func (e HostEdit) Kind() string {
-	if e.Host.Router {
-		return ImageRouter
-	}
-	return cmp.Or(e.Host.Notes.OS, ImageOther)
-}
+func (e HostEdit) Kind() string { return e.Host.Kind() }
 
 // Octet is the host's LAN address octet, or 0 without one.
 func (e HostEdit) Octet() int {
@@ -143,34 +136,15 @@ func (p Planner) envHostFrom(ctx context.Context, vms []proxmox.VM, vmid int) (H
 			inSlot = append(inSlot, v)
 		}
 	}
-	cfgs := make([]map[string]string, len(inSlot))
-	var cpuModels []string
-	var g errgroup.Group
-	g.SetLimit(envReads)
-	g.Go(func() error {
-		cpuModels = p.customCPUModels(ctx, vm.Node)
-		return nil
-	})
-	for i, v := range inSlot {
-		g.Go(func() error {
-			cfg, err := p.API.VMConfig(ctx, v.Node, v.VMID)
-			switch {
-			case proxmox.IsNotFound(err):
-				return nil
-			case err != nil:
-				return fmt.Errorf("reading %s (%d): %w", v.Name, v.VMID, err)
-			}
-			cfgs[i] = cfg
-			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
+	cfgs, err := p.readConfigs(ctx, inSlot)
+	if err != nil {
 		return HostEdit{}, proxmox.VM{}, err
 	}
+	cpuByNode := map[string][]string{}
 	env := Environment{Slot: slot, LAN: p.Cfg.Environments.Subnet}
 	for i, v := range inSlot {
 		if cfgs[i] != nil {
-			env.Hosts = append(env.Hosts, p.buildEnvHost(v, cfgs[i], slot, cpuModels))
+			env.Hosts = append(env.Hosts, p.buildEnvHost(v, cfgs[i], slot, p.nodeCPUModels(ctx, cpuByNode, v.Node)))
 		}
 	}
 	setEnvDomain(&env)

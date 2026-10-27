@@ -68,7 +68,7 @@ type Hub struct {
 	subs    map[string]map[*subscriber]struct{}
 	stopped bool
 	seq     uint64 // the last message's Seq
-	jobSeq  uint64 // incremented on TopicJobs, BumpSeq and resyncs
+	jobSeq  uint64 // incremented on TopicJobs and resyncs
 }
 
 type subscriber struct {
@@ -150,7 +150,7 @@ func (h *Hub) Seq() uint64 {
 }
 
 // JobSeq is the job-change counter, incremented on each TopicJobs message,
-// BumpSeq, connect or disconnect. Busy-VM reads started once JobSeq reached
+// connect or disconnect. Busy-VM reads started once JobSeq reached
 // its value see every job change published so far.
 func (h *Hub) JobSeq() uint64 {
 	h.mu.Lock()

@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -220,11 +219,7 @@ func (s *Server) environmentAddrs(w http.ResponseWriter, r *http.Request) {
 	if !add("env-live", envsView{MayLive: true, LiveRead: true}) {
 		return
 	}
-	h := w.Header()
-	h.Set("Content-Type", "text/html; charset=utf-8")
-	h.Set("Cache-Control", "no-store")
-	h.Set(piecesHeader, "1")
-	_, _ = io.WriteString(w, b.String()) // the client went away; nothing to do
+	writePieces(w, b.String())
 }
 
 // liveAddrs are envs' hosts' live addresses by VMID, read through the
