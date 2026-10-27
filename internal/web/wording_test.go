@@ -24,8 +24,8 @@ var (
 	vmNameRE = regexp.MustCompile(`\bteam\d{2}-[\w.-]*`)
 	teamRE   = regexp.MustCompile(`(?i)\bteams?\b`)
 	// competitorRE are the phrases where "team" means the competitors, as
-	// it should: they read pod VMs' notes, use its VMs, reach it by VPN.
-	competitorRE = regexp.MustCompile(`which team members can read|grow as teams use them|the team VPN`)
+	// it should: they read pod VMs' notes and reach it by VPN.
+	competitorRE = regexp.MustCompile(`which team members can read|the team VPN`)
 )
 
 // shownText is what a person reads on a page: its text, and the
@@ -91,7 +91,7 @@ func TestPagesSayPods(t *testing.T) {
 			}
 		}
 	}
-	if len(competitors) != 3 {
+	if len(competitors) != 2 {
 		t.Errorf("the pages show the competitors' team only as %v", competitors)
 	}
 	// The checks themselves see what they should.

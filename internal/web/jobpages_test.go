@@ -403,7 +403,7 @@ func TestRetryFailed(t *testing.T) {
 	contains(t, "retry preview", body,
 		"<title>Reset to snapshot · battleship</title>",
 		"<dt>Retry of</dt><dd>#"+itoa(id)+"</dd>",
-		"2 will run</span>", `Reset to snapshot <span class="vm">initial</span></h1>`,
+		`Reset to snapshot <span class="vm">initial</span></h1>`,
 		`<dt>Pods</dt><dd><span class="vm">01-02</span></dd>`, "<dt>Hosts</dt><dd>dc, web</dd>",
 		"<dt>Only these VMs</dt><dd><span class=\"name\">team01-dc</span>, <span class=\"name\">team02-web</span></dd>",
 		"<tr><td><span class=\"vm\">team01-dc</span></td>", "<tr><td><span class=\"vm\">team02-web</span></td>",
@@ -447,7 +447,7 @@ func TestPreviewOfNamedVMs(t *testing.T) {
 	op := h.login(asOperator)
 	_, form, body := h.preview(&op, "/power", url.Values{"teams": {"1-2"}, "action": {"start"}, "vms": {"team02-dc, team01-ftp"}})
 	contains(t, "preview of named VMs", body,
-		"1 will run</span>", `<dt>Pods</dt><dd><span class="vm">01-02</span></dd>`,
+		"1 VM will be turned on.", `<dt>Pods</dt><dd><span class="vm">01-02</span></dd>`,
 		"<dt>Only these VMs</dt><dd><span class=\"name\">team02-dc</span>, <span class=\"name\">team01-ftp</span></dd>",
 		"1 of the 2 VMs asked for by name no longer exist or match the pods and hosts, so they are left out: <span class=\"name\">team01-ftp</span>.")
 	if form.Get("vms") != "team02-dc,team01-ftp" {

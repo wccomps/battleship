@@ -497,7 +497,7 @@ func TestBrowserPreviewAndJob(t *testing.T) {
 			if got := b.text("#pv-title"); got != "Force stop" {
 				t.Errorf("preview title = %q", got)
 			}
-			if got := b.text("#panel .chips"); got != "3 will run1 already stopped" {
+			if got := b.text("#panel .chips"); got != "1 already stopped" {
 				t.Errorf("chips = %q", got)
 			}
 			if got := b.text("#panel .say.bad"); got != "3 VMs lose power at once. Unsaved work is lost." {
@@ -648,7 +648,7 @@ func TestBrowserSnapshotFlow(t *testing.T) {
 			if got := b.text("#pv-title"); got != "Take snapshot round2" {
 				t.Errorf("preview title = %q", got)
 			}
-			if got := b.text("#panel .chips"); got != "1 will run1 blocked" {
+			if got := b.text("#panel .chips"); got != "1 blocked" {
 				t.Errorf("chips = %q", got)
 			}
 			if got := b.text("#panel tr.blk"); !strings.Contains(got, "team"+team+"-ftp") || !strings.Contains(got, `already has a snapshot named "round2"`) {

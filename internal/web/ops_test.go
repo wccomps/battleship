@@ -232,7 +232,7 @@ func TestPreviewShowsThePlan(t *testing.T) {
 	action, form, body := h.preview(&op, "/reset", url.Values{"teams": {"1"}})
 	contains(t, "reset preview", body,
 		"<title>Reset to snapshot · battleship</title>",
-		`<span class="chip is-running">`, "1 will run</span>", "1 blocked</span>",
+		"1 blocked</span>",
 		`<dt>Pods</dt><dd><span class="vm">01</span></dd>`, "<dt>Snapshot</dt><dd>baseline</dd>",
 		"<tr><td><span class=\"vm\">team01-dc</span></td><td><span class=\"vm\">n1</span></td><td>stop · rollback to baseline (initial) · start</td><td></td></tr>",
 		`<tr class="blk"><td><span class="vm">team01-web</span></td>`,

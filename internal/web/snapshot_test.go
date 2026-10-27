@@ -68,7 +68,7 @@ func TestSnapshotPreviewAndConfirm(t *testing.T) {
 		"<title>Take snapshot · battleship</title>",
 		`Take snapshot <span class="vm">round2</span></h1>`,
 		"<dt>Description</dt><dd>after lunch</dd>", "<dt>Include RAM</dt><dd>on</dd>",
-		"1 will run</span>", "1 blocked</span>",
+		"1 blocked</span>",
 		`<tr class="blk"><td><span class="vm">team01-web</span></td>`,
 		"already has a snapshot named &#34;round2&#34;; choose another name",
 		"<td>snapshot with RAM</td>",

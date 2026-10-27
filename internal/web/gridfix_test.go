@@ -152,7 +152,7 @@ func TestPowerPreviewSaysWhatIsAlreadyDone(t *testing.T) {
 	h.poll()
 	op := h.login(asOperator)
 	_, _, body := h.preview(&op, "/power", selection([]string{"team01-dc", "team01-web", "team02-dc"}, "action", "start"))
-	contains(t, "start preview", body, "3 will run</span>", "2 already running</span>")
+	contains(t, "start preview", body, "3 VMs will be turned on.", "2 already running</span>")
 	_, _, body = h.preview(&op, "/power", selection([]string{"team01-web"}, "action", "shutdown"))
 	contains(t, "shutdown preview", body, "1 already stopped</span>")
 	_, _, body = h.preview(&op, "/power", selection([]string{"team01-web"}, "action", "start"))

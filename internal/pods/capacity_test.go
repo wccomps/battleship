@@ -116,8 +116,8 @@ func TestCapacityWithoutOvercommitIsQuiet(t *testing.T) {
 	if ws := c.Warnings(); len(ws) != 0 {
 		t.Errorf("warnings = %+v, want none", ws)
 	}
-	if len(c.Notes) != 1 || !strings.Contains(c.Notes[0], "Linked clones") || !strings.Contains(c.Notes[0], "grow") {
-		t.Errorf("notes = %q, want the linked-clone note", c.Notes)
+	if len(c.Notes) != 0 {
+		t.Errorf("notes = %q, want none", c.Notes)
 	}
 }
 

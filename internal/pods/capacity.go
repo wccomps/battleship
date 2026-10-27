@@ -64,7 +64,7 @@ func (u Usage) Near() bool { return u.Total > 0 && (u.Used+u.Needed)*10 > u.Tota
 type Capacity struct {
 	// Usage lists node memory then clone storage, each sorted by node.
 	Usage []Usage `json:"usage"`
-	// Notes are what the numbers can't say, e.g. that linked clones grow.
+	// Notes say what couldn't be checked, e.g. nodes without Sys.Audit.
 	Notes []string `json:"notes"`
 }
 
@@ -145,9 +145,8 @@ func ReadCapacity(ctx context.Context, api Reads, plan *Plan, cfg config.Config)
 //
 // Memory, per node: a new clone needs its template's (or master's) memory on
 // its assigned node; an existing VM the plan starts needs its own unless
-// running. Storage: template builds and full clones copy the whole disk;
-// linked clones grow with use, which a note says instead of guessing. Only
-// nodes and storage the plan uses are listed.
+// running. Storage: template builds and full clones copy the whole disk.
+// Only nodes and storage the plan uses are listed.
 func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *Capacity {
 	if !NeedsCapacity(plan) {
 		return nil
@@ -158,7 +157,6 @@ func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *
 	}
 	mem := map[string]int64{}
 	disk := map[string]int64{}
-	linked := 0
 
 	sources := map[string]proxmox.VM{} // template name -> what its clones copy
 	for _, t := range plan.Templates {
@@ -183,9 +181,7 @@ func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *
 		case slices.Contains(it.Steps, StepClone):
 			src := sources[it.Template]
 			mem[it.Node] += src.MaxMem
-			if deploy.Linked {
-				linked++
-			} else {
+			if !deploy.Linked {
 				disk[it.Node] += src.MaxDisk
 			}
 		case slices.Contains(it.Steps, StepStart):
@@ -220,9 +216,6 @@ func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *
 	}
 	c.Notes = append(c.Notes, offline...)
 	c.Usage = append(c.Usage, storageUsage(c, res.Storage, deploy.Storage, disk)...)
-	if linked > 0 {
-		c.Notes = append(c.Notes, fmt.Sprintf("Linked clones (%d) need almost no space on %s at first, but grow as teams use them.", linked, deploy.Storage))
-	}
 	return c
 }
 
