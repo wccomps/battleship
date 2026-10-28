@@ -912,7 +912,7 @@ func TestBrowserTeardownForm(t *testing.T) {
 			b.shot("teardown-step1-" + size.name)
 
 			b.run("typing the pods", chromedp.SendKeys(`#teams`, "1-32", chromedp.ByQuery))
-			b.click(`#teardown-which button[type=submit]`)
+			b.click(`button[form="teardown-which"]`)
 			b.waitFor("step 2", `location.search === "?teams=1-32" && !!document.getElementById("teardown-pick")`)
 			if got := b.text(`#held h2`); got != "In pods 01-32" {
 				t.Errorf("step 2 heading = %q", got)

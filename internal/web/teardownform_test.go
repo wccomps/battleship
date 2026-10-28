@@ -36,7 +36,7 @@ func TestTeardownFormSteps(t *testing.T) {
 
 	body := h.get(&lead, "/teardown").Body.String()
 	contains(t, "step 1", body, `<form method="get" action="/teardown" class="stack" id="teardown-which">`,
-		`<label class="lbl" for="teams">Pods</label>`, `<button type="submit" class="btn">Next</button>`)
+		`<label class="lbl" for="teams">Pods</label>`, `<button type="submit" class="btn pri" form="teardown-which">Next</button>`)
 	lacks(t, "step 1", body, `id="teardown-pick"`, "Preview teardown")
 
 	body = h.get(&lead, "/teardown?teams=1-3").Body.String()

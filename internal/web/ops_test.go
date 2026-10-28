@@ -132,13 +132,13 @@ func TestOperationForms(t *testing.T) {
 		}},
 		{"/reset", []string{
 			`<form method="get" action="/reset" class="stack" id="reset-which">`,
-			`<button type="submit" class="btn">Next</button>`,
+			`<button type="submit" class="btn pri" form="reset-which">Next</button>`,
 		}},
 		{"/teardown", []string{
 			`<form method="get" action="/teardown" class="stack" id="teardown-which">`,
 			`<label class="lbl" for="teams">Pods</label>`,
 			`<legend>Hosts</legend><button type="button" class="btn sm ghost" data-hosts-toggle hidden>Deselect all</button>`,
-			`<button type="submit" class="btn">Next</button>`,
+			`<button type="submit" class="btn pri" form="teardown-which">Next</button>`,
 		}},
 		{"/deploy", []string{
 			`<form class="sheet" method="post" action="/deploy/preview" aria-labelledby="form-title">`,
