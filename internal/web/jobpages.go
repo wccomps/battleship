@@ -496,6 +496,9 @@ func clockText(d time.Duration) string {
 
 // Old jobs recorded no step outcomes (empty it.Steps); otherwise a done item's unreported steps were unneeded.
 func itemSteps(planned []pods.Step, it store.Item) []stepView {
+	if len(planned) <= 1 && it.Status == store.ItemDone {
+		return nil
+	}
 	pips := map[string]string{"done": "done", "failed": "fail", "interrupted": "int"}
 	out := make([]stepView, 0, len(planned))
 	running := it.Status == store.ItemRunning

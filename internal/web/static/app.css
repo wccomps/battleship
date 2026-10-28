@@ -245,6 +245,7 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .pb{flex:1;display:flex;flex-direction:column;gap:var(--s4);padding:var(--s4) var(--s5);overflow:auto;scrollbar-width:thin}
 .pb>*{flex-shrink:0}
 .pb.form{gap:22px}
+.pb>form+form{padding-top:var(--s4);border-top:1px solid var(--ln)}
 .pf{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px;padding:var(--s3) var(--s5);border-top:1px solid var(--ln)}
 .pf.start{justify-content:flex-start}
 .pf .first{margin-right:auto}
@@ -283,6 +284,7 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .say.bad .i{color:var(--bad)}
 .say.caution,.say.caution .i{color:var(--stale)}
 .say ul{margin:0;padding-left:16px}
+:is(.warn,.say) ul:has(>li:only-child){padding-left:0;list-style:none}
 
 /* tables */
 .tscroll{position:relative;max-width:100%;overflow:auto;scrollbar-width:thin;border:1px solid var(--ln);border-radius:var(--r2)}
@@ -297,7 +299,7 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .tbl tr.bad td{background:var(--bad-bg)}
 .tbl tr.bad .muted,.warn .meta{color:color-mix(in srgb,var(--bad) 65%,var(--tx))}
 .tbl .r{text-align:right}
-.rvw .st{white-space:normal}
+.rvw .st,.tbl tr.blk .st{white-space:normal}
 .more td{color:var(--tx3);text-align:center}
 .panel tr.fold,.page#job-live .fold-n,.panel .c-vmid{display:none}
 
@@ -520,11 +522,11 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .lead-ops .btn{flex:1;padding:0 9px;font-size:var(--t2)}
   .brand span:last-child,.me .role{display:none}
   .top .legend{order:9;width:100%;gap:2px var(--s3);font-size:var(--t1)}
-  .gwrap{padding:var(--s3) 0 168px}
+  .gwrap{padding:var(--s3) 0 196px}
   .gscroll{padding:2px var(--s4)}
   .gwrap .start{padding:0 var(--s4)}
   .grid{--cw:48px;--ch:32px}
-  .rh{position:sticky;left:0;z-index:1;background:var(--sf2)}
+  .rh{position:sticky;left:0;z-index:1;background:var(--sf2);box-shadow:-16px 0 0 2px var(--sf2),2px 0 0 var(--sf2),3px 0 0 var(--ln)}
   .ab{left:0;right:0;bottom:0;max-width:none;padding:var(--s2) var(--s2) calc(var(--s2) + env(safe-area-inset-bottom));border-radius:14px 14px 0 0}
   .ab-ops{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;order:3}
   .ab-ops .btn{flex-direction:column;gap:3px;height:48px;padding:0 4px;font-size:11px;white-space:normal;text-align:center}

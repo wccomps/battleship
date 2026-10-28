@@ -274,7 +274,11 @@ func TestDoneRowsByKind(t *testing.T) {
 		id := h.submitJob(c.in, byLead)
 		h.start(id)
 		h.finish(id, store.Outcome{Status: store.StatusSucceeded, Items: map[string]store.ItemOutcome{"team01-dc": {Status: store.ItemDone}}})
-		contains(t, string(c.in.Kind), vmRowOf(t, h.get(&sess, "/logs/"+itoa(id)).Body.String(), "team01-dc"), c.want)
+		row := vmRowOf(t, h.get(&sess, "/logs/"+itoa(id)).Body.String(), "team01-dc")
+		contains(t, string(c.in.Kind), row, c.want)
+		if c.in.Kind == pods.KindPower {
+			lacks(t, "finished 1-step power row", row, `class="steps"`)
+		}
 	}
 }
 

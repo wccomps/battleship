@@ -107,7 +107,7 @@
 {{- end}}
 <a class="btn" href="/" data-close>Cancel</a>
 {{- else}}
-<a class="btn" href="{{.EditHref}}" data-panel-link>Back</a>
+<a class="btn first" href="{{.EditHref}}" data-panel-link>Back</a>
 {{- end}}
 {{- with .Confirm}}
 <button type="submit" class="btn pri{{if .Danger}} bad{{end}}">{{opIcon $.Data.Title.Icon}}{{.Button}}</button>
