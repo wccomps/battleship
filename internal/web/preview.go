@@ -44,8 +44,8 @@ type previewPage struct {
 	TemplatesOpen   bool      // any template is blocked
 	TemplateSummary string    // e.g. "13 to rebuild"
 	Items           []itemRow // blocked ones first
-	ItemsFold       bool      // fold the VM table behind a summary when nothing is blocked
-	ItemsSummary    string    // e.g. "429 VMs"
+	ItemsFold       bool
+	ItemsSummary    string // e.g. "429 VMs"
 	Blocked         int
 	Warnings        []string
 	// Capacity compares what the plan starts with the cluster's free resources;
@@ -121,13 +121,19 @@ type confirmForm struct {
 	Danger  bool
 }
 
-func deletesVMs(items []pods.Item) bool {
-	return slices.ContainsFunc(items, func(it pods.Item) bool { return slices.Contains(it.Steps, pods.StepDelete) })
+func deletedVMs(items []pods.Item) int {
+	n := 0
+	for _, it := range items {
+		if slices.Contains(it.Steps, pods.StepDelete) {
+			n++
+		}
+	}
+	return n
 }
 
 func destructive(in jobs.Inputs, items []pods.Item) bool {
 	return in.Kind.TearsDown() || in.Kind == pods.KindReset || ((in.Kind == pods.KindPower || in.Kind == pods.KindEnvPower) && in.Action == "stop") ||
-		in.Kind == pods.KindImageDelete || deletesVMs(items)
+		in.Kind == pods.KindImageDelete || deletedVMs(items) > 0
 }
 
 // previewOptions are the extras of a preview beyond the plan.
@@ -266,8 +272,6 @@ func newNonce() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// confirmLabel is the confirm button's text, e.g. "Force stop 2 VMs" or
-// "Register teak-v2".
 func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
 	n := len(runnable)
 	if n == 1 && op.ConfirmVerb != "" {
@@ -293,13 +297,11 @@ func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
 	case pods.KindSnapshot:
 		return "Snapshot " + vms
 	case pods.KindDeploy:
-		if deletesVMs(runnable) {
+		if deletedVMs(runnable) == n {
 			return "Recreate " + vms
 		}
-		return op.Title + " " + vms
-	default:
-		return op.Title + " " + vms
 	}
+	return op.Title + " " + vms
 }
 
 func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Inputs, plan *pods.Plan, opts previewOptions) previewPage {
@@ -377,7 +379,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		}
 	}
 	p.TemplateSummary = strings.Join(tplParts, ", ")
-	p.ItemsFold = p.Blocked == 0 && !deletesVMs(plan.Items) && (op.Kind == pods.KindDeploy || len(p.Items) > 8)
+	p.ItemsFold = p.Blocked == 0 && deletedVMs(plan.Items) == 0 && (op.Kind == pods.KindDeploy || len(p.Items) > 8)
 	p.ItemsSummary = countVMs(len(p.Items))
 	if len(rebuilt) > 0 && len(stopped) > 0 && nCreate == 0 {
 		if len(rebuilt) == 1 && len(stopped) == 1 {
@@ -662,13 +664,10 @@ func consequence(kind pods.Kind, in jobs.Inputs, items []pods.Item) string {
 		return vms + pick(" roll back to snapshot ", " rolls back to snapshot ") + in.Snapshot + pick(" and start. Work since then is lost.", " and starts. Work since then is lost.")
 	case pods.KindDeploy:
 		var nodes []string
-		deleted := 0
+		deleted := deletedVMs(items)
 		for _, it := range items {
 			if it.Node != "" && !slices.Contains(nodes, it.Node) {
 				nodes = append(nodes, it.Node)
-			}
-			if slices.Contains(it.Steps, pods.StepDelete) {
-				deleted++
 			}
 		}
 		slices.Sort(nodes)

@@ -299,8 +299,6 @@ func TestPreviewOfDeploy(t *testing.T) {
 	)
 	lacks(t, "deploy rebuild preview", rebuildBody, "will be deleted and built again", "This covers every pod")
 
-	// Rebuilding when pod VMs already exist unfolds the VMs table and
-	// names the destructive action on the confirm button.
 	h.api.add(teamVM("01", "dc", 10101), cleanConfig("01"))
 	h.api.add(teamVM("01", "web", 10102), cleanConfig("01"))
 	_, _, recreateBody := h.preview(&lead, "/deploy", url.Values{"teams": {"1"}, "pattern": {"*.kilo.alpha"}, "baseline": {"yes"}, "rebuild": {"yes"}})
@@ -310,6 +308,13 @@ func TestPreviewOfDeploy(t *testing.T) {
 		`<button type="submit" class="btn pri bad">`, "Recreate 2 VMs</button>",
 	)
 	lacks(t, "deploy recreate preview", recreateBody, `<summary class="disc"><h2 class="sub">VMs</h2>`)
+
+	_, _, partialRecreateBody := h.preview(&lead, "/deploy", url.Values{"teams": {"1-2"}, "pattern": {"*.kilo.alpha"}, "baseline": {"yes"}, "rebuild": {"yes"}})
+	contains(t, "deploy partial recreate preview", partialRecreateBody,
+		"4 VMs (2 VMs torn down and recreated) will be created or repaired from <span class=\"name\">kilo.alpha</span> on n1, n2.",
+		`<button type="submit" class="btn pri bad">`, "Deploy 4 VMs</button>",
+	)
+	lacks(t, "deploy partial recreate preview", partialRecreateBody, `<summary class="disc"><h2 class="sub">VMs</h2>`, "Recreate 4 VMs")
 }
 
 func TestPreviewRefusesBadInputs(t *testing.T) {

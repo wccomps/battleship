@@ -255,7 +255,7 @@
   if (form && bar) {
     var count = $("sel-count"), why = $("ab-why"), whyText = $("ab-why-text");
     var details = $("ab-details"), detailsSep = $("ab-details-sep");
-    var last = null; // the last box clicked, where a shift-click range starts
+    var last = "";
 
     var boxes = function () { return Array.prototype.slice.call(form.querySelectorAll('input[name="vms"]')); };
 
@@ -282,11 +282,10 @@
       if (count.textContent !== String(n)) count.textContent = n;
       why.hidden = !text;
       if (whyText.textContent !== text) whyText.textContent = text;
-      var pick = last && last.checked && form.contains(last) ? last : on[on.length - 1];
-      var vmHref = pick && "/vm/" + pick.dataset.team + "/" + pick.dataset.host;
-      details.hidden = detailsSep.hidden = !vmHref;
-      if (vmHref) {
-        details.setAttribute("href", vmHref);
+      var pick = on.filter(function (b) { return b.value === last; })[0] || on[on.length - 1];
+      details.hidden = detailsSep.hidden = !pick;
+      if (pick) {
+        details.setAttribute("href", "/vm/" + pick.dataset.team + "/" + pick.dataset.host);
         details.title = n > 1 ? pick.value : "";
       }
       // Row and column headers show whether all of theirs are selected.
@@ -320,6 +319,7 @@
       });
       var on = what !== "none" && !hit.every(function (b) { return b.checked; });
       hit.forEach(function (b) { b.checked = on; });
+      last = "";
       updateBar();
     };
 
@@ -327,11 +327,12 @@
       var t = e.target;
       if (!t.closest || !form.contains(t) && !bar.contains(t)) return;
       if (t.matches('input[name="vms"]')) {
-        if (e.shiftKey && last && last !== t && form.contains(last)) {
-          var list = boxes(), a = list.indexOf(last), b = list.indexOf(t);
+        var list = boxes(), prev = last && list.filter(function (x) { return x.value === last; })[0];
+        if (e.shiftKey && prev && prev !== t) {
+          var a = list.indexOf(prev), b = list.indexOf(t);
           list.slice(Math.min(a, b), Math.max(a, b) + 1).forEach(function (x) { x.checked = t.checked; });
         }
-        last = t;
+        last = t.value;
         updateBar();
         return;
       }
