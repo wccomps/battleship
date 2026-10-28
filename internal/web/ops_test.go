@@ -241,7 +241,6 @@ func TestPreviewShowsThePlan(t *testing.T) {
 		`<button type="submit" class="btn pri bad">`, "Reset 1 VM</button>",
 		`<a class="btn first" href="/reset?teams=1" data-panel-link>Back</a>`,
 	)
-	// Blocked VMs come first.
 	if strings.Index(body, "team01-web") > strings.Index(body, "team01-dc</span></td><td><span") {
 		t.Error("the blocked VM isn't listed first")
 	}

@@ -269,7 +269,6 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .stline{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .meta{font-size:var(--t2);color:var(--tx3)}
 
-/* callouts: boxed, only for what went wrong */
 .warn{display:flex;align-items:flex-start;gap:10px;margin:0;padding:12px 14px;border:1px solid color-mix(in srgb,var(--bad) 45%,transparent);border-radius:var(--r2);background:var(--bad-bg);font-weight:500}
 .warn .i{margin-top:1px;color:var(--bad)}
 .warn.note{border-color:var(--ln);background:var(--sf2);font-weight:400}
@@ -277,14 +276,12 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .warn.stale{border-color:color-mix(in srgb,var(--stale) 45%,transparent);background:var(--stale-bg);font-weight:400}
 .warn.stale .i{color:var(--stale)}
 .warn>div{display:grid;gap:4px;min-width:0}
-.warn ul{margin:0;padding-left:16px}
-/* statements: what an operation will do, unboxed */
 .say{display:flex;align-items:flex-start;gap:10px;margin:0}
 .say .i{margin-top:1px;color:var(--tx2)}
 .say.bad .i{color:var(--bad)}
 .say.caution,.say.caution .i{color:var(--stale)}
 .say ul{margin:0;padding-left:16px}
-:is(.warn,.say) ul:has(>li:only-child){padding-left:0;list-style:none}
+.say ul:has(>li:only-child){padding-left:0;list-style:none}
 
 /* tables */
 .tscroll{position:relative;max-width:100%;overflow:auto;scrollbar-width:thin;border:1px solid var(--ln);border-radius:var(--r2)}
@@ -299,7 +296,7 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .tbl tr.bad td{background:var(--bad-bg)}
 .tbl tr.bad .muted,.warn .meta{color:color-mix(in srgb,var(--bad) 65%,var(--tx))}
 .tbl .r{text-align:right}
-.rvw .st,.tbl tr.blk .st{white-space:normal}
+.tbl tr.blk .st{white-space:normal}
 .more td{color:var(--tx3);text-align:center}
 .panel tr.fold,.page#job-live .fold-n,.panel .c-vmid{display:none}
 

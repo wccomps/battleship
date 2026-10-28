@@ -259,7 +259,6 @@ func TestDeployRowsShowTemplateBuildProgress(t *testing.T) {
 	lacks(t, "web's row after its template finishes", webRow, "cloning master")
 }
 
-// Done rows read as what the job's kind makes of them.
 func TestDoneRowsByKind(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
