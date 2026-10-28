@@ -120,23 +120,26 @@ func TestPropUserNotes(t *testing.T) {
 		piece := rapid.OneOf(rapid.String(), rapid.SampledFrom([]string{
 			"battleship: ip=192.168.100.10", "  battleship: reboot", "\n", "\r\n", "\u202e", "\u200b", "\ufeff", "Login: root",
 		}))
-		desc := strings.Join(rapid.SliceOfN(piece, 0, 40).Draw(t, "pieces"), "")
-		got := UserNotes(desc)
-		for _, line := range strings.Split(got, "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), notesPrefix) {
-				t.Fatalf("kept a battleship line: %q", line)
-			}
-		}
-		if strings.ContainsFunc(got, func(r rune) bool { return unicode.Is(unicode.Cf, r) }) {
-			t.Fatalf("kept a format character: %q", got)
-		}
-		if n := len([]rune(got)); n > maxUserNotes+1 {
-			t.Fatalf("kept %d runes", n)
-		}
-		if len([]rune(got)) <= maxUserNotes && UserNotes(got) != got {
-			t.Fatalf("not idempotent: %q -> %q", got, UserNotes(got))
-		}
+		checkUserNotes(t, strings.Join(rapid.SliceOfN(piece, 0, 40).Draw(t, "pieces"), ""))
 	})
+}
+
+func checkUserNotes(t interface{ Fatalf(string, ...any) }, desc string) {
+	got := UserNotes(desc)
+	for _, line := range strings.Split(got, "\n") {
+		if isNotesLine(line) {
+			t.Fatalf("kept a battleship line: %q", line)
+		}
+	}
+	if strings.ContainsFunc(got, func(r rune) bool { return unicode.Is(unicode.Cf, r) }) {
+		t.Fatalf("kept a format character: %q", got)
+	}
+	if n := len([]rune(got)); n > maxUserNotes+1 {
+		t.Fatalf("kept %d runes", n)
+	}
+	if len([]rune(got)) <= maxUserNotes && UserNotes(got) != got {
+		t.Fatalf("not idempotent: %q -> %q", got, UserNotes(got))
+	}
 }
 
 // safeFamily is a base-image family written out without regexps: 1-40
@@ -277,16 +280,7 @@ func TestPropNotesLineRoundTrip(t *testing.T) {
 			t.Fatalf("Checked notes written %q", c.String())
 		}
 		n := Notes{IP: parsedIP(value.Draw(t, "ip")), OS: value.Draw(t, "os"), Base: value.Draw(t, "base"), DNS: value.Draw(t, "dns")}
-		with := WithNotes(desc, n)
-		if got, ok := ParseNotes(with); !ok || got != n {
-			t.Fatalf("ParseNotes(WithNotes(%q, %+v)) = %+v, %v", desc, n, got, ok)
-		}
-		if again := WithNotes(with, n); again != with {
-			t.Fatalf("WithNotes twice: %q, then %q", with, again)
-		}
-		if UserNotes(with) != UserNotes(desc) {
-			t.Fatalf("UserNotes(WithNotes(%q)) = %q, want %q", desc, UserNotes(with), UserNotes(desc))
-		}
+		checkNotesLine(t, desc, n)
 		cur := map[string]string{"description": desc, "tags": rapid.SampledFrom([]string{"", "dev", "Dev;kilo.alpha", "kilo.alpha,dev", " dev "}).Draw(t, "tags")}
 		tags := rapid.SampledFrom([]string{"", "dev", "dev;kilo.alpha", "kilo.alpha;router"}).Draw(t, "new tags")
 		for k, v := range LabelChanges(cur, tags, &n) {
@@ -300,6 +294,21 @@ func TestPropNotesLineRoundTrip(t *testing.T) {
 			t.Fatalf("LabelChanges after applying them: %q", again)
 		}
 	})
+}
+
+// checkNotesLine checks that n written into desc reads back the same,
+// writing it twice changes nothing, and people's notes around it are kept.
+func checkNotesLine(t interface{ Fatalf(string, ...any) }, desc string, n Notes) {
+	with := WithNotes(desc, n)
+	if got, ok := ParseNotes(with); !ok || got != n {
+		t.Fatalf("ParseNotes(WithNotes(%q, %+v)) = %+v, %v", desc, n, got, ok)
+	}
+	if again := WithNotes(with, n); again != with {
+		t.Fatalf("WithNotes twice: %q, then %q", with, again)
+	}
+	if UserNotes(with) != UserNotes(desc) {
+		t.Fatalf("UserNotes(WithNotes(%q)) = %q, want %q", desc, UserNotes(with), UserNotes(desc))
+	}
 }
 
 // editedNoteValue draws a note value as people might edit it: spaces, line breaks

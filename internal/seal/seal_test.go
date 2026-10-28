@@ -58,6 +58,27 @@ func TestKeyIsRedacted(t *testing.T) {
 	}
 }
 
+// A box opens for its own binding, to what was sealed, and for no other.
+func TestPropSealOpensOnlyForItsBinding(t *testing.T) {
+	k := NewKey("a long enough secret for tests", "job credential v1")
+	rapid.Check(t, func(t *rapid.T) {
+		checkSealed(t, k, rapid.String().Draw(t, "binding"), rapid.SliceOf(rapid.Byte()).Draw(t, "plain"), rapid.String().Draw(t, "junk"))
+	})
+}
+
+func checkSealed(t interface{ Fatalf(string, ...any) }, k Key, binding string, plain []byte, junk string) {
+	box := k.Seal(binding, plain)
+	if got, err := k.Open(binding, box); err != nil || string(got) != string(plain) {
+		t.Fatalf("Open(Seal(%q)) = %q, %v", plain, got, err)
+	}
+	if _, err := k.Open(binding+"x", box); err == nil {
+		t.Fatalf("a box sealed for %q opened for %q", binding, binding+"x")
+	}
+	if _, err := k.Open(binding, junk); err == nil && junk != box {
+		t.Fatalf("Open(%q, %q) accepted a value it never sealed", binding, junk)
+	}
+}
+
 // Open refuses, without panicking, anything but a box sealed for the
 // binding: junk, short or cut boxes, and a box with one character changed.
 func TestPropOpenRefusesAllButTheBox(t *testing.T) {
