@@ -250,12 +250,12 @@
 
   var form = $("grid-form");
   var bar = $("actionbar");
-  var updateBar = function () {};
+  var updateBar = function () {}, select = function () {};
 
   if (form && bar) {
     var count = $("sel-count"), why = $("ab-why"), whyText = $("ab-why-text");
     var details = $("ab-details"), detailsSep = $("ab-details-sep");
-    var last = "";
+    var last = "", picked = "";
 
     var boxes = function () { return Array.prototype.slice.call(form.querySelectorAll('input[name="vms"]')); };
 
@@ -282,7 +282,7 @@
       if (count.textContent !== String(n)) count.textContent = n;
       why.hidden = !text;
       if (whyText.textContent !== text) whyText.textContent = text;
-      var pick = on.filter(function (b) { return b.value === last; })[0] || on[on.length - 1];
+      var pick = on.filter(function (b) { return b.value === picked; })[0] || on[on.length - 1];
       details.hidden = detailsSep.hidden = !pick;
       if (pick) {
         details.setAttribute("href", "/vm/" + pick.dataset.team + "/" + pick.dataset.host);
@@ -312,14 +312,14 @@
 
     // select ticks what a row, column or "all" names, or unticks it if
     // all ticked; "none" unticks all.
-    var select = function (what) {
+    select = function (what) {
       var kind = what.split(":")[0], value = what.slice(kind.length + 1);
       var hit = boxes().filter(function (b) {
         return kind === "all" || kind === "none" || (kind === "team" && b.dataset.team === value) || (kind === "host" && b.dataset.host === value);
       });
       var on = what !== "none" && !hit.every(function (b) { return b.checked; });
       hit.forEach(function (b) { b.checked = on; });
-      last = "";
+      picked = "";
       updateBar();
     };
 
@@ -332,7 +332,7 @@
           var a = list.indexOf(prev), b = list.indexOf(t);
           list.slice(Math.min(a, b), Math.max(a, b) + 1).forEach(function (x) { x.checked = t.checked; });
         }
-        last = t.value;
+        last = picked = t.value;
         updateBar();
         return;
       }
@@ -658,8 +658,7 @@
       menu.open = false;
       menu.querySelector("summary").focus();
     } else if (form && !(panel && panel.open) && !e.target.matches("input[type=text], select, textarea")) {
-      each(form.querySelectorAll('input[name="vms"]:checked'), function (b) { b.checked = false; });
-      updateBar();
+      select("none");
     }
   });
 
