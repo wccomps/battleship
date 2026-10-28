@@ -1,7 +1,6 @@
 name: Security
 
-# Weekly: new advisories arrive without a push, and fuzzing needs longer
-# than a PR run allows. go test already runs every fuzz seed on each push.
+# Weekly, as advisories arrive without a push.
 on:
   schedule:
     - cron: '17 6 * * 1'
@@ -12,8 +11,13 @@ permissions:
 
 jobs:
   vulncheck:
-    name: govulncheck
+    uses: ./.github/workflows/vulncheck.yml
+
+  targets:
+    name: List fuzz targets
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -26,23 +30,20 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: List
+        id: list
+        run: |
+          matrix="$(go test -list '^Fuzz' ./... | awk '/^Fuzz/ {t[n++] = $1} /^ok/ {for (i = 0; i < n; i++) printf "{\"pkg\":\"%s\",\"target\":\"%s\"}\n", $2, t[i]; n = 0}' | jq -cs .)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   fuzz:
     name: Fuzz ${{ matrix.target }}
+    needs: targets
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { pkg: auth, target: FuzzSafeNext }
-          - { pkg: seal, target: FuzzOpen }
-          - { pkg: config, target: FuzzParseSSHPublicKey }
-          - { pkg: pods, target: FuzzGuestCommand }
-          - { pkg: pods, target: FuzzParseHostSpec }
-          - { pkg: pods, target: FuzzParseTeams }
-          - { pkg: pods, target: FuzzUserNotes }
+        include: ${{ fromJSON(needs.targets.outputs.matrix) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -56,16 +57,18 @@ jobs:
           cache: true
 
       - name: Fuzz
+        id: fuzz
         env:
           PKG: ${{ matrix.pkg }}
           TARGET: ${{ matrix.target }}
-        run: go test "./internal/$PKG" -run '^$' -fuzz "^$TARGET\$" -fuzztime 5m
+        run: |
+          echo "dir=$(go list -f '{{.Dir}}' "$PKG")" >> "$GITHUB_OUTPUT"
+          go test "$PKG" -run '^$' -fuzz "^$TARGET\$" -fuzztime 5m
 
-      # A failing input lands in testdata/fuzz/<target>/; commit it there and
-      # go test replays it on every run.
+      # Commit the input under testdata/fuzz/<target>/ so go test replays it.
       - name: Keep the failing input
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-${{ matrix.target }}
-          path: internal/${{ matrix.pkg }}/testdata/fuzz/
+          path: ${{ steps.fuzz.outputs.dir }}/testdata/fuzz/

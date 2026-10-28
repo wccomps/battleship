@@ -56,6 +56,14 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
+      - name: Dockerfile builds with go.mod's Go
+        run: |
+          want="$(sed -n 's/^go //p' go.mod)"
+          if ! grep -qx "FROM golang:${want}-alpine AS build" Dockerfile; then
+            echo "::error file=Dockerfile,line=1::The golang image must be ${want}-alpine, go.mod's go version; bump both together."
+            exit 1
+          fi
+
       - name: gofmt
         run: |
           unformatted="$(gofmt -l .)"
@@ -79,25 +87,7 @@ jobs:
         run: go test -race -count=1 -timeout 15m ./...
 
   vulncheck:
-    name: govulncheck
-    # Reports only vulnerabilities the code can reach, in the Go it builds
-    # with (go.mod) and its modules. Weekly runs (security.yml) catch new
-    # advisories between pushes.
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+    uses: ./.github/workflows/vulncheck.yml
 
   image:
     name: Build image

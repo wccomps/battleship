@@ -8,7 +8,7 @@ updates:
       go-modules:
         patterns: ['*']
 
-  # The golang build image; the Go version in go.mod moves by hand with it.
+  # CI fails a golang image bump until go.mod's go line matches it.
   - package-ecosystem: docker
     directory: /
     schedule:
