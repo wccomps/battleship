@@ -517,7 +517,7 @@ func itemSteps(planned []pods.Step, it store.Item) []stepView {
 		}
 		out = append(out, v)
 	}
-	if len(out) <= 1 && it.Status == store.ItemDone {
+	if len(out) <= 1 && it.Status != store.ItemRunning {
 		return nil
 	}
 	return out

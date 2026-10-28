@@ -416,6 +416,7 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .here{display:flex;flex-wrap:wrap;gap:4px}
 .here span{padding:2px 7px;border-radius:4px;background:var(--sf2);color:var(--tx2);font:var(--t1) var(--fm)}
 #host-field{position:relative}
+#host-field:not(:has(.opt)){display:none}
 #host-field>[data-hosts-toggle]{position:absolute;bottom:calc(100% + 4px);left:44px;min-height:22px;padding:0 7px;font-size:var(--t1)}
 .field>legend,.lbl{display:flex;align-items:center;gap:8px;padding:0;margin-bottom:5px;font-size:var(--t2);font-weight:500}
 .field>.lbl{margin-bottom:0}
@@ -533,7 +534,7 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .ph{padding-left:var(--s4)}
   .pb{padding:var(--s4)}
   .pf{padding:var(--s3) var(--s4) calc(var(--s3) + env(safe-area-inset-bottom))}
-  .pf .btn{flex:1}
+  .pf .btn:not(.ghost){flex:1}
   .inp,.addr input{font-size:var(--t4)}
   main>.sheet{padding:0}
   .page{padding:var(--s4)}

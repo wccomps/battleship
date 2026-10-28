@@ -271,6 +271,9 @@ func TestDoneRowsByKind(t *testing.T) {
 		{jobs.Inputs{Kind: pods.KindPower, Teams: "1", Hosts: []string{"dc"}, Action: "start"}, `Done</span>`},
 	} {
 		id := h.submitJob(c.in, byLead)
+		if c.in.Kind == pods.KindPower {
+			lacks(t, "pending 1-step power row", vmRowOf(t, h.get(&sess, "/logs/"+itoa(id)).Body.String(), "team01-dc"), `class="steps"`)
+		}
 		h.start(id)
 		h.finish(id, store.Outcome{Status: store.StatusSucceeded, Items: map[string]store.ItemOutcome{"team01-dc": {Status: store.ItemDone}}})
 		row := vmRowOf(t, h.get(&sess, "/logs/"+itoa(id)).Body.String(), "team01-dc")
