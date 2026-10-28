@@ -66,6 +66,19 @@ func TestSafeNext(t *testing.T) {
 	}
 }
 
+// A clean path outside /auth, with any query, is kept as it is.
+func TestPropSafeNextKeepsCleanPaths(t *testing.T) {
+	segment := rapid.OneOf(rapid.StringMatching(`[a-z0-9][a-z0-9._~-]{0,8}`), rapid.SampledFrom([]string{"authors", "auth.x", "%41uth", "01"}))
+	rapid.Check(t, func(t *rapid.T) {
+		segs := rapid.SliceOfN(segment, 1, 4).Filter(func(s []string) bool { return s[0] != "auth" }).Draw(t, "segments")
+		in := "/" + strings.Join(segs, "/") + rapid.SampledFrom([]string{"", "/"}).Draw(t, "slash") +
+			rapid.SampledFrom([]string{"", "?", "?page=2", "?x=/../auth#y/../z", "?next=/auth/login"}).Draw(t, "query")
+		if got := safeNext(in); got != in {
+			t.Fatalf("safeNext(%q) = %q, want it kept", in, got)
+		}
+	})
+}
+
 // TestSafeNextStaysOnSite checks that whatever next a login is given, the
 // browser is sent somewhere on this site that no auth route serves.
 func TestSafeNextStaysOnSite(t *testing.T) {
