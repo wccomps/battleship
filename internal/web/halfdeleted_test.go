@@ -7,9 +7,6 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// A VM a failed destroy left half-deleted is listed in its slot's block,
-// in the pool or only at one of its VMIDs, and keeps that slot from being
-// offered.
 func TestEnvironmentsPageShowsHalfDeletedVMs(t *testing.T) {
 	h := newHarness(t)
 	addCatalog(h)
@@ -23,5 +20,5 @@ func TestEnvironmentsPageShowsHalfDeletedVMs(t *testing.T) {
 		t.Errorf("kilo.alpha hosts %q", got)
 	}
 	contains(t, "dev-03", envSection(t, body, "slot-03"), `<span class="hname">VM 2350</span>`)
-	contains(t, "the free line", body, `<span class="vm">dev-02, dev-05 – dev-10</span>`)
+	lacks(t, "Create form", h.get(&sess, "/environments/new").Body.String(), `value="03"`)
 }

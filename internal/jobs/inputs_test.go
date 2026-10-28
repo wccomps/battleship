@@ -296,3 +296,27 @@ func TestValidateDetails(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildPlanNarrowedRebuildBlocksWhenExcludedVMUsesTemplate(t *testing.T) {
+	f := newFake()
+	f.Add(proxmox.VM{VMID: 121, Name: "teak.tango.delta", Node: "cedar", Tags: "dev"}, nil)
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10221, Name: "team02-teak", Node: "cedar"}, nil)
+
+	plan, err := BuildPlan(bg, pods.NewPlanner(f, config.Default()), Inputs{
+		Kind:    pods.KindDeploy,
+		Pattern: "teak.*",
+		Teams:   "1-2",
+		VMs:     []string{"team01-teak"},
+		Rebuild: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Templates) != 1 || !strings.Contains(plan.Templates[0].Blocked, "team02-teak") {
+		t.Errorf("template = %+v", plan.Templates)
+	}
+	if len(plan.Items) != 1 || !strings.HasPrefix(plan.Items[0].Blocked, "template teak.tango.delta.tpl:") || plan.Items[0].Node != "" {
+		t.Errorf("item = %+v", plan.Items)
+	}
+}

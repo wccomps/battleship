@@ -782,11 +782,22 @@ func TestBrowserEmptyGridAndDeploy(t *testing.T) {
 			if got := b.is(`[...document.querySelectorAll('main input[name=hosts]')].every(b => b.checked) && document.querySelectorAll('main input[name=hosts]').length === 12`); !got {
 				t.Error("the set's 12 hosts aren't all ticked")
 			}
+			if got := b.text(`main [data-hosts-toggle]`); got != "Deselect all" {
+				t.Errorf("hosts toggle = %q, want Deselect all", got)
+			}
+			b.click(`main [data-hosts-toggle]`)
+			if !b.is(`[...document.querySelectorAll('main input[name=hosts]')].every(b => !b.checked) && document.querySelector('main input[name=hosts]').required && document.querySelector('main input[name=hosts]').validationMessage === "Tick at least one host."`) || b.text(`main [data-hosts-toggle]`) != "Select all" {
+				t.Error("Deselect all didn't untick all hosts, set validation message, and switch to Select all")
+			}
+			b.click(`main [data-hosts-toggle]`)
+			if !b.is(`[...document.querySelectorAll('main input[name=hosts]')].every(b => b.checked) && !document.querySelector('main input[name=hosts]').required && document.querySelector('main input[name=hosts]').validationMessage === ""`) || b.text(`main [data-hosts-toggle]`) != "Deselect all" {
+				t.Error("Select all didn't tick all hosts, clear validation message, and switch to Deselect all")
+			}
 			b.shot("deploy-form-" + size.name)
 			// Another set shows its own hosts.
 			b.click(`main label.opt input[value="*.kilo.bravo"] + span`)
-			if !b.is(`document.querySelectorAll('main input[name=hosts]').length === 6`) {
-				t.Error("choosing kilo.bravo doesn't show its 6 hosts")
+			if !b.is(`document.querySelectorAll('main input[name=hosts]').length === 6 && [...document.querySelectorAll('main input[name=hosts]')].every(b => b.checked)`) {
+				t.Error("choosing kilo.bravo doesn't show its 6 hosts ticked")
 			}
 			b.click(`main label.opt input[value="*.kilo.alpha"] + span`)
 			// No team has VMs yet: the teams are typed.
@@ -799,8 +810,8 @@ func TestBrowserEmptyGridAndDeploy(t *testing.T) {
 			if got := b.text("#pv-title"); got != "Deploy kilo.alpha" {
 				t.Errorf("preview title = %q", got)
 			}
-			if !b.is(`document.querySelector('main .kv').textContent.includes("all")`) {
-				t.Errorf("recap = %q (want all hosts: none sent)", b.text("main .kv"))
+			if got := b.text("main .kv"); got != "Pods01-32" {
+				t.Errorf("recap = %q (want all hosts: none sent)", got)
 			}
 			// Only a teardown is typed (pods.Kind.TypedConfirm).
 			if b.is(`!!document.querySelector('#typed')`) || b.is(`document.querySelector('main button.pri').disabled`) {
@@ -872,8 +883,6 @@ func setsHarness(t *testing.T) *harness {
 	return h
 }
 
-// The teardown form: pods first, then, as a page of its own, what they
-// hold, set by set, and a set (or everything) to tear down.
 func TestBrowserTeardownForm(t *testing.T) {
 	h := setsHarness(t)
 	lead := h.login(asLead)
@@ -884,7 +893,7 @@ func TestBrowserTeardownForm(t *testing.T) {
 			b.open("/")
 			b.click(`.lead-ops a[href="/teardown"]`)
 			b.waitFor("the teardown page", `location.pathname === "/teardown" && document.readyState === "complete"`)
-			if got := b.text("#host-field legend"); got != "Hosts · none = all" {
+			if got := b.text("#host-field legend"); got != "Hosts Deselect all" {
 				t.Errorf("hosts legend = %q", got)
 			}
 			if got := b.text(`label[for="teams"]`); got != "Pods" {

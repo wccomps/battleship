@@ -213,13 +213,13 @@ type TemplateSpec struct {
 	Bridges []string `json:"bridges,omitempty"`
 }
 
-// Item is one VM and the steps to run on it, in order.
 type Item struct {
 	Team     string `json:"team"`
 	Host     string `json:"host"`
 	Name     string `json:"name"`
 	VMID     int    `json:"vmid"`
 	Node     string `json:"node"`
+	OldNode  string `json:"old_node,omitempty"`
 	Template string `json:"template"` // deploy: TemplateSpec.Name
 	// Set is a team VM's template set: the one a deploy's tag-set step
 	// records, or the one a teardown found (SetOf), for its review. Sets are
@@ -443,8 +443,8 @@ type DeployRequest struct {
 	Pattern  string   // master name pattern, e.g. "*.kilo.alpha"
 	Teams    []string // two-digit team numbers
 	Hosts    []string // optional host filter
-	Rebuild  bool     // recreate templates
-	Snapshot bool     // take the baseline snapshot
+	Rebuild  bool
+	Snapshot bool
 }
 
 func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
@@ -509,7 +509,7 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 	}
 	cpuModels := p.customCPUModels(ctx, nodes[0])
 	for _, m := range kept {
-		spec, ws, err := p.templateSpec(ctx, m, req.Rebuild, byName, used, vms, slotByPool, cpuModels)
+		spec, ws, err := p.templateSpec(ctx, m, req.Rebuild, req.Teams, byName, used, vms, slotByPool, cpuModels)
 		if err != nil {
 			return nil, err
 		}
@@ -538,9 +538,10 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 	assign := p.Naming.AssignNodes(req.Teams, nodes, vms, podVMs)
 	for _, team := range req.Teams {
 		for _, tpl := range plan.Templates {
-			plan.Items = append(plan.Items, p.deployItem(team, tpl, assign[team], req.Snapshot, byName, used))
+			plan.Items = append(plan.Items, p.deployItem(team, tpl, assign[team], req.Rebuild, req.Snapshot, byName, used))
 		}
 	}
+	plan.BlockUnrebuildable()
 	return plan, nil
 }
 
@@ -567,7 +568,34 @@ func (p Planner) blockDuplicateHosts(specs []TemplateSpec, team string) {
 	}
 }
 
-func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool,
+func (p *Plan) BlockUnrebuildable() {
+	for i := range p.Templates {
+		t := &p.Templates[i]
+		if !t.Rebuild || t.Blocked != "" {
+			continue
+		}
+		unperm := false
+		for _, it := range p.Items {
+			if it.Template == t.Name && it.Blocked != "" && slices.Contains(it.Steps, StepDelete) {
+				t.Blocked, t.WillStopMaster, unperm = fmt.Sprintf("pod VMs such as %s still use this template; tear them down first", it.Name), false, it.Unpermitted
+				break
+			}
+		}
+		if t.Blocked == "" {
+			continue
+		}
+		for j := range p.Items {
+			if p.Items[j].Template == t.Name {
+				if p.Items[j].Blocked == "" {
+					p.Items[j].Blocked, p.Items[j].Unpermitted = "template "+t.Name+": "+t.Blocked, unperm
+				}
+				p.Items[j].Node = p.Items[j].OldNode
+			}
+		}
+	}
+}
+
+func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, teams []string,
 	byName map[string][]proxmox.VM, used map[int]string, vms []proxmox.VM,
 	slotByPool map[string]Slot, cpuModels []string) (TemplateSpec, []string, error) {
 	cfg, err := p.API.VMConfig(ctx, m.Node, m.VMID)
@@ -608,11 +636,9 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool,
 		spec.Interfaces, spec.GPU = p.describe(tcfg)
 		spec.CPU, spec.CloudInit, spec.Bridges = tcfg["cpu"], HasCloudInit(tcfg), NICBridges(tcfg)
 	case exists && rebuild:
-		// Rebuilding deletes the template, which would break team VMs linked
-		// to it. Proxmox itself refuses to free a base disk any other linked
-		// clone still uses.
+		// Proxmox refuses to delete a template whose base disk a linked clone still uses.
 		for _, vm := range vms {
-			if _, host, ok := p.Naming.TeamVM(vm); ok && host == spec.Host {
+			if team, host, ok := p.Naming.TeamVM(vm); ok && host == spec.Host && !slices.Contains(teams, team) {
 				spec.Blocked = fmt.Sprintf("pod VMs such as %s still use this template; tear them down first", vm.Name)
 				break
 			}
@@ -671,7 +697,7 @@ func normalizeTeams(teams []string) ([]string, error) {
 	return teamList(seen), nil
 }
 
-func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snapshot bool,
+func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, rebuild, snapshot bool,
 	byName map[string][]proxmox.VM, used map[int]string) Item {
 	it := Item{
 		Team:     team,
@@ -697,7 +723,7 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snap
 	}
 	if named := byName[it.Name]; len(named) > 0 {
 		vm := named[0]
-		it.VMID, it.Node = vm.VMID, vm.Node
+		it.VMID, it.OldNode = vm.VMID, vm.Node
 		if len(named) > 1 {
 			it.Blocked = fmt.Sprintf("several VMs are named %s (VMIDs %s)", it.Name, vmidList(named))
 		} else if kind, _, _ := p.Naming.Classify(vm); kind == TeamTemplate {
@@ -708,6 +734,12 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, snap
 			it.Blocked = wrongPool(vm, want)
 		} else if want := p.Naming.CloneVMID(team, tpl.VMID); vm.VMID != want {
 			it.Blocked = fmt.Sprintf("exists as VMID %d, expected %d (built from a different template?); tear it down first", vm.VMID, want)
+		}
+		if rebuild && slices.ContainsFunc(named, func(v proxmox.VM) bool { _, _, ok := p.Naming.TeamVM(v); return ok }) {
+			it.Steps = append(it.Steps, StepStop, StepDelete, StepClone)
+		}
+		if it.Blocked != "" || !rebuild {
+			it.Node = vm.Node
 		}
 	} else {
 		it.VMID = p.Naming.CloneVMID(team, tpl.VMID)

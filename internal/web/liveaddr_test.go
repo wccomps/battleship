@@ -89,10 +89,6 @@ func checkLiveCells(t *testing.T, body string) {
 	}
 }
 
-// The page comes with assigned addresses and reads no agent; the script
-// fills in the live ones from pieces, and without it a link shows the page
-// with them. An agent that doesn't answer holds up the pieces for the read
-// timeout, not the minute all the reads may take.
 func TestEnvironmentsLiveAddresses(t *testing.T) {
 	h := newHarness(t)
 	addLiveEnv(h, true)
@@ -101,7 +97,7 @@ func TestEnvironmentsLiveAddresses(t *testing.T) {
 
 	body := h.get(&sess, "/environments").Body.String()
 	contains(t, "the page", body, `<p class="meta liveaddr" id="env-live" data-fill="/environments/addresses">`,
-		`<a href="/environments?live=1">Show live addresses</a>`,
+		`<a class="btn sm ghost" href="/environments?live=1" data-fill-say>Live addresses</a>`,
 		`<td class="ad" id="addr-2102"><span class="al"><code>192.168.100.5</code></span></td>`,
 		`<td class="ad" id="addr-2100"><span class="al"><span class="meta">no address</span></span></td>`)
 	lacks(t, "the page", body, "no guest agent", "<code>192.168.100.2</code>", "10.50.12", "differs")
@@ -120,7 +116,7 @@ func TestEnvironmentsLiveAddresses(t *testing.T) {
 		t.Errorf("the addresses took %v with ash's agent hung, read timeout %v", took, h.srv.addrTimeout)
 	}
 	checkLiveCells(t, pieces)
-	contains(t, "the pieces", pieces, `<template><p class="meta liveaddr" id="env-live"><span>Addresses are live from the guest agents, where they answered.</span>`)
+	contains(t, "the pieces", pieces, `<template><p class="meta liveaddr" id="env-live"><a class="btn sm ghost" href="/environments?live=1" title="Re-read live addresses">`)
 	if n := strings.Count(pieces, "<template>"); n != 7 {
 		t.Errorf("%d pieces, want the 6 cells and the line", n)
 	}
@@ -132,7 +128,7 @@ func TestEnvironmentsLiveAddresses(t *testing.T) {
 
 	body = h.get(&sess, "/environments?live=1").Body.String()
 	checkLiveCells(t, body)
-	contains(t, "the live page", body, `<p class="meta liveaddr" id="env-live"><span>Addresses are live`, `<a href="/environments?live=1">Read again</a>`)
+	contains(t, "the live page", body, `<p class="meta liveaddr" id="env-live"><a class="btn sm ghost" href="/environments?live=1" title="Re-read live addresses">`, `</svg>Live</a>`)
 	lacks(t, "the live page", body, "data-fill")
 	if got := strings.Join(hostNames(envSection(t, body, "kilo.alpha")), " "); got != "gw yew teak elm oak ash" {
 		t.Errorf("hosts in order %q, by assigned address", got)
@@ -301,8 +297,6 @@ func TestEnvironmentsLiveSSHWarnings(t *testing.T) {
 	}
 }
 
-// In the browser, the page fills in the live addresses after it loads, as
-// the server renders them, without scrolling sideways on a phone.
 func TestBrowserEnvironmentsLiveAddresses(t *testing.T) {
 	h := browserHarness(t)
 	addLiveEnv(h, true)
@@ -349,7 +343,7 @@ func TestBrowserEnvironmentsLiveAddresses(t *testing.T) {
 			b.run("opening without scripts", emulation.SetScriptExecutionDisabled(true),
 				chromedp.Navigate(b.srv.URL+"/environments"), chromedp.WaitReady("body"))
 			noScriptShot(b, "environments-noscript-"+size.name)
-			if got := b.text("#env-live"); got != "Addresses as assigned. Show live addresses" {
+			if got := b.text("#env-live"); got != "Live addresses" {
 				t.Errorf("the line says %q", got)
 			}
 			b.run("following the link", chromedp.Click(`#env-live a`, chromedp.ByQuery), chromedp.WaitVisible(`#env-live:not([data-fill]) a`, chromedp.ByQuery))
@@ -392,14 +386,13 @@ func noScriptShot(b *browser, name string) {
 // oneLine is markup without its newlines.
 func oneLine(s string) string { return strings.ReplaceAll(s, "\n", "") }
 
-// The page names the paths the server serves the live addresses at.
 func TestTemplateKnowsLiveAddrPaths(t *testing.T) {
 	html, err := templateFS.ReadFile("templates/catalog.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	contains(t, "catalog.html", string(html), `data-fill="`+envAddrsPath+`"`,
-		`<a href="`+envsPath+`?live=1">Read again</a>`, `<a href="`+envsPath+`?live=1">Show live addresses</a>`)
+		`href="`+envsPath+`?live=1"`)
 	hostHTML, err := templateFS.ReadFile("templates/envhost.html")
 	if err != nil {
 		t.Fatal(err)
@@ -407,8 +400,6 @@ func TestTemplateKnowsLiveAddrPaths(t *testing.T) {
 	contains(t, "envhost.html", string(hostHTML), `data-fill="`+envHostAddrsPath+`?vmid={{.VMID}}"`)
 }
 
-// A keyboard user on the line's link when the live addresses land stays on
-// it: on its Read again link.
 func TestBrowserLiveAddressesKeepFocus(t *testing.T) {
 	h := browserHarness(t)
 	addLiveEnv(h, true)
@@ -423,7 +414,7 @@ func TestBrowserLiveAddressesKeepFocus(t *testing.T) {
 	b.waitFor("the live addresses", `!document.querySelector("[data-fill]")`)
 	var focused string
 	b.eval(`document.activeElement.closest("#env-live") ? document.activeElement.textContent : document.activeElement.tagName`, &focused)
-	if focused != "Read again" {
+	if focused != "Live" {
 		t.Errorf("focus is on %q after the fill", focused)
 	}
 	b.clean()

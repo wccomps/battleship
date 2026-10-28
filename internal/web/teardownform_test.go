@@ -28,8 +28,6 @@ func tagSets(h *harness) {
 	}
 }
 
-// The teardown form is two steps, as reset's: pods and hosts (a GET),
-// then what they hold and which set to tear down.
 func TestTeardownFormSteps(t *testing.T) {
 	h := newHarness(t)
 	tagSets(h)
@@ -56,7 +54,7 @@ func TestTeardownFormSteps(t *testing.T) {
 		`<label class="opt sans"><input type="radio" name="set" value="" required><span>Everything in these pods</span>`,
 		`<span class="hint">Battleship can&#39;t tell the set of 2 VMs, so only Everything in these pods removes them.</span>`,
 		`form="teardown-pick">`, "Preview teardown</button>")
-	lacks(t, "step 2 with several sets", body, " checked>") // the person chooses
+	lacks(t, "step 2 with several sets", body, "required checked>")
 
 	// Narrowed by hosts, the nameless choice says "Every matching VM in
 	// these pods" instead of "Everything in these pods".

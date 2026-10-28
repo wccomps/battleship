@@ -2,25 +2,13 @@
 {{- with .Data}}
 {{- $d := .}}
 <div class="page mid envs">
-<div class="phead"><h1 class="ptitle">Environments</h1></div>
+<div class="phead"><h1 class="ptitle">Environments</h1>{{- if and (not .ReadErr) .MayLive}}<span class="sp"></span>{{template "env-live" .}}{{end}}</div>
 {{- range .Lacks}}
 <p class="lock">{{icon "lock"}}{{.}}</p>
 {{- end}}
 {{- with .ReadErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
-{{- with .FreeErr}}<p class="warn" role="alert">{{icon "warn"}}<span>{{.}}</span></p>{{end}}
-{{- if not .ReadErr}}
-<div class="envbar">
-<p class="free"><span class="sub">Free</span>
-{{- if .Free}}<span class="vm">{{.Free}}</span><span class="meta">· Create uses {{.Create}}</span>
-{{- else}}<span class="meta">none: every slot is in use</span>{{end}}
-{{- with .Queued}}<span class="meta">· a queued job will fill {{.}}</span>{{end}}</p>
-{{- if .MayLive}}
-{{template "env-live" .}}
-{{- end}}
-</div>
-{{- if not .Envs}}
-<p class="say">No environments in use yet. Create environment builds one in {{or .Create "a free dev slot"}}.</p>
-{{- end}}
+{{- if and (not .ReadErr) (not .Envs)}}
+<p class="say">No environments in use yet.</p>
 {{- end}}
 {{- range .Envs}}
 {{- $b := .}}
@@ -74,12 +62,10 @@
 {{- end}}
 {{- end}}
 
-{{/* env-live says whether the addresses are live; without them, the
-     script fills them in from data-fill, and the link reads them without it. */}}
 {{define "env-live" -}}
 <p class="meta liveaddr" id="env-live"{{if not .LiveRead}} data-fill="/environments/addresses"{{end}}>
-{{- if .LiveRead}}<span>Addresses are live from the guest agents, where they answered.</span> <a href="/environments?live=1">Read again</a>
-{{- else}}<span data-fill-say>Addresses as assigned.</span> <a href="/environments?live=1">Show live addresses</a>{{end}}</p>
+{{- if .LiveRead}}<a class="btn sm ghost" href="/environments?live=1" title="Re-read live addresses">{{icon "reboot"}}Live</a>
+{{- else}}<a class="btn sm ghost" href="/environments?live=1" data-fill-say>Live addresses</a>{{end}}</p>
 {{- end}}
 
 {{/* env-si is a host's status, image and warning-count cell. */}}

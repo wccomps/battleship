@@ -41,16 +41,14 @@
 <dialog class="panel" id="panel" aria-label="Details"></dialog>
 {{- end}}
 
-{{/* grid-live is the live-updated part. Its pieces with an id (cells,
-     grid-start, the header's grid-status and grid-counts) also render alone,
-     so the stream sends only changed ones and the script swaps them by id. */}}
+{{/* Sub-templates with an id also render standalone as SSE pieces swapped by id. */}}
 {{define "grid-live" -}}
 {{- if .Empty}}
 {{- with .Start}}
 {{template "grid-start" .}}
 {{- end}}
 {{- else}}
-<div class="gscroll{{if .Tall}} tall{{end}}" role="region" aria-label="VM grid" tabindex="0">
+<div class="gscroll{{if .Tall}} tall{{end}}" role="region" aria-label="Pods" tabindex="0">
 <div class="grid{{with .GridClass}} {{.}}{{end}}" id="grid-table" role="table" aria-label="VMs by pod and host">
 <div class="gr hr" role="row"><div class="gh rh" role="columnheader"><label class="all"><input type="checkbox" data-select="all"><span class="sr">Select all VMs</span></label></div>
 {{- range .Hosts}}<div class="gh" role="columnheader"><a class="hb" href="/?select=host:{{.}}" data-select="host:{{.}}" role="button" aria-pressed="{{$.HostPressed .}}"><span class="sr">Select every </span>{{.}}</a></div>{{end -}}

@@ -144,14 +144,12 @@ type navItem struct {
 	Key, Label, Href string
 }
 
-// nav is the main navigation: the grid, environments, images and the logs. The power and reset forms
-// keep their addresses for prefilled links (a job's "start again") but aren't
-// in the menu.
+// The power and reset forms keep their addresses for "start again" links but aren't in the menu.
 func nav(u *auth.User) []navItem {
 	if u == nil {
 		return nil
 	}
-	return []navItem{{"grid", "Grid", "/"}, {"environments", "Environments", "/environments"}, {"images", "Images", "/images"}, {"logs", "Logs", logsPath}}
+	return []navItem{{"grid", "Pods", "/"}, {"environments", "Environments", "/environments"}, {"images", "Images", "/images"}, {"logs", "Logs", logsPath}}
 }
 
 // leadOps is the header's operation buttons for section ("" for the grid's pod
@@ -293,10 +291,9 @@ func (s *Server) errorPage(w http.ResponseWriter, r *http.Request, status int, t
 	s.AuthPage(w, r, auth.Page{Status: status, Title: title, Message: msg, Link: link, LinkText: linkText})
 }
 
-// notFound is the page for addresses the app doesn't serve.
 func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
 	s.errorPage(w, r, http.StatusNotFound, "Miss.",
-		"There's no page at this address. It may have been mistyped, or the link is out of date.", "/", "Go to the grid")
+		"There's no page at this address. It may have been mistyped, or the link is out of date.", "/", "Go to Pods")
 }
 
 // opIcon is the icon of an operation kind, or of a power action.

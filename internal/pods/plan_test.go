@@ -504,3 +504,50 @@ func TestDeployMasterAndUntaggedWarnings(t *testing.T) {
 		t.Errorf("Notices = %v, want %v", plan.Notices, want)
 	}
 }
+
+func TestDeployPlanRebuildReplacesInTeamVMsAndBlocksOnBlockedVM(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "spruce"}, nil)
+
+	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{
+		Pattern: "teak.*", Teams: []string{"01", "02"}, Rebuild: true, Snapshot: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Templates[0].Blocked != "" || !plan.Templates[0].Rebuild {
+		t.Fatalf("template = %+v", plan.Templates[0])
+	}
+	wantSteps := []Step{StepStop, StepDelete, StepClone, StepNetwork, StepDiskLimits, StepCDROM, StepNotes, StepSetTag, StepSnapshot, StepStart}
+	if !reflect.DeepEqual(plan.Items[0].Steps, wantSteps) || plan.Items[0].Blocked != "" {
+		t.Errorf("team01-teak = %+v, want steps %v", plan.Items[0], wantSteps)
+	}
+
+	f.Add(proxmox.VM{VMID: 10110, Name: "team01-elmer", Node: "birch"}, nil)
+	plan, err = testPlanner(f).Deploy(context.Background(), DeployRequest{
+		Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Items[0].Blocked = "you don't have VM.Allocate on /vms/10121"
+	plan.BlockUnrebuildable()
+	if plan.Items[0].Node != "spruce" {
+		t.Errorf("blocked existing item Node = %q, want spruce", plan.Items[0].Node)
+	}
+
+	f.Add(proxmox.VM{VMID: 10299, Name: "team02-teak", Node: "birch"}, nil)
+	plan, err = testPlanner(f).Deploy(context.Background(), DeployRequest{
+		Pattern: "teak.*", Teams: []string{"01", "02"}, Rebuild: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan.Templates[0].Blocked, "team02-teak") {
+		t.Errorf("template Blocked = %q", plan.Templates[0].Blocked)
+	}
+	if !strings.HasPrefix(plan.Items[0].Blocked, "template teak.tango.delta.tpl:") || plan.Items[0].Node != "spruce" {
+		t.Errorf("team01-teak = %+v", plan.Items[0])
+	}
+}

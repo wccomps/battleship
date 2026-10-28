@@ -52,7 +52,7 @@ func (s *Server) limitBody(next http.Handler) http.Handler {
 
 func (s *Server) tooLarge(w http.ResponseWriter, r *http.Request) {
 	s.errorPage(w, r, http.StatusRequestEntityTooLarge, "Request too large",
-		"This request sent more than 1 MiB, more than any of battleship's forms needs, so nothing was changed.", "/", "Go to the grid")
+		"This request sent more than 1 MiB, more than any of battleship's forms needs, so nothing was changed.", "/", "Go to Pods")
 }
 
 // secure sets the security headers on every response.

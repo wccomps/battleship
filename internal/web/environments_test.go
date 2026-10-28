@@ -13,7 +13,6 @@ import (
 
 	"pgregory.net/rapid"
 
-	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/store"
@@ -64,16 +63,12 @@ func hostNames(section string) []string {
 	return out
 }
 
-// Each used slot is a block anchored at its domain, with its slot and
-// router, its actions at its own paths, and its hosts router first, then
-// by address, with their status, image and notes. The free slots are one
-// line of runs, naming the one Create takes.
 func TestEnvironmentsPage(t *testing.T) {
 	h := newHarness(t)
 	addCatalog(h)
 	sess := h.login(asLead)
 	empty := h.get(&sess, "/environments").Body.String()
-	contains(t, "empty page", empty, "No environments in use yet. Create environment builds one in dev-01.")
+	contains(t, "empty page", empty, "No environments in use yet.")
 
 	addEnvs(h)
 	body := h.get(&sess, "/environments").Body.String()
@@ -81,8 +76,7 @@ func TestEnvironmentsPage(t *testing.T) {
 	contains(t, "the page", body,
 		`<nav class="lead-ops" aria-label="Environment operations">`,
 		`href="/environments/new"`, `Create environment</a>`,
-		`href="/environments/teardown"`, `Tear down environment</a>`,
-		`<p class="free"><span class="sub">Free</span><span class="vm">dev-02, dev-03, dev-05 – dev-10</span><span class="meta">· Create uses dev-02</span></p>`)
+		`href="/environments/teardown"`, `Tear down environment</a>`)
 	kilo := envSection(t, body, "kilo.alpha")
 	contains(t, "kilo.alpha", kilo,
 		`<details open>`, `<summary class="envh disc">`,
@@ -105,23 +99,6 @@ func TestEnvironmentsPage(t *testing.T) {
 	}
 }
 
-// A free slot a queued job will fill isn't offered: Create uses the next,
-// and the line says which slot is spoken for.
-func TestEnvironmentsPageSkipsAReservedSlot(t *testing.T) {
-	h := newHarness(t)
-	addImages(h)
-	addEnvs(h)
-	h.submitJob(jobs.Inputs{Kind: pods.KindEnvCreate, Domain: "kilo.bravo", Router: "gw=gw"}, byLead)
-	sess := h.login(asLead)
-	body := h.get(&sess, "/environments").Body.String()
-	contains(t, "the page", body,
-		`<span class="vm">dev-03, dev-05 – dev-10</span><span class="meta">· Create uses dev-03</span><span class="meta">· a queued job will fill dev-02</span>`)
-}
-
-// Slots that can't be acted on by one domain still show, with why: VMs of
-// several domains, a domain an earlier slot holds too, and VMs from outside
-// on a slot's networks. Only one block is anchored at a domain, and only
-// it offers actions.
 func TestEnvironmentsPageOddSlots(t *testing.T) {
 	h := newHarness(t)
 	addCatalog(h)
@@ -162,8 +139,6 @@ func TestEnvironmentsPageOddSlots(t *testing.T) {
 	contains(t, "kilo.alpha", envSection(t, body, "kilo.alpha"), "Also on its networks, from outside dev-01: <code>stray-two</code>.",
 		`<a class="btn sm" href="/environments/kilo.alpha/add">Add hosts</a>`)
 	lacks(t, "kilo.alpha", envSection(t, body, "kilo.alpha"), "Tear down kilo.alpha")
-
-	contains(t, "the free line", body, `<span class="vm">dev-06 – dev-10</span><span class="meta">· Create uses dev-06</span>`)
 }
 
 // Without a privilege, its action shows disabled and one line names it.

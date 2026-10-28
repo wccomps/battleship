@@ -136,14 +136,8 @@ type Result struct {
 	RoundsSkipped bool
 }
 
-// Executor runs a plan. Steps check current state and skip finished work
-// (except reset, reboot and the cloud-init regeneration, which always act),
-// so rerunning a plan resumes or converges it.
-//
-// An Executor must not Run concurrently; OnEvent is called from many
-// goroutines. Cleanup assumes no other run changes the VMs it does at the
-// same time, which the job system's lock keys enforce when a database is
-// configured.
+// Executor runs a plan; a single instance must not Run concurrently, and OnEvent is called from worker goroutines.
+// Cleanup assumes no concurrent run touches the same VMs, which job lock keys enforce.
 type Executor struct {
 	API     pods.API
 	Cfg     config.Config
@@ -185,7 +179,8 @@ type Executor struct {
 	mastersStopped map[string]string
 	// left is how each item, by name, last left its VM's config across rounds;
 	// absent means untouched (see leftAt).
-	left map[string]Left
+	left     map[string]Left
+	tornDown map[string]bool
 }
 
 // cloneState is what a run knows about the outcome of a template clone.
@@ -229,6 +224,7 @@ func (e *Executor) init() {
 	e.asked = map[int][]string{}
 	e.mastersStopped = map[string]string{}
 	e.left = map[string]Left{}
+	e.tornDown = map[string]bool{}
 }
 
 // noteMasterStopped records a master a template build left stopped.
@@ -244,8 +240,6 @@ func (e *Executor) emit(item string, step pods.Step, status EventStatus, msg str
 	}
 }
 
-// Run executes the plan, then retries failed items for the configured
-// rounds.
 func (e *Executor) Run(ctx context.Context, plan *pods.Plan) Result {
 	e.init()
 	res := Result{Failed: map[string]error{}, Interrupted: map[string]error{}, CleanupFailed: map[string]error{}}
@@ -288,8 +282,6 @@ func (e *Executor) Run(ctx context.Context, plan *pods.Plan) Result {
 			e.emit("", "", EventFailed, "listing VMs: "+err.Error())
 			continue
 		}
-		// Builds run up to concurrency.template_builds at once; each template's
-		// items start as soon as it is built.
 		built := e.startTemplates(ctx, plan.Templates, builds, pending)
 		pending, cut = e.runItems(ctx, plan.Kind, pending, builds, failed, succeeded)
 		built()
@@ -330,14 +322,21 @@ func (e *Executor) Run(ctx context.Context, plan *pods.Plan) Result {
 	return res
 }
 
-// runItems runs items, up to concurrency.workers at once, and returns those
-// to retry: failures and items a stop kept from running (cut). An item
-// waits only for the template build it clones from, and fails if it failed.
 func (e *Executor) runItems(ctx context.Context, kind pods.Kind, items []pods.Item, builds map[string]*tplBuild,
 	failed map[string]error, succeeded map[string]bool) (retry []pods.Item, cut bool) {
 	workers := make(sem, e.Cfg.Concurrency.Workers)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	record := func(it pods.Item, rerr error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if rerr == nil {
+			delete(failed, it.Name)
+			succeeded[it.Name] = true
+		} else if failed[it.Name] = rerr; !proxmox.IsForbidden(rerr) && !proxmox.IsModified(rerr) {
+			retry = append(retry, it)
+		}
+	}
 	for _, it := range items {
 		wg.Add(1)
 		go func() {
@@ -345,26 +344,37 @@ func (e *Executor) runItems(ctx context.Context, kind pods.Kind, items []pods.It
 			b := builds[it.Template]
 			// Base-image and environment items clone a Source, not a template.
 			clones := b != nil && slices.Contains(it.Steps, pods.StepClone)
-			run := func() error {
-				var err error
-				if clones && b.err != nil {
-					e.emit(it.Name, "", EventStarted, "")
-					err = e.endItem(ctx, it, "", -1, false, fmt.Errorf("template %s: %w", it.Template, b.err))
-				} else {
-					err = e.runItem(ctx, kind, it, b)
-				}
-				mu.Lock()
-				defer mu.Unlock()
-				if err == nil {
-					delete(failed, it.Name)
-					succeeded[it.Name] = true
-				} else if failed[it.Name] = err; !proxmox.IsForbidden(err) && !proxmox.IsModified(err) { // a missing privilege, or a change worked out from a config since changed, is never tried again
-					retry = append(retry, it)
-				}
-				return nil
+			replaces := clones && slices.Contains(it.Steps, pods.StepDelete)
+			tearsDownFirst := replaces && !e.isTornDown(it.Name)
+			doneFree := func() {}
+			if tearsDownFirst && b.ready != nil && b.spec.Rebuild && !b.oldGone {
+				doneFree = sync.OnceFunc(b.freed.Done)
 			}
+			defer doneFree()
+
+			cloneIdx := slices.Index(it.Steps, pods.StepClone)
+			start, started := 0, false
 			var err error
-			if clones && b.ready != nil {
+			if tearsDownFirst {
+				var rerr error
+				err = workers.do(ctx, func() error {
+					rerr = e.runItem(ctx, kind, it, b, 0, cloneIdx, false)
+					return nil
+				})
+				if rerr != nil {
+					b.noteTeardownErr(fmt.Errorf("could not tear down %s: %w", it.Name, rerr))
+				}
+				doneFree()
+				if rerr != nil {
+					record(it, rerr)
+					return
+				}
+				if err == nil {
+					start, started = cloneIdx, true
+				}
+			}
+			afterTeardown := started || e.isTornDown(it.Name)
+			if err == nil && clones && b.ready != nil {
 				select {
 				case <-b.ready:
 				case <-ctx.Done():
@@ -372,17 +382,37 @@ func (e *Executor) runItems(ctx context.Context, kind pods.Kind, items []pods.It
 				}
 			}
 			if err == nil {
-				err = workers.do(ctx, run)
+				err = workers.do(ctx, func() error {
+					var rerr error
+					if clones && b.err != nil {
+						if !afterTeardown {
+							e.emit(it.Name, "", EventStarted, "")
+						}
+						step, idx := pods.Step(""), -1
+						if afterTeardown {
+							idx = cloneIdx
+							if errors.Is(b.err, context.Canceled) {
+								step = pods.StepClone
+							}
+						}
+						rerr = e.endItem(ctx, it, step, idx, false, fmt.Errorf("template %s: %w", it.Template, b.err))
+					} else {
+						rerr = e.runItem(ctx, kind, it, b, start, len(it.Steps), started)
+					}
+					record(it, rerr)
+					return nil
+				})
 			}
 			if err == nil {
 				return
 			}
-			// A stop kept it from running this round.
 			mu.Lock()
 			defer mu.Unlock()
 			cut = true
 			retry = append(retry, it)
-			if failed[it.Name] != nil { // its earlier round's error is no longer its last word
+			if afterTeardown {
+				failed[it.Name] = e.endItem(ctx, it, pods.StepClone, cloneIdx, false, err)
+			} else if failed[it.Name] != nil { // its earlier round's error is no longer its last word
 				failed[it.Name] = e.endItem(ctx, it, "", -1, false, err)
 			}
 		}()
@@ -403,6 +433,18 @@ func (e *Executor) refresh(ctx context.Context) error {
 		e.present[vm.VMID] = vm
 	}
 	return nil
+}
+
+func (e *Executor) isTornDown(name string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.tornDown[name]
+}
+
+func (e *Executor) setTornDown(name string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.tornDown[name] = true
 }
 
 // lookup returns the VM currently at vmid, if its name matches.

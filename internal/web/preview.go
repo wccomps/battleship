@@ -121,11 +121,9 @@ type confirmForm struct {
 	Danger  bool
 }
 
-// destructive reports whether in destroys or discards something, so the
-// confirm button says so.
-func destructive(in jobs.Inputs) bool {
+func destructive(in jobs.Inputs, items []pods.Item) bool {
 	return in.Kind.TearsDown() || in.Kind == pods.KindReset || ((in.Kind == pods.KindPower || in.Kind == pods.KindEnvPower) && in.Action == "stop") ||
-		in.Kind == pods.KindImageDelete
+		in.Kind == pods.KindImageDelete || slices.ContainsFunc(items, func(it pods.Item) bool { return slices.Contains(it.Steps, pods.StepDelete) })
 }
 
 // previewOptions are the extras of a preview beyond the plan.
@@ -194,8 +192,6 @@ func (s *Server) planRefused(w http.ResponseWriter, r *http.Request, op operatio
 	s.renderForm(w, r, http.StatusUnprocessableEntity, op, in, "Couldn't make a plan: "+sentence(proxmox.Describe(err)))
 }
 
-// showPreview renders plan's preview. If anything can run, it adds a confirm
-// form backed by a stored preview: new, or opts.nonce's when re-shown.
 func (s *Server) showPreview(w http.ResponseWriter, r *http.Request, code int, op operation, in jobs.Inputs,
 	plan *pods.Plan, opts previewOptions) {
 	if len(plan.Runnable()) > 0 {
@@ -225,7 +221,7 @@ func (s *Server) showPreview(w http.ResponseWriter, r *http.Request, code int, o
 			Fingerprint: fp,
 			RetryOf:     opts.retryOf,
 			Button:      confirmLabel(op, in, plan.Runnable()),
-			Danger:      destructive(in),
+			Danger:      destructive(in, plan.Runnable()),
 		}
 		if op.Kind.TypedConfirm() {
 			p.Confirm.Typed = in.Typed()
@@ -297,7 +293,6 @@ func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
 	}
 }
 
-// newPreviewPage describes plan for people.
 func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Inputs, plan *pods.Plan, opts previewOptions) previewPage {
 	runnable := len(plan.Runnable())
 	p := previewPage{
@@ -425,7 +420,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 	} else {
 		p.Capacity = capacityOf(opts.capacity, &p.Warnings)
 		p.Consequence = consequence(op.Kind, in, plan.Runnable())
-		p.Calm = !destructive(in)
+		p.Calm = !destructive(in, plan.Runnable())
 		if op.Kind == pods.KindPower {
 			p.AlreadyN, p.AlreadyWord = s.alreadyDone(ctx, in.Action, plan.Runnable())
 		}
@@ -627,8 +622,6 @@ func (s *Server) alreadyDone(ctx context.Context, action string, items []pods.It
 	return n, want
 }
 
-// consequence says what confirming does to the VMs, e.g.
-// "2 VMs lose power at once. Unsaved work is lost."
 func consequence(kind pods.Kind, in jobs.Inputs, items []pods.Item) string {
 	n := len(items)
 	vms := countVMs(n)
@@ -660,9 +653,13 @@ func consequence(kind pods.Kind, in jobs.Inputs, items []pods.Item) string {
 		return vms + pick(" roll back to snapshot ", " rolls back to snapshot ") + in.Snapshot + pick(" and start. Work since then is lost.", " and starts. Work since then is lost.")
 	case pods.KindDeploy:
 		var nodes []string
+		deleted := 0
 		for _, it := range items {
 			if it.Node != "" && !slices.Contains(nodes, it.Node) {
 				nodes = append(nodes, it.Node)
+			}
+			if slices.Contains(it.Steps, pods.StepDelete) {
+				deleted++
 			}
 		}
 		slices.Sort(nodes)
@@ -673,6 +670,12 @@ func consequence(kind pods.Kind, in jobs.Inputs, items []pods.Item) string {
 		from := in.Pattern
 		if set, ok := pods.SetOfPattern(in.Pattern); ok {
 			from = string(set)
+		}
+		switch {
+		case deleted > 0 && deleted == n:
+			return vms + " will be torn down and recreated from " + from + on + "."
+		case deleted > 0:
+			return vms + " (" + countVMs(deleted) + " torn down and recreated) will be created or repaired from " + from + on + "."
 		}
 		return vms + " will be created or repaired from " + from + on + "."
 	case pods.KindSnapshot:

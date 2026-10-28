@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 {{- with .Refresh}}
 <meta http-equiv="refresh" content="0;url={{.}}">
 {{- end}}
@@ -20,7 +20,7 @@
 <div class="app" id="app"{{with .Live}} data-live="{{.}}"{{end}}>
 <header class="top">
 {{- if .User}}
-<a class="brand" href="/" aria-label="battleship, grid">{{template "mark"}}<span>battleship</span></a>
+<a class="brand" href="/" aria-label="battleship, pods">{{template "mark"}}<span>battleship</span></a>
 <nav class="nav" aria-label="Main">
 {{- range .Nav}}<a href="{{.Href}}"{{if eq .Key $.Active}} aria-current="page"{{end}}>{{.Label}}</a>{{end -}}
 </nav>

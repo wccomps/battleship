@@ -80,8 +80,6 @@ func TestSafeNextStaysOnSite(t *testing.T) {
 	})
 }
 
-// The Proxmox interstitial refreshes and links only to the route it was
-// asked on, whatever the query and Sec-Fetch-Mode.
 func TestPropInterstitialStaysLocal(t *testing.T) {
 	hostile := rapid.OneOf(rapid.String(), rapid.SampledFrom([]string{
 		"//evil.example", "javascript:alert(1)", ";url=https://evil.example", "\r\n", "%2F%2Fevil", "\\", "finish", "",
@@ -112,11 +110,9 @@ func TestPropInterstitialStaysLocal(t *testing.T) {
 		if shown == nil {
 			t.Fatal("said it showed the interstitial but rendered nothing")
 		}
-		for _, to := range []string{shown.Refresh, shown.Link} {
-			u := LocalURL(to)
-			if u == nil || u.Path != route || u.Query().Get("finish") != "1" {
-				t.Fatalf("interstitial for %s?%s goes on to %q", route, r.URL.RawQuery, to)
-			}
+		u := LocalURL(shown.Refresh)
+		if u == nil || u.Path != route || u.Query().Get("finish") != "1" || shown.Link != "" {
+			t.Fatalf("interstitial for %s?%s goes on to %q (link %q)", route, r.URL.RawQuery, shown.Refresh, shown.Link)
 		}
 	})
 }

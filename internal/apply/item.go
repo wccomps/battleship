@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -11,7 +12,7 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tpl *tplBuild) error {
+func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tpl *tplBuild, start, end int, started bool) error {
 	if len(it.Steps) == 0 {
 		e.emit(it.Name, "", EventStarted, "")
 		return e.endItem(ctx, it, "", -1, false, errors.New("no steps planned"))
@@ -47,11 +48,13 @@ func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tp
 		e.emit(it.Name, "", EventStarted, "")
 		return e.endItem(ctx, it, "", -1, false, fmt.Errorf("VM %s (%d) no longer exists", it.Name, it.VMID))
 	}
-	for i, step := range it.Steps {
+	for i := start; i < end; i++ {
+		step := it.Steps[i]
 		if ctx.Err() != nil {
 			return e.endItem(ctx, it, step, i, false, ctx.Err())
 		}
-		if i == 0 {
+		if !started {
+			started = true
 			e.emit(it.Name, step, EventStarted, "")
 		}
 		sctx, done, sent := e.stepContext(ctx)
@@ -77,7 +80,9 @@ func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tp
 			exists = true
 		}
 	}
-	e.emit(it.Name, "", EventSucceeded, "")
+	if end == len(it.Steps) {
+		e.emit(it.Name, "", EventSucceeded, "")
+	}
 	return nil
 }
 
@@ -122,7 +127,6 @@ func (e *Executor) leftAt(it pods.Item, i int) Left {
 	return LeftUntouched
 }
 
-// runStep performs one step and reports whether it changed anything.
 func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, step pods.Step, tpl *tplBuild, exists bool) (bool, error) {
 	switch step {
 	case pods.StepClone:
@@ -249,6 +253,9 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 	case pods.StepStart:
 		return e.power(ctx, it, "start")
 	case pods.StepStop:
+		if !exists || e.isTornDown(it.Name) {
+			return false, nil
+		}
 		return e.power(ctx, it, "stop")
 	case pods.StepPower:
 		return e.power(ctx, it, it.Action)
@@ -257,9 +264,23 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		return true, e.task(ctx, func() (string, error) { return e.api.Rollback(ctx, it.Node, it.VMID, it.Snapshot) })
 
 	case pods.StepDelete:
+		if e.isTornDown(it.Name) {
+			return false, nil
+		}
+		if !exists {
+			if err := e.checkVMIDFree(ctx, it.VMID); err != nil {
+				return false, err
+			}
+			if err := e.retryLeftovers(ctx, it.VMID, cmp.Or(it.OldNode, it.Node), it.Name); err != nil {
+				return false, err
+			}
+			e.setTornDown(it.Name)
+			return false, nil
+		}
 		err := e.deleteVM(ctx, it.Node, it.VMID, it.Name)
 		if err == nil {
 			e.setPresent(proxmox.VM{VMID: it.VMID}, false)
+			e.setTornDown(it.Name)
 		}
 		return err == nil, err
 	}

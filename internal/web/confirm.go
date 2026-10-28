@@ -161,11 +161,10 @@ func (s *Server) alreadySubmitted(w http.ResponseWriter, r *http.Request, jobID 
 	http.Redirect(w, r, logHref(jobID), http.StatusSeeOther)
 }
 
-// serverError logs err and shows a 500 page.
 func (s *Server) serverError(w http.ResponseWriter, r *http.Request, what string, err error) {
 	s.logf("web: %s: %v", what, err)
 	s.errorPage(w, r, http.StatusInternalServerError, "Something went wrong",
-		"Battleship had a problem "+what+". Nothing more was done. Try again in a moment, and tell a lead if it keeps happening.", "/", "Back to the grid")
+		"Battleship had a problem "+what+". Nothing more was done. Try again in a moment, and tell a lead if it keeps happening.", "/", "Back to Pods")
 }
 
 // summaryOf describes a submitted job briefly, e.g. "reset of pod 01 to

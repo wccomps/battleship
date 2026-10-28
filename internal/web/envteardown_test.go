@@ -161,8 +161,6 @@ func TestEnvTeardownTypedConfirm(t *testing.T) {
 	}
 }
 
-// Once the job has run, the environment is gone from Environments and its
-// slot is free; the job page goes back to Environments.
 func TestEnvTeardownFreesTheSlot(t *testing.T) {
 	h := newHarness(t)
 	addEnvs(h)
@@ -185,7 +183,7 @@ func TestEnvTeardownFreesTheSlot(t *testing.T) {
 	h.finish(j.ID, store.Outcome{Status: store.StatusSucceeded})
 	body := h.get(&sess, "/environments").Body.String()
 	lacks(t, "Environments", body, `id="kilo.alpha"`, "dev-01</span><span>router")
-	contains(t, "Environments", body, `<span class="vm">dev-01 – dev-03, dev-05 – dev-10</span><span class="meta">· Create uses dev-01</span></p>`)
+	contains(t, "Create form", h.get(&sess, "/environments/new").Body.String(), `<option value="01" selected>dev-01 · first free</option>`)
 	contains(t, "the job page", h.get(&sess, "/logs/"+itoa(j.ID)).Body.String(), `<a class="btn ghost back" href="/environments#kilo.alpha">`, `</svg>Environments</a>`,
 		`<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>Tear down <span class="vm">kilo.alpha</span>`)
 }

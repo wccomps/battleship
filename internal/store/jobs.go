@@ -253,11 +253,6 @@ func (s *Store) Events(ctx context.Context, jobID, afterID int64, limit int) ([]
 // beforeEventCommit is a test hook run just before AddEvent commits.
 var beforeEventCommit func(jobID int64, ev Event)
 
-// AddEvent records progress of a running job and moves its item to the
-// event's step and status (see the item statuses), or notes a template
-// build's progress on the pending items waiting for it. One job's events
-// are serialized so their IDs follow commit order. ErrNotActive (nothing
-// stored) if the job isn't running.
 func (s *Store) AddEvent(ctx context.Context, jobID int64, ev Event) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -303,7 +298,7 @@ func (s *Store) AddEvent(ctx context.Context, jobID int64, ev Event) error {
 			if _, err := tx.Exec(ctx, `UPDATE job_items i SET
 					note = CASE WHEN $3 = 'info' THEN $4 ELSE '' END
 				FROM jobs j, jsonb_to_recordset(CASE WHEN jsonb_typeof(j.plan->'items') = 'array' THEN j.plan->'items' ELSE '[]'::jsonb END) AS p(name text, template text, steps jsonb)
-				WHERE i.job_id = $1 AND j.id = $1 AND i.status = 'pending'
+				WHERE i.job_id = $1 AND j.id = $1 AND (i.status = 'pending' OR (i.status = 'running' AND i.step = 'delete'))
 					AND i.name = p.name AND p.template = $2 AND jsonb_typeof(p.steps) = 'array' AND p.steps ? 'clone'`,
 				jobID, ev.Item, ev.Status, ev.Message); err != nil {
 				return err
