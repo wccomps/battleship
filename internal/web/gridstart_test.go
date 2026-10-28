@@ -168,8 +168,6 @@ func submitted(t *testing.T, body string) (string, url.Values) {
 	return m[1], form
 }
 
-// A set's button opens the deploy form filled in except teams; once typed,
-// it deploys exactly that set to exactly those teams.
 func TestGridEmptyDeployClickThrough(t *testing.T) {
 	h := emptyWithMasters(t)
 	lead := h.login(asLead)
@@ -204,8 +202,6 @@ func TestGridEmptyDeployClickThrough(t *testing.T) {
 		"team04-dc", "team04-web", "team05-dc", "team05-web",
 		"Building its template stops master <span class=\"name\">dc.kilo.alpha</span>, which is running, until the copy finishes.")
 	lacks(t, "deploy preview from the grid", body, "bugs", "looney")
-	// Without the script, the form sends the set's hosts, all ticked: the
-	// same VMs as none. (The script sends none when all are ticked.)
 	if confirm != "/deploy/confirm" || fields.Get("pattern") != "*.kilo.alpha" || fields.Get("teams") != "4-5" ||
 		fields.Get("baseline") != "yes" || fields.Has("rebuild") || fields.Get("hosts") != "dc,web" || fields.Has("vms") {
 		t.Errorf("confirm %s fields %v", confirm, fields)

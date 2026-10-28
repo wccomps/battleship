@@ -296,3 +296,20 @@ func TestCapacityOnlineNodesWithoutMemoryNeedSysAudit(t *testing.T) {
 		t.Errorf("memory notes =\n %q\nwant\n %q", mem, want)
 	}
 }
+
+func TestCapacityRebuildCrossNodeLocalStorage(t *testing.T) {
+	res := capCluster()
+	res.VMs[1] = proxmox.VM{VMID: 9021, Name: "teak.x.tpl", Node: "birch", Status: "stopped", Template: true, MaxMem: 8 * gib, MaxDisk: 32 * gib}
+	p := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{{
+		Name: "teak.x.tpl", Host: "teak", VMID: 9021, Node: "cedar", OldNode: "birch", Exists: true, Rebuild: true,
+		MasterName: "teak.x", MasterVMID: 121, MasterNode: "cedar",
+	}}, Items: []Item{deployItemOn("01", "birch", 10121, true)}}
+	c := EstimateCapacity(p, res, deployCfg(true))
+	want := []Usage{
+		{Kind: UsageMemory, Node: "birch", Used: 32 * gib, Total: 256 * gib, Needed: 8 * gib},
+		{Kind: UsageStorage, Node: "cedar", Storage: "competitions", Used: 900 * gib, Total: 1000 * gib, Needed: 32 * gib},
+	}
+	if !reflect.DeepEqual(c.Usage, want) {
+		t.Errorf("usage = %+v, want %+v", c.Usage, want)
+	}
+}

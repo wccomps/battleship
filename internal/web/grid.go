@@ -396,8 +396,6 @@ func (s *Server) polledGrid(ctx context.Context) status.Grid {
 	return s.polledView(ctx).Grid()
 }
 
-// gridPage is the status grid: teams × hosts, as a form whose ticked VMs the
-// action bar sends to an operation's preview.
 func (s *Server) gridPage(w http.ResponseWriter, r *http.Request) {
 	g := s.polledGrid(r.Context())
 	v := s.liveGridView(r.Context(), g, s.now())
@@ -407,7 +405,7 @@ func (s *Server) gridPage(w http.ResponseWriter, r *http.Request) {
 	if ticked == 1 {
 		p.Details = last.Href
 	}
-	page := s.newView(w, r, "Grid", "grid", p)
+	page := s.newView(w, r, "Pods", "grid", p)
 	page.Live = v.Live.State
 	s.render(w, r, http.StatusOK, "grid", page)
 }

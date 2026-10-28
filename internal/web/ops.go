@@ -160,16 +160,13 @@ func operationFor(kind pods.Kind) (operation, bool) {
 	return operation{}, false
 }
 
-// Form field names, shared by the VM page's quick forms and the confirm's
-// hidden fields, so every step reads (formInputs) and writes (inputFields)
-// inputs the same way.
 const (
 	fieldTeams       = "teams"
-	fieldHosts       = "hosts"       // comma-separated
-	fieldVMs         = "vms"         // comma-separated exact VM names, e.g. a retry's
-	fieldPattern     = "pattern"     // deploy
-	fieldSet         = "set"         // teardown: its set, "" for everything
-	fieldRebuild     = "rebuild"     // deploy: "yes" rebuilds templates
+	fieldHosts       = "hosts"
+	fieldVMs         = "vms"
+	fieldPattern     = "pattern"
+	fieldSet         = "set" // teardown: its set, "" for everything
+	fieldRebuild     = "rebuild"
 	fieldBaseline    = "baseline"    // deploy: "yes" takes the baseline snapshot
 	fieldSnapshot    = "snapshot"    // reset: the one to roll back to; snapshot: the new one's name
 	fieldDescription = "description" // snapshot
@@ -424,10 +421,9 @@ func (s *Server) selected(ctx context.Context, in jobs.Inputs) jobs.Inputs {
 	return in
 }
 
-// nothingTicked answers the grid's form posted with no VM ticked.
 func (s *Server) nothingTicked(w http.ResponseWriter, r *http.Request) {
 	s.errorPage(w, r, http.StatusUnprocessableEntity, "No VMs selected",
-		"Tick at least one VM on the grid, then choose what to do with it. Nothing has changed.", "/", "Back to the grid")
+		"Tick at least one VM, then choose what to do with it. Nothing has changed.", "/", "Back to Pods")
 }
 
 // actor is how jobs record a web user: the email (Authentik keeps it unique),

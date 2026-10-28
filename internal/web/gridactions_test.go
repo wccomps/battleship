@@ -177,7 +177,6 @@ func TestGridSelectionPreviewsExactVMs(t *testing.T) {
 	}
 }
 
-// Nothing ticked: the volunteer is told to tick VMs first.
 func TestGridSelectionNeedsAVM(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
@@ -187,7 +186,7 @@ func TestGridSelectionNeedsAVM(t *testing.T) {
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("POST %s with nothing ticked = %d, want 422", target, rec.Code)
 		}
-		contains(t, target, rec.Body.String(), "Tick at least one VM on the grid")
+		contains(t, target, rec.Body.String(), "Tick at least one VM")
 		lacks(t, target, rec.Body.String(), `class="confirm"`)
 	}
 	h.noJobs("with nothing ticked")

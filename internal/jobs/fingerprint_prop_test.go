@@ -77,7 +77,7 @@ func drawPlan(t *rapid.T) *pods.Plan {
 	for range rapid.IntRange(0, 3).Draw(t, "items") {
 		it := pods.Item{
 			Team: drawFPText(t, "team"), Host: drawFPText(t, "host"), Name: drawFPText(t, "name"), VMID: rapid.IntRange(0, 99999).Draw(t, "vmid"),
-			Node: drawFPText(t, "node"), Template: drawFPText(t, "template"), Snapshot: drawFPText(t, "snapshot"), Baseline: rapid.Bool().Draw(t, "baseline"),
+			Node: drawFPText(t, "node"), OldNode: drawFPText(t, "item old node"), Template: drawFPText(t, "template"), Snapshot: drawFPText(t, "snapshot"), Baseline: rapid.Bool().Draw(t, "baseline"),
 			Action: drawFPText(t, "action"), Blocked: drawFPText(t, "blocked"), Unpermitted: rapid.Bool().Draw(t, "unpermitted"),
 			Description: drawFPText(t, "description"), VMState: rapid.Bool().Draw(t, "vmstate"),
 			Pool: drawFPText(t, "pool"), Tags: drawFPText(t, "tags"), CPU: drawFPText(t, "item cpu"), Source: drawSource(t, "source"), Supersedes: drawSource(t, "supersedes"),

@@ -124,8 +124,8 @@ func TestOperationForms(t *testing.T) {
 			`<form class="sheet" method="post" action="/power/preview" aria-labelledby="form-title">`,
 			`<input class="inp" type="text" id="teams" name="teams" value="" required`,
 			`<span class="hint" id="teams-hint">1-3 · 3,7 · 12-14</span>`,
-			`<legend>Hosts <span class="muted">· none = all</span></legend>`,
-			`<label class="opt"><input type="checkbox" name="hosts" value="dc"><span>dc</span></label>`,
+			`<legend>Hosts <button type="button" class="btn sm ghost" data-hosts-toggle hidden>Deselect all</button></legend>`,
+			`<label class="opt"><input type="checkbox" name="hosts" value="dc" checked><span>dc</span></label>`,
 			`<input type="radio" name="action" value="stop" required><span>`,
 			`Force stop</span></label>`,
 			`<button type="submit" class="btn pri">Preview</button>`,
@@ -137,11 +137,11 @@ func TestOperationForms(t *testing.T) {
 		{"/teardown", []string{
 			`<form method="get" action="/teardown" class="stack" id="teardown-which">`,
 			`<label class="lbl" for="teams">Pods</label>`,
-			`<legend>Hosts <span class="muted">· none = all</span></legend>`,
+			`<legend>Hosts <button type="button" class="btn sm ghost" data-hosts-toggle hidden>Deselect all</button></legend>`,
 			`<button type="submit" class="btn">Next</button>`,
 		}},
 		{"/deploy", []string{
-			`<form class="sheet" method="post" action="/deploy/preview" aria-labelledby="form-title" data-deploy>`,
+			`<form class="sheet" method="post" action="/deploy/preview" aria-labelledby="form-title">`,
 			`<input class="inp" type="text" name="pattern" value="" required`,
 			`<label class="sw">Take baseline snapshot<input type="checkbox" name="baseline" value="yes" checked></label>`,
 			`<label class="sw">Rebuild templates<input type="checkbox" name="rebuild" value="yes"></label>`,
@@ -180,9 +180,9 @@ func TestDeployFormListsTemplateSets(t *testing.T) {
 	body := h.get(&lead, "/deploy").Body.String()
 	contains(t, "deploy form", body,
 		`<label class="opt"><input type="radio" name="pattern" value="*.kilo.alpha" required data-hosts="dc web" checked><span>kilo.alpha</span></label>`,
+		`<legend>Hosts <button type="button" class="btn sm ghost" data-hosts-toggle hidden>Deselect all</button></legend>`,
 		`<label class="opt"><input type="checkbox" name="hosts" value="dc" checked><span>dc</span></label>`,
 		`<label class="opt"><input type="checkbox" name="hosts" value="web" checked><span>web</span></label>`)
-	lacks(t, "deploy form", body, "none = all")
 }
 
 func TestResetFormPicksSnapshots(t *testing.T) {

@@ -13,7 +13,6 @@ import (
 	"github.com/wccomps/battleship/internal/status"
 )
 
-// formPage is the data of an operation's form.
 type formPage struct {
 	Op        operation
 	In        jobs.Inputs
@@ -28,11 +27,8 @@ type formPage struct {
 	SetsErr      string        // deploy: why the master groups couldn't be listed
 	// OtherPattern is a deploy's pattern when it is none of the sets'.
 	OtherPattern string
-	// HostOpts are the host boxes: the grid's columns, or a deploy set's hosts.
-	// HostsAll means ticking none means all.
-	HostOpts []hostOpt
-	HostsAll bool
-	Step     *stepTwo // a two-step form's (operation.Pick)
+	HostOpts     []hostOpt
+	Step         *stepTwo
 	// FromGrid means the VMs were ticked on the grid: the form lists them instead
 	// of asking for teams and hosts.
 	FromGrid bool
@@ -47,12 +43,10 @@ type hostOpt struct {
 	Checked bool
 }
 
-// hostOpts makes a box per name, ticked if in ticked; ticked names not in
-// names are added.
 func hostOpts(names, ticked []string) []hostOpt {
 	var out []hostOpt
 	for _, n := range names {
-		out = append(out, hostOpt{Name: n, Checked: slices.Contains(ticked, n)})
+		out = append(out, hostOpt{Name: n, Checked: len(ticked) == 0 || slices.Contains(ticked, n)})
 	}
 	for _, n := range ticked {
 		if !slices.Contains(names, n) {
@@ -153,8 +147,7 @@ func (s *Server) reviewPage(w http.ResponseWriter, r *http.Request, op operation
 	s.showPreview(w, r, http.StatusOK, op, in, plan, previewOptions{})
 }
 
-// newFormPage prepares op's form for in. On a two-step form, picked shows
-// step 2 and chosen marks op.Pick as already given (even when "").
+// picked shows step 2; chosen reports whether op.Pick was submitted (even when "").
 func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, picked, chosen bool) formPage {
 	p := formPage{
 		Op:        op,
@@ -185,13 +178,9 @@ func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, 
 			p.OtherPattern = in.Pattern
 		}
 		if chosen != nil {
-			ticked := in.Hosts
-			if len(ticked) == 0 {
-				ticked = chosen.Hosts // a deploy builds all of a set's hosts unless told otherwise
-			}
-			p.HostOpts = hostOpts(chosen.Hosts, ticked)
+			p.HostOpts = hostOpts(chosen.Hosts, in.Hosts)
 		} else {
-			p.HostOpts, p.HostsAll = hostOpts(nil, in.Hosts), true
+			p.HostOpts = hostOpts(nil, in.Hosts)
 		}
 	}
 	if op.step != nil {
@@ -200,7 +189,7 @@ func (s *Server) newFormPage(ctx context.Context, op operation, in jobs.Inputs, 
 		}
 	}
 	if op.Kind != pods.KindDeploy {
-		p.HostOpts, p.HostsAll = hostOpts(s.polledGrid(ctx).Hosts, in.Hosts), true
+		p.HostOpts = hostOpts(s.polledGrid(ctx).Hosts, in.Hosts)
 	}
 	return p
 }
@@ -233,9 +222,6 @@ func (s *Server) deploySets(ctx context.Context) ([]setView, string) {
 	return s.startOf(g, false).Sets, ""
 }
 
-// snapshotStep offers the snapshots of the first VM a reset of in covers
-// (first team, first matching grid host). The per-VM baseline is always
-// offered first, chosen unless in names another snapshot.
 func (s *Server) snapshotStep(ctx context.Context, in jobs.Inputs, teams []string, _ bool) *stepTwo {
 	step := &stepTwo{Legend: "Snapshot", Button: "Preview"}
 	var snaps []string
@@ -255,7 +241,7 @@ func (s *Server) snapshotStep(ctx context.Context, in jobs.Inputs, teams []strin
 			}
 		}
 	} else {
-		step.Note = "The grid shows no VM for those pods and hosts, so only the baseline is offered."
+		step.Note = "No VM was found for those pods and hosts, so only the baseline is offered."
 	}
 	names := append([]string{""}, slices.DeleteFunc(slices.Clone(snaps), func(n string) bool {
 		return n == baseline && n != in.Snapshot
@@ -287,10 +273,6 @@ func (s *Server) snapshotStep(ctx context.Context, in jobs.Inputs, teams []strin
 // preview anyway.
 const pickerReads = 4
 
-// commonSnapshots reads up to pickerReads of the named grid VMs and returns
-// the snapshots all have, in the first one's order, and their shared baseline
-// if all were read and it is one snapshot. It records the source and any note
-// on step.
 func (s *Server) commonSnapshots(ctx context.Context, step *stepTwo, names []string) (_ []string, baseline string) {
 	var cells []status.Cell
 	for _, row := range s.polledGrid(ctx).Rows {
@@ -301,7 +283,7 @@ func (s *Server) commonSnapshots(ctx context.Context, step *stepTwo, names []str
 		}
 	}
 	if len(cells) == 0 {
-		step.Note = "The grid shows none of these VMs, so only the baseline is offered."
+		step.Note = "None of these VMs were found, so only the baseline is offered."
 		return nil, ""
 	}
 	var common, read []string

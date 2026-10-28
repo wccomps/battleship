@@ -177,10 +177,7 @@ func orUnknown(s string) string {
 	return s
 }
 
-// interstitialFirst answers a browser's first request to a slow step with
-// "Signing in to Proxmox", which loads the step again with finish=1, and
-// reports whether it did. Script requests (Sec-Fetch-Mode other than
-// navigate) go straight on: they can't show a page.
+// interstitialFirst skips non-navigate requests (e.g. fetch), which cannot follow a meta-refresh page.
 func (s *Service) interstitialFirst(w http.ResponseWriter, r *http.Request) bool {
 	q := r.URL.Query()
 	if mode := r.Header.Get("Sec-Fetch-Mode"); q.Get("finish") != "" || (mode != "" && mode != "navigate") {
@@ -189,7 +186,7 @@ func (s *Service) interstitialFirst(w http.ResponseWriter, r *http.Request) bool
 	q.Set("finish", "1")
 	to := r.URL.Path + "?" + q.Encode()
 	s.render(w, r, Page{Status: http.StatusOK, Title: "Signing in to Proxmox",
-		Message: "This takes a few seconds.", Link: to, LinkText: "Continue", Refresh: to})
+		Message: "This takes a few seconds.", Refresh: to})
 	return true
 }
 

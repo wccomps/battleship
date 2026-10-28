@@ -416,7 +416,8 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .madd{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
 .here{display:flex;flex-wrap:wrap;gap:4px}
 .here span{padding:2px 7px;border-radius:4px;background:var(--sf2);color:var(--tx2);font:var(--t1) var(--fm)}
-.field>legend,.lbl{padding:0;margin-bottom:5px;font-size:var(--t2);font-weight:500}
+.field>legend,.lbl{display:flex;align-items:center;gap:8px;padding:0;margin-bottom:5px;font-size:var(--t2);font-weight:500}
+.field>legend .btn.sm{min-height:22px;padding:0 7px;font-size:var(--t1)}
 .field>.lbl{margin-bottom:0}
 .field>legend .muted{font-weight:400}
 .hint{font:var(--t1) var(--fm);color:var(--tx3)}
@@ -445,7 +446,6 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .phead{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px}
 .phead .ptitle{margin:0}
 .envs{display:flex;flex-direction:column;gap:var(--s4)}
-.envbar{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 16px;padding:8px 12px;border:1px solid var(--ln);border-radius:var(--r2);background:var(--sf2)}
 .env{border:1px solid var(--ln);border-radius:var(--r2);background:var(--sf);overflow:hidden;scroll-margin-top:64px}
 .envh{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;padding:10px 12px;color:var(--tx);font-size:var(--t3);text-decoration:none}
 .env details[open]>.envh{border-bottom:1px solid var(--ln)}
@@ -501,8 +501,6 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
 .tbl.dchg th[scope=row]{font-weight:500;white-space:nowrap}
 .tbl.dchg tr.chg td:last-child{font-weight:600}
 .tbl.dchg td{overflow-wrap:anywhere}
-.free{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:0;font-size:var(--t2);color:var(--tx2)}
-.free .vm{color:var(--tx);white-space:normal}
 
 /* ---------- phone ---------- */
 @container app (max-width:640px){
@@ -515,7 +513,7 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .top{flex-wrap:wrap;gap:var(--s1) 6px;padding:var(--s1) var(--s4) var(--s2)}
   .top .sp{display:none}
   .nav,span.brand{margin-right:auto}
-  .nav a{padding:5px 6px}
+  .nav a{padding:5px}
   .live>summary{width:28px;height:28px}
   .lead-ops{order:8;width:100%;gap:var(--s1)}
   .lead-ops .btn{flex:1;padding:0 9px;font-size:var(--t2)}
@@ -566,5 +564,5 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .rvw tr.blk td{background:none}
   .env{scroll-margin-top:92px} /* the header wraps to two rows */
 }
-@media (pointer:coarse){.grid{--ch:32px}.hb,.all{height:32px}.all input{width:18px;height:18px}.btn,.inp{min-height:40px}.btn.sm{min-height:32px}.btn.sq{width:40px}.inp,.addr input{font-size:var(--t4)}.opt span{height:36px}}
-@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}.is-busy .g,.spin{animation:none!important}}
+@media (pointer:coarse){.grid{--ch:32px}.hb,.all{height:32px}.all input{width:18px;height:18px}.btn,.inp{min-height:40px}.btn.sm,.field>legend .btn.sm,.kv dd .btn.sm,.pw .btn.sm{min-height:32px}.btn.sq{width:40px}.inp,.addr input{font-size:var(--t4)}.opt span,.kindq .opt span{height:36px}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}.is-busy .g,.spin{animation:none!important;border-right-color:currentColor;border-style:dotted}}

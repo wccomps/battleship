@@ -85,14 +85,12 @@ func powerActionsFor(power string) []powerChoice {
 	return powerChoicesOf(out)
 }
 
-// cellPage shows one team VM: a live read of its state, drift reasons,
-// snapshots, last job, and power/reset/snapshot buttons leading to a preview.
 func (s *Server) cellPage(w http.ResponseWriter, r *http.Request) {
 	team, host := r.PathValue("team"), r.PathValue("host")
 	d, err := s.detail(r.Context(), team, host)
 	if errors.Is(err, status.ErrUnknownCell) {
 		s.errorPage(w, r, http.StatusNotFound, "No such VM",
-			"The grid has no pod "+team+" VM for host "+host+".", "/", "Back to the grid")
+			"There is no pod "+team+" VM for host "+host+".", "/", "Back to Pods")
 		return
 	}
 	c := d.Cell

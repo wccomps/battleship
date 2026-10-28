@@ -242,17 +242,13 @@ func templateNeeds(t TemplateSpec, cfg config.Config) []need {
 	return ns
 }
 
-// itemNeeds is what running its steps needs. tpl is its template (deploy);
-// tags is the datacenter's user-tag-access rule for StepSetTag.
 func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAccess) []need {
 	pool := ""
-	if slices.Contains(it.Steps, StepClone) {
-		pool = it.TargetPool(NewNaming(cfg.Naming))
-	}
 	var ns []need
 	for _, st := range it.Steps {
 		switch st {
 		case StepClone:
+			pool = it.TargetPool(NewNaming(cfg.Naming))
 			src := 0
 			if it.Source != nil {
 				src = it.Source.VMID
@@ -404,9 +400,6 @@ func missing(ctx context.Context, acc Access, ns []need) (string, error) {
 	return strings.Join(out, "; "), nil
 }
 
-// BlockUnpermitted blocks each template and item the user lacks a privilege
-// for, saying which, plus items cloning from a blocked template. Already
-// blocked things keep their reason.
 func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Config) error {
 	templates := map[string]*TemplateSpec{}
 	unpermitted := map[string]bool{} // templates blocked here
@@ -444,6 +437,7 @@ func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Co
 		}
 		tpl := templates[it.Template]
 		if tpl != nil && tpl.Blocked != "" && slices.Contains(it.Steps, StepClone) {
+			it.Node = it.OldNode
 			it.Blocked, it.Unpermitted = "template "+tpl.Name+": "+tpl.Blocked, unpermitted[tpl.Name]
 			continue
 		}
@@ -456,6 +450,7 @@ func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Co
 		}
 		it.Blocked, it.Unpermitted = why, why != ""
 	}
+	plan.BlockUnrebuildable()
 	return nil
 }
 

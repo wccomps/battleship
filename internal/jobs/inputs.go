@@ -430,12 +430,17 @@ func checkVMs(in Inputs, teams []string, naming pods.Naming) error {
 	return errors.Join(errs...)
 }
 
-// keepVMs narrows plan (and a deploy's templates) to vms. Plan teams stay as
-// asked, so the job still locks every one.
+// keepVMs leaves plan.Teams untouched so the job still locks every requested team.
 func keepVMs(plan *pods.Plan, vms []string) {
 	if len(vms) == 0 {
 		return
 	}
+	for i := range plan.Items {
+		if !slices.Contains(vms, plan.Items[i].Name) {
+			plan.Items[i].Blocked = "excluded"
+		}
+	}
+	plan.BlockUnrebuildable()
 	var items []pods.Item
 	used := map[string]bool{}
 	for _, it := range plan.Items {

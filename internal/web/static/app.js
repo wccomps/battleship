@@ -350,18 +350,41 @@
 
   // -- Forms
 
-  // A deploy with every host ticked sends none, meaning all of the set's hosts.
-  // Choosing another set shows its hosts.
-  function deployHosts(f) {
-    var hosts = f.querySelectorAll('input[name="hosts"]');
-    var all = hosts.length > 0 && Array.prototype.every.call(hosts, function (b) { return b.checked; });
-    each(hosts, function (b) { b.disabled = all; });
-    return function () { each(hosts, function (b) { b.disabled = false; }); };
+  function allChecked(boxes) {
+    return boxes.length > 0 && Array.prototype.every.call(boxes, function (b) { return b.checked; });
   }
+
+  function updateHostToggle(f) {
+    if (!f) return;
+    var btn = f.querySelector("[data-hosts-toggle]");
+    if (!btn) return;
+    var hosts = f.querySelectorAll('input[type=checkbox][name="hosts"]');
+    btn.hidden = hosts.length === 0;
+    var any = Array.prototype.some.call(hosts, function (b) { return b.checked; });
+    if (hosts.length > 0) {
+      hosts[0].required = !any;
+      each(hosts, function (b, i) { b.setCustomValidity(i === 0 && !any ? "Tick at least one host." : ""); });
+    }
+    btn.textContent = allChecked(hosts) ? "Deselect all" : "Select all";
+  }
+  each(document.querySelectorAll("form"), updateHostToggle);
+
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest("[data-hosts-toggle]");
+    if (!btn || !btn.form) return;
+    var hosts = btn.form.querySelectorAll('input[type=checkbox][name="hosts"]');
+    var all = allChecked(hosts);
+    each(hosts, function (b) { b.checked = !all; });
+    updateHostToggle(btn.form);
+  });
 
   document.addEventListener("change", function (e) {
     var t = e.target, f = t.form;
-    if (f && f.hasAttribute("data-deploy") && t.name === "pattern" && t.hasAttribute("data-hosts")) {
+    if (f && t.name === "hosts") {
+      updateHostToggle(f);
+      return;
+    }
+    if (f && t.name === "pattern" && t.hasAttribute("data-hosts")) {
       var opts = f.querySelector("#host-opts");
       if (!opts) return;
       opts.replaceChildren();
@@ -376,6 +399,7 @@
         label.append(box, span);
         opts.appendChild(label);
       });
+      updateHostToggle(f);
     }
   });
 
@@ -441,6 +465,8 @@
     else if (sheet.id === "job-live") refreshPage();
     ticks();
     typedConfirm(sheet);
+    if (sheet.tagName === "FORM") updateHostToggle(sheet);
+    each(sheet.querySelectorAll("form"), updateHostToggle);
     machineRows(sheet);
     passwords(sheet);
     each(sheet.querySelectorAll("[data-fill]"), fill);
@@ -500,18 +526,22 @@
     clicked = e.target.closest ? e.target.closest("button[type=submit]") : null;
   }, true);
 
-  // Forms inside [data-panel] or #panel submit via fetch and show their
-  // response in the panel; full-page forms submit natively.
   document.addEventListener("submit", function (e) {
     var f = e.target, sub = e.submitter || (clicked && (clicked.form === f) ? clicked : null);
     clicked = null;
     var which = f.id && /-pick$/.test(f.id) && $(f.id.replace(/-pick$/, "-which"));
     if (which) {
+      if (!which.checkValidity()) {
+        e.preventDefault();
+        which.reportValidity();
+        return;
+      }
       var wt = which.querySelector('input[name="teams"]'), pt = f.querySelector('input[name="teams"]');
       if (wt && pt) pt.value = wt.value;
       var wv = which.querySelector('input[name="vms"]'), pv = f.querySelector('input[name="vms"]');
       if (wv && pv) pv.value = wv.value;
-      var wh = Array.prototype.map.call(which.querySelectorAll('input[name="hosts"]:checked'), function (b) { return b.value; }).join(",");
+      var boxes = which.querySelectorAll('input[name="hosts"]');
+      var wh = allChecked(boxes) ? "" : Array.prototype.map.call(which.querySelectorAll('input[name="hosts"]:checked'), function (b) { return b.value; }).join(",");
       var ph = f.querySelector('input[name="hosts"]');
       if (wh && !ph) {
         ph = document.createElement("input");
@@ -519,18 +549,25 @@
         ph.name = "hosts";
         f.appendChild(ph);
       }
-      if (ph) ph.value = wh;
+      if (ph) {
+        if (wh) ph.value = wh;
+        else ph.remove();
+      }
     }
-    var restore = f.hasAttribute("data-deploy") ? deployHosts(f) : null;
+    var hosts = f.querySelectorAll('input[type=checkbox][name="hosts"]');
+    var omitHosts = allChecked(hosts);
     var method = ((sub && sub.getAttribute("formmethod")) || f.getAttribute("method") || "get").toLowerCase();
     if (!panel || !f.closest("[data-panel], #panel")) {
-      if (restore) setTimeout(restore, 0);
+      if (omitHosts) {
+        each(hosts, function (b) { b.disabled = true; });
+        setTimeout(function () { each(hosts, function (b) { b.disabled = false; }); }, 0);
+      }
       if (sub && method === "post") setTimeout(function () { sub.disabled = true; }, 0);
       return;
     }
     var action = (sub && sub.getAttribute("formaction")) || f.getAttribute("action") || location.pathname;
     var data = new URLSearchParams(new FormData(f));
-    if (restore) restore();
+    if (omitHosts) data.delete("hosts");
     if (sub && sub.name) data.append(sub.name, sub.value);
     e.preventDefault();
     if (f === form) opener = sub;
@@ -684,12 +721,9 @@
 
   // -- Live addresses
 
-  // The Environments page loads with assigned addresses; data-fill is the
-  // URL of pieces (sse.go's piece) that swap in the live ones. If they can't
-  // be read, the line stays as it was, its link reading them without this.
   function fill(line) {
     var say = line.querySelector("[data-fill-say]"), was = say ? say.textContent : "";
-    if (say) say.textContent = "Reading live addresses…";
+    if (say) say.textContent = "Reading…";
     line.setAttribute("aria-busy", "true");
     var undo = function () {
       if (say) say.textContent = was;

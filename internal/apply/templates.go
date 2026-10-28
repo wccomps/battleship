@@ -23,29 +23,44 @@ func needsTemplate(items []pods.Item, name string) bool {
 	return false
 }
 
-// tplBuild is what the run knows of a template it may build. The build
-// writes it before closing ready; items read it after.
 type tplBuild struct {
 	spec *pods.TemplateSpec // as planned
 	node string             // where the template is
 	// oldGone: a rebuild deleted the old template, so later rounds create or
 	// resume the new one.
-	oldGone bool
-	err     error         // the last build's error
-	done    bool          // built (or found) in this run
-	ready   chan struct{} // closed when this round's build ends; nil if none
+	oldGone     bool
+	err         error
+	done        bool
+	ready       chan struct{} // closed when this round's build ends; nil if none
+	freed       sync.WaitGroup
+	mu          sync.Mutex
+	teardownErr error
 }
 
-// startTemplates builds, each in its own goroutine, every template pending
-// items need; each ready channel closes when that build ends, and wait
-// blocks until all have.
+func (b *tplBuild) noteTeardownErr(err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.teardownErr == nil {
+		b.teardownErr = err
+	}
+}
+
 func (e *Executor) startTemplates(ctx context.Context, specs []pods.TemplateSpec, builds map[string]*tplBuild, pending []pods.Item) (wait func()) {
 	var wg sync.WaitGroup
 	for _, spec := range specs {
 		b := builds[spec.Name]
 		b.ready = nil
+		b.freed = sync.WaitGroup{}
+		b.teardownErr = nil
 		if spec.Blocked != "" || b.done || !needsTemplate(pending, spec.Name) {
 			continue
+		}
+		if spec.Rebuild && !b.oldGone {
+			for _, it := range pending {
+				if it.Template == spec.Name && slices.Contains(it.Steps, pods.StepDelete) && !e.isTornDown(it.Name) {
+					b.freed.Add(1)
+				}
+			}
 		}
 		b.ready = make(chan struct{})
 		wg.Add(1)
@@ -74,12 +89,18 @@ const (
 	masterRestartBudget = 2 * time.Minute
 )
 
-// ensureTemplate creates b's template from its master, deleting the old one
-// first on rebuild. An unconverted VM with the template's name from an
-// earlier attempt is resumed, not cloned again.
 func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 	spec := b.spec
 	name := spec.Name
+	if spec.Rebuild && !b.oldGone {
+		b.freed.Wait()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if b.teardownErr != nil {
+			return b.teardownErr
+		}
+	}
 	cur, found := e.lookup(spec.VMID, name)
 	switch {
 	case spec.Rebuild && !b.oldGone:
@@ -331,8 +352,6 @@ func (e *Executor) settleCopy(vmid int, err error) {
 	}
 }
 
-// teamVMUsing returns a team VM for host that currently exists. Rebuilding
-// deletes the template, which would break team VMs linked to it.
 func (e *Executor) teamVMUsing(host string) (proxmox.VM, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

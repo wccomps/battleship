@@ -104,7 +104,7 @@
 </div>
 </form>
 {{- else}}
-<form class="sheet" method="post" action="{{.Op.Path}}/preview" aria-labelledby="form-title"{{if eq .Op.Kind "deploy"}} data-deploy{{end}}>
+<form class="sheet" method="post" action="{{.Op.Path}}/preview" aria-labelledby="form-title">
 {{template "csrf" $csrf}}
 {{template "form-head" .}}
 <div class="pb form">
@@ -168,7 +168,7 @@
 <span class="hint" id="teams-hint">{{with .AllTeams}}{{.}} · {{end}}3,7 · 12-14</span>
 </div>
 <fieldset class="field" id="host-field">
-<legend>Hosts{{if .HostsAll}} <span class="muted">· none = all</span>{{end}}</legend>
+<legend>Hosts <button type="button" class="btn sm ghost" data-hosts-toggle hidden>Deselect all</button></legend>
 <div class="opts" id="host-opts">
 {{- range .HostOpts}}
 <label class="opt"><input type="checkbox" name="hosts" value="{{.Name}}"{{if .Checked}} checked{{end}}><span>{{.Name}}</span></label>

@@ -1,6 +1,7 @@
 package pods
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -108,12 +109,6 @@ func ReadCapacity(ctx context.Context, api Reads, plan *Plan, cfg config.Config)
 	return EstimateCapacity(plan, res, cfg.Deploy), nil
 }
 
-// EstimateCapacity compares what plan needs with what res has free.
-//
-// Memory, per node: a new clone needs its template's (or master's) memory on
-// its assigned node; an existing VM the plan starts needs its own unless
-// running. Storage: template builds and full clones copy the whole disk.
-// Only nodes and storage the plan uses are listed.
 func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *Capacity {
 	if !NeedsCapacity(plan) {
 		return nil
@@ -137,6 +132,11 @@ func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *
 		master := vms[t.MasterVMID]
 		sources[t.Name] = master
 		disk[t.MasterNode] += master.MaxDisk // the full copy the template is built from
+		if t.Rebuild {
+			if old, ok := vms[t.VMID]; ok {
+				disk[cmp.Or(t.OldNode, old.Node)] -= old.MaxDisk
+			}
+		}
 	}
 
 	for _, it := range plan.Runnable() {
@@ -146,6 +146,16 @@ func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *
 				mem[it.Node] += vms[it.VMID].MaxMem
 			}
 		case slices.Contains(it.Steps, StepClone):
+			if slices.Contains(it.Steps, StepDelete) {
+				if vm, ok := vms[it.VMID]; ok {
+					if vm.Status == "running" {
+						mem[vm.Node] -= vm.MaxMem
+					}
+					if !deploy.Linked {
+						disk[vm.Node] -= vm.MaxDisk
+					}
+				}
+			}
 			src := sources[it.Template]
 			mem[it.Node] += src.MaxMem
 			if !deploy.Linked {
@@ -186,18 +196,16 @@ func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *
 	return c
 }
 
-// storageUsage turns per-node disk needs into storage usages: one per node,
-// or one total if the storage is shared.
 func storageUsage(c *Capacity, all []proxmox.StorageResource, storage string, disk map[string]int64) []Usage {
 	var total int64
 	for _, b := range disk {
 		total += b
 	}
-	if total <= 0 {
-		return nil
-	}
 	for _, s := range all {
 		if s.Storage == storage && s.Shared {
+			if total <= 0 {
+				return nil
+			}
 			return []Usage{{Kind: UsageStorage, Storage: storage, Used: s.Disk, Total: s.MaxDisk, Needed: total}}
 		}
 	}

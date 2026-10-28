@@ -134,7 +134,7 @@ func TestCellPageUnknown(t *testing.T) {
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("GET %s = %d, want 404", path, rec.Code)
 		}
-		contains(t, path, rec.Body.String(), "No such VM", `<a class="btn" href="/">Back to the grid</a>`)
+		contains(t, path, rec.Body.String(), "No such VM", `<a class="btn" href="/">Back to Pods</a>`)
 	}
 }
 

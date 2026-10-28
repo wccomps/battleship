@@ -1959,3 +1959,67 @@ func TestLabelStepRenamesVMAndRetriesFindNewName(t *testing.T) {
 		t.Errorf("description = %q", vm.Config["description"])
 	}
 }
+
+func TestRebuildTearsDownExistingTeamVMsBeforeTemplateDelete(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
+	f.Add(proxmox.VM{VMID: 10221, Name: "team02-teak", Node: "birch", Status: "running"}, nil)
+
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{
+		Pattern: "teak.*", Teams: []string{"01", "02"}, Rebuild: true, Snapshot: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.FailOn("power:10121:stop", errors.New("stop failed"))
+	f.FailOn("power:10221:start", errors.New("start failed"))
+	rec := &recorder{}
+	ex := testExecutor(f, rec)
+	ex.Cfg.Concurrency.Workers = 1
+	ex.Cfg.Retry.Rounds = 2
+	ex.Cfg.Retry.Attempts = 1
+	ex.Limits = nil
+	res := ex.Run(context.Background(), plan)
+	if len(res.Failed) != 0 || !reflect.DeepEqual(res.Succeeded, []string{"team01-teak", "team02-teak"}) {
+		t.Fatalf("result = %+v", res)
+	}
+	if f.Called("delete:10121") != 1 || f.Called("delete:10221") != 1 || f.Called("delete:9021") != 1 {
+		t.Errorf("deletes = %v", f.Calls)
+	}
+	if f.VMs[10121] == nil || f.VMs[10221] == nil || f.VMs[9021] == nil || !f.VMs[9021].Template {
+		t.Errorf("VMs = 10121:%v 10221:%v 9021:%v", f.VMs[10121], f.VMs[10221], f.VMs[9021])
+	}
+	for _, ev := range rec.find("teak.tango.delta.tpl", EventFailed) {
+		if strings.Contains(ev.Message, "still use this template") {
+			t.Errorf("unexpected template error: %q", ev.Message)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
+	f.Add(proxmox.VM{VMID: 10221, Name: "team02-teak", Node: "birch", Status: "running"}, nil)
+	f.FailOn("power:10121:stop", errors.New("stop failed"))
+	stops := 0
+	f.OnRecord = func(key string) {
+		if key == "power:10121:stop" {
+			if stops++; stops == 2 {
+				cancel()
+			}
+		}
+	}
+	res = ex.Run(ctx, plan)
+	if err := res.Interrupted["team02-teak"]; err == nil || !strings.Contains(err.Error(), "before clone") {
+		t.Errorf("interrupted team02-teak = %v, want before clone", err)
+	}
+
+	f.OnRecord = nil
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
+	f.Add(proxmox.VM{VMID: 10221, Name: "team02-teak", Node: "birch", Status: "running"}, nil)
+	f.FailOn("power:10221:start", errors.New("start failed"), errors.New("start failed"), errors.New("start failed"))
+	res = ex.Run(context.Background(), plan)
+	if !slices.Contains(res.Removed, "team02-teak") || f.VMs[10221] != nil {
+		t.Errorf("failed rebuilt clone not removed by cleanup: Removed=%v AlreadyGone=%v VM=%v", res.Removed, res.AlreadyGone, f.VMs[10221])
+	}
+}

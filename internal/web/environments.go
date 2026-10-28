@@ -13,17 +13,9 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// envsView is the Environments page: a block per slot in use, then the free
-// slots on one line.
 type envsView struct {
 	ReadErr string
 	Envs    []envBlock
-	// Free are the slots Create may take, in runs: "dev-02, dev-05 – dev-10";
-	// Create is the first. Queued are free slots a queued job will fill.
-	Free    string
-	Create  string
-	Queued  string
-	FreeErr string // why the queued jobs couldn't be read
 	// MayAdd says whether the user holds Add hosts's privilege anywhere;
 	// Lacks says, a line each, what they lack.
 	MayAdd bool
@@ -129,9 +121,6 @@ func hostWhat(notes string, d pods.ImageDetails, unreadable bool) string {
 	return cmp.Or(d.OS, d.Installed)
 }
 
-// environmentsPage is the Environments page with each host's assigned
-// address; with ?live=1, its live ones too, which the script otherwise
-// fills in after the page loads (environmentAddrs).
 func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	mayCreate := s.mayRun(ctx, pods.KindEnvCreate)
@@ -147,14 +136,6 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 			addrs, p.LiveRead = s.liveAddrs(ctx, envs), true
 		}
 		p.Envs = envBlocks(envs, s.hostBases(ctx, envs, vms), addrs)
-		open, queued, err := planner.OpenSlots(ctx, envs)
-		if err != nil {
-			p.FreeErr = "Couldn't tell which free slots queued jobs will fill: " + sentence(err.Error())
-		}
-		p.Free, p.Queued = slotRuns(open), slotRuns(queued)
-		if len(open) > 0 {
-			p.Create = open[0].Pool
-		}
 	}
 	if !mayCreate {
 		p.Lacks = append(p.Lacks, lacksOf(pods.KindEnvCreate, ""))
@@ -181,9 +162,6 @@ func (s *Server) environmentsPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, http.StatusOK, "catalog", v)
 }
 
-// environmentAddrs serves the Environments page's address cells, and the
-// line above them, with live addresses, each in its own <template> (piece).
-// A user who may read no guest agent gets what the page says instead.
 func (s *Server) environmentAddrs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if !s.mayAnywhere(ctx, pods.LiveAddrsPrivilege) {

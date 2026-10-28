@@ -27,7 +27,7 @@ func TestGridPage(t *testing.T) {
 	}
 	body := rec.Body.String()
 	contains(t, "grid page", body,
-		"<title>Grid · battleship</title>",
+		"<title>Pods · battleship</title>",
 		// Headers select their column or row.
 		`<a class="hb" href="/?select=host:dc" data-select="host:dc" role="button" aria-pressed="false"><span class="sr">Select every </span>dc</a>`,
 		`data-select="host:ftp"`, `data-select="host:web"`,
@@ -62,7 +62,7 @@ func TestGridLayoutShowsUserAndNav(t *testing.T) {
 	lead := h.login(asLead)
 	body := h.get(&lead, "/").Body.String()
 	contains(t, "lead's page", body,
-		`<a href="/" aria-current="page">Grid</a>`,
+		`<a href="/" aria-current="page">Pods</a>`,
 		`<a href="/logs">Logs</a>`,
 		`<nav class="lead-ops" aria-label="Pod operations">`, `<a class="btn" href="/deploy">`, "Deploy pods</a>", "Tear down pods</a>",
 		`<summary aria-label="Account: Test lead, test-lead@auth.example.org"><span class="who" aria-hidden="true">T</span></summary>`,
