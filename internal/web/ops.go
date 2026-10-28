@@ -213,8 +213,8 @@ const (
 
 // formInputs reads an operation's inputs from form values, ignoring those
 // that don't belong to kind. A reset without a snapshot uses each VM's own
-// baseline (pods.BaselineSnapshot). VMs may come comma-separated (a confirm's
-// hidden field), one per ticked box (the grid), or both.
+// baseline (pods.BaselineSnapshot). VMs may come comma-separated, one per
+// ticked box, or both.
 func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 	in := jobs.Inputs{
 		Kind:        kind,
