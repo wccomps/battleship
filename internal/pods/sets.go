@@ -21,7 +21,6 @@ type Set string
 // its set: "set-kilo.alpha" (StepSetTag).
 const setTagPrefix = "set-"
 
-// Tag is the tag that records s on a pod VM.
 func (s Set) Tag() string { return setTagPrefix + string(s) }
 
 // Pattern is the master pattern of s's masters: "*.kilo.alpha".
@@ -153,7 +152,6 @@ type DeployedSet struct {
 	VMs  int
 }
 
-// PodList is the pods with VMs of it, sorted.
 func (d DeployedSet) PodList() []string { return slices.Sorted(maps.Keys(d.Pods)) }
 
 // SameHosts is the host count every pod has, or 0 if they differ.

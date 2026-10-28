@@ -14,9 +14,6 @@ import (
 // lock keys overlap.
 const claimLockID = 727071
 
-// beforeClaimUpdate is a test hook between Claim's SELECT and UPDATE.
-var beforeClaimUpdate func(id int64)
-
 // blocksSQL holds when job o keeps pending job j waiting: their lock keys
 // conflict and o is running, or pending and older. Keys conflict when they
 // are equal, except that two "read:" keys never do: "read:K" conflicts only
@@ -39,30 +36,22 @@ func (s *Store) Claim(ctx context.Context, worker string, staleAfter time.Durati
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, claimLockID); err != nil {
 		return nil, err
 	}
-	var id int64
-	err = tx.QueryRow(ctx, `SELECT j.id FROM jobs j
-		WHERE j.status = 'pending'
-		  AND NOT EXISTS (SELECT 1 FROM jobs o WHERE `+blocksSQL+`)
-		ORDER BY j.id LIMIT 1`).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if beforeClaimUpdate != nil {
-		beforeClaimUpdate(id)
-	}
-	job, err := scanJob(tx.QueryRow(ctx, `UPDATE jobs SET status = 'running', claimed_by = $2,
-		started_at = now(), heartbeat_at = now(), stale_after = make_interval(secs => $3)
-		WHERE id = $1 AND status = 'pending' AND NOT cancel_requested RETURNING `+jobColumns, id, worker, staleAfter.Seconds()))
+	job, err := scanJob(tx.QueryRow(ctx, `UPDATE jobs j SET status = 'running', claimed_by = $1,
+		started_at = now(), heartbeat_at = now(), stale_after = make_interval(secs => $2)
+		WHERE id = (SELECT j.id FROM jobs j
+			WHERE j.status = 'pending'
+			  AND NOT j.cancel_requested
+			  AND NOT EXISTS (SELECT 1 FROM jobs o WHERE `+blocksSQL+`)
+			ORDER BY j.id LIMIT 1)
+		  AND status = 'pending' AND NOT cancel_requested
+		RETURNING `+jobColumns, worker, staleAfter.Seconds()))
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	if err := notify(ctx, tx, id); err != nil {
+	if err := notify(ctx, tx, job.ID); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {

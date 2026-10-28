@@ -81,16 +81,14 @@ func (s *Store) Now(ctx context.Context) (time.Time, error) {
 // LastJobOf returns the newest job of any kind with an item for the VM, and
 // that item, or ErrNotFound.
 func (s *Store) LastJobOf(ctx context.Context, name string) (Job, Item, error) {
-	row := s.pool.QueryRow(ctx, `SELECT i.job_id, i.idx, i.name, i.team, i.vmid, i.step, `+itemStatusSQL+`, i.error
+	row := s.pool.QueryRow(ctx, `SELECT i.job_id, i.idx, i.name, i.team, i.vmid, i.step, `+itemStatusSQL+`, i.error, `+jobColumns+`
 		FROM job_items i JOIN jobs j ON j.id = i.job_id WHERE i.name = $1 ORDER BY i.job_id DESC LIMIT 1`, name)
+	var j Job
 	var it Item
-	err := row.Scan(&it.JobID, &it.Idx, &it.Name, &it.Team, &it.VMID, &it.Step, &it.Status, &it.Error)
+	dest := append([]any{&it.JobID, &it.Idx, &it.Name, &it.Team, &it.VMID, &it.Step, &it.Status, &it.Error}, jobDest(&j)...)
+	err := row.Scan(dest...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, Item{}, ErrNotFound
 	}
-	if err != nil {
-		return Job{}, Item{}, err
-	}
-	j, err := s.Job(ctx, it.JobID)
 	return j, it, err
 }

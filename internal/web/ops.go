@@ -121,11 +121,7 @@ func (o operation) sectionName() string {
 }
 
 // page reports whether the operation opens as its own page rather than in
-// the grid's side panel: deploy and teardown act on whole teams, not on VMs
-// picked in the grid, and their previews are long. These are the header's
-// buttons (leadOps) and keep job.html's "Preview again" out of the panel;
-// the grid's and VM page's Deploy links leave out data-panel-link for it.
-// Image and environment operations have nothing to pick in the grid.
+// the grid's side panel.
 func (o operation) page() bool {
 	return o.Kind == pods.KindDeploy || o.Kind == pods.KindTeardown || o.Kind.Teamless()
 }
@@ -173,10 +169,9 @@ const (
 	fieldVMState     = "vmstate"     // snapshot: "yes" saves the RAM of running VMs
 	fieldAction      = "action"      // power
 	fieldNonce       = "nonce"       // confirm: names the preview
-	fieldFingerprint = "fingerprint"
-	fieldTyped       = "typed"    // confirm: the team range, domain or VM name, typed (jobs.Inputs.Typed)
-	fieldRetryOf     = "retry_of" // confirm: the job a retry preview retries; shown only, never trusted
-	fieldFrom        = "from"     // "grid": the grid's form, which sends ticked VMs and no teams
+	fieldTyped       = "typed"       // confirm: the team range, domain or VM name, typed (jobs.Inputs.Typed)
+	fieldRetryOf     = "retry_of"    // confirm: the job a retry preview retries; shown only, never trusted
+	fieldFrom        = "from"        // "grid": the grid's form, which sends ticked VMs and no teams
 	fieldDomain      = "domain"
 	fieldSlot        = "slot"        // env-create, env-teardown: the slot's two digits
 	fieldRouter      = "router"      // name=family
@@ -263,8 +258,12 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 	}
 	if s := strings.TrimPrefix(strings.TrimSpace(form.Get(fieldOctet)), "."); strings.EqualFold(s, clearOctetValue) {
 		in.Octet = pods.ClearOctet
-	} else {
-		in.Octet, _ = strconv.Atoi(s)
+	} else if s != "" {
+		if n, err := strconv.Atoi(s); err != nil || n < 1 {
+			in.Octet = pods.InvalidOctet
+		} else {
+			in.Octet = n
+		}
 	}
 	in.VMID, _ = strconv.Atoi(strings.TrimSpace(form.Get(fieldVMID)))
 	if posted := form.Get(fieldDetails); posted == yes || posted == detailsWithNotes {
@@ -303,7 +302,9 @@ func inputFields(in jobs.Inputs) []field {
 				fs = append(fs, f)
 			}
 		}
-		if in.Octet != 0 {
+		if in.Octet == pods.ClearOctet {
+			fs = append(fs, field{fieldOctet, clearOctetValue})
+		} else if in.Octet != 0 {
 			fs = append(fs, field{fieldOctet, strconv.Itoa(in.Octet)})
 		}
 		if in.EjectCDROM {

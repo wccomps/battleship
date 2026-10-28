@@ -28,7 +28,6 @@ func main() {
 	d := deps{
 		newAPI:    newProxmoxAPI,
 		openStore: openStore,
-		stdout:    os.Stdout,
 		stderr:    os.Stderr,
 	}
 	os.Exit(run(ctx, os.Args[1:], d))
@@ -70,20 +69,13 @@ type deps struct {
 	newAPI func(config.Proxmox) pods.API
 	// openStore connects to and migrates the job database; the returned func
 	// closes it.
-	openStore      func(ctx context.Context, db config.Database) (*store.Store, func(), error)
-	stdout, stderr io.Writer
+	openStore func(ctx context.Context, db config.Database) (*store.Store, func(), error)
+	stderr    io.Writer
 	// listen opens the HTTP listener, and drain waits between failing
 	// readiness and stopping the HTTP server. Nil means net.Listen and
 	// drainDelay.
 	listen func(network, addr string) (net.Listener, error)
 	drain  func()
-}
-
-func run(ctx context.Context, args []string, d deps) int {
-	if len(args) > 0 && args[0] == "serve" {
-		args = args[1:]
-	}
-	return runServe(ctx, args, d)
 }
 
 func openStore(ctx context.Context, db config.Database) (*store.Store, func(), error) {

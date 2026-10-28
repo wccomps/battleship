@@ -113,15 +113,19 @@ type Event struct {
 	Message string
 }
 
-const jobColumns = `id, kind, inputs, plan, fingerprint, lock_keys, status, created_by, created_role, created_as, created_at,
-	started_at, finished_at, coalesce(claimed_by, ''), cancel_requested,
-	coalesce(cancelled_by, ''), summary, error`
+const jobColumns = `j.id, j.kind, j.inputs, j.plan, j.fingerprint, j.lock_keys, j.status, j.created_by, j.created_role, j.created_as, j.created_at,
+	j.started_at, j.finished_at, coalesce(j.claimed_by, ''), j.cancel_requested,
+	coalesce(j.cancelled_by, ''), j.summary, j.error`
+
+func jobDest(j *Job) []any {
+	return []any{&j.ID, &j.Kind, &j.Inputs, &j.Plan, &j.Fingerprint, &j.LockKeys, &j.Status, &j.CreatedBy,
+		&j.CreatedRole, &j.CreatedAs, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.ClaimedBy, &j.CancelRequested,
+		&j.CancelledBy, &j.Summary, &j.Error}
+}
 
 func scanJob(row pgx.Row) (Job, error) {
 	var j Job
-	err := row.Scan(&j.ID, &j.Kind, &j.Inputs, &j.Plan, &j.Fingerprint, &j.LockKeys, &j.Status, &j.CreatedBy,
-		&j.CreatedRole, &j.CreatedAs, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.ClaimedBy, &j.CancelRequested,
-		&j.CancelledBy, &j.Summary, &j.Error)
+	err := row.Scan(jobDest(&j)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, ErrNotFound
 	}
@@ -184,7 +188,7 @@ func (s *Store) CreateJob(ctx context.Context, nj NewJob) (int64, error) {
 }
 
 func (s *Store) Job(ctx context.Context, id int64) (Job, error) {
-	return scanJob(s.pool.QueryRow(ctx, `SELECT `+jobColumns+` FROM jobs WHERE id = $1`, id))
+	return scanJob(s.pool.QueryRow(ctx, `SELECT `+jobColumns+` FROM jobs j WHERE j.id = $1`, id))
 }
 
 // Jobs lists the most recent jobs, newest first.
@@ -195,8 +199,8 @@ func (s *Store) Jobs(ctx context.Context, limit int) ([]Job, error) {
 // JobsBefore lists up to limit jobs with IDs below before (<= 0: from the
 // newest), newest first.
 func (s *Store) JobsBefore(ctx context.Context, before int64, limit int) ([]Job, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+jobColumns+` FROM jobs
-		WHERE $1::bigint <= 0 OR id < $1 ORDER BY id DESC LIMIT $2`, before, limit)
+	rows, err := s.pool.Query(ctx, `SELECT `+jobColumns+` FROM jobs j
+		WHERE $1::bigint <= 0 OR j.id < $1 ORDER BY j.id DESC LIMIT $2`, before, limit)
 	if err != nil {
 		return nil, err
 	}

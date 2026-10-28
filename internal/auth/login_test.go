@@ -132,9 +132,6 @@ func TestSessionCookieAttributes(t *testing.T) {
 			if cleared == nil || cleared.MaxAge >= 0 || cleared.Path != tc.loginPath || cleared.Secure != tc.secure {
 				t.Errorf("%s after callback = %+v, want it cleared", tc.loginName, cleared)
 			}
-			if got := auth.SessionCookieName(h.cfg.Web.BaseURL); got != tc.sessName {
-				t.Errorf("SessionCookieName(%q) = %q, want %q", h.cfg.Web.BaseURL, got, tc.sessName)
-			}
 			if cc := resp.Header().Get("Cache-Control"); cc != "no-store" {
 				t.Errorf("Cache-Control = %q, want no-store", cc)
 			}

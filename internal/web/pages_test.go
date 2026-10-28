@@ -47,6 +47,12 @@ func TestAuthPagesUseTheLayout(t *testing.T) {
 		t.Errorf("AuthPage status = %d", w.Code)
 	}
 	contains(t, "AuthPage", w.Body.String(), "<h1>Authentik didn&#39;t answer</h1>", "Try again &lt;soon&gt;.", `<a class="btn" href="/auth/login">Try again</a>`)
+	wp := httptest.NewRecorder()
+	rp := httptest.NewRequest(http.MethodGet, "/", nil)
+	rp.Header.Set(panelHeader, "1")
+	h.srv.AuthPage(wp, rp, auth.Page{Status: http.StatusConflict, Title: "Preview it again", Message: "Try again.", Link: "/environments", LinkText: "Back to Environments"})
+	contains(t, "panel AuthPage", wp.Body.String(), `<a class="btn" href="/environments">Back to Environments</a>`)
+	lacks(t, "panel AuthPage", wp.Body.String(), `href="/environments" data-close`)
 
 	// An interstitial goes on by itself, with a spinner instead of an icon.
 	w = httptest.NewRecorder()

@@ -33,30 +33,37 @@ func TestJobStatusRules(t *testing.T) {
 	}
 }
 
-// TestItemStatusRules pins each item status's rules likewise.
+type itemRule struct {
+	unfinished    bool // pending or running: its job still has to work on it
+	notRunNoStep  bool // becomes not run if its job ends before it reaches a step
+	retry         bool // a retry of its finished job runs it again
+	touched       bool // its job did something to its VM, so it is the VM's last result
+	keptOnEvent   bool // an event doesn't make it running again
+	keptOnOutcome bool // the worker's outcome doesn't overwrite it
+	ended         bool // the run ended it; only a started event makes it running again
+	busy          bool // in an active job, still to be worked on, or may be retried by a later round
+}
+
+var itemRules = map[ItemStatus]itemRule{
+	ItemPending:     {unfinished: true, notRunNoStep: true, busy: true},
+	ItemRunning:     {unfinished: true, notRunNoStep: true, busy: true},
+	ItemDone:        {touched: true, ended: true},
+	ItemFailed:      {retry: true, touched: true, ended: true, busy: true},
+	ItemBlocked:     {retry: true, keptOnEvent: true, keptOnOutcome: true},
+	ItemInterrupted: {notRunNoStep: true, retry: true, touched: true, keptOnEvent: true, keptOnOutcome: true},
+	ItemRemoved:     {retry: true, touched: true},
+	ItemNotRun:      {retry: true, keptOnEvent: true},
+}
+
+// TestItemStatusRules pins each item status's Retryable rule.
 func TestItemStatusRules(t *testing.T) {
-	type row struct{ unfinished, notRunNoStep, retry, touched, keptOnEvent, keptOnOutcome bool }
-	want := map[string]row{
-		ItemPending:     {unfinished: true, notRunNoStep: true},
-		ItemRunning:     {unfinished: true, notRunNoStep: true},
-		ItemDone:        {touched: true},
-		ItemFailed:      {retry: true, touched: true},
-		ItemBlocked:     {retry: true, keptOnEvent: true, keptOnOutcome: true},
-		ItemInterrupted: {notRunNoStep: true, retry: true, touched: true, keptOnEvent: true, keptOnOutcome: true},
-		ItemRemoved:     {retry: true, touched: true},
-		ItemNotRun:      {retry: true, keptOnEvent: true},
-		"bogus":         {},
-	}
-	if len(itemRules) != len(want)-1 {
-		t.Errorf("itemRules has %d statuses, want %d", len(itemRules), len(want)-1)
-	}
-	for st, w := range want {
-		s := ItemStatus(st)
-		r := s.rule()
-		got := row{r.unfinished, r.notRunNoStep, s.Retryable(), r.touched, r.keptOnEvent, r.keptOnOutcome}
-		if got != w {
-			t.Errorf("%s: got %+v, want %+v", st, got, w)
+	for s, r := range itemRules {
+		if got := s.Retryable(); got != r.retry {
+			t.Errorf("%s: Retryable() = %t, want %t", s, got, r.retry)
 		}
+	}
+	if ItemStatus("bogus").Retryable() {
+		t.Error("bogus: Retryable() = true, want false")
 	}
 }
 

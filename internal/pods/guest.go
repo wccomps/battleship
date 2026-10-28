@@ -174,6 +174,13 @@ try { $held = $lock.WaitOne([TimeSpan]::FromSeconds(` + strconv.Itoa(int(GuestLo
 if (-not $held) { [Console]::Error.WriteLine('another battleship setup script is still running in this guest'); exit 75 }
 `
 
+const (
+	opsPrincipalCore        = "core-infrastructure"
+	opsPrincipalCompetition = "competition-infrastructure"
+	linuxSSHCAFile          = "/etc/ssh/vault-ca.pub"
+	linuxSSHPrincipalsDir   = "/etc/ssh/auth_principals"
+)
+
 // linuxScript sets a static address on the NIC with $MAC through whichever
 // of netplan, NetworkManager or ifupdown the image uses, then the host name,
 // and when $CA is set, trusts the ops SSH CA for root logins.
@@ -241,16 +248,16 @@ if command -v hostnamectl >/dev/null 2>&1; then hostnamectl set-hostname "$HOST"
 sed -i '/^127\.0\.1\.1[[:space:]]/d' /etc/hosts
 echo "127.0.1.1 $HOST.$DOMAIN $HOST" >> /etc/hosts
 if [ -n "$CA" ]; then
-	mkdir -p /etc/ssh/auth_principals /root/.ssh
+	mkdir -p ` + linuxSSHPrincipalsDir + ` /root/.ssh
 	chmod 700 /root/.ssh
-	printf '%s\n' "$CA" > /etc/ssh/vault-ca.pub
-	chmod 644 /etc/ssh/vault-ca.pub
-	touch /etc/ssh/auth_principals/root
-	for p in core-infrastructure competition-infrastructure root; do
-		grep -qxF "$p" /etc/ssh/auth_principals/root || printf '%s\n' "$p" >> /etc/ssh/auth_principals/root
+	printf '%s\n' "$CA" > ` + linuxSSHCAFile + `
+	chmod 644 ` + linuxSSHCAFile + `
+	touch ` + linuxSSHPrincipalsDir + `/root
+	for p in ` + opsPrincipalCore + ` ` + opsPrincipalCompetition + ` root; do
+		grep -qxF "$p" ` + linuxSSHPrincipalsDir + `/root || printf '%s\n' "$p" >> ` + linuxSSHPrincipalsDir + `/root
 	done
-	chmod 644 /etc/ssh/auth_principals/root
-	ak="cert-authority,principals=\"core-infrastructure,competition-infrastructure,root\" $CA"
+	chmod 644 ` + linuxSSHPrincipalsDir + `/root
+	ak="cert-authority,principals=\"` + opsPrincipalCore + `,` + opsPrincipalCompetition + `,root\" $CA"
 	touch /root/.ssh/authorized_keys
 	grep -qxF "$ak" /root/.ssh/authorized_keys || printf '%s\n' "$ak" >> /root/.ssh/authorized_keys
 	chmod 600 /root/.ssh/authorized_keys
@@ -258,15 +265,15 @@ if [ -n "$CA" ]; then
 		awk '
 			tolower($1) == "trustedusercakeys" || tolower($1) == "authorizedprincipalsfile" { next }
 			tolower($1) == "match" && !done {
-				print "TrustedUserCAKeys /etc/ssh/vault-ca.pub"
-				print "AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u"
+				print "TrustedUserCAKeys ` + linuxSSHCAFile + `"
+				print "AuthorizedPrincipalsFile ` + linuxSSHPrincipalsDir + `/%u"
 				done = 1
 			}
 			{ print }
 			END {
 				if (!done) {
-					print "TrustedUserCAKeys /etc/ssh/vault-ca.pub"
-					print "AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u"
+					print "TrustedUserCAKeys ` + linuxSSHCAFile + `"
+					print "AuthorizedPrincipalsFile ` + linuxSSHPrincipalsDir + `/%u"
 				}
 			}' /etc/ssh/sshd_config > /etc/ssh/sshd_config.battleship
 		chmod 600 /etc/ssh/sshd_config.battleship
@@ -309,12 +316,12 @@ if ($ca -and (Get-Service sshd -ErrorAction SilentlyContinue)) {
 	$prDir = "$sshDir\auth_principals"
 	New-Item -ItemType Directory -Path $prDir -Force | Out-Null
 	Set-Content -LiteralPath "$sshDir\vault-ca.pub" -Value $ca -Encoding ascii
-	$principals = @('core-infrastructure', 'competition-infrastructure', 'administrator', 'administrators')
+	$principals = @('` + opsPrincipalCore + `', '` + opsPrincipalCompetition + `', 'administrator', 'administrators')
 	foreach ($u in 'administrators', 'administrator', 'root') {
 		Set-Content -LiteralPath "$prDir\$u" -Value $principals -Encoding ascii
 	}
 	$akFile = "$sshDir\administrators_authorized_keys"
-	$akLine = 'cert-authority,principals="core-infrastructure,competition-infrastructure,administrator,administrators" ' + $ca
+	$akLine = 'cert-authority,principals="` + opsPrincipalCore + `,` + opsPrincipalCompetition + `,administrator,administrators" ' + $ca
 	$existing = @()
 	if (Test-Path -LiteralPath $akFile) { $existing = @(Get-Content -LiteralPath $akFile) }
 	if ($existing -notcontains $akLine) {

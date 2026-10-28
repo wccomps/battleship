@@ -323,7 +323,7 @@ func (w *Worker) execute(ctx, bg context.Context, halt <-chan struct{}, job *sto
 	plan, err := BuildPlan(ctx, planner, in)
 	if err != nil {
 		if ctx.Err() != nil {
-			// Stopped, not failed: claimAndRun records why.
+			// Stopped, not failed: runClaimed records why.
 			return store.Outcome{Status: store.StatusInterrupted, Error: "stopped before anything ran; nothing was changed"}, false
 		}
 		return store.Outcome{Status: store.StatusFailed, Error: "planning: " + proxmox.Describe(err)}, false
@@ -568,8 +568,8 @@ func staleMessage(then, now *pods.Plan) string {
 		len(then.Items), len(then.Runnable()), len(now.Items), len(now.Runnable()))
 }
 
-// privilegesChanged reports whether then and now differ only in which
-// items the user's privileges block.
+// privilegesChanged reports whether then and now have the same items (by Name
+// and VMID) and differ in which items are blocked only where Unpermitted is set.
 func privilegesChanged(then, now *pods.Plan) bool {
 	if len(then.Items) != len(now.Items) {
 		return false

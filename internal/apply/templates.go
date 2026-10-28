@@ -373,31 +373,16 @@ func (e *Executor) finishTemplate(ctx context.Context, spec *pods.TemplateSpec, 
 	if _, err := e.applyConfig(ctx, tplItem, false, always(pods.CDROMChanges)); err != nil {
 		return fmt.Errorf("ejecting CD-ROM: %w", err)
 	}
-	// Conversion renames disks to base-*, which linked clones need; the result
-	// is checked below, not trusted.
 	e.emit(name, pods.StepClone, EventInfo, "converting to template")
-	convErr := e.convert(ctx, node, spec.VMID)
-	if convErr != nil && ctx.Err() != nil {
-		return fmt.Errorf("converting to template: %w", convErr)
-	}
-	cfg, gone, rerr := e.readVM(ctx, node, spec.VMID)
-	switch {
-	case (gone || rerr != nil) && convErr != nil:
-		return fmt.Errorf("converting to template: %w", convErr)
-	case gone:
-		return fmt.Errorf("converting to template: VM %d disappeared", spec.VMID)
-	case rerr != nil:
-		return fmt.Errorf("converting to template finished, but its disks could not be checked: %w", rerr)
-	}
-	isTemplate := cfg["template"] == "1"
-	if key, vol := pods.UnconvertedDisk(cfg); key != "" && isTemplate {
-		return &unconvertedError{name: name, vmid: spec.VMID, key: key, vol: vol, cause: convErr}
-	}
-	switch {
-	case convErr != nil:
-		return fmt.Errorf("converting to template: %w", convErr)
-	case !isTemplate:
-		return fmt.Errorf("converting to template: the task finished OK, but VM %d is still not a template", spec.VMID)
+	if _, err := e.convert(ctx, node, spec.VMID, name); err != nil {
+		var uerr *unconvertedError
+		if errors.As(err, &uerr) {
+			return err
+		}
+		if errors.Is(err, errVanished) {
+			return fmt.Errorf("converting to template: VM %d disappeared", spec.VMID)
+		}
+		return fmt.Errorf("converting to template: %w", err)
 	}
 	e.setPresent(proxmox.VM{VMID: spec.VMID, Name: name, Node: node, Template: true}, true)
 	e.emit(name, pods.StepClone, EventDone, "template created")
@@ -408,14 +393,11 @@ func (e *Executor) finishTemplate(ctx context.Context, spec *pods.TemplateSpec, 
 // rename its disks.
 const convertWait = 2 * time.Minute
 
-// convert converts the VM to a template under the storage-ops slot and waits
-// for the task. Proxmox sets template: 1 before renaming disks, so a request
-// is never sent once the VM says template: 1 (it would fail) and a failed task
-// is never restarted. If the VM was already converted or the outcome is
-// unknown, convert waits up to convertWait for the rename and returns nil if
-// template: 1; the caller checks the disks.
-func (e *Executor) convert(ctx context.Context, node string, vmid int) error {
-	return e.lim.storageOps.do(ctx, true, func() error {
+// convert converts the VM to a template and verifies its disks are base-*
+// volumes. Proxmox sets template: 1 before renaming disks, so ConvertToTemplate
+// is never re-sent once template: 1 is set.
+func (e *Executor) convert(ctx context.Context, node string, vmid int, name string) (changed bool, err error) {
+	convErr := e.lim.storageOps.do(ctx, true, func() error {
 		upid, err := e.taskUPID(ctx, 0, func() (string, error) {
 			cfg, err := e.api.VMConfig(ctx, node, vmid)
 			switch {
@@ -426,6 +408,7 @@ func (e *Executor) convert(ctx context.Context, node string, vmid int) error {
 			case cfg["template"] == "1":
 				return "", nil
 			}
+			changed = true
 			return e.api.ConvertToTemplate(ctx, node, vmid)
 		}, nil)
 		var taskErr *proxmox.TaskError
@@ -446,6 +429,29 @@ func (e *Executor) convert(ctx context.Context, node string, vmid int) error {
 		}
 		return err
 	})
+	if convErr != nil && ctx.Err() != nil {
+		return changed, convErr
+	}
+	cfg, gone, rerr := e.readVM(ctx, node, vmid)
+	switch {
+	case (gone || rerr != nil) && convErr != nil:
+		return changed, convErr
+	case gone:
+		return changed, errVanished
+	case rerr != nil:
+		return changed, fmt.Errorf("converting to template finished, but its disks could not be checked: %w", rerr)
+	}
+	isTemplate := cfg["template"] == "1"
+	if key, vol := pods.UnconvertedDisk(cfg); key != "" && isTemplate {
+		return changed, &unconvertedError{name: name, vmid: vmid, key: key, vol: vol, cause: convErr}
+	}
+	switch {
+	case convErr != nil:
+		return changed, convErr
+	case !isTemplate:
+		return changed, fmt.Errorf("the task finished OK, but VM %d is still not a template", vmid)
+	}
+	return changed, nil
 }
 
 // errVanished is a VM that disappeared mid-step. Unlike "does not exist"

@@ -24,8 +24,7 @@ type Inputs struct {
 	Pattern    string    `json:"pattern,omitempty"`     // deploy
 	Rebuild    bool      `json:"rebuild,omitempty"`     // deploy
 	NoSnapshot bool      `json:"no_snapshot,omitempty"` // deploy
-	// Set is the one template set a teardown takes (pods.ParseSet). A
-	// teardown without one, as every one stored before sets, takes
+	// Set is the template set a teardown takes (pods.ParseSet); empty takes
 	// everything in its pods (among Hosts).
 	Set pods.Set `json:"set,omitempty"`
 	// Snapshot is a reset's target (empty: baseline) or a snapshot job's

@@ -813,7 +813,6 @@ func TestServeStartupFailsClearly(t *testing.T) {
 					t.Error("serve opened the database before its checks")
 					return nil, nil, errors.New("not in this test")
 				},
-				stdout: io.Discard,
 				stderr: stderr,
 			}
 			if code := run(context.Background(), []string{"serve", "-config", path}, d); code != 1 {
@@ -834,7 +833,7 @@ func TestServeStartupFailsClearly(t *testing.T) {
 
 func TestServeFlags(t *testing.T) {
 	var stderr strings.Builder
-	d := deps{stdout: io.Discard, stderr: &stderr}
+	d := deps{stderr: &stderr}
 	if code := run(context.Background(), []string{"-h"}, d); code != 0 {
 		t.Errorf("-h: exit %d, want 0", code)
 	}
@@ -1090,11 +1089,10 @@ func TestServeCommand(t *testing.T) {
 	t.Setenv("BATTLESHIP_DATABASE_URL", "")
 	t.Setenv("BATTLESHIP_SEAL_KEY", testSealKey)
 	t.Setenv("BATTLESHIP_OIDC_CLIENT_SECRET", oidc.OIDC.ClientSecret)
-	stderr, stdout := &syncBuffer{}, &syncBuffer{}
+	stderr := &syncBuffer{}
 	d := deps{
 		newAPI:    func(config.Proxmox) pods.API { return newServeAPI(teamPodVMs()...) },
 		openStore: func(context.Context, config.Database) (*store.Store, func(), error) { return st, func() {}, nil },
-		stdout:    stdout,
 		stderr:    stderr,
 		drain:     func() {},
 	}
@@ -1121,9 +1119,6 @@ func TestServeCommand(t *testing.T) {
 		if !slices.Contains(msgs, want) {
 			t.Errorf("log messages %q lack %q", msgs, want)
 		}
-	}
-	if stdout.String() != "" {
-		t.Errorf("stdout = %q, want everything in the log on stderr", stdout)
 	}
 	if strings.Contains(stderr.String(), "context canceled") {
 		t.Errorf("stopping logged errors:\n%s", stderr)

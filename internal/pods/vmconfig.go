@@ -50,6 +50,20 @@ func joinOptions(head string, opts map[string]string) string {
 	return out
 }
 
+func forEachNIC(cfg map[string]string, fn func(key, val string)) {
+	for i := range 32 {
+		k := fmt.Sprintf("net%d", i)
+		if v := cfg[k]; v != "" {
+			fn(k, v)
+		}
+	}
+}
+
+func nicBridge(nic string) string {
+	_, opts := splitOptions(nic)
+	return opts["bridge"]
+}
+
 // CountInterfaces counts net0, net1, ... keys.
 func CountInterfaces(cfg map[string]string) int {
 	n := 0
@@ -66,10 +80,8 @@ func CountInterfaces(cfg map[string]string) int {
 func NICBridges(cfg map[string]string) []string {
 	var out []string
 	for _, k := range []string{"net0", "net1"} {
-		if v, ok := cfg[k]; ok {
-			if _, opts := splitOptions(v); opts["bridge"] != "" {
-				out = append(out, opts["bridge"])
-			}
+		if b := nicBridge(cfg[k]); b != "" {
+			out = append(out, b)
 		}
 	}
 	return out
@@ -78,8 +90,11 @@ func NICBridges(cfg map[string]string) []string {
 // HasCloudInit reports whether any drive is a cloud-init drive.
 func HasCloudInit(cfg map[string]string) bool {
 	for k, v := range cfg {
-		if isDriveKey(k) && strings.Contains(v, "cloudinit") && strings.Contains(v, "media=cdrom") {
-			return true
+		if isDriveKey(k) {
+			head, opts := splitOptions(v)
+			if opts["media"] == "cdrom" && strings.Contains(head, "cloudinit") {
+				return true
+			}
 		}
 	}
 	return false
@@ -87,8 +102,10 @@ func HasCloudInit(cfg map[string]string) bool {
 
 func nicSpec(current, bridge string) string {
 	head, opts := splitOptions(current)
-	if model, mac, ok := strings.Cut(head, "="); ok && len(mac) != 17 {
-		head = model
+	if model, _, ok := strings.Cut(head, "="); ok {
+		if _, valid := NICMAC(current); !valid {
+			head = model
+		}
 	}
 	delete(opts, "tag")
 	opts["bridge"] = bridge
@@ -133,11 +150,11 @@ func DiskLimitChanges(cur map[string]string, rd, wr int) map[string]string {
 	rdStr := strconv.Itoa(rd)
 	wrStr := strconv.Itoa(wr)
 	for k, v := range cur {
-		if !isDriveKey(k) || !strings.Contains(v, ":") || strings.Contains(v, "media=cdrom") {
+		if !isDriveKey(k) {
 			continue
 		}
 		head, opts := splitOptions(v)
-		if opts["mbps_rd"] == rdStr && opts["mbps_wr"] == wrStr {
+		if !strings.Contains(head, ":") || opts["media"] == "cdrom" || (opts["mbps_rd"] == rdStr && opts["mbps_wr"] == wrStr) {
 			continue
 		}
 		opts["mbps_rd"] = rdStr
@@ -152,8 +169,11 @@ func DiskLimitChanges(cur map[string]string, rd, wr int) map[string]string {
 func CDROMChanges(cur map[string]string) map[string]string {
 	want := map[string]string{}
 	for k, v := range cur {
-		if isDriveKey(k) && strings.Contains(v, "media=cdrom") && !strings.Contains(v, "cloudinit") {
-			want[k] = "none,media=cdrom"
+		if isDriveKey(k) {
+			head, opts := splitOptions(v)
+			if opts["media"] == "cdrom" && !strings.Contains(head, "cloudinit") {
+				want[k] = "none,media=cdrom"
+			}
 		}
 	}
 	return diff(cur, want)

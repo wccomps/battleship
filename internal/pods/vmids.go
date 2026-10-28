@@ -3,7 +3,6 @@ package pods
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/wccomps/battleship/internal/proxmox"
 )
@@ -41,7 +40,7 @@ func (p Planner) reserved(ctx context.Context) (map[string]bool, error) {
 
 // inUse is whether vmid is in use, asking Proxmox only if nothing else says.
 func (u vmidUse) inUse(ctx context.Context, vmid int) (bool, error) {
-	if u.listed[vmid] || u.reserved["vmid:"+strconv.Itoa(vmid)] {
+	if u.listed[vmid] || u.reserved[vmidKey(vmid)] {
 		return true, nil
 	}
 	return u.api.VMIDHeld(ctx, vmid)

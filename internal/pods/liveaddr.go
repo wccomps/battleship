@@ -286,7 +286,7 @@ func (p Planner) checkHostSSH(ctx context.Context, h EnvHost, nics []proxmox.Gue
 	}
 }
 
-var opsPrincipals = []string{"core-infrastructure", "competition-infrastructure"}
+var opsPrincipals = []string{opsPrincipalCore, opsPrincipalCompetition}
 
 // CheckSSHOutput inspects the output of SSHCheckCommand and returns a short
 // warning when sshd or the ops CA key isn't configured, or "" when healthy.

@@ -46,7 +46,7 @@ type User struct {
 
 // Session is a logged-in test browser.
 type Session struct {
-	Cookie *http.Cookie // the session cookie, named by auth.SessionCookieName
+	Cookie *http.Cookie // the session cookie
 	CSRF   string       // the session's CSRF token
 }
 
@@ -114,11 +114,15 @@ func Login(t testing.TB, st *store.Store, cfg config.Config, u User) Session {
 			t.Fatalf("authtest: storing the Proxmox ticket: %v", err)
 		}
 	}
-	name := auth.SessionCookieName(cfg.Web.BaseURL)
+	secure := auth.SecureBaseURL(cfg.Web.BaseURL)
+	name := auth.SessionCookie
+	if secure {
+		name = "__Host-" + name
+	}
 	return Session{
 		Cookie: &http.Cookie{
 			Name: name, Value: token, Path: "/",
-			HttpOnly: true, Secure: name != auth.SessionCookie, SameSite: http.SameSiteLaxMode,
+			HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode,
 		},
 		CSRF: csrf,
 	}

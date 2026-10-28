@@ -25,8 +25,8 @@ type ImageRequest struct {
 
 // agentEnabled reads a VM's agent option ("1", "enabled=1,…", "1,fstrim…").
 func agentEnabled(v string) bool {
-	first, _, _ := strings.Cut(v, ",")
-	return first == "1" || strings.Contains(","+v+",", ",enabled=1,")
+	head, opts := splitOptions(v)
+	return head == "1" || head == "enabled=1" || opts["enabled"] == "1"
 }
 
 // freeVMID is the lowest VMID in lo..hi that no listed VM, no VM the user
@@ -239,11 +239,9 @@ func (p Planner) ImageEdit(ctx context.Context, req ImageRequest) (*Plan, error)
 		it.blockLongNotes(cfg["description"])
 		// Every NIC goes on the edit bridge: a router's LAN left on a slot's
 		// bridge would clash with that environment's router.
-		for i := range 32 {
-			if key := fmt.Sprintf("net%d", i); cfg[key] != "" {
-				it.NICs[key] = p.Cfg.Images.EditBridge
-			}
-		}
+		forEachNIC(cfg, func(key, _ string) {
+			it.NICs[key] = p.Cfg.Images.EditBridge
+		})
 	}
 	return &Plan{Kind: KindImageEdit, Config: ConfigHash(KindImageEdit, p.Cfg), Items: []Item{it},
 		Locks: []string{"family:" + req.Family}}, nil
@@ -287,7 +285,7 @@ func (p Planner) ImageDelete(ctx context.Context, req ImageRequest) (*Plan, erro
 	}
 	return &Plan{Kind: KindImageDelete, Config: ConfigHash(KindImageDelete, p.Cfg),
 		Items: []Item{{Name: im.Name, VMID: im.VMID, Node: im.Node, Steps: []Step{StepDelete}}},
-		Locks: []string{"family:" + im.Family, "storage-ops"}}, nil
+		Locks: []string{"family:" + im.Family, StorageOpsKey}}, nil
 }
 
 // NotesEdit is what Edit notes on a family works on: the family's newest

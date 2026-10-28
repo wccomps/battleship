@@ -25,9 +25,7 @@ type driftView struct {
 
 // snapshotView is one of the VM's snapshots.
 type snapshotView struct {
-	Name string
-	// Baseline marks the VM's baseline snapshot or, in the reset picker, the
-	// nameless option meaning each VM's own.
+	Name     string
 	Baseline bool
 }
 

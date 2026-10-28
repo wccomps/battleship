@@ -92,7 +92,6 @@ func (d *ImageDetails) set(key, v string) {
 	}
 }
 
-// Empty reports whether no field is set.
 func (d ImageDetails) Empty() bool { return d == ImageDetails{} }
 
 // Trimmed is d with each value's surrounding spaces removed, as forms post
@@ -300,7 +299,6 @@ func withDetails(desc string, d ImageDetails) string {
 	return strings.Join(append(out, rest...), "\n")
 }
 
-// shift moves ranges by n lines.
 func shift(bs [][2]int, n int) [][2]int {
 	out := make([][2]int, len(bs))
 	for i, b := range bs {
@@ -369,8 +367,7 @@ func (n ImageNotes) against(r NotesRead) (_ ImageNotes, same bool) {
 // (readImageNotes): the details, and the free text beside them as editing
 // writes it (editText). An unreadable details block gives no details:
 // Unreadable is set, and Block holds the block's lines as pages show them.
-// Plans store it (Item.DetailsWas); one stored before Edit notes wrote free
-// text has only the details and Unreadable.
+// Plans store it in Item.DetailsWas.
 type NotesRead struct {
 	Details    ImageDetails `json:"details"`
 	Unreadable bool         `json:"unreadable,omitempty"`

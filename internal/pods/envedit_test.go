@@ -70,6 +70,13 @@ func TestEnvEditUpdatesNotesDetailsRenameAndGuest(t *testing.T) {
 		t.Fatalf("unchanged edit blocked = %q", plan.Items[0].Blocked)
 	}
 
+	if _, err := p.EnvEdit(ctx, HostEditInput{VMID: 2101, Octet: ClearOctet}); err == nil || !strings.Contains(err.Error(), "only other hosts can clear their address") {
+		t.Fatalf("EnvEdit(ClearOctet on linux host) = %v, want error", err)
+	}
+	if _, err := p.EnvEdit(ctx, HostEditInput{VMID: 2101, Kind: ImageOther, Octet: ClearOctet}); err != nil {
+		t.Fatalf("EnvEdit(ClearOctet on other host) = %v", err)
+	}
+
 	f.CPUModels = []string{"lab-baseline", "lab-baseline-nested"}
 	plan, err = p.EnvEdit(ctx, HostEditInput{VMID: 2101, CPU: "lab-baseline"})
 	if err != nil {

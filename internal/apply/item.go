@@ -203,26 +203,9 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		}
 		return e.applyConfig(ctx, it, false, it.Details.Changes)
 	case pods.StepConvert:
-		cfg, gone, err := e.readVM(ctx, it.Node, it.VMID)
+		changed, err := e.convert(ctx, it.Node, it.VMID, it.Name)
 		if err != nil {
-			return false, err
-		}
-		if gone {
-			return false, errVanished
-		}
-		changed := cfg["template"] != "1"
-		if changed {
-			if err := e.convert(ctx, it.Node, it.VMID); err != nil {
-				return true, err
-			}
-			if cfg, gone, err = e.readVM(ctx, it.Node, it.VMID); err != nil {
-				return true, err
-			} else if gone {
-				return true, errVanished
-			}
-		}
-		if key, vol := pods.UnconvertedDisk(cfg); key != "" {
-			return changed, &unconvertedError{name: it.Name, vmid: it.VMID, key: key, vol: vol}
+			return changed, err
 		}
 		// A converted image is finished work; a later failure mustn't make cleanup delete it.
 		e.mu.Lock()

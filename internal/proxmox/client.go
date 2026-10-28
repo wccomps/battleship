@@ -70,7 +70,7 @@ func (c *Client) capped(limit int64) *Client {
 	return &v
 }
 
-// anonymous is a view that sends no credential, for logins.
+// anonymous is a view that sends no credential, for unauthenticated calls.
 func (c *Client) anonymous() *Client { return &Client{conn: c.conn, anon: true} }
 
 // endpoint is one node's API; host (host:8006) is what logs and errors show.

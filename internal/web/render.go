@@ -195,7 +195,6 @@ func (s *Server) newView(w http.ResponseWriter, r *http.Request, title, active s
 // anything else (e.g. the login page).
 const panelHeader = "X-Battleship-Panel"
 
-// wantsPanel reports whether r asks for the panel's rendering.
 func wantsPanel(r *http.Request) bool { return r.Header.Get(panelHeader) == "1" }
 
 // render writes page with v and status, fully rendered first so a template

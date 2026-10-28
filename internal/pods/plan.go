@@ -321,6 +321,12 @@ type KeptVM struct {
 	Why  string `json:"why"`
 }
 
+// StorageOpsKey is the lock and concurrency-slot key for template conversions
+// and template deletions.
+const StorageOpsKey = "storage-ops"
+
+func vmidKey(id int) string { return "vmid:" + strconv.Itoa(id) }
+
 // LockKeys are what a plan changes and, apart, what it only reads (its
 // items' Sources), as lock keys (see the store's blocksSQL). Besides its own
 // VMs, a plan changes the image a register retires and the master of a
@@ -329,7 +335,7 @@ func (plan *Plan) LockKeys() (writes, reads []string) {
 	w, r := map[string]bool{}, map[string]bool{}
 	vmid := func(set map[string]bool, id int) {
 		if id != 0 {
-			set["vmid:"+strconv.Itoa(id)] = true
+			set[vmidKey(id)] = true
 		}
 	}
 	for _, t := range plan.Teams {
