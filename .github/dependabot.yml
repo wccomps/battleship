@@ -7,6 +7,9 @@ updates:
     groups:
       go-modules:
         patterns: ['*']
+    # chromedp is mid-rewrite (v0.21 made Action generic); move it by hand.
+    ignore:
+      - dependency-name: github.com/chromedp/*
 
   # The image build fails a golang bump until go.mod's go line matches it.
   - package-ecosystem: docker
