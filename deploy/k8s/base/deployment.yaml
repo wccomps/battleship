@@ -65,7 +65,7 @@ spec:
 
       containers:
         - name: battleship
-          image: ghcr.io/wccomps/battleship # tag pinned by the overlay (images:)
+          image: ghcr.io/wccomps/battleship # tag and digest pinned by the overlay (images:)
           imagePullPolicy: IfNotPresent
           # WORKDIR is /config, so ./battleship.toml is the ConfigMap's file.
           args: ["serve", "-log-format", "json"]

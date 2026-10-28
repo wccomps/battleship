@@ -4,8 +4,6 @@ on:
   push:
     branches-ignore:
       - 'dependabot/**'
-    tags:
-      - 'v*'
   pull_request:
     branches-ignore:
       - 'dependabot/**'
@@ -83,8 +81,8 @@ jobs:
 
   image:
     name: Build image
-    # Every push and PR builds the image; release refs push it in 'publish'.
-    if: ${{ !(github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) }}
+    # Every push and PR builds the image; main pushes it in 'publish'.
+    if: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -107,7 +105,7 @@ jobs:
 
   publish:
     name: Build and push image
-    if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     needs: test
     runs-on: ubuntu-latest
     permissions:
@@ -134,14 +132,10 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
-          # sha-<short> always; the git tag (e.g. v1.2.3) on tag pushes;
-          # latest only for main. Deploy by version tag or sha-, never latest.
-          tags: |
-            type=sha,prefix=sha-,format=short
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          tags: type=sha,prefix=sha-,format=short
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -151,54 +145,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  deploy:
-    name: Deploy to Argo CD
-    # Only main deploys; Argo CD rolls out whatever tag wccomps-argocd pins.
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: publish
-    runs-on: ubuntu-latest
-    environment: production
-    # One bump at a time, so two quick pushes can't race on wccomps-argocd.
-    concurrency:
-      group: deploy-argocd
-      cancel-in-progress: false
-    steps:
-      - name: Skip if main has moved on
-        id: head
+      # Deploys are manual: pin both values in the overlay's images entry.
+      - name: Image to deploy
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          head="$(gh api "repos/${{ github.repository }}/commits/main" --jq .sha)"
-          if [ "$head" != "$GITHUB_SHA" ]; then
-            echo "main is at $head now; its own run deploys it."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Check out wccomps-argocd
-        if: steps.head.outputs.skip != 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: wccomps/wccomps-argocd
-          token: ${{ secrets.ARGOCD_REPO_TOKEN }}
-          path: argocd
-
-      - name: Pin the new image
-        if: steps.head.outputs.skip != 'true'
-        working-directory: argocd/manifests/battleship
-        run: |
-          tag="sha-${GITHUB_SHA::7}"
-          # The one newTag line is the deployed version; replace just it.
-          sed -i -E "s/^( *newTag: ).*/\1$tag/" kustomization.yaml
-          test "$(grep -c "newTag: $tag" kustomization.yaml)" = 1
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet; then
-            echo "Already on $tag."
-            exit 0
-          fi
-          git commit -am "Deploy battleship $tag"
-          for i in 1 2 3; do
-            git push && exit 0
-            git pull --rebase
-          done
-          exit 1
+          printf '```yaml\n    newTag: %s\n    digest: %s\n```\n' "$TAG" "$DIGEST" | tee -a "$GITHUB_STEP_SUMMARY"
