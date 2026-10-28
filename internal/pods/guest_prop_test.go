@@ -38,7 +38,7 @@ func nearMisses(field, v string) []string {
 			}, v)
 		}
 		return []string{"0" + v, "::ffff:" + v, v + " ", " " + v, v + ".", v + ".1", "+" + v, "-" + v, v[:dot], v[:dot+1] + "256",
-			v[:dot+1] + "0" + v[dot+1:], digits('\u0660'), digits('\uff10'), strings.Replace(v, ".", "\uff0e", 1), "0::", "FE80::1"}
+			v[:dot+1] + "0" + v[dot+1:], digits('\u0660'), digits('\uff10'), strings.Replace(v, ".", "\uff0e", 1), "::", "fe80::1", "fe80::1%'$(id)'"}
 	case "hostname", "domain":
 		first, _, _ := strings.Cut(v, ".")
 		return []string{strings.ToUpper(v), "-" + v, v + "-", v + ".", "." + v, strings.Replace(v, ".", "..", 1), strings.Replace(v, ".", "-.", 1),
@@ -136,16 +136,12 @@ func safeSSHKey(s string) bool {
 }
 
 // storedGuest is g with its addresses read from text, as a stored plan's
-// are; false if a plan with them can't be read.
-func storedGuest(t interface{ Fatalf(string, ...any) }, g Guest, ip, gateway, dns string) (Guest, bool) {
-	b, err := json.Marshal(map[string]string{"ip": ip, "gateway": gateway, "dns": dns})
-	if err != nil {
-		t.Fatalf("%v", err)
-	}
+// are; false unless a plan holds them as written (AddrText's spelling).
+func storedGuest(g Guest, ip, gateway, dns string) (Guest, bool) {
+	b, _ := json.Marshal(map[string]string{"ip": ip, "gateway": gateway, "dns": dns})
 	if json.Unmarshal(b, &g) != nil {
 		return Guest{}, false
 	}
-	// A stored plan holds addresses as AddrText writes them.
 	if AddrText(g.IP) != ip || AddrText(g.Gateway) != gateway || AddrText(g.DNS) != dns {
 		return Guest{}, false
 	}
@@ -220,8 +216,11 @@ func TestGuestTricks(t *testing.T) {
 				half := len(valid) / 2
 				for _, placed := range []string{trick, trick + valid, valid + trick, valid[:half] + trick + valid[half:]} {
 					*v = placed
-					if h, ok := storedGuest(t, g, ip, gw, dns); ok {
+					h, ok := storedGuest(g, ip, gw, dns)
+					if ok {
 						checkGuest(t, h, mac)
+					} else if field != "ip" && field != "gateway" && field != "dns" {
+						t.Fatalf("valid addresses %q, %q, %q don't read back", ip, gw, dns)
 					}
 				}
 			}
@@ -248,9 +247,12 @@ func TestPropGuestScriptsAreInjectionFree(t *testing.T) {
 		if !bad("ops_ca_key") && rapid.Bool().Draw(t, "empty ca") {
 			g.OpsCAKey = ""
 		}
-		g, ok := storedGuest(t, g, guestValue(t, "ip", bad("ip"), "192.168.100.10", "10.0.0.5", "0.0.0.0"),
+		g, ok := storedGuest(g, guestValue(t, "ip", bad("ip"), "192.168.100.10", "10.0.0.5", "0.0.0.0"),
 			guestValue(t, "gateway", bad("gateway"), "192.168.100.2"), guestValue(t, "dns", bad("dns"), "192.168.100.2", "255.255.255.255"))
 		if !ok {
+			if !bad("ip") && !bad("gateway") && !bad("dns") {
+				t.Fatalf("valid addresses don't read back")
+			}
 			return
 		}
 		if bad("os") {

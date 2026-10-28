@@ -2,7 +2,6 @@ package seal
 
 import "testing"
 
-// FuzzOpen explores values Open accepts that weren't sealed for their binding.
 func FuzzOpen(f *testing.F) {
 	k := NewKey("a long enough secret for tests", "job credential v1")
 	f.Add("job:7", []byte("PVE:ticket"), "v1:")

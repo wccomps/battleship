@@ -6,8 +6,6 @@ import (
 	"github.com/wccomps/battleship/internal/pods/podstest"
 )
 
-// FuzzGuestCommand explores guest values for one GuestCommand accepts that
-// isn't a plain name, address or key quoted into the script.
 func FuzzGuestCommand(f *testing.F) {
 	f.Add(true, "teak", "kilo.alpha", "192.168.100.10", 24, "192.168.100.2", "192.168.100.2", "BC:24:11:00:00:01", podstest.DefaultSSHCAKey)
 	f.Add(false, "dc", "a.b", "10.0.0.5", 32, "10.0.0.1", "10.0.0.1", "bc:24:11:aa:bb:cc", "")
@@ -17,7 +15,7 @@ func FuzzGuestCommand(f *testing.F) {
 		if windows {
 			g.OS = ImageWindows
 		}
-		if g, ok := storedGuest(t, g, ip, gateway, dns); ok {
+		if g, ok := storedGuest(g, ip, gateway, dns); ok {
 			checkGuest(t, g, mac)
 		}
 	})
@@ -30,8 +28,6 @@ func FuzzParseHostSpec(f *testing.F) {
 	f.Fuzz(func(t *testing.T, s string) { checkHostSpec(t, s) })
 }
 
-// FuzzUserNotes explores descriptions for one whose notes keep a line that
-// reads as battleship's, or lose battleship's line written into them.
 func FuzzUserNotes(f *testing.F) {
 	for _, s := range notesPieces {
 		f.Add(s, "192.168.100.10", true, "router")

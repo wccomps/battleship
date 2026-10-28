@@ -127,7 +127,7 @@ func TestPropUserNotes(t *testing.T) {
 func checkUserNotes(t interface{ Fatalf(string, ...any) }, desc string) {
 	got := UserNotes(desc)
 	for _, line := range strings.Split(got, "\n") {
-		if isNotesLine(line) {
+		if strings.HasPrefix(strings.TrimSpace(line), notesPrefix) {
 			t.Fatalf("kept a battleship line: %q", line)
 		}
 	}
@@ -296,8 +296,6 @@ func TestPropNotesLineRoundTrip(t *testing.T) {
 	})
 }
 
-// checkNotesLine checks that n written into desc reads back the same,
-// writing it twice changes nothing, and people's notes around it are kept.
 func checkNotesLine(t interface{ Fatalf(string, ...any) }, desc string, n Notes) {
 	with := WithNotes(desc, n)
 	if got, ok := ParseNotes(with); !ok || got != n {

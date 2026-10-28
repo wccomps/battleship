@@ -58,7 +58,7 @@ func TestKeyIsRedacted(t *testing.T) {
 	}
 }
 
-// A box opens for its own binding, to what was sealed, and for no other.
+// A box opens to what was sealed for its binding, and not for another binding or junk.
 func TestPropSealOpensOnlyForItsBinding(t *testing.T) {
 	k := NewKey("a long enough secret for tests", "job credential v1")
 	rapid.Check(t, func(t *rapid.T) {

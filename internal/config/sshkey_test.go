@@ -24,18 +24,20 @@ func TestPropParseSSHPublicKey(t *testing.T) {
 		if got, err := ParseSSHPublicKey(raw); err != nil || got != kt+" "+b64 {
 			t.Fatalf("ParseSSHPublicKey(%q) = %q, %v", raw, got, err)
 		}
-		// Before padding, the last character has spare bits: flipping one
-		// decodes to the same key but isn't its canonical spelling.
-		spare := b64
+		// The character before padding has spare bits; flipping one still decodes.
+		flipped := b64
 		if data := strings.TrimRight(b64, "="); len(data) < len(b64) {
 			const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 			i := len(data) - 1
-			spare = b64[:i] + string(alphabet[strings.IndexByte(alphabet, b64[i])^1]) + b64[i+1:]
+			flipped = b64[:i] + string(alphabet[strings.IndexByte(alphabet, b64[i])^1]) + b64[i+1:]
 		}
 		spoilt := rapid.SampledFrom([]string{
-			kt + " " + spare, strings.TrimRight(b64, "="), b64 + "=", kt + "x " + b64, raw + "\n'$(id)'", "\r" + raw,
+			kt + " " + flipped, kt + " " + strings.TrimRight(b64, "="), kt + " " + b64 + "=", kt + "x " + b64, raw + "\n'$(id)'", "\r" + raw,
 		}).Draw(t, "spoilt")
-		checkSSHKey(t, rapid.OneOf(rapid.Just(spoilt), rapid.String()).Draw(t, "raw"))
+		if got, err := ParseSSHPublicKey(spoilt); err == nil && spoilt != kt+" "+b64 {
+			t.Fatalf("ParseSSHPublicKey(%q) = %q, want an error", spoilt, got)
+		}
+		checkSSHKey(t, rapid.String().Draw(t, "raw"))
 	})
 }
 
