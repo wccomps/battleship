@@ -1,6 +1,5 @@
 name: Security
 
-# Weekly, as advisories arrive without a push.
 on:
   schedule:
     - cron: '17 6 * * 1'
@@ -10,6 +9,7 @@ permissions:
   contents: read
 
 jobs:
+  # Advisories arrive without a push.
   vulncheck:
     uses: ./.github/workflows/vulncheck.yml
 
@@ -32,8 +32,9 @@ jobs:
 
       - name: List
         id: list
+        shell: bash
         run: |
-          matrix="$(go test -list '^Fuzz' ./... | awk '/^Fuzz/ {t[n++] = $1} /^ok/ {for (i = 0; i < n; i++) printf "{\"pkg\":\"%s\",\"target\":\"%s\"}\n", $2, t[i]; n = 0}' | jq -cs .)"
+          matrix="$(go test -list '^Fuzz' -json ./... | jq -cs '[.[] | select(.Action == "output" and (.Output | startswith("Fuzz"))) | {pkg: .Package, target: (.Output | rtrimstr("\n"))}]')"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   fuzz:

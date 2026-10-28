@@ -1,6 +1,7 @@
 FROM golang:1.26.10-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
+RUN want="go$(sed -n 's/^go //p' go.mod)"; [ "$(go env GOVERSION)" = "$want" ] || { echo "the golang image must be go.mod's $want" >&2; exit 1; }
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /battleship ./cmd/battleship
