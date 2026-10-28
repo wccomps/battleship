@@ -391,7 +391,7 @@ func (t jobItems) TallyText() string {
 type jobItemView struct {
 	Name  string
 	VMID  string
-	Steps []stepView // its planned steps and how far it got; none if the plan can't be read
+	Steps []stepView
 	// Look is its status; a done VM's says its outcome and address, e.g.
 	// "Ready · 192.168.100.4".
 	Look statusLook
@@ -516,6 +516,9 @@ func itemSteps(planned []pods.Step, it store.Item) []stepView {
 			continue
 		}
 		out = append(out, v)
+	}
+	if len(out) <= 1 && it.Status == store.ItemDone {
+		return nil
 	}
 	return out
 }

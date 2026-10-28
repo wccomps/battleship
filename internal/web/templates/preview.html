@@ -1,9 +1,6 @@
 {{define "content" -}}
 {{- $csrf := .CSRF}}
 {{- with .Data}}
-{{- /* The sheet is the confirm form. Its inputs also post, for
-       "Change", back to the operation's form (the snapshot picker, or a
-       snapshot's name). */}}
 <form class="sheet" method="post" action="{{.Op.Path}}{{if .Confirm}}/confirm{{end}}" aria-labelledby="pv-title">
 {{template "csrf" $csrf}}
 {{- with .Confirm}}
@@ -73,7 +70,7 @@
 <thead><tr><th scope="col">Template</th><th scope="col">Node</th><th scope="col">Steps</th><th scope="col">Blocked</th></tr></thead>
 <tbody>
 {{- range .Templates}}
-<tr{{if .Blocked}} class="blk"{{end}}><td><span class="vm">{{.Name}}</span></td><td><span class="vm">{{.Node}}</span></td><td>{{if .Blocked}}—{{else}}{{.State}}{{end}}</td><td>{{with .Blocked}}<span class="st s-cancel">{{icon "blocked"}}{{names .}}</span>{{end}}</td></tr>
+<tr{{if .Blocked}} class="blk"{{end}}><td><span class="vm">{{.Name}}</span></td><td><span class="vm">{{.Node}}</span></td><td>{{if .Blocked}}—{{else}}{{.State}}{{end}}</td><td>{{with .Blocked}}<span class="st s-cancel">{{icon "blocked"}}<span>{{names .}}</span></span>{{end}}</td></tr>
 {{- end}}
 </tbody>
 </table>
@@ -99,15 +96,13 @@
 {{- end}}{{end}}
 </div>
 <div class="pf">
-{{- if .Review}}
-<a class="btn first" href="{{.EditHref}}"{{if eq .EditHref .CloseHref}} data-close{{else}} data-panel-link{{end}}>Back</a>
-{{- else if .FromGrid}}
+{{- if .FromGrid}}
 {{- with .Reselect}}
 <button type="submit" class="btn first" formaction="{{$.Data.Op.Path}}" formnovalidate>{{.}}</button>
 {{- end}}
 <a class="btn" href="/" data-close>Cancel</a>
 {{- else}}
-<a class="btn" href="{{.EditHref}}" data-panel-link>Back</a>
+<a class="btn first" href="{{.EditHref}}"{{if and .Review (eq .EditHref .CloseHref)}} data-close{{else}} data-panel-link{{end}}>Back</a>
 {{- end}}
 {{- with .Confirm}}
 <button type="submit" class="btn pri{{if .Danger}} bad{{end}}">{{opIcon $.Data.Title.Icon}}{{.Button}}</button>
@@ -123,7 +118,7 @@
 <thead><tr><th scope="col">VM</th><th scope="col">Node</th><th scope="col">Steps</th><th scope="col">Blocked</th></tr></thead>
 <tbody>
 {{- range .Items}}
-<tr{{if .Blocked}} class="blk"{{end}}><td><span class="vm">{{.Name}}</span></td><td><span class="vm">{{.Node}}</span></td><td>{{if .Blocked}}—{{else}}{{.Steps}}{{end}}</td><td>{{with .Blocked}}<span class="st s-cancel">{{icon "blocked"}}{{names .}}</span>{{end}}</td></tr>
+<tr{{if .Blocked}} class="blk"{{end}}><td><span class="vm">{{.Name}}</span></td><td><span class="vm">{{.Node}}</span></td><td>{{if .Blocked}}—{{else}}{{.Steps}}{{end}}</td><td>{{with .Blocked}}<span class="st s-cancel">{{icon "blocked"}}<span>{{names .}}</span></span>{{end}}</td></tr>
 {{- end}}
 </tbody>
 </table>

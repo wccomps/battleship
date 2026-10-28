@@ -388,6 +388,7 @@ func TestItemSteps(t *testing.T) {
 		{store.Item{Status: store.ItemRunning, Steps: map[string]string{"clone": "done", "network": "skipped"}}, "done run wait"},
 		{store.Item{Status: store.ItemFailed, Steps: map[string]string{"clone": "done", "network": "failed"}}, "done fail wait wait"},
 		{store.Item{Status: store.ItemDone, Steps: map[string]string{"clone": "done", "network": "done", "cdrom": "skipped", "start": "done"}}, "done done done"},
+		{store.Item{Status: store.ItemDone, Steps: map[string]string{"clone": "skipped", "network": "skipped", "cdrom": "skipped", "start": "done"}}, ""},
 		{store.Item{Status: store.ItemDone, Steps: map[string]string{"start": "skipped"}}, ""},
 		{store.Item{Status: store.ItemDone}, "done done done done"},
 		{store.Item{Status: store.ItemInterrupted, Steps: map[string]string{"clone": "interrupted"}}, "int wait wait wait"},

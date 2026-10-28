@@ -239,9 +239,8 @@ func TestPreviewShowsThePlan(t *testing.T) {
 		`no &#34;initial&#34; or fresh_clone_* baseline snapshot (has: other)`,
 		"1 VM rolls back to its baseline snapshot and starts. Work since then is lost.",
 		`<button type="submit" class="btn pri bad">`, "Reset 1 VM</button>",
-		`<a class="btn" href="/reset?teams=1" data-panel-link>Back</a>`,
+		`<a class="btn first" href="/reset?teams=1" data-panel-link>Back</a>`,
 	)
-	// Blocked VMs come first.
 	if strings.Index(body, "team01-web") > strings.Index(body, "team01-dc</span></td><td><span") {
 		t.Error("the blocked VM isn't listed first")
 	}
