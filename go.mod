@@ -1,6 +1,6 @@
 module github.com/wccomps/battleship
 
-go 1.25.1
+go 1.26.10
 
 require (
 	github.com/BurntSushi/toml v1.4.1-0.20240526193622-a339e1f7089c
@@ -10,7 +10,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/jackc/pgx/v5 v5.11.0
 	golang.org/x/oauth2 v0.36.0
-	golang.org/x/sync v0.17.0
+	golang.org/x/sync v0.24.0
 	pgregory.net/rapid v1.3.0
 )
 
@@ -24,5 +24,5 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	golang.org/x/sys v0.34.0 // indirect
-	golang.org/x/text v0.29.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 )
