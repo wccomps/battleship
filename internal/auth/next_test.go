@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path"
 	"strings"
 	"testing"
 
@@ -37,6 +38,9 @@ func TestSafeNext(t *testing.T) {
 		"/./auth/login":                 "/",
 		"/%2e%2e/auth/login":            "/",
 		"/jobs/../auth/login":           "/",
+		"/auth//..":                     "/",
+		"/auth//../x":                   "/",
+		"/x/..//auth/login":             "/",
 		"/jobs/../help":                 "/jobs/../help",
 		"/%2F%2Fevil.example":           "/%2F%2Fevil.example",
 		"/authors":                      "/authors",
@@ -59,25 +63,32 @@ func TestSafeNextStaysOnSite(t *testing.T) {
 			rapid.StringOf(rapid.SampledFrom([]rune{'/', '\\', ':', '.', '@', '?', '#', '%', 'a', 'e', 'v', 'l', '\t', '\n', ' '})),
 			rapid.Map(rapid.String(), func(s string) string { return "/" + s }),
 		).Draw(t, "next")
-		out := safeNext(in)
-		if !strings.HasPrefix(out, "/") || strings.HasPrefix(out, "//") || strings.ContainsAny(out, "\\\r\n\t\x00") {
-			t.Fatalf("safeNext(%q) = %q", in, out)
-		}
-		ref, err := url.Parse(out)
-		if err != nil {
-			t.Fatalf("safeNext(%q) = %q, which doesn't parse: %v", in, out, err)
-		}
-		dest := base.ResolveReference(ref)
-		if dest.Scheme != base.Scheme || dest.Host != base.Host {
-			t.Fatalf("safeNext(%q) = %q leads to %s", in, out, dest)
-		}
-		if dest.Path == "/auth" || strings.HasPrefix(dest.Path, "/auth/") {
-			t.Fatalf("safeNext(%q) = %q leads back into login", in, out)
-		}
-		if out != "/" && out != in {
-			t.Fatalf("safeNext(%q) = %q; it may only keep next or replace it with /", in, out)
-		}
+		checkSafeNext(t, base, in)
 	})
+}
+
+// checkSafeNext checks that safeNext(in) is in or "/", and that a browser
+// following it stays on base's site and out of login.
+func checkSafeNext(t interface{ Fatalf(string, ...any) }, base *url.URL, in string) {
+	out := safeNext(in)
+	if !strings.HasPrefix(out, "/") || strings.HasPrefix(out, "//") || strings.ContainsAny(out, "\\\r\n\t\x00") {
+		t.Fatalf("safeNext(%q) = %q", in, out)
+	}
+	ref, err := url.Parse(out)
+	if err != nil {
+		t.Fatalf("safeNext(%q) = %q, which doesn't parse: %v", in, out, err)
+	}
+	dest := base.ResolveReference(ref)
+	if dest.Scheme != base.Scheme || dest.Host != base.Host {
+		t.Fatalf("safeNext(%q) = %q leads to %s", in, out, dest)
+	}
+	// The server's mux then cleans the path, redirecting //auth to /auth.
+	if p := path.Clean(dest.Path); p == "/auth" || strings.HasPrefix(p, "/auth/") {
+		t.Fatalf("safeNext(%q) = %q leads back into login", in, out)
+	}
+	if out != "/" && out != in {
+		t.Fatalf("safeNext(%q) = %q; it may only keep next or replace it with /", in, out)
+	}
 }
 
 func TestPropInterstitialStaysLocal(t *testing.T) {

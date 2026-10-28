@@ -19,8 +19,10 @@ func safeNext(next string) string {
 	if u == nil {
 		return "/"
 	}
-	// Browsers resolve dot segments (including %2e) before requesting.
-	if p := path.Clean("/" + u.Path); p == "/auth" || strings.HasPrefix(p, "/auth/") {
+	// Browsers resolve dot segments (including %2e) keeping empty ones, so
+	// /auth//.. is /auth/; the mux then cleans what they request.
+	resolved := (&url.URL{Path: "/"}).ResolveReference(&url.URL{Path: u.Path}).Path
+	if p := path.Clean(resolved); p == "/auth" || strings.HasPrefix(p, "/auth/") {
 		return "/"
 	}
 	return next
