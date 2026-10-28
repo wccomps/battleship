@@ -2,7 +2,7 @@
 
 Web app for deploying, resetting, snapshotting, and tearing down competition VM pods, dev environments, and base images on Proxmox.
 
-Every change previews a plan first and runs as a queued job using the signed-in user's own Proxmox ticket; Battleship holds no Proxmox credentials of its own. Failed or cancelled jobs clean up any VMs they half-built, so re-running a job is safe. [`ARCHITECTURE.md`](ARCHITECTURE.md) covers how jobs, locks, and packages fit together.
+Every change previews a plan first and runs as a queued job using the signed-in user's own Proxmox ticket; Battleship holds no Proxmox credentials of its own. Failed or cancelled jobs clean up any VMs they half-built, so re-running a job is safe. [`ARCHITECTURE.md`](ARCHITECTURE.md) covers how jobs, locks, and packages fit together, and [`THREAT_MODEL.md`](THREAT_MODEL.md) covers principals, trust boundaries, and secret invariants.
 
 ![Pod grid](screenshots/grid.png)
 

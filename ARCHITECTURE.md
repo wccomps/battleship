@@ -45,8 +45,9 @@ form ──> preview ──> confirm ──> stored job ──> worker claims it
    exists.
 
 Every Proxmox call is made with the submitter's credential; battleship holds
-none of its own. Postgres LISTEN/NOTIFY wakes idle workers, cancels jobs at
-once, and pushes changes to open pages.
+none of its own (see [`THREAT_MODEL.md`](THREAT_MODEL.md)). Postgres
+LISTEN/NOTIFY wakes idle workers, cancels jobs at once, and pushes changes to
+open pages.
 
 ## Packages
 
@@ -82,11 +83,3 @@ once, and pushes changes to open pages.
 | **view** | One user's live grid, read with their own ticket |
 | **base image, family** | A template tagged `base` and a kind, named `<family>-v<N>`; the versions of one OS build make its family |
 | **environment, dev slot** | A dev slot is a numbered pool with its own bridges and VMID block; the environment is the domain-named VMs in it |
-
-## Threat model
-
-- **Principals & credential delegation.** Volunteers sign in via OIDC (`auth.Service`) and complete a second OpenID exchange against Proxmox (`auth.ProxmoxLogin`), binding the returned Proxmox ticket to `<preferred_username>@<proxmox.realm>` (`internal/auth/proxmoxlogin.go`). Battleship holds no ambient Proxmox service token (`noServiceToken` in `cmd/battleship/serve.go` refuses startup if `BATTLESHIP_PROXMOX_TOKEN_*` is set): every read, preview, status poll (`status.Views` keyed by the Proxmox user), and job execution (`jobs.Worker`) runs with the signed-in user's or job submitter's own Proxmox ticket. Proxmox enforces RBAC, while `pods.BlockUnpermitted` (`internal/pods/access.go`) pre-checks ACL paths before planning or running steps.
-- **Trust boundaries & entry points.** Browser requests enter `web.Server` (`internal/web/server.go`). Only `/healthz`, `/readyz`, `/static/`, and `/auth/` are unauthenticated; all other routes wrap `s.require` (`auth.RequireUser`), which requires a live session, a usable Proxmox ticket, and—on every method except `GET` and `HEAD`—a constant-time verified CSRF token (`Service.csrfProblem` in `internal/auth/middleware.go`) and a 1 MiB body cap (`maxBody` in `internal/web/middleware.go`). `opConfirm` (`internal/web/confirm.go`) loads the server-stored `store.Preview` by `(session_id, sha256(nonce))` rather than trusting hidden form inputs, and `cancelJob` / `mayCancel` (`internal/web/jobpages.go`) allows only the job's creator (`j.CreatedBy == actor(u)` in `internal/web/ops.go`) or a user holding `pods.HoldsOffered` (`internal/pods/access.go`) on every item's VM (`/vms/<vmid>`) or target pool (`/pool/<pool>`).
-- **Secrets at rest & in logs.** Session cookies carry a 32-byte random token whose SHA-256 hex digest (`auth.HashToken` in `internal/auth/session.go`) is stored as the session ID. Session OIDC refresh tokens (`internal/auth/refreshtoken.go`), session Proxmox tickets (`internal/auth/ticket.go`), and job credentials (`internal/jobs/credential.go`) are sealed with AES-256-GCM under domain-separated subkeys derived via HMAC-SHA256 (`seal.NewKey` in `internal/seal/seal.go`), with the session ID or job ID in the AEAD additional data so ciphertexts cannot be transplanted across rows. The PostgreSQL trigger `jobs_end_credentials` (`internal/store/migrations/006_delegated_auth.sql`) deletes a job's credential row when the job finishes, is reaped, or is cancelled, and `store.RenewCredential` (`internal/store/credentials.go`) deletes lapsed credentials. `seal.Key` and `proxmox.Credential` redact secrets in `String`/`GoString`/`Format`, and `config.OIDC` and `config.Database` redact secrets in `String`/`GoString`.
-- **Untrusted cluster data & guest execution.** Proxmox VM descriptions and configs are writable by anyone with Proxmox access to a VM and are treated as untrusted input: `pods.NotesChanges` (`internal/pods/vmconfig.go`) strips `description` from cloned pod VMs so base-image credentials never leak to team VMs; `pods.ParseDetails` (`internal/pods/details.go`) strips Unicode `Cf` format characters and bounds note sizes; `html/template` auto-escapes all rendered views; and `pods.Guest.Check` (`internal/pods/guest.go`) validates every hostname, domain, IPv4 address, prefix, MAC, and OpenSSH CA key before embedding values into guest setup scripts sent via the Proxmox QEMU guest agent (`AgentExec`—Battleship never SSHes into nodes or guests).
-- **Non-goals & accepted risks.** Battleship does not defend against a compromised Proxmox cluster, identity provider, PostgreSQL database, or host key (`BATTLESHIP_SEAL_KEY` / `oidc.client_secret`), and does not rate-limit authenticated volunteers beyond PostgreSQL pool limits and `apply.Limits` cluster concurrency slots.
