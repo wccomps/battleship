@@ -9,8 +9,8 @@ import (
 // maxNext bounds the next URL a login carries in its cookie.
 const maxNext = 2048
 
-// safeNext returns next if it is a path on this site outside /auth, else "/",
-// so login is neither an open redirect nor a loop.
+// safeNext returns next if it is a clean path on this site outside /auth, else
+// "/", so login is neither an open redirect nor a loop.
 func safeNext(next string) string {
 	// http.Redirect cleans everything before the query, a fragment included.
 	if p, _, _ := strings.Cut(next, "?"); len(next) > maxNext || strings.Contains(p, "#") {
@@ -20,9 +20,8 @@ func safeNext(next string) string {
 	if u == nil {
 		return "/"
 	}
-	// u.Path is decoded (%2e is a dot, %2F a slash): unless it is already
-	// clean, browsers and the mux resolve it to some other page.
-	if c := path.Clean(u.Path); u.Path != c && u.Path != c+"/" {
+	// u.Path is decoded, so this refuses dot and empty segments in any spelling.
+	if c := path.Clean(u.Path); u.Path != c && (c == "/" || u.Path != c+"/") {
 		return "/"
 	}
 	if first, _, _ := strings.Cut(u.Path[1:], "/"); first == "auth" {

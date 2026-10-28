@@ -55,6 +55,7 @@ func TestSafeNext(t *testing.T) {
 		"/jobs?x=/../auth#y/../z":       "/jobs?x=/../auth#y/../z",
 		"/auth.x/y":                     "/auth.x/y",
 		"/%2F%2Fevil.example":           "/",
+		"/%2F":                          "/",
 		"/authors":                      "/authors",
 		"/" + strings.Repeat("a", 2048): "/",
 	}
@@ -66,7 +67,7 @@ func TestSafeNext(t *testing.T) {
 }
 
 // TestSafeNextStaysOnSite checks that whatever next a login is given, the
-// browser is sent somewhere on this site, outside /auth/.
+// browser is sent somewhere on this site that no auth route serves.
 func TestSafeNextStaysOnSite(t *testing.T) {
 	segment := rapid.SampledFrom([]string{"x", "", ".", "..", ".%2e", "%2E%2e", "x%2Fy", "x%2F..", "auth", "\\", "@",
 		"x%2Fy/..", "auth//..", "/%2e%2e", "x#"})
@@ -86,7 +87,6 @@ func TestSafeNextStaysOnSite(t *testing.T) {
 	})
 }
 
-// authMux routes the auth service's paths, and everything else to "/".
 var authMux = func() *http.ServeMux {
 	mux := http.NewServeMux()
 	(&Service{}).Routes(mux)
@@ -105,7 +105,7 @@ func checkSafeNext(t interface{ Fatalf(string, ...any) }, in string) {
 	if !strings.HasPrefix(loc, "/") || strings.HasPrefix(loc, "//") || strings.ContainsAny(loc, "\\\r\n\t\x00") {
 		t.Fatalf("safeNext(%q) = %q, sent as Location %q", in, out, loc)
 	}
-	u, err := url.Parse(browserPath(loc))
+	u, err := url.ParseRequestURI(browserPath(loc))
 	if err != nil {
 		t.Fatalf("safeNext(%q) = %q, sent as Location %q: %v", in, out, loc, err)
 	}
@@ -116,9 +116,10 @@ func checkSafeNext(t interface{ Fatalf(string, ...any) }, in string) {
 	}
 }
 
-// browserPath is the path a browser requests for Location loc: its dot
-// segments resolved as WHATWG URL parsing does (empty segments kept, any %2e).
+// browserPath trims loc and resolves its dot segments, %2e spellings included,
+// as WHATWG URL parsing does.
 func browserPath(loc string) string {
+	loc = strings.Trim(loc, " ")
 	p := loc[:strings.IndexAny(loc+"?", "?#")]
 	segs := strings.Split(p[1:], "/")
 	var stack []string

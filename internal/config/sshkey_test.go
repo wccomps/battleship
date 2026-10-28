@@ -11,7 +11,7 @@ import (
 )
 
 // A well-formed key reads as "<type> <base64>" whatever its comment and spacing,
-// and anything accepted is canonical.
+// near misses are refused, and anything accepted is canonical.
 func TestPropParseSSHPublicKey(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		kt := rapid.SampledFrom(sshKeyTypes).Draw(t, "type")

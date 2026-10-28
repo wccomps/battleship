@@ -22,7 +22,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # Scans the standard library of the Go running here, go.mod's. Dependabot
-      # can't see this pin; bump it by hand.
+      # Scans the running Go's stdlib (go.mod's); Dependabot can't see this pin.
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
