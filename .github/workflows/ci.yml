@@ -78,6 +78,9 @@ jobs:
         # browser (BATTLESHIP_BROWSER).
         run: go test -race -count=1 -timeout 15m ./...
 
+  vulncheck:
+    uses: ./.github/workflows/vulncheck.yml
+
   image:
     name: Build image
     # Every push and PR builds the image; release refs push it in 'publish'.
