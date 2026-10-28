@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"path"
 	"strings"
 	"testing"
 
@@ -49,9 +48,13 @@ func TestSafeNext(t *testing.T) {
 		"/x/.%2e/auth":                  "/",
 		"/%61uth/login":                 "/",
 		"/jobs/":                        "/jobs/",
-		"/x%2F..%2F..%2Fauth/login":     "/x%2F..%2F..%2Fauth/login",
+		"/x%2F..%2F..%2Fauth/login":     "/",
+		"/x#/../auth/login":             "/",
+		"/x#/../../auth/proxmox?next=/": "/",
+		"/jobs#x":                       "/",
+		"/jobs?x=/../auth#y/../z":       "/jobs?x=/../auth#y/../z",
 		"/auth.x/y":                     "/auth.x/y",
-		"/%2F%2Fevil.example":           "/%2F%2Fevil.example",
+		"/%2F%2Fevil.example":           "/",
 		"/authors":                      "/authors",
 		"/" + strings.Repeat("a", 2048): "/",
 	}
@@ -65,10 +68,8 @@ func TestSafeNext(t *testing.T) {
 // TestSafeNextStaysOnSite checks that whatever next a login is given, the
 // browser is sent somewhere on this site, outside /auth/.
 func TestSafeNextStaysOnSite(t *testing.T) {
-	base, _ := url.Parse("https://battleship.example.org/")
-	// Single segments, and pairs a loop needs together.
 	segment := rapid.SampledFrom([]string{"x", "", ".", "..", ".%2e", "%2E%2e", "x%2Fy", "x%2F..", "auth", "\\", "@",
-		"x%2Fy/..", "auth//..", "/%2e%2e"})
+		"x%2Fy/..", "auth//..", "/%2e%2e", "x#"})
 	tail := rapid.SampledFrom([]string{"auth", "%61uth", "auth/login", "x"})
 	segmented := rapid.Custom(func(t *rapid.T) string {
 		return "/" + strings.Join(append(rapid.SliceOfN(segment, 0, 4).Draw(t, "segments"), tail.Draw(t, "tail")), "/")
@@ -80,35 +81,45 @@ func TestSafeNextStaysOnSite(t *testing.T) {
 			rapid.Map(rapid.String(), func(s string) string { return "/" + s }),
 			segmented, segmented, segmented, segmented,
 		).Draw(t, "next")
-		in += rapid.SampledFrom([]string{"", "?next=/auth/login", "#x"}).Draw(t, "suffix")
-		checkSafeNext(t, base, in)
+		in += rapid.SampledFrom([]string{"", "?next=/auth/login", "#x", "#/../auth/login"}).Draw(t, "suffix")
+		checkSafeNext(t, in)
 	})
 }
 
-func checkSafeNext(t interface{ Fatalf(string, ...any) }, base *url.URL, in string) {
+// authMux routes the auth service's paths, and everything else to "/".
+var authMux = func() *http.ServeMux {
+	mux := http.NewServeMux()
+	(&Service{}).Routes(mux)
+	mux.HandleFunc("/", http.NotFound)
+	return mux
+}()
+
+func checkSafeNext(t interface{ Fatalf(string, ...any) }, in string) {
 	out := safeNext(in)
-	if !strings.HasPrefix(out, "/") || strings.HasPrefix(out, "//") || strings.ContainsAny(out, "\\\r\n\t\x00") {
-		t.Fatalf("safeNext(%q) = %q", in, out)
-	}
-	ref, err := url.Parse(out)
-	if err != nil {
-		t.Fatalf("safeNext(%q) = %q, which doesn't parse: %v", in, out, err)
-	}
-	if dest := base.ResolveReference(ref); dest.Scheme != base.Scheme || dest.Host != base.Host {
-		t.Fatalf("safeNext(%q) = %q leads to %s", in, out, dest)
-	}
-	if routedFirstSegment(out) == "auth" {
-		t.Fatalf("safeNext(%q) = %q leads back into login", in, out)
-	}
 	if out != "/" && out != in {
 		t.Fatalf("safeNext(%q) = %q; it may only keep next or replace it with /", in, out)
 	}
+	w := httptest.NewRecorder()
+	http.Redirect(w, httptest.NewRequest(http.MethodGet, "/auth/login", nil), out, http.StatusSeeOther)
+	loc := w.Header().Get("Location")
+	if !strings.HasPrefix(loc, "/") || strings.HasPrefix(loc, "//") || strings.ContainsAny(loc, "\\\r\n\t\x00") {
+		t.Fatalf("safeNext(%q) = %q, sent as Location %q", in, out, loc)
+	}
+	u, err := url.Parse(browserPath(loc))
+	if err != nil {
+		t.Fatalf("safeNext(%q) = %q, sent as Location %q: %v", in, out, loc, err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.URL = u
+	if _, pattern := authMux.Handler(r); pattern != "/" {
+		t.Fatalf("safeNext(%q) = %q, sent as Location %q, leads to %s", in, out, loc, pattern)
+	}
 }
 
-// routedFirstSegment is the first segment the mux routes local URL s by, after
-// WHATWG dot-segment resolution (empty segments kept, any %2e) and path.Clean.
-func routedFirstSegment(s string) string {
-	p := s[:strings.IndexAny(s+"?", "?#")]
+// browserPath is the path a browser requests for Location loc: its dot
+// segments resolved as WHATWG URL parsing does (empty segments kept, any %2e).
+func browserPath(loc string) string {
+	p := loc[:strings.IndexAny(loc+"?", "?#")]
 	segs := strings.Split(p[1:], "/")
 	var stack []string
 	for i, seg := range segs {
@@ -129,11 +140,7 @@ func routedFirstSegment(s string) string {
 			stack = append(stack, seg)
 		}
 	}
-	first, _, _ := strings.Cut(path.Clean("/" + strings.Join(stack, "/"))[1:], "/")
-	if u, err := url.PathUnescape(first); err == nil {
-		return u
-	}
-	return first
+	return "/" + strings.Join(stack, "/")
 }
 
 func TestPropInterstitialStaysLocal(t *testing.T) {
