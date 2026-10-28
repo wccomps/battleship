@@ -173,7 +173,7 @@ func TestJobPage(t *testing.T) {
 		`<span title="olive@example.org">olive</span> · olive@auth.example.org`,
 		`pods <span class="vm">01</span>`,
 		`<tr><td><span class="vm">team01-dc</span></td><td class="muted c-vmid">10101</td><td class="wide"><span class="steps" role="img" aria-label="stop: waiting, rollback: waiting, start: waiting"><span class="pip wait" title="stop: waiting"></span><span class="pip wait" title="rollback: waiting"></span><span class="pip wait" title="start: waiting"></span></span><span class="st s-wait">`,
-		`<ol class="log" id="job-log" aria-live="polite">`,
+		`<ol class="log" id="job-log">`,
 	)
 	// Whoever may reset VMs may cancel; others see why not.
 	contains(t, "operator's job page", body, "/cancel")

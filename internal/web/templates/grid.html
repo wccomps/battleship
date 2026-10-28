@@ -34,7 +34,7 @@
 <button type="submit" class="btn" formaction="/reset" data-needs="{{needs "reset"}}">{{icon "reset"}}Reset to snapshot…</button>
 <button type="submit" class="btn" formaction="/snapshot" data-needs="{{needs "snapshot"}}">{{icon "snapshot"}}Take snapshot…</button>
 </div>
-<span class="ab-sep" id="ab-details-sep"{{if not .Data.Details}} hidden{{end}}></span><a class="btn" id="ab-details" href="{{or .Data.Details "/"}}" data-panel-link{{if not .Data.Details}} hidden{{end}}>Details</a>
+<span class="ab-sep" id="ab-details-sep"{{if not .Data.Details}} hidden{{end}}></span><a class="btn" id="ab-details" href="{{or .Data.Details "/"}}"{{with .Data.DetailsTitle}} title="{{.}}"{{end}} data-panel-link{{if not .Data.Details}} hidden{{end}}>Details</a>
 </div>
 </form>
 </div>

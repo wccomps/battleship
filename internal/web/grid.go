@@ -308,8 +308,9 @@ func (v *gridView) markSelected(sel []string) (n int, last *cellView) {
 // gridPageView is the grid page: the live part, shared by one viewer's pages,
 // plus the per-request parts rendered outside it.
 type gridPageView struct {
-	Live    gridView
-	Details string // the page of the one VM ?select ticked, if just one
+	Live         gridView
+	Details      string
+	DetailsTitle string
 }
 
 // startView is the empty grid's next step: the template sets to deploy.
@@ -402,8 +403,11 @@ func (s *Server) gridPage(w http.ResponseWriter, r *http.Request) {
 	v.markBusy(s.sharedBusy(r.Context()).jobs)
 	ticked, last := v.markSelected(r.URL.Query()["select"])
 	p := gridPageView{Live: v}
-	if ticked == 1 {
+	if ticked > 0 {
 		p.Details = last.Href
+	}
+	if ticked > 1 {
+		p.DetailsTitle = last.Name
 	}
 	page := s.newView(w, r, "Pods", "grid", p)
 	page.Live = v.Live.State

@@ -168,7 +168,7 @@
 <span class="hint" id="teams-hint">{{with .AllTeams}}{{.}} · {{end}}3,7 · 12-14</span>
 </div>
 <fieldset class="field" id="host-field">
-<legend>Hosts <button type="button" class="btn sm ghost" data-hosts-toggle hidden>Deselect all</button></legend>
+<legend>Hosts</legend><button type="button" class="btn sm ghost" data-hosts-toggle hidden>Deselect all</button>
 <div class="opts" id="host-opts">
 {{- range .HostOpts}}
 <label class="opt"><input type="checkbox" name="hosts" value="{{.Name}}"{{if .Checked}} checked{{end}}><span>{{.Name}}</span></label>

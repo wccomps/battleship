@@ -419,8 +419,8 @@ func TestBrowserGridSelection(t *testing.T) {
 			b.click(`#cell-07-db label`)
 			b.eval(`(function(){var e=new MouseEvent("click",{bubbles:true,shiftKey:true});document.querySelector('#cell-07-dns input').dispatchEvent(e);})()`, nil)
 			b.click(`#cell-08-db label`)
-			b.click(`#cell-08-dc label`)
 			b.click(`#cell-08-dns label`)
+			b.click(`#cell-08-dc label`)
 			if n := b.text("#sel-count"); n != "6" {
 				var on []string
 				b.eval(`[...document.querySelectorAll("input[name=vms]:checked")].map(b => b.value)`, &on)
@@ -429,6 +429,9 @@ func TestBrowserGridSelection(t *testing.T) {
 			if !b.is(`getComputedStyle(document.getElementById("actionbar")).display !== "none"`) {
 				t.Error("the action bar is hidden with VMs selected")
 			}
+			if !b.is(`!document.getElementById("ab-details").hidden && document.getElementById("ab-details").getAttribute("href") === "/vm/08/dc" && document.getElementById("ab-details").title === "team08-dc"`) {
+				t.Error("Details isn't linked to the last ticked VM on multi-select")
+			}
 			b.noSideways("grid with the action bar")
 			b.shot("grid-selection-" + size.name)
 
@@ -436,6 +439,9 @@ func TestBrowserGridSelection(t *testing.T) {
 			b.click(`.all input`)
 			if n := b.text("#sel-count"); n != "378" {
 				t.Errorf("select all: count %q, want every VM that isn't missing or busy", n)
+			}
+			if !b.is(`document.getElementById("ab-details").title === "team32-wks3"`) {
+				t.Error("select all didn't reset last-clicked VM on Details")
 			}
 			b.click(`.all input`)
 			if n := b.text("#sel-count"); n != "0" {
@@ -893,7 +899,7 @@ func TestBrowserTeardownForm(t *testing.T) {
 			b.open("/")
 			b.click(`.lead-ops a[href="/teardown"]`)
 			b.waitFor("the teardown page", `location.pathname === "/teardown" && document.readyState === "complete"`)
-			if got := b.text("#host-field legend"); got != "Hosts Deselect all" {
+			if got := b.text("#host-field legend"); got != "Hosts" {
 				t.Errorf("hosts legend = %q", got)
 			}
 			if got := b.text(`label[for="teams"]`); got != "Pods" {

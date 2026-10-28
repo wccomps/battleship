@@ -124,7 +124,7 @@ func TestOperationForms(t *testing.T) {
 			`<form class="sheet" method="post" action="/power/preview" aria-labelledby="form-title">`,
 			`<input class="inp" type="text" id="teams" name="teams" value="" required`,
 			`<span class="hint" id="teams-hint">1-3 · 3,7 · 12-14</span>`,
-			`<legend>Hosts <button type="button" class="btn sm ghost" data-hosts-toggle hidden>Deselect all</button></legend>`,
+			`<legend>Hosts</legend><button type="button" class="btn sm ghost" data-hosts-toggle hidden>Deselect all</button>`,
 			`<label class="opt"><input type="checkbox" name="hosts" value="dc" checked><span>dc</span></label>`,
 			`<input type="radio" name="action" value="stop" required><span>`,
 			`Force stop</span></label>`,
@@ -137,7 +137,7 @@ func TestOperationForms(t *testing.T) {
 		{"/teardown", []string{
 			`<form method="get" action="/teardown" class="stack" id="teardown-which">`,
 			`<label class="lbl" for="teams">Pods</label>`,
-			`<legend>Hosts <button type="button" class="btn sm ghost" data-hosts-toggle hidden>Deselect all</button></legend>`,
+			`<legend>Hosts</legend><button type="button" class="btn sm ghost" data-hosts-toggle hidden>Deselect all</button>`,
 			`<button type="submit" class="btn">Next</button>`,
 		}},
 		{"/deploy", []string{
@@ -180,7 +180,7 @@ func TestDeployFormListsTemplateSets(t *testing.T) {
 	body := h.get(&lead, "/deploy").Body.String()
 	contains(t, "deploy form", body,
 		`<label class="opt"><input type="radio" name="pattern" value="*.kilo.alpha" required data-hosts="dc web" checked><span>kilo.alpha</span></label>`,
-		`<legend>Hosts <button type="button" class="btn sm ghost" data-hosts-toggle hidden>Deselect all</button></legend>`,
+		`<legend>Hosts</legend><button type="button" class="btn sm ghost" data-hosts-toggle hidden>Deselect all</button>`,
 		`<label class="opt"><input type="checkbox" name="hosts" value="dc" checked><span>dc</span></label>`,
 		`<label class="opt"><input type="checkbox" name="hosts" value="web" checked><span>web</span></label>`)
 }
@@ -298,6 +298,23 @@ func TestPreviewOfDeploy(t *testing.T) {
 		"Rebuilding 2 templates deletes the old ones and stops 2 running masters, each until its copy finishes.",
 	)
 	lacks(t, "deploy rebuild preview", rebuildBody, "will be deleted and built again", "This covers every pod")
+
+	h.api.add(teamVM("01", "dc", 10101), cleanConfig("01"))
+	h.api.add(teamVM("01", "web", 10102), cleanConfig("01"))
+	_, _, recreateBody := h.preview(&lead, "/deploy", url.Values{"teams": {"1"}, "pattern": {"*.kilo.alpha"}, "baseline": {"yes"}, "rebuild": {"yes"}})
+	contains(t, "deploy recreate preview", recreateBody,
+		"<td>stop · delete · clone · network · disk-limits · cdrom · clear-notes · tag-set · snapshot · start</td>",
+		"2 VMs will be torn down and recreated from <span class=\"name\">kilo.alpha</span> on n1.",
+		`<button type="submit" class="btn pri bad">`, "Recreate 2 VMs</button>",
+	)
+	lacks(t, "deploy recreate preview", recreateBody, `<summary class="disc"><h2 class="sub">VMs</h2>`)
+
+	_, _, partialRecreateBody := h.preview(&lead, "/deploy", url.Values{"teams": {"1-2"}, "pattern": {"*.kilo.alpha"}, "baseline": {"yes"}, "rebuild": {"yes"}})
+	contains(t, "deploy partial recreate preview", partialRecreateBody,
+		"4 VMs (2 VMs torn down and recreated) will be created or repaired from <span class=\"name\">kilo.alpha</span> on n1, n2.",
+		`<button type="submit" class="btn pri bad">`, "Deploy 4 VMs</button>",
+	)
+	lacks(t, "deploy partial recreate preview", partialRecreateBody, `<summary class="disc"><h2 class="sub">VMs</h2>`, "Recreate 4 VMs")
 }
 
 func TestPreviewRefusesBadInputs(t *testing.T) {
