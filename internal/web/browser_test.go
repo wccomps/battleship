@@ -429,6 +429,9 @@ func TestBrowserGridSelection(t *testing.T) {
 			if !b.is(`getComputedStyle(document.getElementById("actionbar")).display !== "none"`) {
 				t.Error("the action bar is hidden with VMs selected")
 			}
+			if !b.is(`!document.getElementById("ab-details").hidden && document.getElementById("ab-details").getAttribute("href") === "/vm/08/dns" && document.getElementById("ab-details").title === "team08-dns"`) {
+				t.Error("Details isn't linked to the last ticked VM on multi-select")
+			}
 			b.noSideways("grid with the action bar")
 			b.shot("grid-selection-" + size.name)
 
@@ -893,7 +896,7 @@ func TestBrowserTeardownForm(t *testing.T) {
 			b.open("/")
 			b.click(`.lead-ops a[href="/teardown"]`)
 			b.waitFor("the teardown page", `location.pathname === "/teardown" && document.readyState === "complete"`)
-			if got := b.text("#host-field legend"); got != "Hosts Deselect all" {
+			if got := b.text("#host-field legend"); got != "Hosts" {
 				t.Errorf("hosts legend = %q", got)
 			}
 			if got := b.text(`label[for="teams"]`); got != "Pods" {

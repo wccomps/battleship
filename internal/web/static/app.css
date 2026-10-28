@@ -416,8 +416,9 @@ main>.sheet{max-width:760px;margin:0 auto;padding:var(--s4) 0}
 .madd{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
 .here{display:flex;flex-wrap:wrap;gap:4px}
 .here span{padding:2px 7px;border-radius:4px;background:var(--sf2);color:var(--tx2);font:var(--t1) var(--fm)}
+#host-field{position:relative}
+#host-field>[data-hosts-toggle]{position:absolute;bottom:calc(100% + 4px);left:44px;min-height:22px;padding:0 7px;font-size:var(--t1)}
 .field>legend,.lbl{display:flex;align-items:center;gap:8px;padding:0;margin-bottom:5px;font-size:var(--t2);font-weight:500}
-.field>legend .btn.sm{min-height:22px;padding:0 7px;font-size:var(--t1)}
 .field>.lbl{margin-bottom:0}
 .field>legend .muted{font-weight:400}
 .hint{font:var(--t1) var(--fm);color:var(--tx3)}
@@ -564,5 +565,5 @@ textarea.inp{height:auto;min-height:9em;padding:8px 10px;line-height:1.5;resize:
   .rvw tr.blk td{background:none}
   .env{scroll-margin-top:92px} /* the header wraps to two rows */
 }
-@media (pointer:coarse){.grid{--ch:32px}.hb,.all{height:32px}.all input{width:18px;height:18px}.btn,.inp{min-height:40px}.btn.sm,.field>legend .btn.sm,.kv dd .btn.sm,.pw .btn.sm{min-height:32px}.btn.sq{width:40px}.inp,.addr input{font-size:var(--t4)}.opt span,.kindq .opt span{height:36px}}
+@media (pointer:coarse){.grid{--ch:32px}.hb,.all{height:32px}.all input{width:18px;height:18px}.btn,.inp{min-height:40px}.btn.sm,#host-field>[data-hosts-toggle],.kv dd .btn.sm,.pw .btn.sm{min-height:32px}#host-field>[data-hosts-toggle]{bottom:calc(100% - 1px)}.btn.sq{width:40px}.inp,.addr input{font-size:var(--t4)}.opt span,.kindq .opt span{height:36px}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}.is-busy .g,.spin{animation:none!important;border-right-color:currentColor;border-style:dotted}}

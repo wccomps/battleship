@@ -121,9 +121,13 @@ type confirmForm struct {
 	Danger  bool
 }
 
+func deletesVMs(items []pods.Item) bool {
+	return slices.ContainsFunc(items, func(it pods.Item) bool { return slices.Contains(it.Steps, pods.StepDelete) })
+}
+
 func destructive(in jobs.Inputs, items []pods.Item) bool {
 	return in.Kind.TearsDown() || in.Kind == pods.KindReset || ((in.Kind == pods.KindPower || in.Kind == pods.KindEnvPower) && in.Action == "stop") ||
-		in.Kind == pods.KindImageDelete || slices.ContainsFunc(items, func(it pods.Item) bool { return slices.Contains(it.Steps, pods.StepDelete) })
+		in.Kind == pods.KindImageDelete || deletesVMs(items)
 }
 
 // previewOptions are the extras of a preview beyond the plan.
@@ -288,6 +292,11 @@ func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
 		return "Tear down " + in.Domain
 	case pods.KindSnapshot:
 		return "Snapshot " + vms
+	case pods.KindDeploy:
+		if deletesVMs(runnable) {
+			return "Recreate " + vms
+		}
+		return op.Title + " " + vms
 	default:
 		return op.Title + " " + vms
 	}
@@ -368,7 +377,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		}
 	}
 	p.TemplateSummary = strings.Join(tplParts, ", ")
-	p.ItemsFold = p.Blocked == 0 && (op.Kind == pods.KindDeploy || len(p.Items) > 8)
+	p.ItemsFold = p.Blocked == 0 && !deletesVMs(plan.Items) && (op.Kind == pods.KindDeploy || len(p.Items) > 8)
 	p.ItemsSummary = countVMs(len(p.Items))
 	if len(rebuilt) > 0 && len(stopped) > 0 && nCreate == 0 {
 		if len(rebuilt) == 1 && len(stopped) == 1 {

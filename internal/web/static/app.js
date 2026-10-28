@@ -282,9 +282,13 @@
       if (count.textContent !== String(n)) count.textContent = n;
       why.hidden = !text;
       if (whyText.textContent !== text) whyText.textContent = text;
-      var one = n === 1 && "/vm/" + on[0].dataset.team + "/" + on[0].dataset.host;
-      details.hidden = detailsSep.hidden = !one;
-      if (one) details.setAttribute("href", one);
+      var pick = last && last.checked && form.contains(last) ? last : on[on.length - 1];
+      var vmHref = pick && "/vm/" + pick.dataset.team + "/" + pick.dataset.host;
+      details.hidden = detailsSep.hidden = !vmHref;
+      if (vmHref) {
+        details.setAttribute("href", vmHref);
+        details.title = n > 1 ? pick.value : "";
+      }
       // Row and column headers show whether all of theirs are selected.
       var tot = {}, chk = {};
       all.forEach(function (b) {

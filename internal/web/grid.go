@@ -402,7 +402,7 @@ func (s *Server) gridPage(w http.ResponseWriter, r *http.Request) {
 	v.markBusy(s.sharedBusy(r.Context()).jobs)
 	ticked, last := v.markSelected(r.URL.Query()["select"])
 	p := gridPageView{Live: v}
-	if ticked == 1 {
+	if ticked > 0 {
 		p.Details = last.Href
 	}
 	page := s.newView(w, r, "Pods", "grid", p)

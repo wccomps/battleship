@@ -60,7 +60,7 @@
 {{define "job-log" -}}
 <details class="logbox" id="job-logbox"{{if .LogOpen}} open{{end}}>
 <summary class="disc" id="job-log-n">Log · {{len .Events}} {{if eq (len .Events) 1}}line{{else}}lines{{end}}</summary>
-<ol class="log" id="job-log" aria-live="polite">
+<ol class="log" id="job-log">
 {{template "job-log-lines" .Events}}
 </ol>
 </details>

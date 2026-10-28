@@ -115,7 +115,8 @@ func TestGridIsASelectionForm(t *testing.T) {
 	contains(t, "column selected", body,
 		`data-select="host:web" role="button" aria-pressed="true"`,
 		`value="team01-web" data-team="01" data-host="web" checked>`,
-		`value="team03-web" data-team="03" data-host="web" checked>`)
+		`value="team03-web" data-team="03" data-host="web" checked>`,
+		`<a class="btn" id="ab-details" href="/vm/03/web" data-panel-link>Details</a>`)
 	lacks(t, "column selected", body,
 		`data-select="host:dc" role="button" aria-pressed="true"`,
 		`value="team01-dc" data-team="01" data-host="dc" checked>`)
