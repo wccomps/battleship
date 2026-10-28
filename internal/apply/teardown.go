@@ -187,7 +187,7 @@ func (e *Executor) freeLeftovers(ctx context.Context, vmid int, name string, l l
 		still = left
 		causes = append(causes, "checking what is left: "+proxmox.Describe(err))
 	}
-	if freed := minus(left, still); len(freed) > 0 {
+	if freed := slices.DeleteFunc(slices.Clone(left), func(v string) bool { return slices.Contains(still, v) }); len(freed) > 0 {
 		e.emit(name, pods.StepDelete, EventInfo, fmt.Sprintf("freed disks that deleting VM %d left on the storage: %s", vmid, strings.Join(freed, ", ")))
 	}
 	if len(still) > 0 {
@@ -223,17 +223,6 @@ func (e *Executor) leftDisks(ctx context.Context, node string, vmid int, disks m
 	}
 	sort.Strings(left)
 	return left, nil
-}
-
-// minus returns the elements of a that are not in b.
-func minus(a, b []string) []string {
-	var out []string
-	for _, x := range a {
-		if !slices.Contains(b, x) {
-			out = append(out, x)
-		}
-	}
-	return out
 }
 
 func (e *Executor) rememberLeftover(vmid int, l leftover) {

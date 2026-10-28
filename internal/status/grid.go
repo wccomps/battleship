@@ -56,8 +56,7 @@ type Cell struct {
 	Node  string
 	Pool  string
 	// Sets are the sets its set tags name (pods.SetTags): one non-empty set
-	// when its set is recorded. None is no drift, as every VM deployed
-	// before sets has none; Several is.
+	// when its set is recorded; none is no drift, while Several is.
 	Sets  pods.SetRecord
 	Drift []Drift // nil unless drifted
 }

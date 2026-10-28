@@ -304,7 +304,7 @@ func (s *Server) hostEditPrefill(ctx context.Context, p *catalogPage) {
 		octetIn = clearOctetValue
 	case p.In.Octet > 0:
 		octetIn = strconv.Itoa(p.In.Octet)
-	case at.Octet() > 0:
+	case p.In.Octet == 0 && at.Octet() > 0:
 		octetIn = strconv.Itoa(at.Octet())
 	}
 	imageIn := cmp.Or(at.Host.Notes.Base, pods.NoBaseImage)

@@ -14,13 +14,3 @@ func asUser(api pods.API, cred func() proxmox.Credential, refused func()) pods.A
 	}
 	return api
 }
-
-// bindAs is a jobs.Worker's Bind over api.
-func bindAs(api pods.API) func(cred func() proxmox.Credential, refused func()) pods.API {
-	return func(cred func() proxmox.Credential, refused func()) pods.API { return asUser(api, cred, refused) }
-}
-
-// asToken is asUser with a fixed credential.
-func asToken(api pods.API, cred proxmox.Credential) pods.API {
-	return asUser(api, func() proxmox.Credential { return cred }, nil)
-}

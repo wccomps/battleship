@@ -989,7 +989,11 @@ func (v cliValues) posted() url.Values {
 	}
 	form.Set(fieldEnvHosts, strings.Join(v.envHosts, "\r\n"))
 	form.Set(fieldVMID, strconv.Itoa(v.vmid))
-	form.Set(fieldOctet, strconv.Itoa(v.octet))
+	if v.octet == pods.ClearOctet {
+		form.Set(fieldOctet, clearOctetValue)
+	} else if v.octet != 0 {
+		form.Set(fieldOctet, strconv.Itoa(v.octet))
+	}
 	for k, on := range map[string]bool{fieldRebuild: v.rebuild, fieldBaseline: !v.noSnap, fieldVMState: v.vmstate, fieldEjectCDROM: v.ejectCDROM} {
 		if on {
 			form.Set(k, yes)

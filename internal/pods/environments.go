@@ -389,20 +389,14 @@ func setEnvDomain(e *Environment) {
 	}
 }
 
-func nicBridge(nic string) string {
-	_, opts := splitOptions(nic)
-	return opts["bridge"]
-}
-
 // routerMACs returns a router's WAN and LAN MAC addresses by matching its
 // NICs' bridges to the slot's external and internal bridges, falling back to
 // net0 and net1.
 func routerMACs(cfg map[string]string, s Slot) (wan, lan string) {
-	for i := range 32 {
-		v := cfg[fmt.Sprintf("net%d", i)]
+	forEachNIC(cfg, func(_, v string) {
 		mac, ok := NICMAC(v)
 		if !ok {
-			continue
+			return
 		}
 		switch nicBridge(v) {
 		case s.ExtBridge:
@@ -414,7 +408,7 @@ func routerMACs(cfg map[string]string, s Slot) (wan, lan string) {
 				lan = mac
 			}
 		}
-	}
+	})
 	if wan == "" && (s.IntBridge == "" || nicBridge(cfg["net0"]) != s.IntBridge) {
 		wan, _ = NICMAC(cfg["net0"])
 	}
@@ -427,11 +421,11 @@ func routerMACs(cfg map[string]string, s Slot) (wan, lan string) {
 // nicBridgesAll lists the bridge of every NIC (net0 to net31).
 func nicBridgesAll(cfg map[string]string) []string {
 	var out []string
-	for i := range 32 {
-		if b := nicBridge(cfg[fmt.Sprintf("net%d", i)]); b != "" {
+	forEachNIC(cfg, func(_, v string) {
+		if b := nicBridge(v); b != "" {
 			out = append(out, b)
 		}
-	}
+	})
 	return out
 }
 
@@ -469,12 +463,11 @@ func cpuWarning(raw string, cpuTypes []string) string {
 // vlanWarnings reports any NIC with a VLAN tag.
 func vlanWarnings(cfg map[string]string) []string {
 	var out []string
-	for i := range 32 {
-		k := fmt.Sprintf("net%d", i)
-		if _, opts := splitOptions(cfg[k]); opts["tag"] != "" {
+	forEachNIC(cfg, func(k, v string) {
+		if _, opts := splitOptions(v); opts["tag"] != "" {
 			out = append(out, fmt.Sprintf("%s has VLAN tag %s", k, opts["tag"]))
 		}
-	}
+	})
 	return out
 }
 

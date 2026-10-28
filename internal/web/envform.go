@@ -309,7 +309,6 @@ func shapeOK(m *machineRow, what string) bool {
 	return false
 }
 
-// machineInputs reports whether form is op's machine rows.
 func machineInputs(op operation, form url.Values) bool {
 	return op.Machines && (form.Has(fieldHostName) || form.Has(fieldRouterImage))
 }

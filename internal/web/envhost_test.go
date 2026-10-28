@@ -127,6 +127,18 @@ func TestEnvEditFormAndConfirm(t *testing.T) {
 	}
 	page := h.get(&sess, rec.Header().Get("Location")).Body.String()
 	contains(t, "job page", page, "Edit host", "kilo.alpha", "2101")
+
+	for _, badOctet := range []string{"abc", "0", "-1", "none"} {
+		bad := h.post(&sess, "/environments/edit/preview", url.Values{
+			"vmid":       {"2101"},
+			"env_host":   {"oak"},
+			"image_kind": {"linux"},
+			"octet":      {badOctet},
+		})
+		if bad.Code != http.StatusUnprocessableEntity {
+			t.Errorf("preview with octet=%q = %d, want 422", badOctet, bad.Code)
+		}
+	}
 }
 
 func TestEnvHostPowerAndDelete(t *testing.T) {

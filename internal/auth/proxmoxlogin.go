@@ -31,7 +31,6 @@ const proxmoxCallbackPath = "/auth/proxmox/callback"
 
 func (s *Service) proxmoxRedirectURL() string { return s.cfg.Web.BaseURL + proxmoxCallbackPath }
 
-// proxmoxStart is step 1.
 func (s *Service) proxmoxStart(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	next := safeNext(r.URL.Query().Get("next"))
@@ -77,7 +76,6 @@ func (s *Service) proxmoxStart(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
-// proxmoxCallback is step 2.
 func (s *Service) proxmoxCallback(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	w.Header().Set("Referrer-Policy", "no-referrer")

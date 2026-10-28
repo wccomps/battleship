@@ -103,7 +103,6 @@ type pieceSet struct {
 	html map[string]string
 }
 
-// add appends the piece of element id.
 func (p *pieceSet) add(id, html string) {
 	if p.html == nil {
 		p.html = map[string]string{}

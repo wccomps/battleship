@@ -40,7 +40,7 @@ var confirmPreviews = map[pods.Kind]url.Values{
 // confirmFields are every field a confirm form may carry.
 var confirmFields = []string{
 	fieldTeams, fieldHosts, fieldVMs, fieldPattern, fieldRebuild, fieldBaseline, fieldSnapshot, fieldDescription, fieldVMState,
-	fieldAction, fieldNonce, fieldFingerprint, fieldTyped, fieldRetryOf, fieldFrom, fieldDomain, fieldRouter, fieldEnvHosts,
+	fieldAction, fieldNonce, fieldTyped, fieldRetryOf, fieldFrom, fieldDomain, fieldRouter, fieldEnvHosts,
 	fieldEnvHost, fieldOctet, fieldEjectCDROM, fieldCPU, fieldVMID, fieldFamily, fieldImageKind, fieldImage, fieldDetails, fieldNotes, fieldNotesFrom,
 }
 
@@ -70,10 +70,9 @@ func sameConfirm(kind pods.Kind, a, b url.Values) bool {
 }
 
 // confirmFieldsOf are the fields a confirm form of kind carries:
-// inputFields's, the nonce and fingerprint, and a teardown's typed range
-// or domain.
+// inputFields's, the nonce, and a teardown's typed range or domain.
 func confirmFieldsOf(kind pods.Kind) []string {
-	fs := []string{fieldNonce, fieldFingerprint}
+	fs := []string{fieldNonce}
 	if kind.TypedConfirm() {
 		fs = append(fs, fieldTyped)
 	}
@@ -173,8 +172,8 @@ func (c *confirmTest) confirm(t interface{ Fatalf(string, ...any) }, kind pods.K
 	if same {
 		op := operationOf(kind)
 		want := op.scope(formInputs(kind, previewed))
-		if got := readInputs(made[0]); !reflect.DeepEqual(got, want) || made[0].Fingerprint != previewed.Get(fieldFingerprint) {
-			t.Fatalf("confirm stored %#v (fp %s), want preview's %#v (fp %s)", got, made[0].Fingerprint, want, previewed.Get(fieldFingerprint))
+		if got := readInputs(made[0]); !reflect.DeepEqual(got, want) || made[0].Fingerprint == "" {
+			t.Fatalf("confirm stored %#v (fp %s), want preview's %#v", got, made[0].Fingerprint, want)
 		}
 	}
 	return len(made) == 1

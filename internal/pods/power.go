@@ -16,7 +16,6 @@ var PowerActions = []PowerAction{
 	{"reboot", ""},
 }
 
-// PowerActionOf returns the power action whose Value is action.
 func PowerActionOf(action string) (PowerAction, bool) {
 	for _, a := range PowerActions {
 		if a.Value == action {
@@ -26,7 +25,6 @@ func PowerActionOf(action string) (PowerAction, bool) {
 	return PowerAction{}, false
 }
 
-// IsPowerAction reports whether action is the Value of one of PowerActions.
 func IsPowerAction(action string) bool {
 	_, ok := PowerActionOf(action)
 	return ok

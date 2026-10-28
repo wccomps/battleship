@@ -45,8 +45,9 @@ form ──> preview ──> confirm ──> stored job ──> worker claims it
    exists.
 
 Every Proxmox call is made with the submitter's credential; battleship holds
-none of its own. Postgres LISTEN/NOTIFY wakes idle workers, cancels jobs at
-once, and pushes changes to open pages.
+none of its own (see [`THREAT_MODEL.md`](THREAT_MODEL.md)). Postgres
+LISTEN/NOTIFY wakes idle workers, cancels jobs at once, and pushes changes to
+open pages.
 
 ## Packages
 

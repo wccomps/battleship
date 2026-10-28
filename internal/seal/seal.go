@@ -82,8 +82,6 @@ func (k Key) Open(binding, stored string) ([]byte, error) {
 }
 
 // String, GoString and Format never show the key's bytes.
-func (k Key) String() string   { return "seal.Key{" + k.purpose + ", [redacted]}" }
-func (k Key) GoString() string { return k.String() }
-
-// Format makes every verb print String.
+func (k Key) String() string             { return "seal.Key{" + k.purpose + ", [redacted]}" }
+func (k Key) GoString() string           { return k.String() }
 func (k Key) Format(f fmt.State, _ rune) { _, _ = f.Write([]byte(k.String())) }

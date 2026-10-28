@@ -220,7 +220,6 @@ func PickOctet(domain, host string, used map[int]bool) (int, bool) {
 	return 0, false
 }
 
-// AddrText is a as text, or "" for the zero Addr.
 func AddrText(a netip.Addr) string {
 	if !a.IsValid() {
 		return ""

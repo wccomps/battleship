@@ -7,12 +7,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// SetBeforeClaimUpdate sets the test hook that runs after Claim selects a
-// pending job but before it updates to running. Pass nil to reset.
-func SetBeforeClaimUpdate(f func(id int64)) {
-	beforeClaimUpdate = f
-}
-
 // SetBeforeEventCommit sets the test hook that runs after AddEvent stores
 // an event but before it commits. Pass nil to reset.
 func SetBeforeEventCommit(f func(jobID int64, ev Event)) {

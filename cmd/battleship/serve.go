@@ -62,9 +62,12 @@ type serveDeps struct {
 	stopReserve time.Duration
 }
 
-// runServe runs the web app, the status grid and the job workers in one
+// run runs the web app, the status grid and the job workers in one
 // process, until a stop signal.
-func runServe(ctx context.Context, args []string, d deps) int {
+func run(ctx context.Context, args []string, d deps) int {
+	if len(args) > 0 && args[0] == "serve" {
+		args = args[1:]
+	}
 	fs := flag.NewFlagSet("battleship", flag.ContinueOnError)
 	fs.SetOutput(d.stderr)
 	cfgPath := fs.String("config", "battleship.toml", "config file")
@@ -131,7 +134,7 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 		return err
 	}
 
-	if err := errors.Join(cfg.RequireDatabase(), cfg.RequireWeb(), cfg.RequireSealKey(), noServiceToken("battleship serve"), cfg.RequireTLSVerify()); err != nil {
+	if err := errors.Join(cfg.RequireDatabase(), cfg.RequireWeb(), cfg.RequireSealKey(), noServiceToken(), cfg.RequireTLSVerify()); err != nil {
 		return cantStart(err)
 	}
 	if cfg.Proxmox.InsecureSkipVerify {
@@ -179,7 +182,9 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	}
 	app, err := web.New(web.Deps{
 		Config: cfg, Store: st, Auth: svc, Views: views, Hub: hub, Credentials: creds,
-		As:        func(cred proxmox.Credential) pods.API { return asToken(api, cred) },
+		As: func(cred proxmox.Credential) pods.API {
+			return asUser(api, func() proxmox.Credential { return cred }, nil)
+		},
 		Logf:      logfFor(log, "web"),
 		AccessLog: log.With("component", "http"),
 	})
@@ -291,14 +296,14 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	return failure
 }
 
-// noServiceToken refuses to run what with a Proxmox token in the
+// noServiceToken refuses a BATTLESHIP_PROXMOX_TOKEN_* left in the
 // environment: serve acts only as the people who asked, so a token
 // there is a leftover and must not linger.
-func noServiceToken(what string) error {
+func noServiceToken() error {
 	for _, k := range []string{"BATTLESHIP_PROXMOX_TOKEN_ID", "BATTLESHIP_PROXMOX_TOKEN_SECRET"} {
 		if os.Getenv(k) != "" {
-			return fmt.Errorf("%s is set, but %s holds no Proxmox token: it acts as each person who asked. "+
-				"Remove it, and delete the old service token in Proxmox", k, what)
+			return fmt.Errorf("%s is set, but battleship serve holds no Proxmox token: it acts as each person who asked. "+
+				"Remove it, and delete the old service token in Proxmox", k)
 		}
 	}
 	return nil
@@ -307,7 +312,7 @@ func noServiceToken(what string) error {
 // connectAuth builds the auth service, retrying provider discovery for
 // d.oidcWait so a pod that starts before the provider is reachable still comes up.
 func connectAuth(ctx context.Context, cfg config.Config, st *store.Store, login auth.ProxmoxLogin, d serveDeps) (*auth.Service, error) {
-	opts := auth.Options{Logf: logfFor(d.log, "auth"), Proxmox: login} // web.New renders its pages
+	opts := auth.Options{Logf: logfFor(d.log, "auth"), Proxmox: login}
 	wait, cancel := context.WithTimeout(ctx, d.oidcWait)
 	defer cancel()
 	for {
@@ -345,7 +350,7 @@ func startWorkers(ctx context.Context, draining <-chan struct{}, cfg config.Conf
 		wl := log.With("component", "worker", "worker", id)
 		w := &jobs.Worker{
 			Store: st, Cfg: cfg, ID: id, Limits: lim, Credentials: creds,
-			Bind:     bindAs(client),
+			Bind:     func(cred func() proxmox.Credential, refused func()) pods.API { return asUser(client, cred, refused) },
 			Logf:     func(format string, args ...any) { wl.Warn(fmt.Sprintf(format, args...)) },
 			Hub:      hub,
 			Draining: draining,

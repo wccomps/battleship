@@ -67,8 +67,6 @@ func (s *Server) lacks(ctx context.Context, vmid int) []string {
 	return out
 }
 
-// mayRun reports whether the user holds kind's privilege anywhere, i.e.
-// whether to offer it.
 func (s *Server) mayRun(ctx context.Context, kind pods.Kind) bool {
 	return s.mayAnywhere(ctx, pods.OfferPrivileges(kind)...)
 }

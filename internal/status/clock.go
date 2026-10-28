@@ -6,11 +6,9 @@ import "time"
 // them with a fake one.
 type Clock interface {
 	Now() time.Time
-	// After returns a channel that receives the time once d has passed.
 	After(d time.Duration) <-chan time.Time
 }
 
-// SystemClock is the real clock.
 var SystemClock Clock = systemClock{}
 
 type systemClock struct{}

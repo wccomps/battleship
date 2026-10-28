@@ -59,8 +59,8 @@ type previewPage struct {
 	// else the page the operation belongs to.
 	CloseHref string
 	FromGrid  bool // the VMs were ticked on the grid: Back closes the panel
-	// Fields are the inputs as hidden fields: submitted by the confirm, and posted
-	// back by Reselect.
+	// Fields are the inputs as hidden fields, posted back by Reselect or
+	// Edit details.
 	Fields []field
 	// Reselect, for a reset or snapshot of grid-ticked VMs, labels a button that
 	// posts them back to the operation's form to choose again.
@@ -190,7 +190,7 @@ func (s *Server) opPreview(op operation) http.Handler {
 // field it names, for a pods.EnvProblem on a form with machine rows.
 func (s *Server) planRefused(w http.ResponseWriter, r *http.Request, op operation, in jobs.Inputs, err error) {
 	var pr pods.EnvProblem
-	if errors.As(err, &pr) && op.Machines {
+	if op.Machines && errors.As(err, &pr) {
 		if p, ok := s.catalogForm(r, op, in, ""); ok {
 			_, rows := p.request()
 			p.mark(pr, rows)

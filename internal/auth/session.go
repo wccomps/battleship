@@ -135,6 +135,3 @@ func SecureBaseURL(baseURL string) bool {
 	u, err := url.Parse(baseURL)
 	return err == nil && u.Scheme == "https" // Parse lowercases the scheme
 }
-
-// SessionCookieName is the session cookie's name for this web.base_url.
-func SessionCookieName(baseURL string) string { return namesFor(SecureBaseURL(baseURL)).session }

@@ -17,6 +17,8 @@ const (
 	NoBaseImage = "-"
 	// ClearOctet clears an other host's address in its notes.
 	ClearOctet = -1
+	// InvalidOctet marks an unparsable or out-of-range octet form input.
+	InvalidOctet = -2
 )
 
 // HostEdit is what Edit host starts from: the environment, the host and its
@@ -215,6 +217,9 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 		}
 	}
 
+	if req.Octet == ClearOctet && wantKind != ImageOther {
+		return nil, errors.New("only other hosts can clear their address")
+	}
 	switch wantKind {
 	case ImageRouter:
 		wantNotes.IP, wantNotes.OS, wantNotes.DNS = netip.Addr{}, "", ""

@@ -83,39 +83,19 @@ func (s JobStatus) StartAgain() bool { r, _ := s.rule(); return r.startAgain }
 // nothing.
 func (s JobStatus) CancelTooLate() bool { r, _ := s.rule(); return r.cancelTooLate }
 
-// ItemStatus is a job item's status, with the rules that hang on it.
 type ItemStatus string
 
-type itemRule struct {
-	unfinished    bool // pending or running: its job still has to work on it
-	notRunNoStep  bool // becomes not run if its job ends before it reaches a step
-	retry         bool // a retry of its finished job runs it again
-	touched       bool // its job did something to its VM, so it is the VM's last result
-	keptOnEvent   bool // an event doesn't make it running again
-	keptOnOutcome bool // the worker's outcome doesn't overwrite it
-	ended         bool // the run ended it; only a started event makes it running again
-	busy          bool // in an active job, still to be worked on, or may be retried by a later round
-}
-
-// itemRules is every item status's rules; an unknown status has none.
-var itemRules = map[ItemStatus]itemRule{
-	ItemPending:     {unfinished: true, notRunNoStep: true, busy: true},
-	ItemRunning:     {unfinished: true, notRunNoStep: true, busy: true},
-	ItemDone:        {touched: true, ended: true},
-	ItemFailed:      {retry: true, touched: true, ended: true, busy: true},
-	ItemBlocked:     {retry: true, keptOnEvent: true, keptOnOutcome: true},
-	ItemInterrupted: {notRunNoStep: true, retry: true, touched: true, keptOnEvent: true, keptOnOutcome: true},
-	ItemRemoved:     {retry: true, touched: true},
-	ItemNotRun:      {retry: true, keptOnEvent: true},
-}
-
-func (s ItemStatus) rule() itemRule { return itemRules[s] }
-
 // Retryable reports whether a retry should run the item again.
-func (s ItemStatus) Retryable() bool { return s.rule().retry }
+func (s ItemStatus) Retryable() bool {
+	switch s {
+	case ItemFailed, ItemBlocked, ItemInterrupted, ItemRemoved, ItemNotRun:
+		return true
+	default:
+		return false
+	}
+}
 
-// SQL lists of the sets above, for queries; TestStatusSQLLists keeps them
-// in step with the tables.
+// SQL status lists for queries.
 const (
 	activeJobsSQL      = `('pending', 'running')`
 	unfinishedItemsSQL = `('pending', 'running')`

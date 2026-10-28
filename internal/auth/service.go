@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	// SessionCookie names the session token cookie; see SessionCookieName
-	// for the __Host- prefixed form.
+	// SessionCookie names the session token cookie; over https it is
+	// __Host- prefixed.
 	SessionCookie = "battleship_session"
 	// CSRFField is the form field that carries a session's CSRF token on
 	// state-changing requests.
@@ -40,8 +40,7 @@ var ErrNoStore = errors.New("auth: a session store is required")
 
 // Options configure a Service. Proxmox is required.
 type Options struct {
-	// Now is the clock for session expiry, refresh timing and ID token
-	// expiry. Default time.Now.
+	// Now is the clock for session expiry and refresh timing. Default time.Now.
 	Now func() time.Time
 	// Logf receives security events, never tokens or cookies. Default
 	// log.Printf.

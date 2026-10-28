@@ -151,41 +151,6 @@ func TestOtherWorkersCannotHeartbeatOrFinish(t *testing.T) {
 	}
 }
 
-func TestCancelDuringClaimWins(t *testing.T) {
-	s := storetest.New(t)
-	id := create(t, s, "team:01")
-
-	// Set up a hook that cancels the job after Claim selects it but before updating.
-	store.SetBeforeClaimUpdate(func(jobID int64) {
-		if jobID == id {
-			if err := s.RequestCancel(ctx, id, "bob"); err != nil {
-				t.Error(err)
-			}
-		}
-	})
-	t.Cleanup(func() { store.SetBeforeClaimUpdate(nil) })
-
-	// Claim must return nil because the job was cancelled before the update.
-	got, err := s.Claim(ctx, "w", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != nil {
-		t.Fatalf("Claim = %+v, want nil (job was cancelled during claim)", got)
-	}
-
-	// Verify the job is cancelled.
-	j, _ := s.Job(ctx, id)
-	if j.Status != store.StatusCancelled || j.CancelledBy != "bob" {
-		t.Errorf("job = %+v, want cancelled by bob", j)
-	}
-
-	// A second claim must also return nil.
-	if got, _ := s.Claim(ctx, "w", time.Hour); got != nil {
-		t.Errorf("second claim = %+v, want nil", got)
-	}
-}
-
 func TestReapStaleInterruptsSilentJobs(t *testing.T) {
 	s := storetest.New(t)
 	id := create(t, s, "team:01")

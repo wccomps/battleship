@@ -24,8 +24,7 @@ type ProxmoxLogin interface {
 	RenewTicket(ctx context.Context, cred proxmox.Credential, now time.Time) (proxmox.Credential, error)
 }
 
-// SealSessionTicket seals cred as session sessionID stores it. authtest
-// uses it to log test users in with a ticket.
+// SealSessionTicket seals cred as session sessionID stores it.
 func SealSessionTicket(cfg config.Config, sessionID string, cred proxmox.Credential) store.SessionTicket {
 	k := ticketKey(cfg)
 	return store.SessionTicket{

@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/pods"
 )
 
 // Limits caps concurrent Proxmox work: config calls, clones, template
@@ -127,7 +128,7 @@ func (s *storageOps) do(ctx context.Context, high bool, fn func() error) error {
 		return err
 	}
 	defer s.release()
-	return withClusterSlot(ctx, s.slots, "storage-ops", 1, fn)
+	return withClusterSlot(ctx, s.slots, pods.StorageOpsKey, 1, fn)
 }
 
 func (s *storageOps) acquire(ctx context.Context, high bool) error {

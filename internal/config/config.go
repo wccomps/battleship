@@ -242,7 +242,7 @@ func redactURL(raw string) string {
 type Jobs struct {
 	Heartbeat  time.Duration `toml:"heartbeat"`   // how often a running job proves it's alive
 	StaleAfter time.Duration `toml:"stale_after"` // a running job silent this long is marked interrupted
-	Poll       time.Duration `toml:"poll"`        // how often a job poll checks status
+	Poll       time.Duration `toml:"poll"`        // how often workers poll for pending jobs and the hub reconnects
 	// CancelGrace is how long a canceled step waits for a Proxmox task it
 	// already started, so the job records what it did.
 	CancelGrace time.Duration `toml:"cancel_grace"`
@@ -307,7 +307,6 @@ func Default() Config {
 	}
 }
 
-// String shows the Proxmox settings on one line.
 func (p Proxmox) String() string {
 	s := "{URL:" + p.URL
 	if len(p.URLs) > 0 {
@@ -344,7 +343,6 @@ func ReadCAFile(path string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-// GoString is String for %#v.
 func (p Proxmox) GoString() string { return "config.Proxmox" + p.String() }
 
 // removedKeys are retired settings, with why. A config that sets one fails
