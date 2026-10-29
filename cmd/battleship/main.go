@@ -17,7 +17,6 @@ import (
 	"syscall"
 
 	"github.com/wccomps/battleship/internal/config"
-	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/store"
 )
@@ -26,9 +25,9 @@ func main() {
 	ctx, stop := stopOnSignal(func() {})
 	defer stop()
 	d := deps{
-		newAPI:    newProxmoxAPI,
-		openStore: openStore,
-		stderr:    os.Stderr,
+		newCluster: newCluster,
+		openStore:  openStore,
+		stderr:     os.Stderr,
 	}
 	os.Exit(run(ctx, os.Args[1:], d))
 }
@@ -46,27 +45,17 @@ func stopOnSignal(onFirst func()) (context.Context, context.CancelFunc) {
 	return ctx, stop
 }
 
-// newProxmoxAPI is the Proxmox client for p. It holds no credential: every
-// call goes through asUser, as a person.
-func newProxmoxAPI(p config.Proxmox) pods.API {
-	return proxmox.New(proxmox.Options{
-		URLs: p.Endpoints(), InsecureSkipVerify: p.InsecureSkipVerify, RootCAs: p.RootCAs,
+// newCluster connects to p's nodes, logging failovers to logf.
+func newCluster(p config.Proxmox, logf func(format string, args ...any)) cluster {
+	c := proxmox.New(proxmox.Options{
+		URLs: p.Endpoints(), InsecureSkipVerify: p.InsecureSkipVerify, RootCAs: p.RootCAs, Logf: logf,
 	})
-}
-
-// setProxmoxLogf sends the client's failover lines to logf, if api is a
-// client that logs them.
-func setProxmoxLogf(api any, logf func(format string, args ...any)) {
-	if l, ok := api.(interface {
-		SetLogf(func(format string, args ...any))
-	}); ok {
-		l.SetLogf(logf)
-	}
+	return proxmoxCluster{ProxmoxLogin: c, client: c}
 }
 
 // deps are the process-level dependencies of run, replaced in tests.
 type deps struct {
-	newAPI func(config.Proxmox) pods.API
+	newCluster func(p config.Proxmox, logf func(format string, args ...any)) cluster
 	// openStore connects to and migrates the job database; the returned func
 	// closes it.
 	openStore func(ctx context.Context, db config.Database) (*store.Store, func(), error)
