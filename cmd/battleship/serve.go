@@ -51,10 +51,10 @@ const (
 // serveDeps are what serve runs on, replaced in tests. Zero durations and a
 // nil drain mean the defaults above.
 type serveDeps struct {
-	newAPI    func(config.Proxmox) pods.API
-	openStore func(ctx context.Context, db config.Database) (*store.Store, func(), error)
-	listen    func(network, addr string) (net.Listener, error)
-	log       *slog.Logger
+	newCluster func(p config.Proxmox, logf func(format string, args ...any)) cluster
+	openStore  func(ctx context.Context, db config.Database) (*store.Store, func(), error)
+	listen     func(network, addr string) (net.Listener, error)
+	log        *slog.Logger
 	// drain waits between failing readiness and stopping the HTTP server.
 	drain       func()
 	oidcWait    time.Duration
@@ -92,7 +92,7 @@ func run(ctx context.Context, args []string, d deps) int {
 		log.Error("battleship serve can't start", "err", err)
 		return 1
 	}
-	sd := serveDeps{newAPI: d.newAPI, openStore: d.openStore, listen: d.listen, log: log, drain: d.drain}
+	sd := serveDeps{newCluster: d.newCluster, openStore: d.openStore, listen: d.listen, log: log, drain: d.drain}
 	if err := serve(ctx, cfg, sd); err != nil {
 		return 1 // serve logged it
 	}
@@ -101,9 +101,7 @@ func run(ctx context.Context, args []string, d deps) int {
 
 // serve runs battleship serve with cfg until ctx is done, then shuts down and
 // returns any error. Startup fails clearly if the config, database or identity
-// provider doesn't work. The workers, viewers' grids, ticket renewer, hub (the
-// process's only LISTEN connection), hourly cleanup and HTTP server share one
-// Proxmox client and one set of limits.
+// provider doesn't work. The hub holds the process's only LISTEN connection.
 //
 // On the stop signal readiness fails and the workers claim no more jobs;
 // running jobs carry on (heartbeats included, so no other replica reaps
@@ -163,19 +161,14 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 			closeStore()
 		}
 	}()
-	api := d.newAPI(cfg.Proxmox)
-	setProxmoxLogf(api, logfFor(log, "proxmox"))
-	login, ok := api.(auth.ProxmoxLogin)
-	if !ok {
-		return cantStart(errors.New("this Proxmox client can't sign users in to Proxmox"))
-	}
-	svc, err := connectAuth(ctx, cfg, st, login, d)
+	pve := d.newCluster(cfg.Proxmox, logfFor(log, "proxmox"))
+	svc, err := connectAuth(ctx, cfg, st, pve, d)
 	if err != nil {
 		return cantStart(err)
 	}
 	lim := apply.NewClusterLimits(cfg.Concurrency, st)
 	hub := status.NewHub(st.Notifications, status.HubOptions{Logf: logfFor(log, "status")})
-	views, err := status.NewViews(func(cred func() proxmox.Credential) pods.API { return asUser(api, cred, nil) },
+	views, err := status.NewViews(func(cred func() proxmox.Credential) pods.API { return pve.Bind(cred, nil) },
 		st, lim, cfg, status.Options{Hub: hub, Logf: logfFor(log, "status")}, viewLinger)
 	if err != nil {
 		return cantStart(err)
@@ -183,7 +176,7 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	app, err := web.New(web.Deps{
 		Config: cfg, Store: st, Auth: svc, Views: views, Hub: hub, Credentials: creds,
 		As: func(cred proxmox.Credential) pods.API {
-			return asUser(api, func() proxmox.Credential { return cred }, nil)
+			return pve.Bind(func() proxmox.Credential { return cred }, nil)
 		},
 		Logf:      logfFor(log, "web"),
 		AccessLog: log.With("component", "http"),
@@ -212,10 +205,8 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	var bg sync.WaitGroup
 	background := []func(context.Context){hub.Run, func(ctx context.Context) { <-ctx.Done(); views.Close() }, func(ctx context.Context) { cleanupLoop(ctx, svc.EndExpiredSessions, st.DeleteExpiredPreviews, log) },
 		svc.RunRevocations}
-	if renewer, ok := api.(jobs.TicketRenewer); ok {
-		r := &jobs.Renewer{Store: st, Proxmox: renewer, Credentials: creds, Logf: logfFor(log, "renewer")}
-		background = append(background, r.Run)
-	}
+	renewer := &jobs.Renewer{Store: st, Proxmox: pve, Credentials: creds, Logf: logfFor(log, "renewer")}
+	background = append(background, renewer.Run)
 	for _, run := range background {
 		bg.Add(1)
 		go func() { defer bg.Done(); run(bgCtx) }()
@@ -223,7 +214,7 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	draining := make(chan struct{})
 	workCtx, stopJobs := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopJobs()
-	workersDone := startWorkers(workCtx, draining, cfg, st, api, creds, lim, hub, log)
+	workersDone := startWorkers(workCtx, draining, cfg, st, pve.Bind, creds, lim, hub, log)
 	served := make(chan error, 1)
 	go func() { served <- httpSrv.Serve(ln) }()
 	log.Info("serving", "listen", ln.Addr().String(), "workers", cfg.Web.Workers)
@@ -339,18 +330,18 @@ func connectAuth(ctx context.Context, cfg config.Config, st *store.Store, login 
 	}
 }
 
-// startWorkers starts cfg.Web.Workers job workers sharing api and lim, and
-// returns a channel closed once they all return, which they do once draining
-// closes and their running jobs have ended; ctx done stops those jobs. hub
-// tells them of job changes and cancels.
-func startWorkers(ctx context.Context, draining <-chan struct{}, cfg config.Config, st *store.Store, client pods.API, creds jobs.Credentials, lim *apply.Limits, hub *status.Hub, log *slog.Logger) <-chan struct{} {
+// startWorkers starts cfg.Web.Workers job workers and returns a channel
+// closed once they all return, which they do once draining closes and their
+// running jobs have ended; ctx done stops those jobs. hub tells them of job
+// changes and cancels.
+func startWorkers(ctx context.Context, draining <-chan struct{}, cfg config.Config, st *store.Store, bind func(cred func() proxmox.Credential, refused func()) pods.API, creds jobs.Credentials, lim *apply.Limits, hub *status.Hub, log *slog.Logger) <-chan struct{} {
 	var wg sync.WaitGroup
 	for range cfg.Web.Workers {
 		id := jobs.NewWorkerID("serve")
 		wl := log.With("component", "worker", "worker", id)
 		w := &jobs.Worker{
 			Store: st, Cfg: cfg, ID: id, Limits: lim, Credentials: creds,
-			Bind:     func(cred func() proxmox.Credential, refused func()) pods.API { return asUser(client, cred, refused) },
+			Bind:     bind,
 			Logf:     func(format string, args ...any) { wl.Warn(fmt.Sprintf(format, args...)) },
 			Hub:      hub,
 			Draining: draining,

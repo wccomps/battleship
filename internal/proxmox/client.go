@@ -86,6 +86,8 @@ type Options struct {
 	// RootCAs, if set, replace the system CAs, e.g. with the cluster CA,
 	// which verifies every node.
 	RootCAs *x509.CertPool
+	// Logf, if set, logs each failover.
+	Logf func(format string, args ...any)
 }
 
 // maxAnswer is the most bytes of an answer a call reads, unless capped.
@@ -112,7 +114,7 @@ func New(o Options) *Client {
 	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: o.InsecureSkipVerify, RootCAs: o.RootCAs} //nolint:gosec // see above
 	tr.MaxIdleConnsPerHost = 32                                                                    // the executor runs many calls in parallel
 	tr.MaxResponseHeaderBytes = maxHeader
-	c := &Client{conn: &conn{http: &http.Client{Transport: tr, Timeout: requestTimeout}}}
+	c := &Client{conn: &conn{http: &http.Client{Transport: tr, Timeout: requestTimeout}, logf: o.Logf}}
 	for _, raw := range o.URLs {
 		raw = strings.TrimRight(raw, "/")
 		host := raw
@@ -123,10 +125,6 @@ func New(o Options) *Client {
 	}
 	return c
 }
-
-// SetLogf sets where failovers are logged, one line each. Call it before
-// the client's first request.
-func (c *Client) SetLogf(logf func(format string, args ...any)) { c.logf = logf }
 
 // Endpoints lists every endpoint's host:port, in the configured order.
 func (c *Client) Endpoints() []string {

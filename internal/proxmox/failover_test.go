@@ -107,10 +107,9 @@ func refusedURL(t *testing.T) string {
 
 func failoverClient(t *testing.T, urls ...string) (*Client, *logLines) {
 	t.Helper()
-	c := New(Options{URLs: urls, InsecureSkipVerify: true}).As(TokenCredential("battleship@pve!app", "secret"))
-	c.http.Timeout = 500 * time.Millisecond
 	l := &logLines{}
-	c.SetLogf(l.logf)
+	c := New(Options{URLs: urls, InsecureSkipVerify: true, Logf: l.logf}).As(TokenCredential("battleship@pve!app", "secret"))
+	c.http.Timeout = 500 * time.Millisecond
 	return c, l
 }
 

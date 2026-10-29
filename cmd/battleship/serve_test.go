@@ -49,6 +49,13 @@ type serveAPI struct {
 	// login is the Proxmox access layer (pvetest) the fake signs users in
 	// and renews tickets through, as the real client does.
 	login auth.ProxmoxLogin
+
+	binds []bound
+}
+
+type bound struct {
+	user    string
+	refused bool
 }
 
 func (a *serveAPI) OpenIDAuthURL(ctx context.Context, realm, redirectURL string) (string, string, error) {
@@ -61,6 +68,14 @@ func (a *serveAPI) OpenIDLogin(ctx context.Context, endpoint, code, state, redir
 
 func (a *serveAPI) RenewTicket(ctx context.Context, cred proxmox.Credential, now time.Time) (proxmox.Credential, error) {
 	return a.login.RenewTicket(ctx, cred, now)
+}
+
+// Bind records each binding and returns the fake, which checks no credential.
+func (a *serveAPI) Bind(cred func() proxmox.Credential, refused func()) pods.API {
+	a.Mu.Lock()
+	defer a.Mu.Unlock()
+	a.binds = append(a.binds, bound{user: cred().User, refused: refused != nil})
+	return a
 }
 
 func newServeAPI(vms ...proxmox.VM) *serveAPI {
@@ -209,7 +224,7 @@ func startServe(t *testing.T, opts ...serveOption) *serveEnv {
 	cfg.Web.BaseURL = e.url
 	cfg.Web.Listen = ln.Addr().String()
 	d := serveDeps{
-		newAPI: func(config.Proxmox) pods.API { return e.api },
+		newCluster: func(config.Proxmox, func(string, ...any)) cluster { return e.api },
 		openStore: func(context.Context, config.Database) (*store.Store, func(), error) {
 			return e.st, func() {}, nil
 		},
@@ -394,6 +409,12 @@ func TestServeRunsQueuedJobs(t *testing.T) {
 	}
 	if got := signalled(t, e.api.powered, "a power call"); got != 10101 {
 		t.Errorf("powered VM %d, want 10101", got)
+	}
+	e.api.Mu.Lock()
+	binds := slices.Clone(e.api.binds)
+	e.api.Mu.Unlock()
+	if !slices.Contains(binds, bound{user: "alice@auth.example.org", refused: true}) {
+		t.Errorf("binds = %v, want the job bound to its submitter's ticket, reporting refusal", binds)
 	}
 	workers := map[any]bool{}
 	for _, r := range e.records("worker started") {
@@ -805,7 +826,7 @@ func TestServeStartupFailsClearly(t *testing.T) {
 			}
 			stderr := &syncBuffer{}
 			d := deps{
-				newAPI: func(config.Proxmox) pods.API {
+				newCluster: func(config.Proxmox, func(string, ...any)) cluster {
 					t.Error("serve made a Proxmox client before its checks")
 					return newServeAPI()
 				},
@@ -864,8 +885,8 @@ func TestServeFailsFastWithoutIdentityProvider(t *testing.T) {
 	st := storetest.New(t)
 	logs := &syncBuffer{}
 	d := serveDeps{
-		newAPI:    func(config.Proxmox) pods.API { return newServeAPI() },
-		openStore: func(context.Context, config.Database) (*store.Store, func(), error) { return st, func() {}, nil },
+		newCluster: func(config.Proxmox, func(string, ...any)) cluster { return newServeAPI() },
+		openStore:  func(context.Context, config.Database) (*store.Store, func(), error) { return st, func() {}, nil },
 		listen: func(string, string) (net.Listener, error) {
 			t.Error("serve listened without an identity provider")
 			return nil, errors.New("no")
@@ -907,8 +928,8 @@ func TestServeStoppedWhileWaitingForIdentityProvider(t *testing.T) {
 	st := storetest.New(t)
 	logs := &syncBuffer{}
 	d := serveDeps{
-		newAPI:    func(config.Proxmox) pods.API { return newServeAPI() },
-		openStore: func(context.Context, config.Database) (*store.Store, func(), error) { return st, func() {}, nil },
+		newCluster: func(config.Proxmox, func(string, ...any)) cluster { return newServeAPI() },
+		openStore:  func(context.Context, config.Database) (*store.Store, func(), error) { return st, func() {}, nil },
 		listen: func(string, string) (net.Listener, error) {
 			t.Error("serve listened without an identity provider")
 			return nil, errors.New("no")
@@ -996,13 +1017,13 @@ func TestServeWaitsForIdentityProvider(t *testing.T) {
 	}
 	cfg.Web.BaseURL = "http://" + app.Addr().String()
 	d := serveDeps{
-		newAPI:    func(config.Proxmox) pods.API { return newServeAPI(teamPodVMs()...) },
-		openStore: func(context.Context, config.Database) (*store.Store, func(), error) { return st, func() {}, nil },
-		listen:    func(string, string) (net.Listener, error) { return app, nil },
-		log:       slog.New(slog.NewTextHandler(logs, nil)),
-		drain:     func() {},
-		oidcWait:  20 * time.Second,
-		oidcRetry: 50 * time.Millisecond,
+		newCluster: func(config.Proxmox, func(string, ...any)) cluster { return newServeAPI(teamPodVMs()...) },
+		openStore:  func(context.Context, config.Database) (*store.Store, func(), error) { return st, func() {}, nil },
+		listen:     func(string, string) (net.Listener, error) { return app, nil },
+		log:        slog.New(slog.NewTextHandler(logs, nil)),
+		drain:      func() {},
+		oidcWait:   20 * time.Second,
+		oidcRetry:  50 * time.Millisecond,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -1091,10 +1112,10 @@ func TestServeCommand(t *testing.T) {
 	t.Setenv("BATTLESHIP_OIDC_CLIENT_SECRET", oidc.OIDC.ClientSecret)
 	stderr := &syncBuffer{}
 	d := deps{
-		newAPI:    func(config.Proxmox) pods.API { return newServeAPI(teamPodVMs()...) },
-		openStore: func(context.Context, config.Database) (*store.Store, func(), error) { return st, func() {}, nil },
-		stderr:    stderr,
-		drain:     func() {},
+		newCluster: func(config.Proxmox, func(string, ...any)) cluster { return newServeAPI(teamPodVMs()...) },
+		openStore:  func(context.Context, config.Database) (*store.Store, func(), error) { return st, func() {}, nil },
+		stderr:     stderr,
+		drain:      func() {},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	exit := make(chan int, 1)
