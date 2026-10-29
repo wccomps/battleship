@@ -67,8 +67,8 @@ task_poll = "2s"                   # longest wait between task status polls; the
 
 [database]
 # url comes from BATTLESHIP_DATABASE_URL (the Postgres operator's secret).
-# Main pool per replica; each replica uses up to max_conns + 4 = 20. Budget
-# (replicas + 1 surging) x 20 = 60 under Postgres's max_connections.
+# Main pool per replica; each replica uses up to max_conns + 5 = 21. Budget
+# (replicas + 1 surging) x 21 = 63 under Postgres's max_connections.
 # See deploy/README.md.
 max_conns = 16
 

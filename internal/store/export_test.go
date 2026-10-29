@@ -48,8 +48,8 @@ func HoldMainPool(ctx context.Context, s *Store) (func(), error) {
 }
 
 // PoolSizes reports the most connections each of the store's pools opens.
-func PoolSizes(s *Store) (main, liveness int) {
-	return int(s.pool.Config().MaxConns), int(s.liveness.Config().MaxConns)
+func PoolSizes(s *Store) (main, liveness, ping int) {
+	return int(s.pool.Config().MaxConns), int(s.liveness.Config().MaxConns), int(s.ping.Config().MaxConns)
 }
 
 // SlotConnConfig is the config the store's slot session connects with, so
@@ -62,3 +62,9 @@ func ClearStaleAfter(ctx context.Context, s *Store, id int64) error {
 	_, err := s.pool.Exec(ctx, `UPDATE jobs SET stale_after = NULL WHERE id = $1`, id)
 	return err
 }
+
+// SetBeforePing sets the hook run while s's shared ping holds its connection.
+func SetBeforePing(s *Store, f func()) { s.beforePing = f }
+
+// LivenessAcquires is how many connections the heartbeat pool has handed out.
+func LivenessAcquires(s *Store) int64 { return s.liveness.Stat().AcquireCount() }

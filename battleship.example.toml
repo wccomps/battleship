@@ -81,7 +81,7 @@ url = "https://192.0.2.123:8006"
 
 # [database]
 # url = ""                       # prefer the BATTLESHIP_DATABASE_URL environment variable
-# max_conns = 16                 # main pool size per process (at least 4); +2 more for heartbeats and readiness, +1 for clone, delete and storage slots, +1 to listen for job changes
+# max_conns = 16                 # main pool size per process (at least 4); +2 more for heartbeats, +1 for readiness, +1 for clone, delete and storage slots, +1 to listen for job changes
 # seal_key = ""                  # prefer BATTLESHIP_SEAL_KEY: 32+ random chars, same in every process; encrypts jobs' Proxmox credentials
 
 # [jobs]

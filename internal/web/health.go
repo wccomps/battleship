@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// pingTimeout bounds the readiness check's database ping.
-const pingTimeout = 2 * time.Second
+// readyWait bounds how long readyz waits for the database ping.
+const readyWait = 2 * time.Second
 
 // readiness is the last readiness answer: unknown until the first check.
 type readiness int
@@ -34,7 +34,7 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 		plain(w, r, http.StatusServiceUnavailable, "shutting down")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), pingTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), readyWait)
 	defer cancel()
 	dbErr := s.st.Ping(ctx)
 
