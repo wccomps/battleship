@@ -21,9 +21,11 @@ type Guest struct {
 	// restarts.
 	Down int
 	// SetupPending is how many more setup state reads (commands that name
-	// Windows setup's Setup\State key) print an unfinished ImageState
-	// before they print IMAGE_STATE_COMPLETE.
+	// Windows setup's Setup\State key) print SetupOut before they print
+	// IMAGE_STATE_COMPLETE.
 	SetupPending int
+	// SetupOut is what they print; "" prints IMAGE_STATE_SPECIALIZE_RESEAL_TO_OOBE\r\n.
+	SetupOut string
 	// SSHOut is what the live SSH check command prints; "" prints a running
 	// sshd that trusts DefaultSSHCAKey.
 	SSHOut string
@@ -158,7 +160,10 @@ func (f *Fake) AgentExec(ctx context.Context, node string, vmid int, command []s
 			}
 		case isSetupRead(command) && g.SetupPending > 0:
 			g.SetupPending--
-			st.Out = "IMAGE_STATE_SPECIALIZE_RESEAL_TO_OOBE\r\n"
+			st.Out = g.SetupOut
+			if st.Out == "" {
+				st.Out = "IMAGE_STATE_SPECIALIZE_RESEAL_TO_OOBE\r\n"
+			}
 		case isSetupRead(command):
 			st.Out = "IMAGE_STATE_COMPLETE\r\n"
 		default:

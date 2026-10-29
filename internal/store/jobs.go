@@ -132,11 +132,15 @@ func scanJob(row pgx.Row) (Job, error) {
 	return j, err
 }
 
-// CreateJob stores a confirmed job and its items as pending. With
+// CreateJob stores a confirmed job and its items, pending or blocked. With
 // nj.Preview set, it also marks that preview submitted by this job.
 func (s *Store) CreateJob(ctx context.Context, nj NewJob) (int64, error) {
 	if nj.Kind == "" || len(nj.Inputs) == 0 || len(nj.Plan) == 0 || len(nj.LockKeys) == 0 || nj.CreatedBy == "" {
 		return 0, ErrEmptyInput
+	}
+	plan, err := storableJSON(nj.Plan)
+	if err != nil {
+		return 0, fmt.Errorf("job plan: %w", err)
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -151,7 +155,7 @@ func (s *Store) CreateJob(ctx context.Context, nj NewJob) (int64, error) {
 	var id int64
 	err = tx.QueryRow(ctx, `INSERT INTO jobs (kind, inputs, plan, fingerprint, lock_keys, created_by, created_as)
 		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-		nj.Kind, nj.Inputs, nj.Plan, nj.Fingerprint, nj.LockKeys, nj.CreatedBy, nj.CreatedAs).Scan(&id)
+		nj.Kind, nj.Inputs, plan, nj.Fingerprint, nj.LockKeys, nj.CreatedBy, nj.CreatedAs).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -177,7 +181,7 @@ func (s *Store) CreateJob(ctx context.Context, nj NewJob) (int64, error) {
 			status = ItemBlocked
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO job_items (job_id, idx, name, team, vmid, status, error)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)`, id, i, it.Name, it.Team, it.VMID, status, it.Blocked); err != nil {
+			VALUES ($1, $2, $3, $4, $5, $6, $7)`, id, i, it.Name, it.Team, it.VMID, status, storable(it.Blocked)); err != nil {
 			return 0, err
 		}
 	}
@@ -276,6 +280,7 @@ func (s *Store) AddEvent(ctx context.Context, jobID int64, ev Event) error {
 	if status != StatusRunning {
 		return fmt.Errorf("job %d is %s: %w", jobID, status, ErrNotActive)
 	}
+	ev.Message = storable(ev.Message)
 	if _, err := tx.Exec(ctx, `INSERT INTO job_events (job_id, at, item, step, status, message)
 		VALUES ($1, $2, $3, $4, $5, $6)`, jobID, ev.At, ev.Item, ev.Step, ev.Status, ev.Message); err != nil {
 		return err

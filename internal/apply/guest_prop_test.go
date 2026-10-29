@@ -2,10 +2,13 @@ package apply
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 
 	"pgregory.net/rapid"
 
@@ -14,8 +17,7 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-func checkLastLines(t interface{ Fatalf(string, ...any) }, s string, n int) {
-	// A line ends at \n or \r (a bare \r rewrites the line on a terminal).
+func tailLines(s string, n int) string {
 	var lines []string
 	for _, l := range strings.Split(strings.ReplaceAll(s, "\r", "\n"), "\n") {
 		if l = strings.TrimSpace(l); l != "" {
@@ -27,28 +29,49 @@ func checkLastLines(t interface{ Fatalf(string, ...any) }, s string, n int) {
 	} else if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
-	got := lastLines(s, n)
-	if strings.ContainsAny(got, "\r\n") {
-		t.Fatalf("lastLines(%q, %d) = %q has a line break", s, n, got)
+	return strings.Join(lines, " / ")
+}
+
+// checkShown fails unless got is want as guestText shows it: quoted, no
+// control character, whole or cut within a character of maxGuestShown.
+func checkShown(t interface{ Fatalf(string, ...any) }, got, want string) {
+	if !utf8.ValidString(got) {
+		t.Fatalf("%q isn't valid UTF-8", got)
 	}
-	var segs []string
-	if got != "" {
-		segs = strings.Split(got, " / ")
+	for _, r := range got {
+		if unicode.IsControl(r) {
+			t.Fatalf("%q has control character %U", got, r)
+		}
 	}
-	if !slices.Equal(segs, lines) {
-		t.Fatalf("lastLines(%q, %d) = %q, want the last %d of non-blank lines %q", s, n, got, n, lines)
+	q, cut := strings.CutSuffix(got, "…")
+	text, err := strconv.Unquote(q)
+	switch {
+	case err != nil:
+		t.Fatalf("%q isn't quoted: %v", got, err)
+	case cut != (len(want) > maxGuestShown):
+		t.Fatalf("%q: cut %v, but %d bytes against a bound of %d", got, cut, len(want), maxGuestShown)
+	case !cut && text != want:
+		t.Fatalf("%q shows %q, want %q", got, text, want)
+	case cut && !strings.HasPrefix(want, text):
+		t.Fatalf("%q shows %q, not a prefix of %q", got, text, want)
+	case cut && (len(text) > maxGuestShown || len(text) <= maxGuestShown-utf8.UTFMax):
+		t.Fatalf("%q: cut to %d bytes, want within a character of %d", got, len(text), maxGuestShown)
+	case cut && utf8.ValidString(want) && !utf8.RuneStart(want[len(text)]):
+		t.Fatalf("%q: cut inside a character", got)
 	}
 }
 
-// The tail of a script's output is its last n non-blank lines, trimmed, on
-// one line; none for n <= 0.
-func TestPropLastLines(t *testing.T) {
-	for _, s := range []string{"", "\n", " \n \n", "a", "a\n", "\na\n\nb\n\n", "a\r\nb\r\n", " a \n b ", "a\n\n\n\nb\nc\nd\ne\nf\ng", "a\rb", "a\r\rb\r"} {
+// The tail of a guest's output is its last n non-blank lines, trimmed, on
+// one line, quoted and bounded.
+func TestPropGuestTail(t *testing.T) {
+	for _, s := range []string{"", "\n", " \n \n", "a", "a\n", "\na\n\nb\n\n", "a\r\nb\r\n", " a \n b ", "a\n\n\n\nb\nc\nd\ne\nf\ng", "a\rb", "a\r\rb\r",
+		"\x00\x1b[2J", strings.Repeat("é", maxGuestShown), "a" + strings.Repeat("é", maxGuestShown), "a" + strings.Repeat("\x80", 2*maxGuestShown), strings.Repeat("x", 3*maxGuestShown)} {
 		for n := -2; n < 8; n++ {
-			checkLastLines(t, s, n)
+			checkShown(t, guestTail(s, n), tailLines(s, n))
 		}
 	}
-	pieces := rapid.SampledFrom([]string{"a", "b c", "  ", "\t", "x/y", "\r", "line one", "-"})
+	pieces := rapid.SampledFrom([]string{"a", "b c", "  ", "\t", "x/y", "\r", "line one", "-", "\x00", "\x1b", "\xff", "\x80", "\u0085", "é", "\u202e", `"`,
+		strings.Repeat("A", maxGuestShown/3)})
 	rapid.Check(t, func(t *rapid.T) {
 		parts := rapid.SliceOfN(pieces, 0, 14).Draw(t, "parts")
 		seps := rapid.SampledFrom([]string{"\n", "\n", "\r\n", "\n\n", "\n \n", ""})
@@ -57,7 +80,8 @@ func TestPropLastLines(t *testing.T) {
 			b.WriteString(p)
 			b.WriteString(seps.Draw(t, "sep"))
 		}
-		checkLastLines(t, b.String(), rapid.IntRange(-2, 7).Draw(t, "n"))
+		s, n := b.String(), rapid.IntRange(-2, 7).Draw(t, "n")
+		checkShown(t, guestTail(s, n), tailLines(s, n))
 	})
 }
 
@@ -161,4 +185,61 @@ func TestPropVerifyGuest(t *testing.T) {
 		}
 		check(t, nics, rapid.SampledFrom(hostnames).Draw(t, "hostname"))
 	})
+}
+
+// The step fails with the ImageState as guestText shows it, unless setup finished.
+func TestPropUnfinishedSetupStateIsShown(t *testing.T) {
+	pieces := rapid.SampledFrom([]string{"IMAGE_STATE_UNDEPLOYABLE", "\r\n", "\n", " ", "\ufeff", "<b>x</b>", "\x00", "\xff", "\x80", "é", "IMAGE_STATE_COMPLETE",
+		strings.Repeat("A", maxGuestShown/2), strings.Repeat("line\n", 50)})
+	rapid.Check(t, func(rt *rapid.T) {
+		var b strings.Builder
+		for _, p := range rapid.SliceOfN(pieces, 1, 8).Draw(rt, "pieces") {
+			b.WriteString(p)
+		}
+		out := b.String()
+		f := guestFake(t)
+		f.Guests[2101].SetupPending = 1 << 20
+		f.Guests[2101].SetupOut = out
+		f.ExecHook = applied(f, "")
+		res := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{guestItem(pods.ImageWindows)}})
+		err := res.Failed["oak.kilo.alpha"]
+		if pods.SetupComplete(out) {
+			if err != nil {
+				rt.Fatalf("setup state %q failed the step: %v", out, err)
+			}
+			return
+		}
+		if err == nil {
+			rt.Fatalf("setup state %q never finishing didn't fail the step", out)
+		}
+		_, shown, ok := strings.Cut(err.Error(), "(its ImageState is ")
+		shown, ok2 := strings.CutSuffix(shown, ")")
+		if !ok || !ok2 {
+			rt.Fatalf("setup state %q: error %q doesn't show it", out, err)
+		}
+		checkShown(rt, shown, pods.SetupState(out))
+	})
+}
+
+// A failed verification shows what the guest reported as guestText does,
+// however long its host name and address list.
+func TestVerifyShowsGuestReportCapped(t *testing.T) {
+	f := guestFake(t)
+	var ips []string
+	for i := range 4000 {
+		ips = append(ips, fmt.Sprintf("10.%d.%d.1/24", i/256, i%256))
+	}
+	f.Guests[2101].Hostname = strings.Repeat("h\x00", 2000)
+	f.Guests[2101].NICs = []proxmox.GuestNIC{{Name: "eth0", MAC: "bc:24:11:00:21:01", IPs: podstest.IPs(ips...)}}
+	it := guestItem(pods.ImageLinux)
+	it.Steps = []pods.Step{pods.StepVerify}
+	err := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{it}}).Failed["oak.kilo.alpha"]
+	if err == nil {
+		t.Fatal("verification passed")
+	}
+	_, saw, _ := strings.Cut(err.Error(), "the guest reports host name ")
+	host, rest, _ := strings.Cut(saw, " with ")
+	addrs, _, _ := strings.Cut(rest, "; expected")
+	checkShown(t, host, strings.Repeat("h\x00", 2000))
+	checkShown(t, addrs, strings.Join(ips, ", "))
 }
