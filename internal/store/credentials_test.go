@@ -14,7 +14,7 @@ import (
 // ticketCred is what a caller hands CreateJob: already sealed for the job.
 func ticketCred(issued time.Time) func(int64) (store.JobCredential, error) {
 	return func(id int64) (store.JobCredential, error) {
-		return store.JobCredential{Kind: store.CredentialTicket, User: "jdoe@auth.example.org",
+		return store.JobCredential{User: "jdoe@auth.example.org",
 			Sealed: "v1:sealed-for-" + itoa(id), IssuedAt: issued, LoginAt: issued.Add(-time.Hour), RenewAfter: issued.Add(time.Hour)}, nil
 	}
 }
@@ -52,7 +52,7 @@ func TestCreateJobStoresItsCredentialSealedForItsID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.JobID != id || c.Kind != store.CredentialTicket || c.User != "jdoe@auth.example.org" ||
+	if c.JobID != id || c.User != "jdoe@auth.example.org" ||
 		c.Sealed != "v1:sealed-for-"+itoa(id) || !c.IssuedAt.Equal(t0) || !c.LoginAt.Equal(t0.Add(-time.Hour)) ||
 		!c.RenewAfter.Equal(t0.Add(time.Hour)) {
 		t.Fatalf("credential = %+v", c)
@@ -147,19 +147,12 @@ func TestDueCredentialsListsTicketsToRenew(t *testing.T) {
 	s := storetest.New(t)
 	old := createWithCred(t, s, t0, "team:01")
 	fresh := createWithCred(t, s, t0.Add(30*time.Minute), "team:02")
-	nj := newJob("team:03")
-	nj.Credential = func(int64) (store.JobCredential, error) {
-		return store.JobCredential{Kind: store.CredentialToken, User: "a@b!c", Sealed: "v1:x", IssuedAt: t0, LoginAt: t0}, nil
-	}
-	if _, err := s.CreateJob(ctx, nj); err != nil {
-		t.Fatal(err)
-	}
 	due, err := s.DueCredentials(ctx, t0.Add(time.Hour), 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(due) != 1 || due[0] != old {
-		t.Fatalf("due = %v, want only %d (not %d, not the token)", due, old, fresh)
+		t.Fatalf("due = %v, want only %d (not %d)", due, old, fresh)
 	}
 }
 

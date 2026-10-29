@@ -30,11 +30,8 @@ func (h *harness) submitJob(in jobs.Inputs, by jobs.Submitter) int64 {
 	}
 	if !by.Credential.Usable() {
 		// lena@example.org acts as Proxmox user lena@auth.example.org.
-		name, _, _ := strings.Cut(strings.TrimPrefix(by.User, "cli:"), "@")
+		name, _, _ := strings.Cut(by.User, "@")
 		by.Credential, by.Seal = h.ticket(name), h.creds
-		if strings.HasPrefix(by.User, "cli:") { // their own API token
-			by.Credential = proxmox.TokenCredential(name+"@auth.example.org!cli", "secret")
-		}
 	}
 	id, err := jobs.Submit(context.Background(), h.st, in, plan, by)
 	if err != nil {
@@ -704,12 +701,12 @@ func TestReshownRetryPreviewKeepsItsJob(t *testing.T) {
 	}
 }
 
-// The job list marks CLI jobs and each web job's role; a stale or failed
-// job's page links to its filled-in form.
-func TestJobsShowOriginAndStartAgain(t *testing.T) {
+// The job list shows who each job acts as; a stale or failed job's page links
+// to its filled-in form.
+func TestJobsShowActsAsAndStartAgain(t *testing.T) {
 	h := newHarness(t)
 	h.poll()
-	cli := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "2", Action: "stop"}, jobs.Submitter{User: "cli:alice"})
+	pending := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "2", Action: "stop"}, byLead)
 	stale := h.submitJob(jobs.Inputs{Kind: pods.KindReset, Teams: "1", Hosts: []string{"dc"}, Snapshot: "initial"}, byOperator)
 	h.start(stale)
 	h.finish(stale, store.Outcome{Status: store.StatusStale, Error: "the cluster changed since the preview"})
@@ -723,7 +720,6 @@ func TestJobsShowOriginAndStartAgain(t *testing.T) {
 
 	body := h.get(&op, "/logs").Body.String()
 	contains(t, "job list", body,
-		`<span class="j-by" title="cli:alice">cli:alice <span class="role">alice@auth.example.org!cli</span></span>`,
 		`<span class="j-by" title="olive@example.org">olive <span class="role">olive@auth.example.org</span></span>`,
 		`<span class="j-by" title="lena@example.org">lena <span class="role">lena@auth.example.org</span></span>`,
 		// A stale job ran nothing, and says so.
@@ -738,7 +734,7 @@ func TestJobsShowOriginAndStartAgain(t *testing.T) {
 	contains(t, "failed job", body, `<a class="btn pri" href="/power?action=reboot&amp;teams=3" data-panel-link>`, "Preview again</a>")
 	body = h.get(&op, "/logs/"+itoa(done)).Body.String()
 	lacks(t, "succeeded job", body, "Preview again</a>")
-	body = h.get(&op, "/logs/"+itoa(cli)).Body.String()
+	body = h.get(&op, "/logs/"+itoa(pending)).Body.String()
 	lacks(t, "pending job", body, "Preview again</a>")
 
 	// Only for an operation the user may start.

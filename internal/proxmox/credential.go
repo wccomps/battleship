@@ -19,11 +19,10 @@ const TicketLifetime = 2 * time.Hour
 // a client with no credential.
 var ErrNoCredential = errors.New("no Proxmox credential: every call must be made as a person (Client.As)")
 
-// Credential is a person's login ticket (with CSRF token) or API token.
-// Its String and GoString never show secrets.
+// Credential is a person's login ticket, with its CSRF token. Its String and
+// GoString never show secrets.
 type Credential struct {
-	// User is the Proxmox user, e.g. jdoe@auth.example.org; for a token,
-	// the token ID, e.g. jdoe@auth.example.org!cli.
+	// User is the Proxmox user, e.g. jdoe@auth.example.org.
 	User   string
 	Ticket string
 	CSRF   string
@@ -32,8 +31,7 @@ type Credential struct {
 	Issued time.Time
 	// LoginAt is when the login ran; renewals keep it. Renewal skips the IdP,
 	// so proxmox.ticket_max_age caps renewals after it.
-	LoginAt     time.Time
-	TokenSecret string
+	LoginAt time.Time
 }
 
 // TicketCredential is a login ticket of user.
@@ -41,33 +39,20 @@ func TicketCredential(user, ticket, csrf string, issued time.Time) Credential {
 	return Credential{User: user, Ticket: ticket, CSRF: csrf, Issued: issued}
 }
 
-// TokenCredential is an API token: id is user@realm!name.
-func TokenCredential(id, secret string) Credential {
-	return Credential{User: id, TokenSecret: secret}
-}
+// Usable reports whether c holds a user and a ticket.
+func (c Credential) Usable() bool { return c.User != "" && c.Ticket != "" }
 
-// IsToken reports whether c is an API token rather than a ticket.
-func (c Credential) IsToken() bool { return c.TokenSecret != "" }
-
-// Usable reports whether c holds a ticket or a token secret, and a user.
-func (c Credential) Usable() bool { return c.User != "" && (c.Ticket != "" || c.TokenSecret != "") }
-
-// Expired reports whether a ticket is past TicketLifetime. Proxmox enforces
-// token expiry.
+// Expired reports whether the ticket is past TicketLifetime.
 func (c Credential) Expired(now time.Time) bool {
-	return !c.IsToken() && !now.Before(c.Issued.Add(TicketLifetime))
+	return !now.Before(c.Issued.Add(TicketLifetime))
 }
 
-// Lapsed reports whether a ticket expired or its login is maxAge old.
-// Tokens never lapse here.
+// Lapsed reports whether the ticket expired or its login is maxAge old.
 func (c Credential) Lapsed(now time.Time, maxAge time.Duration) bool {
-	return !c.IsToken() && (c.Expired(now) || !now.Before(c.LoginAt.Add(maxAge)))
+	return c.Expired(now) || !now.Before(c.LoginAt.Add(maxAge))
 }
 
 func (c Credential) String() string {
-	if c.IsToken() {
-		return fmt.Sprintf("{token %s [redacted]}", c.User)
-	}
 	return fmt.Sprintf("{ticket %s issued %s [redacted]}", c.User, c.Issued.UTC().Format(time.RFC3339))
 }
 
@@ -84,12 +69,8 @@ func (c Credential) Format(f fmt.State, verb rune) {
 }
 
 // authorize sets the request's credential headers. A write (anything but
-// GET) with a ticket also needs the CSRF token.
+// GET) also needs the CSRF token.
 func (c Credential) authorize(req *http.Request) {
-	if c.IsToken() {
-		req.Header.Set("Authorization", "PVEAPIToken="+c.User+"="+c.TokenSecret)
-		return
-	}
 	req.AddCookie(&http.Cookie{Name: "PVEAuthCookie", Value: url.QueryEscape(c.Ticket)})
 	if req.Method != http.MethodGet {
 		req.Header.Set("CSRFPreventionToken", c.CSRF)
@@ -113,9 +94,6 @@ func (a ticketAnswer) credential(what string, asked time.Time) (Credential, erro
 // RenewTicket exchanges a valid ticket for a fresh one with the same LoginAt;
 // Proxmox accepts the current ticket as the password.
 func (c *Client) RenewTicket(ctx context.Context, cred Credential, now time.Time) (Credential, error) {
-	if cred.IsToken() {
-		return Credential{}, errors.New("an API token is not renewed")
-	}
 	if !cred.Usable() {
 		return Credential{}, ErrNoCredential
 	}

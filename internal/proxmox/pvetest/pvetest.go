@@ -168,14 +168,10 @@ func (s *Server) Counts() (logins, renews, perms int) {
 	return s.logins, s.renews, s.perms
 }
 
-// Accepts reports whether Proxmox would take cred now. Tokens are always
-// taken.
+// Accepts reports whether Proxmox would take cred now.
 func (s *Server) Accepts(cred proxmox.Credential) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if cred.IsToken() {
-		return true
-	}
 	_, ok := s.valid(cred.Ticket)
 	return ok
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -28,8 +29,8 @@ type fakePVE struct {
 func newFake(t *testing.T) (*fakePVE, *Client) {
 	f := &fakePVE{t: t, routes: map[string]func(http.ResponseWriter, *http.Request){}, bodies: map[string]string{}}
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "PVEAPIToken=battleship@pve!app=secret" {
-			t.Errorf("Authorization = %q", got)
+		if c, err := r.Cookie("PVEAuthCookie"); err != nil || c.Value != url.QueryEscape(testTicket.Ticket) {
+			t.Errorf("PVEAuthCookie = %v, %v", c, err)
 		}
 		key := r.Method + " " + strings.TrimPrefix(r.URL.Path, "/api2/json")
 		f.mu.Lock()
@@ -51,7 +52,7 @@ func newFake(t *testing.T) (*fakePVE, *Client) {
 		h(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	c := New(Options{URLs: []string{srv.URL}, InsecureSkipVerify: true}).As(TokenCredential("battleship@pve!app", "secret"))
+	c := New(Options{URLs: []string{srv.URL}, InsecureSkipVerify: true}).As(testTicket)
 	return f, c
 }
 
@@ -520,12 +521,12 @@ func TestClientVerifiesWithRootCAs(t *testing.T) {
 	pool := x509.NewCertPool()
 	pool.AddCert(srv.Certificate())
 
-	c := New(Options{URLs: []string{srv.URL}, RootCAs: pool}).As(TokenCredential("battleship@pve!app", "secret"))
+	c := New(Options{URLs: []string{srv.URL}, RootCAs: pool}).As(testTicket)
 	if _, err := c.ClusterVMs(context.Background()); err != nil {
 		t.Errorf("with the server's CA: %v", err)
 	}
 	// Without it, the certificate is refused.
-	c = New(Options{URLs: []string{srv.URL}}).As(TokenCredential("battleship@pve!app", "secret"))
+	c = New(Options{URLs: []string{srv.URL}}).As(testTicket)
 	var unknown x509.UnknownAuthorityError
 	if _, err := c.ClusterVMs(context.Background()); !errors.As(err, &unknown) {
 		t.Errorf("without the CA: %v, want an unknown-authority error", err)

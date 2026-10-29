@@ -36,7 +36,7 @@ type Job struct {
 	Status          string
 	CreatedBy       string
 	CreatedRole     string // the creator's battleship role, for jobs from before roles were removed
-	CreatedAs       string // the Proxmox user (or API token) the job acts as
+	CreatedAs       string // the Proxmox user the job acts as
 	CreatedAt       time.Time
 	StartedAt       *time.Time
 	FinishedAt      *time.Time
@@ -63,7 +63,7 @@ type NewJob struct {
 	Fingerprint string
 	LockKeys    []string // what it changes, and "read:"+K for what it only reads (see blocksSQL)
 	CreatedBy   string
-	CreatedAs   string // the Proxmox user (or API token ID) it acts as
+	CreatedAs   string // the Proxmox user it acts as
 	Items       []NewItem
 	// Preview, if set, is the web preview this job submits; CreateJob fails
 	// (ErrPreview*) unless it exists, is unexpired and unused.

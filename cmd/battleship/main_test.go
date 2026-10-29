@@ -112,7 +112,7 @@ func TestProxmoxCAFileVerifiesTheCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newCluster(cfg.Proxmox, nil).Bind(func() proxmox.Credential { return proxmox.TokenCredential("u@pve!t", "s") }, nil).ClusterVMs(context.Background()); err != nil {
+	if _, err := newCluster(cfg.Proxmox, nil).Bind(func() proxmox.Credential { return proxmox.TicketCredential("u@pve", "PVE:u", "csrf", time.Now()) }, nil).ClusterVMs(context.Background()); err != nil {
 		t.Errorf("with proxmox.ca_file: %v", err)
 	}
 }

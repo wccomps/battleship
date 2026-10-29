@@ -51,11 +51,8 @@ func NewCredentials(cfg config.Config) (Credentials, error) {
 
 // sealed is what a job credential's box holds.
 type sealed struct {
-	Ticket      string    `json:"t,omitempty"`
-	CSRF        string    `json:"c,omitempty"`
-	TokenSecret string    `json:"s,omitempty"`
-	Issued      time.Time `json:"i"`
-	LoginAt     time.Time `json:"l"`
+	Ticket string `json:"t"`
+	CSRF   string `json:"c"`
 }
 
 func binding(jobID int64) string { return "job:" + strconv.FormatInt(jobID, 10) }
@@ -63,29 +60,20 @@ func binding(jobID int64) string { return "job:" + strconv.FormatInt(jobID, 10) 
 // Seal returns a store.NewJob.Credential that seals cred for the job ID.
 func (c Credentials) Seal(cred proxmox.Credential) func(jobID int64) (store.JobCredential, error) {
 	return func(jobID int64) (store.JobCredential, error) {
-		return c.row(jobID, cred, time.Now())
+		return c.row(jobID, cred)
 	}
 }
 
-func (c Credentials) row(jobID int64, cred proxmox.Credential, now time.Time) (store.JobCredential, error) {
+func (c Credentials) row(jobID int64, cred proxmox.Credential) (store.JobCredential, error) {
 	if !cred.Usable() {
 		return store.JobCredential{}, ErrNoCredential
 	}
-	plain, err := json.Marshal(sealed{Ticket: cred.Ticket, CSRF: cred.CSRF, TokenSecret: cred.TokenSecret, Issued: cred.Issued, LoginAt: cred.LoginAt})
+	plain, err := json.Marshal(sealed{Ticket: cred.Ticket, CSRF: cred.CSRF})
 	if err != nil {
 		return store.JobCredential{}, err
 	}
-	jc := store.JobCredential{JobID: jobID, Kind: store.CredentialTicket, User: cred.User,
-		Sealed: c.key.Seal(binding(jobID), plain), IssuedAt: cred.Issued, LoginAt: cred.LoginAt}
-	if cred.IsToken() {
-		jc.Kind, jc.IssuedAt, jc.LoginAt = store.CredentialToken, now, now
-	} else {
-		if jc.LoginAt.IsZero() {
-			jc.LoginAt = jc.IssuedAt
-		}
-		jc.RenewAfter = cred.Issued.Add(c.renewAfter)
-	}
-	return jc, nil
+	return store.JobCredential{JobID: jobID, User: cred.User, Sealed: c.key.Seal(binding(jobID), plain),
+		IssuedAt: cred.Issued, LoginAt: cred.LoginAt, RenewAfter: cred.Issued.Add(c.renewAfter)}, nil
 }
 
 // errSealKey means this process's seal key differs from the sealing one; it
@@ -102,19 +90,16 @@ func (c Credentials) Open(jc store.JobCredential) (proxmox.Credential, error) {
 	if err := json.Unmarshal(plain, &s); err != nil {
 		return proxmox.Credential{}, fmt.Errorf("job %d's credential: %w", jc.JobID, err)
 	}
-	if jc.Kind == store.CredentialToken {
-		return proxmox.TokenCredential(jc.User, s.TokenSecret), nil
-	}
-	cred := proxmox.TicketCredential(jc.User, s.Ticket, s.CSRF, s.Issued)
-	cred.LoginAt = s.LoginAt
+	cred := proxmox.TicketCredential(jc.User, s.Ticket, s.CSRF, jc.IssuedAt)
+	cred.LoginAt = jc.LoginAt
 	return cred, nil
 }
 
 // RowLapsed is proxmox.Credential.Lapsed from the row's columns, without
 // opening it, so a wrong seal key can't make a credential look lapsed.
 func (c Credentials) RowLapsed(jc store.JobCredential, now time.Time) bool {
-	view := proxmox.Credential{Issued: jc.IssuedAt, LoginAt: jc.LoginAt} // a ticket: no token secret
-	return jc.Kind == store.CredentialTicket && view.Lapsed(now, c.maxAge)
+	view := proxmox.Credential{Issued: jc.IssuedAt, LoginAt: jc.LoginAt}
+	return view.Lapsed(now, c.maxAge)
 }
 
 // OpenCredentials is NewCredentials plus CheckKey.
@@ -245,7 +230,7 @@ func (r *Renewer) renew(ctx context.Context, cur store.JobCredential, now time.T
 	case err != nil:
 		return cur, store.RenewalFailed, err
 	}
-	row, err := r.Credentials.row(cur.JobID, next, now)
+	row, err := r.Credentials.row(cur.JobID, next)
 	if err != nil {
 		return cur, store.RenewalFailed, err
 	}
