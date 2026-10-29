@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -73,7 +75,7 @@ func (e *Executor) waitGuest(ctx context.Context, it *pods.Item, setup bool) err
 	}
 	if err == nil {
 		return fmt.Errorf("Windows didn't finish first-boot setup within %s (its ImageState is %s)",
-			e.Cfg.Environments.AgentTimeout, strings.TrimSpace(state))
+			e.Cfg.Environments.AgentTimeout, guestText(pods.SetupState(state)))
 	}
 	return fmt.Errorf("the guest agent didn't answer within %s (is qemu-guest-agent installed and running in the image?): %s",
 		e.Cfg.Environments.AgentTimeout, proxmox.Describe(err))
@@ -96,7 +98,7 @@ func (e *Executor) setupState(ctx context.Context, it *pods.Item, waited *time.D
 		}
 		if st.Exited {
 			if st.ExitCode != 0 {
-				return "", fmt.Errorf("reading the setup state exited %d: %s", st.ExitCode, lastLines(st.Err+"\n"+st.Out, 3))
+				return "", fmt.Errorf("reading the setup state exited %d: %s", st.ExitCode, guestTail(st.Err+"\n"+st.Out, 3))
 			}
 			return st.Out, nil
 		}
@@ -218,7 +220,7 @@ func (e *Executor) exec(ctx context.Context, it *pods.Item, cmd []string, input 
 		}
 		if st.Exited {
 			if st.ExitCode != 0 {
-				return st.Out, fmt.Errorf("the setup script exited %d: %s", st.ExitCode, lastLines(st.Err+"\n"+st.Out, 5))
+				return st.Out, fmt.Errorf("the setup script exited %d: %s", st.ExitCode, guestTail(st.Err+"\n"+st.Out, 5))
 			}
 			return st.Out, nil
 		}
@@ -229,17 +231,33 @@ func (e *Executor) exec(ctx context.Context, it *pods.Item, cmd []string, input 
 	return "", fmt.Errorf("the setup script was still running after %s", execLimit)
 }
 
-// lastLines is the last n non-blank lines of s, each trimmed, joined with
-// " / ". A line ends at \n or \r (Windows ends lines with \r\n, and progress
-// output rewrites one with a bare \r).
-func lastLines(s string, n int) string {
+// maxGuestShown bounds the bytes of guest output an error quotes, before quoting.
+const maxGuestShown = 1 << 10
+
+// guestTail is guestText of the last n non-blank lines of s, each trimmed,
+// joined with " / ". A line ends at \n or \r (Windows ends lines with \r\n,
+// and progress output rewrites one with a bare \r).
+func guestTail(s string, n int) string {
 	lines := strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == '\r' })
 	for i, l := range lines {
 		lines[i] = strings.TrimSpace(l)
 	}
 	lines = slices.DeleteFunc(lines, func(l string) bool { return l == "" })
 	n = min(max(n, 0), len(lines))
-	return strings.Join(lines[len(lines)-n:], " / ")
+	return guestText(strings.Join(lines[len(lines)-n:], " / "))
+}
+
+// guestText is t, text the guest chose, quoted so it reads apart from ours
+// and stays on one line; past maxGuestShown bytes it is cut, marked "…".
+func guestText(t string) string {
+	if len(t) <= maxGuestShown {
+		return strconv.Quote(t)
+	}
+	cut := maxGuestShown
+	for cut > maxGuestShown-utf8.UTFMax+1 && !utf8.RuneStart(t[cut]) {
+		cut--
+	}
+	return strconv.Quote(t[:cut]) + "…"
 }
 
 // addrList is ips, each written "address/prefix", or as its bare address
@@ -283,7 +301,10 @@ func (e *Executor) verifyGuest(ctx context.Context, it *pods.Item) (bool, error)
 			if slices.Contains(ips, want) && strings.EqualFold(short, it.Guest.Hostname) {
 				return false, nil
 			}
-			saw = fmt.Sprintf("host name %q with %s", host, addrList(ips))
+			saw = "host name " + guestText(host) + " with no address"
+			if len(ips) > 0 {
+				saw = "host name " + guestText(host) + " with " + guestText(addrList(ips))
+			}
 		} else {
 			if ctx.Err() != nil {
 				return false, ctx.Err()

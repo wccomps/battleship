@@ -49,12 +49,17 @@ func NeedsReboot(out string) bool { return strings.Contains(out, RebootMarker) }
 var SetupStateCommand = []string{"powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
 	`(Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\State' -Name ImageState -ErrorAction SilentlyContinue).ImageState`}
 
+// SetupState is the ImageState in out, SetupStateCommand's output,
+// without the blank space and byte order marks around it.
+func SetupState(out string) string {
+	return strings.TrimFunc(out, func(r rune) bool { return unicode.IsSpace(r) || r == '\ufeff' })
+}
+
 // SetupComplete reports whether out, SetupStateCommand's output, says
 // first-boot setup has finished: IMAGE_STATE_COMPLETE, or nothing, from a
-// Windows that records no state. Blank space and byte order marks around
-// it don't count.
+// Windows that records no state.
 func SetupComplete(out string) bool {
-	s := strings.TrimFunc(out, func(r rune) bool { return unicode.IsSpace(r) || r == '\ufeff' })
+	s := SetupState(out)
 	return s == "" || strings.EqualFold(s, "IMAGE_STATE_COMPLETE")
 }
 

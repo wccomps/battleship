@@ -102,13 +102,17 @@ func (s *Store) Finish(ctx context.Context, jobID int64, worker string, o Outcom
 	if !JobStatus(o.Status).Final() {
 		return fmt.Errorf("finish job %d: %q is not a final status", jobID, o.Status)
 	}
+	summary, err := storableJSON(o.Summary)
+	if err != nil {
+		return fmt.Errorf("finish job %d: summary: %w", jobID, err)
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	tag, err := tx.Exec(ctx, `UPDATE jobs SET status = $3, finished_at = now(), summary = $4, error = $5
-		WHERE id = $1 AND claimed_by = $2 AND status = 'running'`, jobID, worker, o.Status, o.Summary, o.Error)
+		WHERE id = $1 AND claimed_by = $2 AND status = 'running'`, jobID, worker, o.Status, summary, storable(o.Error))
 	if err != nil {
 		return err
 	}
@@ -117,7 +121,7 @@ func (s *Store) Finish(ctx context.Context, jobID int64, worker string, o Outcom
 	}
 	for name, it := range o.Items {
 		if _, err := tx.Exec(ctx, `UPDATE job_items SET status = $3, error = $4, left_config = $5
-			WHERE job_id = $1 AND name = $2 AND status NOT IN `+keptOnOutcomeSQL, jobID, name, it.Status, it.Error, it.LeftConfig); err != nil {
+			WHERE job_id = $1 AND name = $2 AND status NOT IN `+keptOnOutcomeSQL, jobID, name, it.Status, storable(it.Error), it.LeftConfig); err != nil {
 			return err
 		}
 	}
