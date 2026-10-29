@@ -389,8 +389,8 @@ func (in Inputs) checkText() error {
 	return errors.Join(errs...)
 }
 
-// BuildPlan plans the inputs against the cluster. With p.Access it blocks
-// what the user lacks privileges for, so preview and job plan agree.
+// BuildPlan plans the inputs against the cluster, blocking what the user
+// lacks privileges for, so preview and job plan agree.
 func BuildPlan(ctx context.Context, p pods.Planner, in Inputs) (*pods.Plan, error) {
 	if err := in.Validate(); err != nil {
 		return nil, err
@@ -407,10 +407,8 @@ func BuildPlan(ctx context.Context, p pods.Planner, in Inputs) (*pods.Plan, erro
 		return nil, err
 	}
 	keepVMs(plan, in.VMs)
-	if p.Access != nil {
-		if err := pods.BlockUnpermitted(ctx, plan, p.Access, p.Cfg); err != nil {
-			return nil, err
-		}
+	if err := pods.BlockUnpermitted(ctx, plan, p.Access, p.Cfg); err != nil {
+		return nil, err
 	}
 	return plan, nil
 }

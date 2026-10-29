@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/wccomps/battleship/internal/jobs"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/proxmox/pvetest"
 )
@@ -211,7 +212,7 @@ func TestDeployPreviewRespectsUserTagAccess(t *testing.T) {
 	user := "test-lead@" + pvetest.Realm
 	h.pve.SetTagAccess(proxmox.TagAccess{Mode: "existing", Allowed: []string{"prod"}})
 	h.pve.Revoke(user, "/")
-	h.pve.Grant(user, "/", slices.DeleteFunc(slices.Clone(allPrivileges), func(p string) bool { return p == "Sys.Modify" })...)
+	h.pve.Grant(user, "/", slices.DeleteFunc(slices.Clone(podstest.AllPrivileges), func(p string) bool { return p == "Sys.Modify" })...)
 	body := h.post(&lead, "/deploy/preview", url.Values{"teams": {"9"}, "hosts": {"dc"}, "pattern": {"*.kilo.alpha"}}).Body.String()
 	contains(t, "deploy blocked by tag access", body, `you don&#39;t have <span class="name">Sys.Modify</span> on /`)
 	lacks(t, "deploy blocked by tag access", body, `name="nonce"`)

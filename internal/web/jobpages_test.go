@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1101,5 +1102,31 @@ func TestInterruptedJobCanBeStartedAgain(t *testing.T) {
 	page := h.get(&op, logHref(id)).Body.String()
 	if !strings.Contains(page, `href="/images/delete?image=debian-12-v1"`) || !strings.Contains(page, "Preview again</a>") {
 		t.Errorf("an interrupted image job offers no way to run it again:\n%s", page)
+	}
+}
+
+type failingPerms struct{ pods.API }
+
+func (failingPerms) Permissions(context.Context) (proxmox.Permissions, error) {
+	return nil, errors.New("connection reset")
+}
+
+func (failingPerms) PermissionsAt(context.Context, string) (map[string]bool, error) {
+	return nil, errors.New("connection reset")
+}
+
+// A cancel by someone other than the starter needs their privileges read:
+// when the read fails, the cancel is refused.
+func TestCancelRefusedWhenPrivilegesCantBeRead(t *testing.T) {
+	h := newHarness(t)
+	id := h.submitJob(jobs.Inputs{Kind: pods.KindPower, Teams: "1", Action: "start"}, byOperator)
+	bind := h.srv.as
+	h.srv.as = func(cred proxmox.Credential) pods.API { return failingPerms{bind(cred)} }
+	lead := h.login(asLead)
+	if rec := h.post(&lead, "/logs/"+itoa(id)+"/cancel", url.Values{}); rec.Code != http.StatusForbidden {
+		t.Errorf("lead's cancel with failing privilege reads = %d, want 403", rec.Code)
+	}
+	if j, _ := h.st.Job(context.Background(), id); j.CancelRequested {
+		t.Errorf("after lead's cancel: %+v", j)
 	}
 }

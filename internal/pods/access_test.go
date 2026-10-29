@@ -22,6 +22,8 @@ func (g grants) Privileges(_ context.Context, path string) (map[string]bool, err
 	return out, nil
 }
 
+func (grants) TagAccess(context.Context) (proxmox.TagAccess, error) { return proxmox.TagAccess{}, nil }
+
 func blocked(plan *Plan) map[string]string {
 	out := map[string]string{}
 	for _, it := range plan.Items {

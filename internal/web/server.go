@@ -331,13 +331,8 @@ type accessEntry struct {
 }
 
 // accessFor is the signed-in user's Proxmox privileges, read with their
-// ticket and cached per session for accessTTL; nil if the API can't read
-// privileges (only test fakes).
+// ticket and cached per session for accessTTL.
 func (s *Server) accessFor(ctx context.Context) *pods.UserAccess {
-	r, ok := s.apiFor(ctx).(pods.PermissionReader)
-	if !ok {
-		return nil
-	}
 	id, now := auth.SessionID(ctx), s.now()
 	s.privsMu.Lock()
 	defer s.privsMu.Unlock()
@@ -349,7 +344,7 @@ func (s *Server) accessFor(ctx context.Context) *pods.UserAccess {
 			delete(s.privs, k)
 		}
 	}
-	acc := pods.NewAccess(r)
+	acc := pods.NewAccess(s.apiFor(ctx))
 	s.privs[id] = accessEntry{acc: acc, at: now}
 	return acc
 }
@@ -357,9 +352,7 @@ func (s *Server) accessFor(ctx context.Context) *pods.UserAccess {
 // planner plans as the signed-in user, checking their privileges.
 func (s *Server) planner(ctx context.Context) pods.Planner {
 	p := pods.NewPlanner(s.apiFor(ctx), s.cfg)
-	if acc := s.accessFor(ctx); acc != nil {
-		p.Access = acc
-	}
+	p.Access = s.accessFor(ctx)
 	p.Reserved = func(ctx context.Context) (map[string]bool, error) { return s.st.ReservedKeys(ctx, 0) }
 	return p
 }
