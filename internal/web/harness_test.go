@@ -616,7 +616,7 @@ const (
 )
 
 var personaPrivileges = map[persona][]string{
-	asLead:     allPrivileges,
+	asLead:     podstest.AllPrivileges,
 	asOperator: {"VM.Audit", "VM.PowerMgmt", "VM.Snapshot", "VM.Snapshot.Rollback", "Pool.Audit", "Sys.Audit", "Datastore.Audit"},
 }
 
@@ -624,7 +624,7 @@ var personaPrivileges = map[persona][]string{
 // use with every privilege on /.
 func (h *harness) ticket(subject string) proxmox.Credential {
 	h.t.Helper()
-	return h.ticketWith(subject, allPrivileges)
+	return h.ticketWith(subject, podstest.AllPrivileges)
 }
 
 // ticketWith is ticket for a user created with privs on /.
@@ -639,12 +639,6 @@ func (h *harness) ticketWith(subject string, privs []string) proxmox.Credential 
 	}
 	return h.pve.Ticket(user)
 }
-
-// allPrivileges are the privileges an administrator holds.
-var allPrivileges = []string{"VM.Audit", "VM.PowerMgmt", "VM.Snapshot", "VM.Snapshot.Rollback", "VM.Clone", "VM.Allocate",
-	"VM.Config.Network", "VM.Config.Disk", "VM.Config.Cloudinit", "VM.Config.CDROM", "VM.Config.CPU", "VM.Config.Options", "Datastore.AllocateSpace",
-	"Datastore.Allocate", "Datastore.Audit", "Pool.Audit", "Pool.Allocate", "Sys.Audit", "Sys.Modify", "SDN.Use", "Mapping.Use",
-	"VM.GuestAgent.Audit", "VM.GuestAgent.Unrestricted"}
 
 // loginStudent stores a session for a team 01 member (no role).
 func (h *harness) loginStudent() authtest.Session {

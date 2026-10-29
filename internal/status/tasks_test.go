@@ -38,10 +38,6 @@ func (a *taskAPI) NodeTasks(_ context.Context, node string, since time.Time) ([]
 	return out, nil
 }
 
-func (a *taskAPI) Permissions(context.Context) (proxmox.Permissions, error) {
-	return proxmox.Permissions{}, nil
-}
-
 func (a *taskAPI) PermissionsAt(_ context.Context, path string) (map[string]bool, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

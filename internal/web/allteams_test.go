@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/wccomps/battleship/internal/auth/authtest"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/status"
 )
@@ -166,7 +167,7 @@ func TestColdViewWaitsForFirstPoll(t *testing.T) {
 	h := newHarness(t)
 	h.srv.firstPoll = 5 * time.Second
 	cold := func(subject string) authtest.Session {
-		cred := h.ticketWith(subject, allPrivileges)
+		cred := h.ticketWith(subject, podstest.AllPrivileges)
 		sess := authtest.Login(t, h.st, h.cfg, authtest.User{Subject: subject, Name: subject, At: h.clock.Now(), Proxmox: cred})
 		ctx, cancel := context.WithCancel(context.Background())
 		t.Cleanup(cancel)

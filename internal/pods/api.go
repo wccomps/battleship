@@ -7,7 +7,7 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// API is the subset of *proxmox.Client the planner and executor use.
+// API is the subset of *proxmox.Client battleship uses.
 // Tests substitute an in-memory fake.
 type API interface {
 	Reads
@@ -18,6 +18,7 @@ type API interface {
 // changes: reads, task waits, and StopTask, which only stops a task the run
 // started.
 type Reads interface {
+	PermissionReader
 	ClusterVMs(ctx context.Context) ([]proxmox.VM, error)
 	OnlineNodes(ctx context.Context) ([]string, error)
 	AgentPing(ctx context.Context, node string, vmid int) error
@@ -32,6 +33,7 @@ type Reads interface {
 	VMIDHeld(ctx context.Context, vmid int) (bool, error)
 	WaitTask(ctx context.Context, upid string, poll time.Duration) error
 	StopTask(ctx context.Context, upid string) error
+	NodeTasks(ctx context.Context, node string, since time.Time) ([]proxmox.Task, error)
 }
 
 // Changes are the API calls that change the cluster. A wrapper that must

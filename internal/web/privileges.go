@@ -25,12 +25,9 @@ var gridOps = []pods.Kind{pods.KindPower, pods.KindReset, pods.KindSnapshot}
 func needs(kind string) string { return strings.Join(pods.OfferPrivileges(pods.Kind(kind)), " ") }
 
 // mayAnywhere reports whether the user holds any of privs on any path Proxmox
-// lists for them. Without a privilege reader (test fakes) it says yes.
+// lists for them.
 func (s *Server) mayAnywhere(ctx context.Context, privs ...string) bool {
 	acc := s.accessFor(ctx)
-	if acc == nil {
-		return true
-	}
 	for _, p := range privs {
 		if ok, err := acc.Anywhere(ctx, p); err == nil && ok {
 			return true
@@ -43,9 +40,6 @@ func (s *Server) mayAnywhere(ctx context.Context, privs ...string) bool {
 // listed paths tell (UserAccess.Approx).
 func (s *Server) mayOn(ctx context.Context, vmid int, privs ...string) bool {
 	acc := s.accessFor(ctx)
-	if acc == nil {
-		return true
-	}
 	held, err := acc.Approx(ctx, pods.VMPath(vmid))
 	if err != nil {
 		return false

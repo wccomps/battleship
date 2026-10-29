@@ -22,21 +22,16 @@ import (
 // item fails as not permitted.
 
 // Access is what the planning user may do: their effective privileges at
-// an ACL path, as Proxmox resolves them (inheritance, groups, pools).
+// an ACL path, as Proxmox resolves them (inheritance, groups, pools), and
+// the datacenter's tag-access rules.
 type Access interface {
 	Privileges(ctx context.Context, path string) (map[string]bool, error)
+	TagAccess(ctx context.Context) (proxmox.TagAccess, error)
 }
 
-// PermissionReader reads a caller's privileges from Proxmox;
-// *proxmox.Client is one.
 type PermissionReader interface {
 	Permissions(ctx context.Context) (proxmox.Permissions, error)
 	PermissionsAt(ctx context.Context, path string) (map[string]bool, error)
-}
-
-// tagAccessReader reads datacenter tag-access options; *proxmox.Client and
-// *UserAccess implement it.
-type tagAccessReader interface {
 	TagAccess(ctx context.Context) (proxmox.TagAccess, error)
 }
 
@@ -60,19 +55,13 @@ func NewAccess(r PermissionReader) *UserAccess {
 	return &UserAccess{r: r, at: map[string]map[string]bool{}}
 }
 
-// TagAccess returns the datacenter's user-tag-access rules from Proxmox, or
-// unrestricted TagAccess when the reader doesn't provide them.
 func (a *UserAccess) TagAccess(ctx context.Context) (proxmox.TagAccess, error) {
-	tr, ok := a.r.(tagAccessReader)
-	if !ok {
-		return proxmox.TagAccess{}, nil
-	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.tagsSet || a.tagsErr != nil {
 		return a.tags, a.tagsErr
 	}
-	t, err := tr.TagAccess(ctx)
+	t, err := a.r.TagAccess(ctx)
 	if err != nil {
 		err = fmt.Errorf("reading Proxmox tag access: %w", err)
 		if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
@@ -401,6 +390,9 @@ func missing(ctx context.Context, acc Access, ns []need) (string, error) {
 }
 
 func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Config) error {
+	if acc == nil {
+		return errors.New("planning without the user's privileges")
+	}
 	templates := map[string]*TemplateSpec{}
 	unpermitted := map[string]bool{} // templates blocked here
 	for i := range plan.Templates {
@@ -418,16 +410,14 @@ func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Co
 		}
 	}
 	var tags proxmox.TagAccess
-	if tr, ok := acc.(tagAccessReader); ok {
-		for _, it := range plan.Items {
-			if it.Blocked == "" && it.Set != "" && slices.Contains(it.Steps, StepSetTag) {
-				var err error
-				tags, err = tr.TagAccess(ctx)
-				if err != nil {
-					return err
-				}
-				break
+	for _, it := range plan.Items {
+		if it.Blocked == "" && it.Set != "" && slices.Contains(it.Steps, StepSetTag) {
+			var err error
+			tags, err = acc.TagAccess(ctx)
+			if err != nil {
+				return err
 			}
+			break
 		}
 	}
 	for i := range plan.Items {

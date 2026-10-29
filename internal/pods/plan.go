@@ -426,8 +426,8 @@ type Planner struct {
 	API    Reads
 	Cfg    config.Config
 	Naming Naming
-	// Access, if set, is the planning user's privileges: jobs.BuildPlan
-	// blocks what they lack (BlockUnpermitted).
+	// Access is the planning user's privileges; required (BlockUnpermitted
+	// refuses nil).
 	Access Access
 	// Reserved, if set, returns the lock keys other pending or running jobs
 	// write ("vmid:8012", "slot:05"): VMIDs and slots they will create but may
@@ -435,14 +435,10 @@ type Planner struct {
 	Reserved func(ctx context.Context) (map[string]bool, error)
 }
 
-// NewPlanner plans with api. If api can read the caller's privileges (a
-// Proxmox client acting as someone), plans are checked against them.
+// NewPlanner plans with api; Access reads the privileges of whoever api acts
+// as.
 func NewPlanner(api Reads, cfg config.Config) Planner {
-	p := Planner{API: api, Cfg: cfg, Naming: NewNaming(cfg.Naming)}
-	if r, ok := api.(PermissionReader); ok {
-		p.Access = NewAccess(r)
-	}
-	return p
+	return Planner{API: api, Cfg: cfg, Naming: NewNaming(cfg.Naming), Access: NewAccess(api)}
 }
 
 type DeployRequest struct {

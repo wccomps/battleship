@@ -14,11 +14,6 @@ import (
 // Sys.Audit on (without it Proxmox lists only the viewer's own tasks) and
 // re-reads the VMs those tasks touched.
 
-// TaskReader lists a node's tasks; *proxmox.Client is one.
-type TaskReader interface {
-	NodeTasks(ctx context.Context, node string, since time.Time) ([]proxmox.Task, error)
-}
-
 // auditRecheck is how long a node's Sys.Audit answer is trusted.
 const auditRecheck = 5 * time.Minute
 
@@ -45,13 +40,8 @@ var vmTasks = map[string]bool{
 }
 
 // touchedByTasks re-reads team VMs touched by tasks on auditable nodes.
-// Failures are only logged; the full scan still finds the changes.
+// Failures are skipped; the full scan still finds the changes.
 func (p *Poller) touchedByTasks(ctx context.Context, teamVMs []pods.NamedVM, offset time.Duration) scanResults {
-	tasks, ok1 := p.api.(TaskReader)
-	perms, ok2 := p.api.(pods.PermissionReader)
-	if !ok1 || !ok2 {
-		return nil
-	}
 	now := p.clock.Now()
 	// Only the VM a cell shows is re-read, as the scan's results are by name.
 	byVMID := map[int]pods.NamedVM{}
@@ -62,14 +52,14 @@ func (p *Poller) touchedByTasks(ctx context.Context, teamVMs []pods.NamedVM, off
 	}
 	touched := map[int]bool{}
 	for node := range nodes {
-		if !p.mayAudit(ctx, perms, node, now) {
+		if !p.mayAudit(ctx, node, now) {
 			continue
 		}
 		since, seen := p.follow.since[node]
 		if !seen {
 			since = now // nothing from before the view started
 		}
-		list, err := tasks.NodeTasks(ctx, node, since)
+		list, err := p.api.NodeTasks(ctx, node, since)
 		if err != nil {
 			p.logf("status: reading the tasks of %s: %v", node, proxmox.Describe(err))
 			continue
@@ -116,11 +106,11 @@ func (p *Poller) touchedByTasks(ctx context.Context, teamVMs []pods.NamedVM, off
 
 // mayAudit reports whether the viewer has Sys.Audit on node, cached for
 // auditRecheck.
-func (p *Poller) mayAudit(ctx context.Context, perms pods.PermissionReader, node string, now time.Time) bool {
+func (p *Poller) mayAudit(ctx context.Context, node string, now time.Time) bool {
 	if a, ok := p.follow.audit[node]; ok && now.Sub(a.at) < auditRecheck {
 		return a.ok
 	}
-	privs, err := perms.PermissionsAt(ctx, "/nodes/"+node)
+	privs, err := p.api.PermissionsAt(ctx, "/nodes/"+node)
 	if err != nil {
 		return false // not remembered: a failed read says nothing about the privilege
 	}

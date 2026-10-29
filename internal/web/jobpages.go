@@ -1091,9 +1091,6 @@ func (s *Server) mayCancel(ctx context.Context, j store.Job, plan pods.Plan, ite
 		return true
 	}
 	acc := s.accessFor(ctx)
-	if acc == nil {
-		return true // a test fake that can't read privileges
-	}
 	kind := pods.Kind(j.Kind)
 	for _, it := range items {
 		if !pods.HoldsOffered(ctx, acc, kind, it.VMID, plan.ItemPool(s.naming, it.Name, it.Team)) {
