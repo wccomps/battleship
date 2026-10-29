@@ -205,10 +205,7 @@ form.rrow:invalid .btn{opacity:.4}
   .grid.cols-l{--cw:38px}
   .grid.cols-xl{--cw:34px}
   .grid.rows-s{--ch:22px}
-  .gscroll.tall{max-height:calc(100dvh - 160px);overflow:auto}
 }
-.tall .hr .gh{position:sticky;top:0;z-index:2;background:var(--sf2)}
-.tall .hr .rh{left:0;z-index:3}
 .all{display:grid;place-items:center;height:22px}
 .all input{width:14px;height:14px;margin:0;accent-color:var(--tx)}
 [data-live=stale] .gscroll{opacity:.5;filter:grayscale(1)}

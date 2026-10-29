@@ -996,8 +996,8 @@ func TestBrowserGridSizes(t *testing.T) {
 			b := newBrowser(t, h, &lead, 1366, c.height, false)
 			b.open("/")
 			b.noSideways(c.name)
-			if c.teams > 36 && !b.is(`document.querySelector(".gscroll").classList.contains("tall")`) {
-				t.Error("a tall grid doesn't scroll by itself")
+			if b.is(`document.querySelector(".gscroll").scrollHeight > document.querySelector(".gscroll").clientHeight`) {
+				t.Error("the grid scrolls vertically inside .gscroll instead of with the page")
 			}
 			b.shot(c.name)
 			b.clean()

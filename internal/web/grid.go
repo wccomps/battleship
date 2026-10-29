@@ -143,14 +143,12 @@ type liveView struct {
 
 // gridView is the live part of the grid page, resent whenever the grid changes.
 type gridView struct {
-	Live   liveView
-	Counts []stateCount
-	Hosts  []string
-	Rows   []rowView
-	Stale  bool
-	// GridClass and Tall size the grid from its counts (see app.css).
+	Live      liveView
+	Counts    []stateCount
+	Hosts     []string
+	Rows      []rowView
+	Stale     bool
 	GridClass string
-	Tall      bool
 	// Empty means a read found no team VMs: the page shows Start instead of a
 	// grid. Before the first read the grid is unknown, not empty.
 	Empty bool
@@ -175,11 +173,10 @@ func gridClass(hosts, teams int) string {
 	return strings.Join(cls, " ")
 }
 
-// newGridView prepares g for the templates. lacks, if set, says which grid
-// actions' privileges the viewer lacks on a VM.
+// newGridView builds g's view; lacks, if set, lists action privileges the viewer lacks on vmid.
 func (s *Server) newGridView(g status.Grid, now time.Time, lacks func(vmid int) []string) gridView {
 	v := gridView{Hosts: g.Hosts, Stale: g.Stale, Empty: len(g.Rows) == 0 && !g.PolledAt.IsZero(),
-		GridClass: gridClass(len(g.Hosts), len(g.Rows)), Tall: len(g.Rows) > 36}
+		GridClass: gridClass(len(g.Hosts), len(g.Rows))}
 	for i, row := range g.Rows {
 		rv := rowView{Team: row.Team, Grp: i > 0 && i%8 == 0}
 		for _, c := range row.Cells {
@@ -448,11 +445,10 @@ type gridParts struct {
 	pieceSet
 }
 
-// renderParts renders every swappable piece of v.
 func renderParts(v gridView) (gridParts, error) {
 	var p gridParts
 	var shape strings.Builder
-	fmt.Fprintf(&shape, "stale=%v empty=%v class=%q tall=%v hosts=%q teams=", v.Stale, v.Empty, v.GridClass, v.Tall, v.Hosts)
+	fmt.Fprintf(&shape, "stale=%v empty=%v class=%q hosts=%q teams=", v.Stale, v.Empty, v.GridClass, v.Hosts)
 	add := func(id, tmpl string, data any) error {
 		h, err := fragment("grid", tmpl, data)
 		if err != nil {

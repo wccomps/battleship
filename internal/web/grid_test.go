@@ -308,8 +308,6 @@ func TestGridDeployLinkGoneWithColumns(t *testing.T) {
 	lacks(t, "lead's grid", body, `id="grid-start"`, "set-deploy")
 }
 
-// The grid's cells size by its counts: narrower for many hosts, taller
-// for few teams; a little gap every 8 teams; a box of its own past 36.
 func TestGridSizing(t *testing.T) {
 	for _, c := range []struct {
 		hosts, teams int
@@ -333,5 +331,5 @@ func TestGridSizing(t *testing.T) {
 	if n := strings.Count(frag, `<div class="gr grp" role="row">`); n != 4 {
 		t.Errorf("40 teams have %d group gaps, want 4 (before 09, 17, 25 and 33)", n)
 	}
-	contains(t, "tall grid", frag, `<div class="gscroll tall" role="region"`, `<div class="grid" id="grid-table"`)
+	contains(t, "40-team grid", frag, `<div class="gscroll" role="region"`, `<div class="grid" id="grid-table"`)
 }

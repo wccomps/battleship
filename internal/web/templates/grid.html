@@ -48,7 +48,7 @@
 {{template "grid-start" .}}
 {{- end}}
 {{- else}}
-<div class="gscroll{{if .Tall}} tall{{end}}" role="region" aria-label="Pods" tabindex="0">
+<div class="gscroll" role="region" aria-label="Pods" tabindex="0">
 <div class="grid{{with .GridClass}} {{.}}{{end}}" id="grid-table" role="table" aria-label="VMs by pod and host">
 <div class="gr hr" role="row"><div class="gh rh" role="columnheader"><label class="all"><input type="checkbox" data-select="all"><span class="sr">Select all VMs</span></label></div>
 {{- range .Hosts}}<div class="gh" role="columnheader"><a class="hb" href="/?select=host:{{.}}" data-select="host:{{.}}" role="button" aria-pressed="{{$.HostPressed .}}"><span class="sr">Select every </span>{{.}}</a></div>{{end -}}
