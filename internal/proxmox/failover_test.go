@@ -108,7 +108,7 @@ func refusedURL(t *testing.T) string {
 func failoverClient(t *testing.T, urls ...string) (*Client, *logLines) {
 	t.Helper()
 	l := &logLines{}
-	c := New(Options{URLs: urls, InsecureSkipVerify: true, Logf: l.logf}).As(TokenCredential("battleship@pve!app", "secret"))
+	c := New(Options{URLs: urls, InsecureSkipVerify: true, Logf: l.logf}).As(testTicket)
 	c.http.Timeout = 500 * time.Millisecond
 	return c, l
 }
@@ -133,15 +133,15 @@ func (l *logLines) get() []string {
 var cloneReq = CloneRequest{SourceNode: "cedar", SourceVMID: 9005, NewVMID: 10105, Name: "team01-teak", TargetNode: "cedar"}
 
 func TestNewWithOneURLHasOneEndpoint(t *testing.T) {
-	c := New(Options{URLs: []string{"https://192.0.2.123:8006/"}}).As(TokenCredential("battleship@pve!app", "secret"))
+	c := New(Options{URLs: []string{"https://192.0.2.123:8006/"}}).As(testTicket)
 	if got := activeEndpoint(c); got != "192.0.2.123:8006" {
 		t.Errorf("ActiveEndpoint = %q", got)
 	}
-	c = New(Options{URLs: []string{"https://10.1.1.1:8006", "https://10.1.1.2:8006"}}).As(TokenCredential("battleship@pve!app", "secret"))
-	if got := c.Endpoints(); len(got) != 2 || got[0] != "10.1.1.1:8006" || got[1] != "10.1.1.2:8006" {
+	c = New(Options{URLs: []string{"https://198.51.100.1:8006", "https://198.51.100.2:8006"}}).As(testTicket)
+	if got := c.Endpoints(); len(got) != 2 || got[0] != "198.51.100.1:8006" || got[1] != "198.51.100.2:8006" {
 		t.Errorf("Endpoints = %v", got)
 	}
-	if got := activeEndpoint(c); got != "10.1.1.1:8006" {
+	if got := activeEndpoint(c); got != "198.51.100.1:8006" {
 		t.Errorf("ActiveEndpoint = %q, want the first", got)
 	}
 }
@@ -253,7 +253,7 @@ func TestTLSFailureFailsOverWrites(t *testing.T) {
 	b := newNode(t, okNode)
 	pool := x509.NewCertPool()
 	pool.AddCert(b.srv.Certificate())
-	c := New(Options{URLs: []string{bad.URL, b.srv.URL}, RootCAs: pool}).As(TokenCredential("battleship@pve!app", "secret"))
+	c := New(Options{URLs: []string{bad.URL, b.srv.URL}, RootCAs: pool}).As(testTicket)
 
 	if _, err := c.Clone(context.Background(), cloneReq); err != nil {
 		t.Fatalf("Clone: %v", err)
@@ -330,8 +330,8 @@ func TestAllEndpointsFail(t *testing.T) {
 			t.Errorf("error %q doesn't name %s", msg, h)
 		}
 	}
-	if strings.Contains(msg, "secret") || strings.Contains(msg, "PVEAPIToken") {
-		t.Errorf("error leaks the token: %q", msg)
+	if strings.Contains(msg, testTicket.Ticket) || strings.Contains(msg, testTicket.CSRF) {
+		t.Errorf("error leaks the ticket: %q", msg)
 	}
 	if NewClassifier(nil).Classify(err) != Transient {
 		t.Errorf("all-endpoints error is not transient")

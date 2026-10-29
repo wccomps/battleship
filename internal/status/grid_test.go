@@ -146,7 +146,7 @@ func TestGridStates(t *testing.T) {
 			Drift: []Drift{{Kind: DriftPool, Reason: `in pool "pool-01", expected "pool-02"`}}}},
 		{"03", "dc", Cell{Team: "03", Host: "dc", Name: "team03-dc", State: StateDrifted, Power: "running", VMID: 10301, Node: "n1", Pool: "pool-03",
 			Drift: []Drift{{Kind: DriftDuplicate, Reason: "several VMs are named team03-dc (VMIDs 10301, 10399); remove the extras"}}}},
-		// No pool means the token can't read pools: unknown, not drift.
+		// No pool means the caller can't read pools: unknown, not drift.
 		{"03", "web", Cell{Team: "03", Host: "web", Name: "team03-web", State: StateRunning, Power: "running", VMID: 10302, Node: "n1"}},
 	}
 	for _, tt := range tests {

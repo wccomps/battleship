@@ -31,23 +31,16 @@ func TestClearSessionTicketOnlyClearsTheTicketItRead(t *testing.T) {
 	}
 }
 
-// The schema refuses a ticket without a renewal time and a token with one.
-func TestJobCredentialKindMatchesRenewAfter(t *testing.T) {
+func TestJobCredentialNeedsRenewAfter(t *testing.T) {
 	s := storetest.New(t)
 	conn, err := store.Acquire(ctx, s)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Release()
-	for _, tc := range []struct {
-		kind  string
-		renew *time.Time
-	}{{"ticket", nil}, {"token", &t0}} {
-		id := create(t, s, "team:01")
-		_, err := conn.Exec(ctx, `INSERT INTO job_credentials (job_id, kind, pve_user, sealed, issued_at, login_at, renew_after)
-			VALUES ($1, $2, 'u', 'v1:x', $3, $3, $4)`, id, tc.kind, t0, tc.renew)
-		if err == nil {
-			t.Errorf("a %s with renew_after %v was stored", tc.kind, tc.renew)
-		}
+	id := create(t, s, "team:01")
+	if _, err := conn.Exec(ctx, `INSERT INTO job_credentials (job_id, pve_user, sealed, issued_at, login_at, renew_after)
+		VALUES ($1, 'u', 'v1:x', $2, $2, NULL)`, id, t0); err == nil {
+		t.Error("a credential without renew_after was stored")
 	}
 }

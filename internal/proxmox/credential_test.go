@@ -93,26 +93,6 @@ func TestTicketCredentialSendsCookieAndCSRFOnWrites(t *testing.T) {
 	}
 }
 
-func TestTokenCredentialSendsAuthorizationOnly(t *testing.T) {
-	rec := &authRecorder{}
-	n := newNode(t, rec.handler)
-	c := bareClient(t, n.srv.URL).As(TokenCredential("jdoe@auth.example.org!cli", "s3cret"))
-	if _, err := c.ClusterVMs(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := c.Power(context.Background(), "n1", 101, "start"); err != nil {
-		t.Fatal(err)
-	}
-	for _, s := range rec.all() {
-		if s.authorization != "PVEAPIToken=jdoe@auth.example.org!cli=s3cret" {
-			t.Errorf("%s %s sent Authorization %q", s.method, s.path, s.authorization)
-		}
-		if s.cookie != "" || s.csrf != "" {
-			t.Errorf("%s %s sent a cookie %q or CSRF token %q with a token", s.method, s.path, s.cookie, s.csrf)
-		}
-	}
-}
-
 func TestClientWithoutCredentialSendsNothing(t *testing.T) {
 	rec := &authRecorder{}
 	n := newNode(t, rec.handler)
@@ -134,7 +114,7 @@ func TestViewsShareFailover(t *testing.T) {
 	good := newNode(t, rec.handler)
 	base := bareClient(t, refusedURL(t), good.srv.URL)
 	a := base.As(testTicket)
-	b := base.As(TokenCredential("x@pve!t", "s"))
+	b := base.As(TicketCredential("x@pve", "PVE:x", "x-csrf", time.Now()))
 	if _, err := a.ClusterVMs(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -169,16 +149,15 @@ func TestAsSourceReadsTheCredentialPerCall(t *testing.T) {
 }
 
 func TestCredentialStringRedacts(t *testing.T) {
-	for _, c := range []Credential{testTicket, TokenCredential("u@pve!t", "topsecret")} {
-		for _, s := range []string{c.String(), fmt.Sprintf("%v", c), fmt.Sprintf("%+v", c), fmt.Sprintf("%#v", c)} {
-			for _, secret := range []string{c.Ticket, c.CSRF, c.TokenSecret} {
-				if secret != "" && strings.Contains(s, secret) {
-					t.Errorf("%q shows a secret", s)
-				}
+	c := testTicket
+	for _, s := range []string{c.String(), fmt.Sprintf("%v", c), fmt.Sprintf("%+v", c), fmt.Sprintf("%#v", c)} {
+		for _, secret := range []string{c.Ticket, c.CSRF} {
+			if strings.Contains(s, secret) {
+				t.Errorf("%q shows a secret", s)
 			}
-			if !strings.Contains(s, c.User) {
-				t.Errorf("%q doesn't name the user %s", s, c.User)
-			}
+		}
+		if !strings.Contains(s, c.User) {
+			t.Errorf("%q doesn't name the user %s", s, c.User)
 		}
 	}
 }
@@ -191,9 +170,6 @@ func TestCredentialExpiry(t *testing.T) {
 	}
 	if !c.Expired(issued.Add(TicketLifetime)) {
 		t.Error("not expired at the end of its lifetime")
-	}
-	if TokenCredential("u@r!t", "s").Expired(issued.Add(100 * TicketLifetime)) {
-		t.Error("a token expired")
 	}
 }
 
@@ -215,9 +191,6 @@ func TestCredentialLapsed(t *testing.T) {
 		if got := c.Lapsed(tc.at, tc.maxAge); got != tc.want {
 			t.Errorf("Lapsed %s after login, max age %s = %v, want %v", tc.at.Sub(login), tc.maxAge, got, tc.want)
 		}
-	}
-	if TokenCredential("u@r!t", "s").Lapsed(login.Add(100*maxAge), maxAge) {
-		t.Error("a token lapsed")
 	}
 }
 
@@ -285,13 +258,6 @@ func TestRenewRefusedIsLapsed(t *testing.T) {
 	}
 	if NewClassifier(nil).Classify(err) == Transient {
 		t.Fatal("a refused renewal is transient")
-	}
-}
-
-func TestRenewTokenIsAnError(t *testing.T) {
-	_, err := bareClient(t, "https://127.0.0.1:1").RenewTicket(context.Background(), TokenCredential("a@b!c", "d"), time.Now())
-	if err == nil {
-		t.Fatal("renewing a token succeeded")
 	}
 }
 

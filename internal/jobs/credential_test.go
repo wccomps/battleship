@@ -39,49 +39,38 @@ func aliceTicket() proxmox.Credential {
 
 func TestCredentialsSealForOneJob(t *testing.T) {
 	creds := testCreds(t)
-	for _, in := range []proxmox.Credential{aliceTicket(), proxmox.TokenCredential("alice@auth.example.org!cli", "tok-secret")} {
-		kind := store.CredentialTicket
-		if in.IsToken() {
-			kind = store.CredentialToken
+	in := aliceTicket()
+	jc, err := creds.Seal(in)(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jc.JobID = 7
+	for _, secret := range []string{in.Ticket, in.CSRF} {
+		if strings.Contains(jc.Sealed, secret) {
+			t.Fatalf("sealed %q shows a secret", jc.Sealed)
 		}
-		jc, err := creds.Seal(in)(7)
-		if err != nil {
-			t.Fatal(err)
-		}
-		jc.JobID = 7
-		for _, secret := range []string{in.Ticket, in.CSRF, in.TokenSecret} {
-			if secret != "" && strings.Contains(jc.Sealed, secret) {
-				t.Fatalf("sealed %q shows a secret", jc.Sealed)
-			}
-		}
-		if jc.User != in.User || jc.Kind != kind {
-			t.Fatalf("row = %+v", jc)
-		}
-		if in.IsToken() != jc.RenewAfter.IsZero() {
-			t.Fatalf("renew_after = %v for a %s", jc.RenewAfter, kind)
-		}
-		out, err := creds.Open(jc)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if out.Ticket != in.Ticket || out.CSRF != in.CSRF || out.TokenSecret != in.TokenSecret || out.User != in.User {
-			t.Fatalf("opened %v, sealed %v", out, in)
-		}
-		jc.JobID = 8
-		if _, err := creds.Open(jc); err == nil {
-			t.Fatal("a credential sealed for job 7 opened as job 8's")
-		}
+	}
+	if jc.User != in.User || jc.RenewAfter.IsZero() {
+		t.Fatalf("row = %+v", jc)
+	}
+	out, err := creds.Open(jc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Ticket != in.Ticket || out.CSRF != in.CSRF || out.User != in.User {
+		t.Fatalf("opened %v, sealed %v", out, in)
+	}
+	jc.JobID = 8
+	if _, err := creds.Open(jc); err == nil {
+		t.Fatal("a credential sealed for job 7 opened as job 8's")
 	}
 }
 
 func TestRowLapsed(t *testing.T) {
 	creds := testCreds(t)
-	at := time.Now()
-	ticket, err := creds.row(7, aliceTicket(), at)
-	if err != nil {
-		t.Fatal(err)
-	}
-	token, err := creds.row(8, proxmox.TokenCredential("alice@auth.example.org!cli", "tok-secret"), at)
+	in := aliceTicket()
+	at := in.Issued
+	ticket, err := creds.row(7, in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,9 +79,6 @@ func TestRowLapsed(t *testing.T) {
 	}
 	if !creds.RowLapsed(ticket, at.Add(proxmox.TicketLifetime+time.Second)) {
 		t.Error("an expired ticket's row didn't lapse")
-	}
-	if creds.RowLapsed(token, at.Add(100*proxmox.TicketLifetime)) {
-		t.Error("a token's row lapsed")
 	}
 }
 
@@ -206,7 +192,7 @@ func TestRenewerRenewsDueTickets(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := creds.Open(jc)
-	if got.Ticket != cred.Ticket+"+r" || !got.LoginAt.Equal(cred.LoginAt.Truncate(time.Microsecond)) && !got.LoginAt.Equal(cred.LoginAt) {
+	if got.Ticket != cred.Ticket+"+r" || !got.LoginAt.Equal(cred.LoginAt.Truncate(time.Microsecond)) {
 		t.Fatalf("after renewal: %v (login %v, want %v)", got, got.LoginAt, cred.LoginAt)
 	}
 	if !jc.RenewAfter.After(time.Now().Add(50 * time.Minute)) {
@@ -301,17 +287,6 @@ func TestRenewerKeepsTicketsWhenProxmoxIsUnreachable(t *testing.T) {
 	}
 }
 
-func TestRenewerLeavesTokensAlone(t *testing.T) {
-	st := storetest.New(t)
-	creds := testCreds(t)
-	id := storeJobWith(t, st, creds, proxmox.TokenCredential("alice@auth.example.org!cli", "s"))
-	r := &fakeRenewer{valid: map[string]bool{}}
-	newRenewer(st, creds, r, time.Now().Add(100*time.Hour)).RenewDue(bg)
-	if _, err := st.JobCredential(bg, id); err != nil || len(r.calls()) != 0 {
-		t.Fatalf("token: %v, renewals %v", err, r.calls())
-	}
-}
-
 // Open refuses a credential row it can't read, never panicking: junk, or a
 // box sealed for another job.
 func TestPropCredentialOpenRefusesJunk(t *testing.T) {
@@ -323,7 +298,6 @@ func TestPropCredentialOpenRefusesJunk(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		jc := box
 		jc.JobID = rapid.Int64Range(-1, 9).Draw(t, "job")
-		jc.Kind = rapid.SampledFrom([]string{store.CredentialTicket, store.CredentialToken, ""}).Draw(t, "kind")
 		if rapid.Bool().Draw(t, "junk") {
 			jc.Sealed = rapid.SampledFrom([]string{"", "v1:"}).Draw(t, "prefix") + rapid.String().Draw(t, "sealed")
 		} else if jc.JobID == 7 {

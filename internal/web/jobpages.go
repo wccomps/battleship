@@ -1105,8 +1105,8 @@ func notPermitted(kind string) string {
 	return "You don't have " + strings.Join(pods.OfferPrivileges(pods.Kind(kind)), " or ") + " in Proxmox."
 }
 
-// actsAs is who a job acts as: the Proxmox user or token, or the role for
-// jobs from before roles were dropped.
+// actsAs is who a job acts as: the Proxmox user, or the role for jobs from
+// before roles were dropped.
 func actsAs(j store.Job) string {
 	if j.CreatedAs != "" {
 		return j.CreatedAs

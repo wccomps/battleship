@@ -47,7 +47,7 @@ func TestUnfinishedSnapshotIsNoBaseline(t *testing.T) {
 	}
 }
 
-// Proxmox leaves pool out of /cluster/resources when the token can't audit
+// Proxmox leaves pool out of /cluster/resources when the caller can't audit
 // pools, so an empty pool is unknown, not wrong; a different one is drift.
 func TestPoolDriftOnlyWhenKnown(t *testing.T) {
 	h := newHarness(t, nil)

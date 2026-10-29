@@ -9,54 +9,40 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Kinds of job credential.
-const (
-	CredentialTicket = "ticket"
-	CredentialToken  = "token"
-)
-
 // ErrNoCredential means the job ended or the renewer dropped its ticket.
 var ErrNoCredential = errors.New("job has no credential")
 
-// JobCredential is a job's Proxmox credential, sealed by the caller.
+// JobCredential is a job's Proxmox ticket, sealed by the caller.
 type JobCredential struct {
 	JobID    int64
-	Kind     string // CredentialTicket or CredentialToken
-	User     string // the Proxmox user, or the token ID
+	User     string
 	Sealed   string
 	IssuedAt time.Time
-	// LoginAt is the submitter's login time (renewals keep it); for a token,
-	// when it was stored.
-	LoginAt time.Time
-	// RenewAfter is when a ticket is due for renewal; zero for a token.
+	// LoginAt is the submitter's login time; renewals keep it.
+	LoginAt    time.Time
 	RenewAfter time.Time
 }
 
 func (c JobCredential) valid() bool {
-	return (c.Kind == CredentialTicket && !c.RenewAfter.IsZero() || c.Kind == CredentialToken) &&
-		c.User != "" && c.Sealed != "" && !c.IssuedAt.IsZero() && !c.LoginAt.IsZero()
+	return c.User != "" && c.Sealed != "" && !c.IssuedAt.IsZero() && !c.LoginAt.IsZero() && !c.RenewAfter.IsZero()
 }
 
 func insertCredential(ctx context.Context, tx pgx.Tx, c JobCredential) error {
 	if !c.valid() {
 		return fmt.Errorf("job %d: incomplete credential", c.JobID)
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO job_credentials (job_id, kind, pve_user, sealed, issued_at, login_at, renew_after)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`, c.JobID, c.Kind, c.User, c.Sealed, c.IssuedAt, c.LoginAt, nullTime(c.RenewAfter))
+	_, err := tx.Exec(ctx, `INSERT INTO job_credentials (job_id, pve_user, sealed, issued_at, login_at, renew_after)
+		VALUES ($1, $2, $3, $4, $5, $6)`, c.JobID, c.User, c.Sealed, c.IssuedAt, c.LoginAt, c.RenewAfter)
 	return err
 }
 
-const credentialColumns = `job_id, kind, pve_user, sealed, issued_at, login_at, renew_after`
+const credentialColumns = `job_id, pve_user, sealed, issued_at, login_at, renew_after`
 
 func scanCredential(row pgx.Row) (JobCredential, error) {
 	var c JobCredential
-	var renew *time.Time
-	err := row.Scan(&c.JobID, &c.Kind, &c.User, &c.Sealed, &c.IssuedAt, &c.LoginAt, &renew)
+	err := row.Scan(&c.JobID, &c.User, &c.Sealed, &c.IssuedAt, &c.LoginAt, &c.RenewAfter)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return JobCredential{}, ErrNoCredential
-	}
-	if renew != nil {
-		c.RenewAfter = *renew
 	}
 	return c, err
 }
@@ -70,7 +56,7 @@ func (s *Store) JobCredential(ctx context.Context, jobID int64) (JobCredential, 
 // due for renewal at now.
 func (s *Store) DueCredentials(ctx context.Context, now time.Time, limit int) ([]int64, error) {
 	rows, err := s.pool.Query(ctx, `SELECT job_id FROM job_credentials
-		WHERE renew_after IS NOT NULL AND renew_after <= $1 ORDER BY renew_after, job_id LIMIT $2`, now, limit)
+		WHERE renew_after <= $1 ORDER BY renew_after, job_id LIMIT $2`, now, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +103,7 @@ func (s *Store) RenewCredential(ctx context.Context, jobID int64, now time.Time,
 		}
 	}()
 	cur, err := scanCredential(conn.QueryRow(ctx, `SELECT `+credentialColumns+` FROM job_credentials
-		WHERE job_id = $1 AND renew_after IS NOT NULL AND renew_after <= $2`, jobID, now))
+		WHERE job_id = $1 AND renew_after <= $2`, jobID, now))
 	if errors.Is(err, ErrNoCredential) {
 		return false, nil
 	}
@@ -135,7 +121,7 @@ func (s *Store) RenewCredential(ctx context.Context, jobID int64, now time.Time,
 			return true, fmt.Errorf("job %d: renewal returned an incomplete credential", jobID)
 		}
 		_, err = conn.Exec(ctx, `UPDATE job_credentials SET sealed = $2, issued_at = $3, renew_after = $4
-			WHERE job_id = $1 AND issued_at = $5`, jobID, next.Sealed, next.IssuedAt, nullTime(next.RenewAfter), cur.IssuedAt)
+			WHERE job_id = $1 AND issued_at = $5`, jobID, next.Sealed, next.IssuedAt, next.RenewAfter, cur.IssuedAt)
 	case RenewalLapsed:
 		_, err = conn.Exec(ctx, `DELETE FROM job_credentials WHERE job_id = $1 AND issued_at = $2`, jobID, cur.IssuedAt)
 	}

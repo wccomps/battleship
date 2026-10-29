@@ -143,7 +143,7 @@ func TestPropClientSurvivesAnyAnswer(t *testing.T) {
 		fmt.Fprint(w, b)
 	}))
 	t.Cleanup(srv.Close)
-	c := New(Options{URLs: []string{srv.URL}, InsecureSkipVerify: true}).As(TokenCredential("battleship@pve!app", "secret"))
+	c := New(Options{URLs: []string{srv.URL}, InsecureSkipVerify: true}).As(testTicket)
 	calls := map[string]func(ctx context.Context){
 		"ClusterResources": func(ctx context.Context) { c.ClusterResources(ctx) },
 		"ClusterVMs":       func(ctx context.Context) { c.ClusterVMs(ctx) },
