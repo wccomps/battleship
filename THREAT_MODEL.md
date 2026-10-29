@@ -72,9 +72,9 @@ Whoever controls the deployed image or its config controls every signed-in volun
 ## 7. Security-Critical Invariants & Sharp Edges
 
 - **Proxmox RBAC is the only gate**, apart from cancel and preview ownership (§3): `mayAnywhere`, `mayOn`, `lacks` and `mayRun` (`internal/web/privileges.go`) only hide or disable controls, and `pods.BlockUnpermitted` blocks plan items early from a cached copy of the user's permissions. Proxmox refusing the bound ticket is what actually stops an action.
-- **Test-fake fallbacks must stay test-only:** when `pods.API` is not a `*proxmox.Client` / `pods.PermissionReader` (unit-test fakes), `asUser` returns it unbound, `accessFor` returns nil, `mayAnywhere`, `mayOn` and `mayCancel` then allow everything, the web `planner` leaves `Access` nil so `BuildPlan` skips `BlockUnpermitted`, and task following is skipped. Production startup (`newProxmoxAPI` in `cmd/battleship/main.go`) must always build a `*proxmox.Client`.
+- **Privilege reads fail closed:** every `pods.API` reads privileges (`PermissionReader` in `pods.Reads`), `mayCancel` refuses anyone but the submitter when their privileges can't be read, and `BlockUnpermitted` errors on a nil `Access`.
 - **Bounded SSE stream lifetime:** event streams (`Server.stream`) end after `streamLifetime`, derived from `web.session_refresh`, so revoked sessions go back through `RequireUser` on reconnect.
-- **Liveness pool:** `store.Store` keeps `s.liveness` apart from `s.pool` so web query load cannot starve worker heartbeats (`Worker.heartbeat`). `/readyz` pings on the liveness pool too, and it is public, so it shares that pool with heartbeats.
+- **Liveness and ping pools:** `store.Store` gives worker heartbeats (`Worker.heartbeat`) and the public `/readyz` ping (`Store.Ping`) their own pools, so web query load can't starve heartbeats and a `/readyz` flood takes no heartbeat or main-pool connection.
 
 ## 8. Explicit Non-Goals & Accepted Risks
 
