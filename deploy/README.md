@@ -52,7 +52,7 @@ for the event streams.
 
 - **Seal key.** Every process that submits or runs jobs needs the same
   `BATTLESHIP_SEAL_KEY`; a process with another key refuses to start.
-- **Connections.** Each process uses up to `database.max_conns` + 4.
+- **Connections.** Each process uses up to `database.max_conns` + 5.
 - **Migrations** run at startup and only forward: back up the database
   before upgrading. Old pods keep serving during a rolling update, so drop
   a column one release after the code stops using it.

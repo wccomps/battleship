@@ -194,7 +194,7 @@ type Retry struct {
 type Database struct {
 	URL string `toml:"url"` // postgres://...; overridden by BATTLESHIP_DATABASE_URL
 	// MaxConns caps the main connection pool (min 4, default 16). A process
-	// uses up to MaxConns+4 connections; budget that against max_connections.
+	// uses up to MaxConns+5 connections; budget that against max_connections.
 	MaxConns int `toml:"max_conns"`
 	// SealKey encrypts job credentials in the database; every process that
 	// submits or runs jobs needs the same key. Overridden by BATTLESHIP_SEAL_KEY.
