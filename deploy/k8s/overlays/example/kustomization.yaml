@@ -1,7 +1,7 @@
 # Example production overlay: copy it (e.g. to overlays/prod) and point Argo CD / Flux at it.
 #
-# Release by bumping newTag below (CI pushes :<vX.Y.Z> per git tag, :sha-<short>
-# per main commit); roll back by reverting that commit. Never deploy :latest.
+# Release by setting newTag and digest from a main run's publish summary;
+# tags can be pushed over, so the digest pins the image.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -12,7 +12,8 @@ resources:
 
 images:
   - name: ghcr.io/wccomps/battleship
-    newTag: v0.1.0 # CHANGE ME on each release (or pin a digest: "digest: sha256:...")
+    newTag: sha-0000000 # CHANGE ME on each release
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 
 # Replace the base's placeholder config; unset keys take battleship's built-in defaults.
 configMapGenerator:

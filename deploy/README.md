@@ -33,7 +33,7 @@ NetworkPolicy and ConfigMap; `k8s/postgres` a CloudNativePG cluster;
 
 1. Create the Secret (it isn't in kustomize):
    `kubectl -n battleship create secret generic battleship-secrets --from-literal=seal-key="$(openssl rand -base64 48)" --from-literal=oidc-client-secret=...`
-2. In your overlay set the image tag, Ingress host, `battleship.toml`
+2. In your overlay set the image tag and digest, Ingress host, `battleship.toml`
    (`proxmox.urls`, `web.base_url`, `web.trusted_proxies`, `oidc.client_id`)
    and add `pve-root-ca.pem`. Fix the NetworkPolicy CIDRs.
 3. Label nodes with their Proxmox host
