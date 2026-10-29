@@ -70,8 +70,7 @@ func (a *serveAPI) RenewTicket(ctx context.Context, cred proxmox.Credential, now
 	return a.login.RenewTicket(ctx, cred, now)
 }
 
-// Bind records whom it binds and whether refusal is reported, then returns
-// the fake, which checks no credential.
+// Bind records each binding and returns the fake, which checks no credential.
 func (a *serveAPI) Bind(cred func() proxmox.Credential, refused func()) pods.API {
 	a.Mu.Lock()
 	defer a.Mu.Unlock()

@@ -6,8 +6,8 @@ import (
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
-// cluster is the credential-less Proxmox connection; API calls go through
-// Bind.
+// cluster is the credential-less Proxmox connection; every API call goes
+// through Bind.
 type cluster interface {
 	auth.ProxmoxLogin
 	// Bind acts as cred's person; refused, if set, runs on each 401.

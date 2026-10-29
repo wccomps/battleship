@@ -101,9 +101,7 @@ func run(ctx context.Context, args []string, d deps) int {
 
 // serve runs battleship serve with cfg until ctx is done, then shuts down and
 // returns any error. Startup fails clearly if the config, database or identity
-// provider doesn't work. The workers, viewers' grids and web pages share one
-// Proxmox connection and one set of limits; the hub holds the process's only
-// LISTEN connection.
+// provider doesn't work. The hub holds the process's only LISTEN connection.
 //
 // On the stop signal readiness fails and the workers claim no more jobs;
 // running jobs carry on (heartbeats included, so no other replica reaps
@@ -332,10 +330,10 @@ func connectAuth(ctx context.Context, cfg config.Config, st *store.Store, login 
 	}
 }
 
-// startWorkers starts cfg.Web.Workers job workers sharing bind and lim, and
-// returns a channel closed once they all return, which they do once draining
-// closes and their running jobs have ended; ctx done stops those jobs. hub
-// tells them of job changes and cancels.
+// startWorkers starts cfg.Web.Workers job workers and returns a channel
+// closed once they all return, which they do once draining closes and their
+// running jobs have ended; ctx done stops those jobs. hub tells them of job
+// changes and cancels.
 func startWorkers(ctx context.Context, draining <-chan struct{}, cfg config.Config, st *store.Store, bind func(cred func() proxmox.Credential, refused func()) pods.API, creds jobs.Credentials, lim *apply.Limits, hub *status.Hub, log *slog.Logger) <-chan struct{} {
 	var wg sync.WaitGroup
 	for range cfg.Web.Workers {

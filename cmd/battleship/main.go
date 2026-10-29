@@ -45,7 +45,7 @@ func stopOnSignal(onFirst func()) (context.Context, context.CancelFunc) {
 	return ctx, stop
 }
 
-// newCluster connects to p's nodes, logging failovers to logf.
+// newCluster is the Proxmox cluster at p's nodes; logf gets each failover.
 func newCluster(p config.Proxmox, logf func(format string, args ...any)) cluster {
 	c := proxmox.New(proxmox.Options{
 		URLs: p.Endpoints(), InsecureSkipVerify: p.InsecureSkipVerify, RootCAs: p.RootCAs, Logf: logf,
