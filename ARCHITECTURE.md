@@ -44,8 +44,9 @@ form ──> preview ──> confirm ──> stored job ──> worker claims it
    `RetryInputs`: run them again from their form, and image jobs resume what
    exists.
 
-Every Proxmox call is made with the submitter's credential; battleship holds
-none of its own (see [`THREAT_MODEL.md`](THREAT_MODEL.md)). Postgres
+Every Proxmox call is made with the credential of the person acting (for a
+job, its submitter); battleship holds none of its own (see
+[`THREAT_MODEL.md`](THREAT_MODEL.md)). Postgres
 LISTEN/NOTIFY wakes idle workers, cancels jobs at once, and pushes changes to
 open pages.
 
