@@ -329,13 +329,8 @@ func (b *browser) startLogin(u authtest.User, next string) *url.URL {
 	return cb
 }
 
-// dropTicket leaves the session without a Proxmox ticket: none stored and no
-// ticket cookie.
+// dropTicket leaves the session without a Proxmox ticket cookie.
 func (b *browser) dropTicket() {
-	b.h.t.Helper()
-	if err := b.h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
-		b.h.t.Fatal(err)
-	}
 	u, _ := url.Parse(b.h.app.URL)
 	b.jar.SetCookies(u, []*http.Cookie{{Name: auth.TicketCookie, Value: "", Path: "/", MaxAge: -1}})
 }

@@ -102,7 +102,7 @@ func (s *Service) setSessionCookie(w http.ResponseWriter, token string, left tim
 
 func (s *Service) clearSessionCookies(w http.ResponseWriter) {
 	http.SetCookie(w, siteCookie(s.names.session, "", s.secure, -1))
-	http.SetCookie(w, siteCookie(s.names.ticket, "", s.secure, -1))
+	s.clearTicketCookie(w)
 }
 
 // noStore keeps responses that set or clear cookies out of caches.

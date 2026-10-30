@@ -36,26 +36,12 @@ type Session struct {
 	// RefreshFailedAt is the last failure to reach the identity provider
 	// since the last success; zero if none.
 	RefreshFailedAt time.Time
-	// PVE is the session row's copy of the Proxmox ticket, which auth's
-	// ticket cookie supersedes; zero until the Proxmox login.
-	PVE SessionTicket
 	// An in-progress Proxmox login: SHA-256 hex of its state, the redirect
 	// after it, and the endpoint that started it, which alone can finish it
 	// (it keeps the login state on its own disk).
 	PVELoginState    string
 	PVELoginNext     string
 	PVELoginEndpoint string
-}
-
-// SessionTicket is a session row's copy of its Proxmox ticket. Ticket and
-// CSRF are sealed by auth.
-type SessionTicket struct {
-	User     string
-	Ticket   string
-	CSRF     string
-	IssuedAt time.Time
-	// LoginAt is the original login time; renewals keep it.
-	LoginAt time.Time
 }
 
 // SessionUpdate is what a refresh learns from the identity provider.
@@ -71,8 +57,7 @@ type SessionUpdate struct {
 const sessionColumns = `id, subject, name, email, refresh_token, csrf,
 	created_at, last_seen, refreshed_at, expires_at, refresh_retry_at, refresh_failed_at, username, id_token_sealed`
 
-const sessionPVEColumns = `pve_user, pve_ticket_sealed, pve_csrf_sealed, pve_issued_at, pve_login_at,
-	pve_login_state, pve_login_next, pve_login_endpoint`
+const sessionPVEColumns = `pve_login_state, pve_login_next, pve_login_endpoint`
 
 // CreateSession stores a new session. It fails if the ID is taken.
 func (s *Store) CreateSession(ctx context.Context, sess Session) error {
@@ -94,11 +79,11 @@ func (s *Store) CreateSession(ctx context.Context, sess Session) error {
 // ErrSessionNotFound.
 func (s *Store) Session(ctx context.Context, id string) (Session, error) {
 	var x Session
-	var retry, failed, issued, loginAt *time.Time
+	var retry, failed *time.Time
 	err := s.pool.QueryRow(ctx, `SELECT `+sessionColumns+`, `+sessionPVEColumns+` FROM sessions WHERE id = $1`, id).Scan(
 		&x.ID, &x.Subject, &x.Name, &x.Email, &x.RefreshToken, &x.CSRF,
 		&x.CreatedAt, &x.LastSeen, &x.RefreshedAt, &x.ExpiresAt, &retry, &failed, &x.Username, &x.IDToken,
-		&x.PVE.User, &x.PVE.Ticket, &x.PVE.CSRF, &issued, &loginAt, &x.PVELoginState, &x.PVELoginNext, &x.PVELoginEndpoint)
+		&x.PVELoginState, &x.PVELoginNext, &x.PVELoginEndpoint)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, ErrSessionNotFound
 	}
@@ -111,58 +96,18 @@ func (s *Store) Session(ctx context.Context, id string) (Session, error) {
 	if failed != nil {
 		x.RefreshFailedAt = *failed
 	}
-	if issued != nil {
-		x.PVE.IssuedAt = *issued
-	}
-	if loginAt != nil {
-		x.PVE.LoginAt = *loginAt
-	}
 	return x, nil
 }
 
-func (t SessionTicket) valid() bool {
-	return t.User != "" && t.Ticket != "" && t.CSRF != "" && !t.IssuedAt.IsZero() && !t.LoginAt.IsZero()
-}
-
-// SetSessionTicket stores the ticket a Proxmox login returned and ends the
-// login in progress.
-func (s *Store) SetSessionTicket(ctx context.Context, id string, t SessionTicket) error {
-	if !t.valid() {
-		return ErrEmptySession
-	}
-	tag, err := s.pool.Exec(ctx, `UPDATE sessions SET pve_user = $2, pve_ticket_sealed = $3, pve_csrf_sealed = $4,
-			pve_issued_at = $5, pve_login_at = $6, pve_login_state = '', pve_login_next = '', pve_login_endpoint = ''
-		WHERE id = $1`, id, t.User, t.Ticket, t.CSRF, t.IssuedAt, t.LoginAt)
+// EndProxmoxLogin clears the session's Proxmox login in progress.
+func (s *Store) EndProxmoxLogin(ctx context.Context, id string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE sessions SET pve_login_state = '', pve_login_next = '', pve_login_endpoint = ''
+		WHERE id = $1`, id)
 	if err != nil {
-		return fmt.Errorf("storing the Proxmox ticket: %w", err)
+		return fmt.Errorf("ending the Proxmox login: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrSessionNotFound
-	}
-	return nil
-}
-
-// RenewSessionTicket stores a renewed ticket unless the session row holds
-// one issued no earlier.
-func (s *Store) RenewSessionTicket(ctx context.Context, id string, t SessionTicket) error {
-	if !t.valid() {
-		return ErrEmptySession
-	}
-	if _, err := s.pool.Exec(ctx, `UPDATE sessions SET pve_user = $2, pve_ticket_sealed = $3, pve_csrf_sealed = $4,
-			pve_issued_at = $5, pve_login_at = $6
-		WHERE id = $1 AND (pve_issued_at IS NULL OR pve_issued_at < $5)`,
-		id, t.User, t.Ticket, t.CSRF, t.IssuedAt, t.LoginAt); err != nil {
-		return fmt.Errorf("storing the renewed Proxmox ticket: %w", err)
-	}
-	return nil
-}
-
-// ClearSessionTicket drops the session row's ticket. A non-zero prev drops
-// only a ticket issued at prev, so a stale refusal can't wipe a newer one.
-func (s *Store) ClearSessionTicket(ctx context.Context, id string, prev time.Time) error {
-	if _, err := s.pool.Exec(ctx, `UPDATE sessions SET pve_ticket_sealed = '', pve_csrf_sealed = '', pve_issued_at = NULL,
-		pve_login_at = NULL WHERE id = $1 AND ($2::timestamptz IS NULL OR pve_issued_at = $2)`, id, nullTime(prev)); err != nil {
-		return fmt.Errorf("clearing the Proxmox ticket: %w", err)
 	}
 	return nil
 }

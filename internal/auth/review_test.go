@@ -73,7 +73,7 @@ func TestProxmoxSignInAsSomeoneElseIsRefused(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(resp.body, "lena@auth.example.org") {
 		t.Fatalf("got %d: %s", resp.StatusCode, resp.body)
 	}
-	if c, ok := b.pveTicket(); ok {
+	if c, ok := b.cookieTicket(); ok {
 		t.Fatalf("alice's session holds %v", c)
 	}
 }
@@ -95,7 +95,7 @@ func TestProxmoxSignInWithSkewedClocksWorks(t *testing.T) {
 	if resp := b.get("/private"); resp.StatusCode != http.StatusOK {
 		t.Fatalf("after the sign-in: %d %s", resp.StatusCode, resp.body)
 	}
-	c, ok := b.pveTicket()
+	c, ok := b.cookieTicket()
 	if !ok || !c.Issued.Equal(h.clock.Now()) {
 		t.Fatalf("ticket issued %v, want battleship's now %v", c.Issued, h.clock.Now())
 	}

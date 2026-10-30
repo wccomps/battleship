@@ -262,76 +262,24 @@ func TestRenewCredentialClaimsEachRowOnce(t *testing.T) {
 	}
 }
 
-func TestSessionTicketRoundTrip(t *testing.T) {
-	s := storetest.New(t)
-	sess := newSession("sess-1")
-	createSession(t, s, sess)
-	got, err := s.Session(ctx, "sess-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.PVE.User != "" || !got.PVE.IssuedAt.IsZero() {
-		t.Fatalf("a new session has a ticket: %+v", got.PVE)
-	}
-	tk := store.SessionTicket{User: "jdoe@auth.example.org", Ticket: "v1:t", CSRF: "v1:c", IssuedAt: t0, LoginAt: t0}
-	if err := s.SetSessionTicket(ctx, "sess-1", tk); err != nil {
-		t.Fatal(err)
-	}
-	got, _ = s.Session(ctx, "sess-1")
-	if got.PVE.User != tk.User || got.PVE.Ticket != tk.Ticket || got.PVE.CSRF != tk.CSRF || !got.PVE.IssuedAt.Equal(t0) || !got.PVE.LoginAt.Equal(t0) {
-		t.Fatalf("ticket = %+v", got.PVE)
-	}
-	// A renewal replaces it only with a later-issued ticket.
-	newer := store.SessionTicket{User: tk.User, Ticket: "v1:t2", CSRF: "v1:c2", IssuedAt: t0.Add(time.Hour), LoginAt: t0}
-	if err := s.RenewSessionTicket(ctx, "sess-1", newer); err != nil {
-		t.Fatal(err)
-	}
-	for _, kept := range []store.SessionTicket{
-		{User: tk.User, Ticket: "v1:older", CSRF: "v1:c", IssuedAt: t0.Add(time.Minute), LoginAt: t0},
-		{User: tk.User, Ticket: "v1:same", CSRF: "v1:c", IssuedAt: newer.IssuedAt, LoginAt: t0},
-	} {
-		if err := s.RenewSessionTicket(ctx, "sess-1", kept); err != nil {
-			t.Fatal(err)
-		}
-		if got, _ = s.Session(ctx, "sess-1"); got.PVE.Ticket != newer.Ticket {
-			t.Fatalf("renewing to %s replaced %s: %+v", kept.Ticket, newer.Ticket, got.PVE)
-		}
-	}
-	if err := s.ClearSessionTicket(ctx, "sess-1", time.Time{}); err != nil {
-		t.Fatal(err)
-	}
-	got, _ = s.Session(ctx, "sess-1")
-	if got.PVE.Ticket != "" || !got.PVE.IssuedAt.IsZero() {
-		t.Fatalf("cleared ticket = %+v", got.PVE)
-	}
-	// A renewal Proxmox accepted refills a row a refusal cleared.
-	if err := s.RenewSessionTicket(ctx, "sess-1", newer); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ = s.Session(ctx, "sess-1"); got.PVE.Ticket != newer.Ticket {
-		t.Fatalf("renewal over a cleared row: %+v", got.PVE)
-	}
-	if err := s.SetSessionTicket(ctx, "nope", tk); !errors.Is(err, store.ErrSessionNotFound) {
-		t.Fatalf("unknown session: %v", err)
-	}
-}
-
 func TestSessionProxmoxLoginState(t *testing.T) {
 	s := storetest.New(t)
 	createSession(t, s, newSession("sess-1"))
-	if err := s.SetSessionPVELogin(ctx, "sess-1", "state-hash", "/logs", "10.1.1.2:8006"); err != nil {
+	if err := s.SetSessionPVELogin(ctx, "sess-1", "state-hash", "/logs", "198.51.100.2:8006"); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := s.Session(ctx, "sess-1")
-	if got.PVELoginState != "state-hash" || got.PVELoginNext != "/logs" || got.PVELoginEndpoint != "10.1.1.2:8006" {
+	if got.PVELoginState != "state-hash" || got.PVELoginNext != "/logs" || got.PVELoginEndpoint != "198.51.100.2:8006" {
 		t.Fatalf("login state = %q %q %q", got.PVELoginState, got.PVELoginNext, got.PVELoginEndpoint)
 	}
-	// Storing a ticket ends the login.
-	if err := s.SetSessionTicket(ctx, "sess-1", store.SessionTicket{User: "u", Ticket: "v1:t", CSRF: "v1:c", IssuedAt: t0, LoginAt: t0}); err != nil {
+	if err := s.EndProxmoxLogin(ctx, "sess-1"); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = s.Session(ctx, "sess-1")
-	if got.PVELoginState != "" || got.PVELoginEndpoint != "" {
-		t.Fatalf("login state kept after the ticket was stored: %q", got.PVELoginState)
+	if got.PVELoginState != "" || got.PVELoginNext != "" || got.PVELoginEndpoint != "" {
+		t.Fatalf("login state kept after the login ended: %q %q %q", got.PVELoginState, got.PVELoginNext, got.PVELoginEndpoint)
+	}
+	if err := s.EndProxmoxLogin(ctx, "nope"); !errors.Is(err, store.ErrSessionNotFound) {
+		t.Fatalf("ending an unknown session's login: %v", err)
 	}
 }
