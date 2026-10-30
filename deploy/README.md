@@ -56,10 +56,6 @@ for the event streams.
 - **Migrations** run at startup and only forward: back up the database
   before upgrading. Old pods keep serving during a rolling update, so drop
   a column one release after the code stops using it.
-- **Pending.** Once the release that stopped reading and writing the
-  session row's Proxmox ticket is deployed, the next drops
-  `sessions.pve_user`, `pve_ticket_sealed`, `pve_csrf_sealed`,
-  `pve_issued_at` and `pve_login_at` (#90).
 - **Pending.** Jobs move to being pinned to the replica that took their
   confirm, which holds the ticket in memory only. This release leaves jobs
   with `jobs.replica` set alone; deploy the release that pins them only
