@@ -17,7 +17,9 @@ const lastUnguarded = 11
 
 // allowDestructive maps a destructive migration's version to the deployed
 // image that already stopped using what it drops or changes.
-var allowDestructive = map[int]string{}
+var allowDestructive = map[int]string{
+	19: "sha-e62f50e", // the session ticket columns
+}
 
 func TestMigrationsKeepThePreviousReleaseWorking(t *testing.T) {
 	files, err := fs.Glob(migrations, "migrations/*.sql")
@@ -64,6 +66,7 @@ var migrationSums = map[int]string{
 	16: "8a193bfc9df42efa",
 	17: "764f959be89d1dbd",
 	18: "569ff5d7b6f1f56a",
+	19: "006b020180c60475",
 }
 
 func TestShippedMigrationsDontChange(t *testing.T) {
