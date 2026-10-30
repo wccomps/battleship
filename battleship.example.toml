@@ -38,9 +38,6 @@ url = "https://192.0.2.123:8006"
 # disk_mbps_rd = 300
 # disk_mbps_wr = 300
 # snapshot_name = "initial"          # the baseline a deploy takes
-# Snapshots that count as a baseline when a VM has no snapshot_name; a reset
-# naming no snapshot uses snapshot_name, else the newest match. [] for none.
-# baseline_patterns = ["fresh_clone_*"]
 # gpu_vga = "virtio-gl"
 
 # [images]

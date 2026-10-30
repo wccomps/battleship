@@ -5,25 +5,6 @@ import (
 	"testing"
 )
 
-// A fresh_clone_<timestamp> baseline (no "initial") counts as a baseline:
-// no drift, and Detail names it.
-func TestPatternBaselineIsNotDrift(t *testing.T) {
-	h := newHarness(t, nil)
-	h.api.add(teamVM("01", "dc", 10101), cleanConfig("01"), "fresh_clone_20261002034615")
-	h.poll(t)
-	h.scan(t)
-	if c := cell(t, h.p.Grid(), "01", "dc"); c.State != StateRunning || c.Drift != nil {
-		t.Errorf("cell = %s %+v, want running with no drift", c.State, c.Drift)
-	}
-	d, err := h.p.Detail(ctx, "01", "dc")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d.Baseline != "fresh_clone_20261002034615" || d.Cell.Drift != nil {
-		t.Errorf("detail baseline %q drift %+v", d.Baseline, d.Cell.Drift)
-	}
-}
-
 // A snapshot whose task died (snapstate set) can't be rolled back to: the
 // scan and Detail treat it as no baseline, and Detail doesn't list it.
 func TestUnfinishedSnapshotIsNoBaseline(t *testing.T) {
@@ -34,7 +15,7 @@ func TestUnfinishedSnapshotIsNoBaseline(t *testing.T) {
 	h.api.Mu.Unlock()
 	h.poll(t)
 	h.scan(t)
-	want := []Drift{{Kind: DriftSnapshot, Reason: `no "initial" or fresh_clone_* baseline snapshot`}}
+	want := []Drift{{Kind: DriftSnapshot, Reason: `no "initial" baseline snapshot`}}
 	if c := cell(t, h.p.Grid(), "01", "dc"); !reflect.DeepEqual(c.Drift, want) {
 		t.Errorf("scan drift = %+v, want %+v", c.Drift, want)
 	}
@@ -42,8 +23,8 @@ func TestUnfinishedSnapshotIsNoBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Baseline != "" || !reflect.DeepEqual(d.Snapshots, []string{"before-scoring"}) || !reflect.DeepEqual(d.Cell.Drift, want) {
-		t.Errorf("detail baseline %q snapshots %v drift %+v", d.Baseline, d.Snapshots, d.Cell.Drift)
+	if !reflect.DeepEqual(d.Snapshots, []string{"before-scoring"}) || !reflect.DeepEqual(d.Cell.Drift, want) {
+		t.Errorf("detail snapshots %v drift %+v", d.Snapshots, d.Cell.Drift)
 	}
 }
 

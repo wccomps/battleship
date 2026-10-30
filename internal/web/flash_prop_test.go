@@ -302,52 +302,45 @@ func TestPropCellPageOnlyForGridCells(t *testing.T) {
 
 var pickerOptionRE = regexp.MustCompile(`<input type="radio" name="snapshot" value="([^"]*)" required( checked)?>`)
 
-// The reset picker offers the baseline first, then each snapshot of the VM
-// once, leaves out the one the baseline already stands for, keeps whatever
-// was asked for, and marks exactly that option.
+// The reset picker offers deploy.snapshot_name first, then each snapshot of
+// the VM once, keeps whatever was asked for, and marks that option (or
+// deploy.snapshot_name when none was asked for).
 func TestPropResetPickerOptions(t *testing.T) {
 	h := newHarness(t)
 	op := h.login(asOperator)
-	names := []string{"initial", "Initial", "fresh_clone_20261001000000", "fresh_clone_20261002034615", "before-scoring", "round1", "round2", "a", "x-y_z"}
+	names := []string{"initial", "Initial", "before-scoring", "round1", "round2", "a", "x-y_z"}
 	rapid.Check(t, func(t *rapid.T) {
 		snaps := rapid.SliceOfNDistinct(rapid.SampledFrom(names), 0, 6, rapid.ID[string]).Draw(t, "snapshots")
 		selected := rapid.SampledFrom(append([]string{""}, append(slices.Clone(names), "gone", "a&b")...)).Draw(t, "selected")
 		h.api.setSnapshots(10101, snaps...)
 		h.poll()
 		body := h.get(&op, "/reset?teams=1&hosts=dc&snapshot="+url.QueryEscape(selected)).Body.String()
+		wantSelected := selected
+		if wantSelected == "" {
+			wantSelected = "initial"
+		}
 		var values []string
 		checked := 0
 		for _, m := range pickerOptionRE.FindAllStringSubmatch(body, -1) {
 			values = append(values, html.UnescapeString(m[1]))
 			if m[2] != "" {
 				checked++
-				if html.UnescapeString(m[1]) != selected {
-					t.Fatalf("checked option %q, selected %q", m[1], selected)
+				if html.UnescapeString(m[1]) != wantSelected {
+					t.Fatalf("checked option %q, selected %q", m[1], wantSelected)
 				}
 			}
 		}
-		baseline := ""
-		switch {
-		case slices.Contains(snaps, "initial"):
-			baseline = "initial"
-		default:
-			for _, n := range snaps {
-				if strings.HasPrefix(n, "fresh_clone_") && n > baseline {
-					baseline = n
-				}
-			}
-		}
-		want := []string{""}
+		want := []string{"initial"}
 		for _, n := range snaps {
-			if n != baseline || n == selected {
+			if !slices.Contains(want, n) {
 				want = append(want, n)
 			}
 		}
-		if !slices.Contains(want, selected) {
-			want = append(want, selected)
+		if !slices.Contains(want, wantSelected) {
+			want = append(want, wantSelected)
 		}
 		if !slices.Equal(values, want) || checked != 1 {
-			t.Fatalf("snapshots %v, baseline %q, selected %q: options %q (%d checked), want %q", snaps, baseline, selected, values, checked, want)
+			t.Fatalf("snapshots %v, selected %q: options %q (%d checked), want %q", snaps, selected, values, checked, want)
 		}
 	})
 }

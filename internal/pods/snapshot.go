@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path"
 	"slices"
 	"strings"
 
+	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -52,15 +52,14 @@ type SnapshotRequest struct {
 }
 
 // Snapshot takes a new snapshot of team VMs. It refuses names Proxmox would
-// reject or that could pass for the deploy baseline (which a bare reset
-// would roll back to). VMs already holding the name are blocked: snapshots
-// are never replaced.
+// reject or the deploy baseline (deploy.snapshot_name). VMs already holding
+// the name are blocked: snapshots are never replaced.
 func (p Planner) Snapshot(ctx context.Context, req SnapshotRequest) (*Plan, error) {
 	if err := CheckSnapshotName(req.Name); err != nil {
 		return nil, err
 	}
-	if err := p.notBaseline(req.Name); err != nil {
-		return nil, err
+	if req.Name == p.Cfg.Deploy.SnapshotName {
+		return nil, fmt.Errorf("%q is the baseline snapshot a deploy takes (deploy.snapshot_name); choose another name", req.Name)
 	}
 	plan, _, err := p.simple(ctx, KindSnapshot, req.Teams, req.Hosts, func(it *Item) {
 		it.Steps = []Step{StepSnapshot}
@@ -87,22 +86,36 @@ func (p Planner) Snapshot(ctx context.Context, req SnapshotRequest) (*Plan, erro
 	return plan, nil
 }
 
-// notBaseline refuses a name that is the deploy baseline's or matches
-// baseline_patterns.
-func (p Planner) notBaseline(name string) error {
-	d := p.Cfg.Deploy
-	if name == d.SnapshotName {
-		return fmt.Errorf("%q is the baseline snapshot a deploy takes (deploy.snapshot_name); choose another name", name)
-	}
-	for _, pat := range d.BaselinePatterns {
-		if ok, _ := path.Match(pat, name); ok {
-			return fmt.Errorf("%q matches %s, so a reset to the baseline could pick it (deploy.baseline_patterns); choose another name", name, pat)
-		}
-	}
-	return nil
-}
-
 // alreadyHas blocks an item whose VM has a snapshot of the name.
 func alreadyHas(name string) string {
 	return fmt.Sprintf("already has a snapshot named %q; choose another name", name)
+}
+
+// HasBaseline reports whether a VM with these snapshots has the finished
+// deploy baseline (deploy.snapshot_name).
+func HasBaseline(d config.Deploy, snaps []proxmox.Snapshot) bool {
+	return slices.Contains(SnapshotNames(Finished(snaps)), d.SnapshotName)
+}
+
+// NoBaseline says a VM lacks the baseline snapshot, e.g.
+// `no "initial" baseline snapshot`.
+func NoBaseline(d config.Deploy) string {
+	return fmt.Sprintf("no %q baseline snapshot", d.SnapshotName)
+}
+
+// Finished drops snapshots still being taken or deleted, or whose task died
+// (snapstate set): Proxmox refuses to roll back to them.
+func Finished(snaps []proxmox.Snapshot) []proxmox.Snapshot {
+	return slices.DeleteFunc(slices.Clone(snaps), func(s proxmox.Snapshot) bool { return s.State != "" })
+}
+
+func SnapshotNames(snaps []proxmox.Snapshot) []string {
+	if snaps == nil {
+		return nil
+	}
+	out := make([]string, len(snaps))
+	for i, s := range snaps {
+		out[i] = s.Name
+	}
+	return out
 }

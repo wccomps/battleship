@@ -195,32 +195,30 @@ func TestResetFormPicksSnapshots(t *testing.T) {
 		`<form method="post" action="/reset/preview" class="stack" id="reset-pick">`,
 		`<input type="hidden" name="teams" value="2">`,
 		`<input type="hidden" name="hosts" value="web">`,
-		`<input type="radio" name="snapshot" value="" required checked><span>baseline (initial)</span>`,
-		`<span class="hint">baseline: initial, else the newest fresh_clone_*</span>`,
+		`<input type="radio" name="snapshot" value="initial" required checked><span>initial</span>`,
 		`<input type="radio" name="snapshot" value="before-scoring" required><span>before-scoring</span>`,
 		`<button type="submit" class="btn pri" form="reset-pick">Preview</button>`,
 	)
-	// The baseline is initial here, so initial isn't offered twice.
-	lacks(t, "reset step 2", body, `value="initial"`)
+	lacks(t, "reset step 2", body, `value=""`, "baseline")
 
 	// A VM without the baseline: it is still offered, and the note says so.
 	h.api.setSnapshots(10101, "golden")
 	body = h.get(&op, "/reset?teams=1").Body.String()
 	contains(t, "reset of a VM without the baseline", body,
-		`<input type="radio" name="snapshot" value="" required checked><span>baseline</span>`,
+		`<input type="radio" name="snapshot" value="initial" required checked><span>initial</span>`,
 		`<input type="radio" name="snapshot" value="golden" required><span>golden</span>`,
-		"<span class=\"name\">team01-dc</span> has no baseline snapshot.")
+		"<span class=\"name\">team01-dc</span> has no initial snapshot.")
 
-	// No VM matches: only the baseline.
+	// No VM matches: only initial.
 	body = h.get(&op, "/reset?teams=1&hosts=nope").Body.String()
-	contains(t, "reset matching nothing", body, "only the baseline is offered")
+	contains(t, "reset matching nothing", body, "only initial is offered")
 
 	// A snapshot read that fails says why in words, as other Proxmox
 	// errors on the pages do.
 	h.api.setReadErr(10101, &proxmox.APIError{Status: 403, Message: "Permission check failed (/vms/10101, VM.Audit)"})
 	body = h.get(&op, "/reset?teams=1&hosts=dc").Body.String()
 	contains(t, "reset with an unreadable VM", body,
-		"Couldn&#39;t read the snapshots of <span class=\"name\">team01-dc</span>: reading <span class=\"name\">team01-dc</span> (VMID 10101 on n1): not permitted: you don&#39;t have <span class=\"name\">VM.Audit</span> on /vms/10101. Only the baseline is offered.")
+		"Couldn&#39;t read the snapshots of <span class=\"name\">team01-dc</span>: reading <span class=\"name\">team01-dc</span> (VMID 10101 on n1): not permitted: you don&#39;t have <span class=\"name\">VM.Audit</span> on /vms/10101. Only initial is offered.")
 }
 
 func TestPreviewShowsThePlan(t *testing.T) {
@@ -232,23 +230,24 @@ func TestPreviewShowsThePlan(t *testing.T) {
 	action, form, body := h.preview(&op, "/reset", url.Values{"teams": {"1"}})
 	contains(t, "reset preview", body,
 		"<title>Reset to snapshot · battleship</title>",
+		`Reset to snapshot <span class="vm">initial</span></h1>`,
 		"1 blocked</span>",
-		`<dt>Pods</dt><dd><span class="vm">01</span></dd>`, "<dt>Snapshot</dt><dd>baseline</dd>",
-		"<tr><td><span class=\"vm\">team01-dc</span></td><td><span class=\"vm\">n1</span></td><td>stop · rollback to baseline (initial) · start</td><td></td></tr>",
+		`<dt>Pods</dt><dd><span class="vm">01</span></dd>`,
+		"<tr><td><span class=\"vm\">team01-dc</span></td><td><span class=\"vm\">n1</span></td><td>stop · rollback to initial · start</td><td></td></tr>",
 		`<tr class="blk"><td><span class="vm">team01-web</span></td>`,
-		`no &#34;initial&#34; or fresh_clone_* baseline snapshot (has: other)`,
-		"1 VM rolls back to its baseline snapshot and starts. Work since then is lost.",
+		`no snapshot &#34;initial&#34; (has: other)`,
+		"1 VM rolls back to snapshot <span class=\"name\">initial</span> and starts. Work since then is lost.",
 		`<button type="submit" class="btn pri bad">`, "Reset 1 VM</button>",
-		`<a class="btn first" href="/reset?teams=1" data-panel-link>Back</a>`,
+		`<a class="btn first" href="/reset?snapshot=initial&amp;teams=1" data-panel-link>Back</a>`,
 	)
 	if strings.Index(body, "team01-web") > strings.Index(body, "team01-dc</span></td><td><span") {
 		t.Error("the blocked VM isn't listed first")
 	}
-	lacks(t, "reset preview", body, `name="typed"`)
+	lacks(t, "reset preview", body, `name="typed"`, "<dt>Snapshot</dt>")
 	if action != "/reset/confirm" {
 		t.Errorf("confirm posts to %q", action)
 	}
-	if form.Get("teams") != "1" || form.Has("snapshot") || len(form.Get("nonce")) != 43 || len(form.Get("fingerprint")) != 64 {
+	if form.Get("teams") != "1" || form.Get("snapshot") != "initial" || len(form.Get("nonce")) != 43 || len(form.Get("fingerprint")) != 64 {
 		t.Errorf("confirm fields = %v", form)
 	}
 	h.noJobs("after a preview")
@@ -622,7 +621,7 @@ func TestConfirmRefusesEditedForms(t *testing.T) {
 		t.Fatalf("tampered confirm = %d, want 303", rec.Code)
 	}
 	j := h.jobsInStore()[0]
-	want := jobs.Inputs{Kind: pods.KindReset, Teams: "1", Hosts: []string{"dc"}}
+	want := jobs.Inputs{Kind: pods.KindReset, Teams: "1", Hosts: []string{"dc"}, Snapshot: "initial"}
 	if got := readInputs(j); !reflect.DeepEqual(got, want) || j.Fingerprint != form.Get("fingerprint") {
 		t.Errorf("job inputs = %#v (fp %s), want %#v (fp %s)", got, j.Fingerprint, want, form.Get("fingerprint"))
 	}

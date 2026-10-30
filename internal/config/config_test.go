@@ -578,35 +578,6 @@ max_conns = 24
 	}
 }
 
-func TestBaselinePatterns(t *testing.T) {
-	if got := Default().Deploy.BaselinePatterns; !reflect.DeepEqual(got, []string{"fresh_clone_*"}) {
-		t.Errorf("default baseline_patterns = %v, want [fresh_clone_*]", got)
-	}
-	load := func(patterns string) (Config, error) {
-		t.Helper()
-		path := writeFile(t, `
-[proxmox]
-url = "https://pve.example:8006"
-
-[deploy]
-baseline_patterns = `+patterns+"\n")
-		return Load(path)
-	}
-	cfg, err := load(`[]`)
-	if err != nil || len(cfg.Deploy.BaselinePatterns) != 0 {
-		t.Errorf("empty list: %v, %v; want no patterns and no error", cfg.Deploy.BaselinePatterns, err)
-	}
-	cfg, err = load(`["golden-?", "base_[0-9]*"]`)
-	if err != nil || !reflect.DeepEqual(cfg.Deploy.BaselinePatterns, []string{"golden-?", "base_[0-9]*"}) {
-		t.Errorf("custom list: %v, %v", cfg.Deploy.BaselinePatterns, err)
-	}
-	for _, bad := range []string{`["fresh_[clone"]`, `[""]`, `["  "]`} {
-		if _, err := load(bad); err == nil || !strings.Contains(err.Error(), "deploy.baseline_patterns") {
-			t.Errorf("%s: err = %v, want a deploy.baseline_patterns error", bad, err)
-		}
-	}
-}
-
 func TestParseRange(t *testing.T) {
 	for in, want := range map[string][2]int{"8000-8999": {8000, 8999}, "1-10": {1, 10}, " 7 - 7 ": {7, 7}} {
 		lo, hi, err := ParseRange(in)

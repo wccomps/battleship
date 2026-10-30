@@ -73,7 +73,7 @@ func TestCellPageShowsDrift(t *testing.T) {
 		`<ul class="reasons is-drifted" aria-label="Drift">`,
 		"failed in deploy job 41: bridge int02 missing",
 		`<a href="/logs/41" data-panel-link>#41</a>`,
-		"no &#34;initial&#34; or fresh_clone_* baseline snapshot",
+		"no &#34;initial&#34; baseline snapshot",
 		// No baseline: the table shows it missing.
 		`<span class="gl is-missing"><i class="g" aria-hidden="true"></i><span class="vm">initial</span></span></td><td class="muted">missing</td>`,
 		`<tr><td><span class="vm">other</span></td>`,

@@ -13,7 +13,6 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
-	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -83,10 +82,7 @@ type Deploy struct {
 	DiskMBpsRead  int    `toml:"disk_mbps_rd"`
 	DiskMBpsWrite int    `toml:"disk_mbps_wr"`
 	SnapshotName  string `toml:"snapshot_name"` // the baseline a deploy takes
-	// BaselinePatterns are path.Match globs for snapshots that count as the
-	// baseline when a VM lacks SnapshotName; a reset uses the newest match.
-	BaselinePatterns []string `toml:"baseline_patterns"`
-	GPUVGA           string   `toml:"gpu_vga"` // templates with this vga value are pinned to their node
+	GPUVGA        string `toml:"gpu_vga"`       // templates with this vga value are pinned to their node
 }
 
 // Concurrency limits Proxmox work. Workers is per job; ConfigCalls and
@@ -267,14 +263,13 @@ func Default() Config {
 			CICustom:  "vendor=competitions:snippets/ssh-keys.yaml",
 		},
 		Deploy: Deploy{
-			Storage:          "competitions",
-			Linked:           true,
-			MasterTag:        "dev",
-			DiskMBpsRead:     300,
-			DiskMBpsWrite:    300,
-			SnapshotName:     "initial",
-			BaselinePatterns: []string{"fresh_clone_*"},
-			GPUVGA:           "virtio-gl",
+			Storage:       "competitions",
+			Linked:        true,
+			MasterTag:     "dev",
+			DiskMBpsRead:  300,
+			DiskMBpsWrite: 300,
+			SnapshotName:  "initial",
+			GPUVGA:        "virtio-gl",
 		},
 		Images: Images{Pool: "dev-templates", VMIDRange: "8000-8999", EditBridge: "vmbr0"},
 		Environments: Environments{
@@ -514,13 +509,6 @@ func (c Config) Validate() error {
 	}
 	if c.Deploy.SnapshotName == "" {
 		errs = append(errs, errors.New("deploy.snapshot_name is required"))
-	}
-	for _, p := range c.Deploy.BaselinePatterns {
-		if strings.TrimSpace(p) == "" {
-			errs = append(errs, errors.New("deploy.baseline_patterns must not contain blank entries"))
-		} else if _, err := path.Match(p, ""); err != nil {
-			errs = append(errs, fmt.Errorf("deploy.baseline_patterns: %q is not a valid glob: %w", p, err))
-		}
 	}
 
 	if c.Deploy.DiskMBpsRead < 1 {

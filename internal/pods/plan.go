@@ -228,11 +228,8 @@ type Item struct {
 	Sets     SetRecord `json:"sets,omitempty"`
 	Steps    []Step    `json:"steps"`
 	Snapshot string    `json:"snapshot"` // reset: snapshot to roll back to; snapshot: the one to take
-	// Baseline: the reset named no snapshot, so Snapshot is this VM's own
-	// baseline (see BaselineSnapshot).
-	Baseline bool   `json:"baseline,omitempty"`
-	Action   string `json:"action"`  // power: start, shutdown, stop, reboot
-	Blocked  string `json:"blocked"` // non-empty: the item will not run
+	Action   string    `json:"action"`   // power: start, shutdown, stop, reboot
+	Blocked  string    `json:"blocked"`  // non-empty: the item will not run
 	// Unpermitted: Blocked because the planning user lacks a privilege
 	// (BlockUnpermitted), not because of the cluster's state.
 	Unpermitted bool `json:"unpermitted,omitempty"`
@@ -382,16 +379,15 @@ func ConfigHash(kind Kind, c config.Config) string {
 
 func deployConfigHash(c config.Config) any {
 	return struct {
-		Network          config.Network
-		Storage          string
-		Linked           bool
-		DiskRead, Write  int
-		Snapshot         string
-		BaselinePatterns []string
-		Pool             string
-		TemplatePool     string
+		Network         config.Network
+		Storage         string
+		Linked          bool
+		DiskRead, Write int
+		Snapshot        string
+		Pool            string
+		TemplatePool    string
 	}{c.Network, c.Deploy.Storage, c.Deploy.Linked, c.Deploy.DiskMBpsRead, c.Deploy.DiskMBpsWrite,
-		c.Deploy.SnapshotName, c.Deploy.BaselinePatterns, c.Naming.Pool, c.Images.Pool}
+		c.Deploy.SnapshotName, c.Naming.Pool, c.Images.Pool}
 }
 
 func imageConfigHash(c config.Config) any {
@@ -967,13 +963,13 @@ func (p Planner) storageNodes(ctx context.Context, online []string) ([]string, e
 	return has, nil
 }
 
-// Reset rolls team VMs back to snapshot and starts them; "" means each VM's
-// own baseline (see BaselineSnapshot). VMs without it are blocked.
+// Reset rolls team VMs back to snapshot and starts them; "" means
+// deploy.snapshot_name. VMs without it are blocked.
 func (p Planner) Reset(ctx context.Context, teams, hosts []string, snapshot string) (*Plan, error) {
+	snapshot = cmp.Or(snapshot, p.Cfg.Deploy.SnapshotName)
 	plan, _, err := p.simple(ctx, KindReset, teams, hosts, func(it *Item) {
 		it.Steps = []Step{StepStop, StepRollback, StepStart}
 		it.Snapshot = snapshot
-		it.Baseline = snapshot == ""
 	})
 	if err != nil {
 		return nil, err
@@ -995,14 +991,6 @@ func (p Planner) Reset(ctx context.Context, teams, hosts []string, snapshot stri
 		has := "has none"
 		if len(names) > 0 {
 			has = "has: " + strings.Join(names, ", ")
-		}
-		if snapshot == "" {
-			if base, ok := BaselineSnapshot(p.Cfg.Deploy, snaps); ok {
-				it.Snapshot = base
-			} else {
-				it.Blocked = fmt.Sprintf("%s (%s)", NoBaseline(p.Cfg.Deploy), has)
-			}
-			continue
 		}
 		if !slices.Contains(names, snapshot) {
 			it.Blocked = fmt.Sprintf("no snapshot %q (%s)", snapshot, has)

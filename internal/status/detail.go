@@ -18,9 +18,6 @@ type Detail struct {
 	Cell      Cell
 	Config    map[string]string // the VM's config; nil when it is missing
 	Snapshots []string          // its finished snapshots, in Proxmox's order; nil when it is missing
-	// Baseline is the default reset target (pods.BaselineSnapshot); empty if
-	// absent.
-	Baseline string
 }
 
 // Detail reads the cell's VM now and judges its drift. The read counts as a
@@ -43,7 +40,6 @@ func (p *Poller) Detail(ctx context.Context, team, host string) (Detail, error) 
 		return d, fmt.Errorf("reading %s (VMID %d on %s): %s", c.Name, c.VMID, c.Node, proxmox.Describe(err))
 	}
 	d.Config, d.Snapshots = cfg, pods.SnapshotNames(pods.Finished(snaps))
-	d.Baseline, _ = pods.BaselineSnapshot(p.rules.cfg.Deploy, snaps)
 
 	p.mu.Lock()
 	// Scan results are in database time.

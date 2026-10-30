@@ -32,8 +32,8 @@ var fingerprinted = map[string]map[string]bool{
 		"Description": true, "VMState": true, // what a snapshot job writes to Proxmox
 		// What base-image and environment steps do.
 		"Source": true, "Pool": true, "Tags": true, "Notes": true, "NICs": true, "CPU": true, "Guest": true, "Supersedes": true, "Details": true,
-		// Derived from Name or Snapshot, or where the VM runs.
-		"Team": false, "Host": false, "Node": false, "OldNode": false, "Baseline": false,
+		// Derived from Name, or where the VM runs.
+		"Team": false, "Host": false, "Node": false, "OldNode": false,
 		// A deploy's is its Template's set; a teardown's is for its review,
 		// and which VMs the set takes, Name and VMID already say.
 		"Set": false, "Sets": false,

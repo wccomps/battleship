@@ -444,9 +444,9 @@ func TestGridResetPicksCommonSnapshots(t *testing.T) {
 		`<form method="post" action="/reset/preview" class="stack" id="reset-pick">`,
 		`<input type="hidden" name="vms" value="team01-dc,team01-web">`,
 		`<input type="hidden" name="teams" value="1">`,
-		`<input type="radio" name="snapshot" value="" required checked><span>baseline (initial)</span>`,
+		`<input type="radio" name="snapshot" value="initial" required checked><span>initial</span>`,
 		`<ul class="hosts" aria-label="VMs"><li>team01-dc</li><li>team01-web</li></ul>`)
-	lacks(t, "picker", body, `value="before-scoring"`, `value="initial"`, `<form method="get" action="/reset"`)
+	lacks(t, "picker", body, `value="before-scoring"`, `value=""`, `<form method="get" action="/reset"`)
 
 	body = h.post(&op, "/reset", selection([]string{"team01-dc"})).Body.String()
 	contains(t, "picker of one VM", body, `<input type="radio" name="snapshot" value="before-scoring" required><span>before-scoring</span>`)

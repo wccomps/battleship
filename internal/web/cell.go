@@ -49,8 +49,8 @@ type cellPage struct {
 	ReadErr   string // the live read failed; the page shows the grid's cell
 	Drift     []driftView
 	Snapshots []snapshotView
-	// Baseline is the VM's baseline snapshot, or what a baseline is when it has
-	// none (e.g. "initial"); HasBaseline says which.
+	// Baseline is deploy.snapshot_name (e.g. "initial"); HasBaseline reports
+	// whether the VM has it.
 	Baseline    string
 	HasBaseline bool
 	Network     []configRow
@@ -96,7 +96,7 @@ func (s *Server) cellPage(w http.ResponseWriter, r *http.Request) {
 		Cell:     c,
 		State:    string(c.State),
 		Missing:  c.State == status.StateMissing,
-		Baseline: d.Baseline,
+		Baseline: s.cfg.Deploy.SnapshotName,
 	}
 	if err != nil {
 		p.ReadErr = err.Error()
@@ -107,12 +107,9 @@ func (s *Server) cellPage(w http.ResponseWriter, r *http.Request) {
 	_, p.SetKnown = c.Sets.Of()
 	p.Set = c.Sets.Label()
 	for _, name := range d.Snapshots {
-		p.Snapshots = append(p.Snapshots, snapshotView{Name: name, Baseline: name == d.Baseline})
+		p.Snapshots = append(p.Snapshots, snapshotView{Name: name, Baseline: name == p.Baseline})
 	}
-	p.HasBaseline = d.Baseline != "" && slices.Contains(d.Snapshots, d.Baseline)
-	if p.Baseline == "" {
-		p.Baseline = s.cfg.Deploy.SnapshotName
-	}
+	p.HasBaseline = slices.Contains(d.Snapshots, p.Baseline)
 	p.Network = networkRows(d.Config)
 	p.LastJob = s.lastJobView(r.Context(), c.Name)
 
