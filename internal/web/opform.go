@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -224,30 +225,29 @@ func (s *Server) deploySets(ctx context.Context) ([]setView, string) {
 
 func (s *Server) snapshotStep(ctx context.Context, in jobs.Inputs, teams []string, _ bool) *stepTwo {
 	step := &stepTwo{Legend: "Snapshot", Button: "Preview"}
+	base := s.cfg.Deploy.SnapshotName
 	var snaps []string
-	var baseline string
 	if len(in.VMs) > 0 {
-		snaps, baseline = s.commonSnapshots(ctx, step, in.VMs)
+		snaps = s.commonSnapshots(ctx, step, in.VMs)
 	} else if team, host, ok := s.firstVM(ctx, teams, in.Hosts); ok {
 		d, err := s.detail(ctx, team, host)
 		step.Hints = append(step.Hints, "The snapshots of "+d.Cell.Name+", the first VM this covers.")
 		switch {
 		case err != nil:
-			step.Note = "Couldn't read the snapshots of " + d.Cell.Name + ": " + proxmox.Describe(err) + ". Only the baseline is offered."
+			step.Note = "Couldn't read the snapshots of " + d.Cell.Name + ": " + proxmox.Describe(err) + ". Only " + base + " is offered."
 		default:
-			snaps, baseline = d.Snapshots, d.Baseline
-			if d.Baseline == "" {
-				step.Note = d.Cell.Name + " has no baseline snapshot."
+			snaps = d.Snapshots
+			if !slices.Contains(snaps, base) {
+				step.Note = d.Cell.Name + " has no " + base + " snapshot."
 			}
 		}
 	} else {
-		step.Note = "No VM was found for those pods and hosts, so only the baseline is offered."
+		step.Note = "No VM was found for those pods and hosts, so only " + base + " is offered."
 	}
-	names := append([]string{""}, slices.DeleteFunc(slices.Clone(snaps), func(n string) bool {
-		return n == baseline && n != in.Snapshot
-	})...)
-	if !slices.Contains(names, in.Snapshot) {
-		names = append(names, in.Snapshot)
+	selected := cmp.Or(in.Snapshot, base)
+	names := append([]string{base}, snaps...)
+	if !slices.Contains(names, selected) {
+		names = append(names, selected)
 	}
 	seen := map[string]bool{}
 	for _, n := range names {
@@ -255,16 +255,8 @@ func (s *Server) snapshotStep(ctx context.Context, in jobs.Inputs, teams []strin
 			continue
 		}
 		seen[n] = true
-		o := stepOpt{Value: n, Label: n, Checked: n == in.Snapshot}
-		if n == "" {
-			o.Label = "baseline"
-			if baseline != "" {
-				o.Label += " (" + baseline + ")"
-			}
-		}
-		step.Options = append(step.Options, o)
+		step.Options = append(step.Options, stepOpt{Value: n, Label: n, Checked: n == selected})
 	}
-	step.Hints = append(step.Hints, "baseline: "+pods.BaselineText(s.cfg.Deploy))
 	return step
 }
 
@@ -273,7 +265,8 @@ func (s *Server) snapshotStep(ctx context.Context, in jobs.Inputs, teams []strin
 // preview anyway.
 const pickerReads = 4
 
-func (s *Server) commonSnapshots(ctx context.Context, step *stepTwo, names []string) (_ []string, baseline string) {
+func (s *Server) commonSnapshots(ctx context.Context, step *stepTwo, names []string) []string {
+	base := s.cfg.Deploy.SnapshotName
 	var cells []status.Cell
 	for _, row := range s.polledGrid(ctx).Rows {
 		for _, c := range row.Cells {
@@ -283,24 +276,17 @@ func (s *Server) commonSnapshots(ctx context.Context, step *stepTwo, names []str
 		}
 	}
 	if len(cells) == 0 {
-		step.Note = "None of these VMs were found, so only the baseline is offered."
-		return nil, ""
+		step.Note = "None of these VMs were found, so only " + base + " is offered."
+		return nil
 	}
 	var common, read []string
-	allBaseline := true
 	for i, c := range cells[:min(len(cells), pickerReads)] {
 		d, err := s.detail(ctx, c.Team, c.Host)
 		if err != nil {
-			step.Note = "Couldn't read the snapshots of " + c.Name + ": " + proxmox.Describe(err) + ". Only the baseline is offered."
-			return nil, ""
+			step.Note = "Couldn't read the snapshots of " + c.Name + ": " + proxmox.Describe(err) + ". Only " + base + " is offered."
+			return nil
 		}
 		read = append(read, c.Name)
-		allBaseline = allBaseline && d.Baseline != ""
-		if i == 0 {
-			baseline = d.Baseline
-		} else if d.Baseline != baseline {
-			baseline = ""
-		}
 		if i == 0 {
 			common = slices.Clone(d.Snapshots) // d is shared with others reading the cell
 		} else {
@@ -308,17 +294,20 @@ func (s *Server) commonSnapshots(ctx context.Context, step *stepTwo, names []str
 		}
 	}
 	if len(cells) > len(read) {
-		baseline = "" // the unread VMs' baselines may be other snapshots
 		step.Hints = append(step.Hints, fmt.Sprintf("The snapshots that %s, the first %d of the %d VMs, all have.", strings.Join(read, ", "), len(read), len(cells)))
 	} else if len(read) == 1 {
 		step.Hints = append(step.Hints, "The snapshots of "+read[0]+".")
 	} else {
 		step.Hints = append(step.Hints, "The snapshots that "+strings.Join(read, ", ")+" all have.")
 	}
-	if !allBaseline {
-		step.Note = "Not all of them have a baseline snapshot."
+	if !slices.Contains(common, base) {
+		if len(read) == 1 {
+			step.Note = read[0] + " has no " + base + " snapshot."
+		} else {
+			step.Note = "Not all of them have " + base + "."
+		}
 	}
-	return common, baseline
+	return common
 }
 
 // firstVM is the first non-missing grid VM of teams whose host matches hosts

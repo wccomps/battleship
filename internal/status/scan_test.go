@@ -50,7 +50,7 @@ func TestScanFindsDrift(t *testing.T) {
 		"01/dc":  nil,
 		"01/web": {{Kind: DriftNetwork, Reason: "network differs from pod 01's: net1 should be virtio=BC:24:11:00:00:02,bridge=int01"}},
 		"02/dc":  {{Kind: DriftDiskLimits, Reason: "disk limits differ on scsi0 (want 300 MB/s read and 300 MB/s write)"}},
-		"02/web": {{Kind: DriftSnapshot, Reason: `no "initial" or fresh_clone_* baseline snapshot`}},
+		"02/web": {{Kind: DriftSnapshot, Reason: `no "initial" baseline snapshot`}},
 	}
 	for key, drift := range want {
 		team, host, _ := strings.Cut(key, "/")

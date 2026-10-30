@@ -113,11 +113,10 @@ func TestSnapshotPreviewRefusesBadNames(t *testing.T) {
 	h.poll()
 	op := h.login(asOperator)
 	for name, want := range map[string]string{
-		"":              "A snapshot needs a name.",
-		"2nd":           "must start with a letter",
-		"current":       "is reserved by Proxmox",
-		"initial":       "Couldn&#39;t make a plan: &#34;initial&#34; is the baseline snapshot a deploy takes (deploy.snapshot_name); choose another name.",
-		"fresh_clone_1": "so a reset to the baseline could pick it",
+		"":        "A snapshot needs a name.",
+		"2nd":     "must start with a letter",
+		"current": "is reserved by Proxmox",
+		"initial": "Couldn&#39;t make a plan: &#34;initial&#34; is the baseline snapshot a deploy takes (deploy.snapshot_name); choose another name.",
 	} {
 		rec := h.post(&op, "/snapshot/preview", url.Values{"teams": {"1"}, "snapshot": {name}})
 		if rec.Code != http.StatusUnprocessableEntity {

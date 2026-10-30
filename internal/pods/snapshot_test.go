@@ -128,10 +128,9 @@ func TestSnapshotPlanRefusesBadAndBaselineNames(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
 	for name, why := range map[string]string{
-		"initial":            `"initial" is the baseline snapshot a deploy takes (deploy.snapshot_name)`,
-		"fresh_clone_202610": `"fresh_clone_202610" matches fresh_clone_*, so a reset to the baseline could pick it (deploy.baseline_patterns)`,
-		"current":            "reserved",
-		"9lives":             "start with a letter",
+		"initial": `"initial" is the baseline snapshot a deploy takes (deploy.snapshot_name)`,
+		"current": "reserved",
+		"9lives":  "start with a letter",
 	} {
 		_, err := testPlanner(f).Snapshot(context.Background(), SnapshotRequest{Teams: []string{"01"}, Name: name})
 		if err == nil || !strings.Contains(err.Error(), why) {

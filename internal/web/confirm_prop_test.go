@@ -21,7 +21,7 @@ import (
 // confirmPreviews are a valid preview form of each operation.
 var confirmPreviews = map[pods.Kind]url.Values{
 	pods.KindPower:          {"teams": {"1"}, "action": {"stop"}},
-	pods.KindReset:          {"teams": {"1"}, "hosts": {"dc"}},
+	pods.KindReset:          {"teams": {"1"}, "hosts": {"dc"}, "snapshot": {"initial"}},
 	pods.KindSnapshot:       {"teams": {"1"}, "snapshot": {"round2"}, "description": {"before round 2"}},
 	pods.KindDeploy:         {"teams": {"1"}, "pattern": {"*.kilo.alpha"}, "baseline": {"yes"}},
 	pods.KindTeardown:       {"teams": {"1-2"}},

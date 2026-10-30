@@ -150,6 +150,9 @@ func (s *Server) opPreview(op operation) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		form := postedForm(r)
 		in := op.scope(formInputs(op.Kind, form))
+		if op.Kind == pods.KindReset && in.Snapshot == "" {
+			in.Snapshot = s.cfg.Deploy.SnapshotName
+		}
 		if machineInputs(op, form) {
 			// Add host without JavaScript, or Review: the form again, with
 			// more rows or what is wrong with the fields.
@@ -525,10 +528,6 @@ func askedFacts(in jobs.Inputs) []fact {
 		if in.NoSnapshot {
 			fs = append(fs, fact{"Baseline snapshot", "off"})
 		}
-	case pods.KindReset:
-		if in.Snapshot == "" {
-			fs = append(fs, fact{"Snapshot", "baseline"})
-		}
 	case pods.KindSnapshot:
 		if in.Description != "" {
 			fs = append(fs, fact{"Description", in.Description})
@@ -657,10 +656,6 @@ func consequence(kind pods.Kind, in jobs.Inputs, items []pods.Item) string {
 		}
 		return vms + " get the power action " + in.Action + "."
 	case pods.KindReset:
-		if in.Snapshot == "" {
-			return vms + pick(" roll back to their baseline snapshots and start. Work since then is lost.",
-				" rolls back to its baseline snapshot and starts. Work since then is lost.")
-		}
 		return vms + pick(" roll back to snapshot ", " rolls back to snapshot ") + in.Snapshot + pick(" and start. Work since then is lost.", " and starts. Work since then is lost.")
 	case pods.KindDeploy:
 		var nodes []string
@@ -751,7 +746,7 @@ func stepsText(it pods.Item) string {
 	for i, st := range it.Steps {
 		parts[i] = string(st)
 		if st == pods.StepRollback && it.Snapshot != "" {
-			parts[i] += " to " + pods.SnapshotLabel(it)
+			parts[i] += " to " + it.Snapshot
 		}
 		if st == pods.StepSnapshot && it.VMState {
 			parts[i] += " with RAM"

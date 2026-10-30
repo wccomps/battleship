@@ -171,8 +171,6 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		if err := e.call(ctx, func() (err error) { snaps, err = e.api.Snapshots(ctx, it.Node, it.VMID); return }); err != nil {
 			return false, err
 		}
-		// Any baseline will do: one taken now would capture whatever the VM has
-		// been through.
 		if pods.HasBaseline(e.Cfg.Deploy, snaps) {
 			return false, nil
 		}

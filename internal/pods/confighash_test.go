@@ -25,9 +25,9 @@ var hashedFor = map[string]map[string][]Kind{
 	"Deploy": {
 		"Storage": append([]Kind{KindDeploy}, append(slices.Clone(imageKinds), envKinds...)...),
 		"Linked":  {KindDeploy}, "DiskMBpsRead": {KindDeploy}, "DiskMBpsWrite": {KindDeploy},
-		"SnapshotName": {KindDeploy}, "BaselinePatterns": {KindDeploy},
-		"MasterTag": envKinds, // environment VMs are tagged with it
-		"GPUVGA":    nil,
+		"SnapshotName": {KindDeploy},
+		"MasterTag":    envKinds, // environment VMs are tagged with it
+		"GPUVGA":       nil,
 	},
 	"Images": {
 		"Pool":      append(slices.Clone(imageKinds), KindDeploy), // built templates join it

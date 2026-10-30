@@ -196,6 +196,7 @@ func TestJobPage(t *testing.T) {
 // (askedFacts).
 func TestJobPageRecapsWhatWasAsked(t *testing.T) {
 	h := newHarness(t)
+	addMasters(h)
 	h.poll()
 	op := h.login(asOperator)
 	for _, c := range []struct {
@@ -204,7 +205,8 @@ func TestJobPageRecapsWhatWasAsked(t *testing.T) {
 	}{
 		{jobs.Inputs{Kind: pods.KindSnapshot, Teams: "1", Snapshot: "round2", Description: "after lunch", VMState: true},
 			` · Description <span class="vm">after lunch</span> · Include RAM <span class="vm">on</span>`},
-		{jobs.Inputs{Kind: pods.KindReset, Teams: "1"}, ` · Snapshot <span class="vm">baseline</span>`},
+		{jobs.Inputs{Kind: pods.KindDeploy, Teams: "1", Pattern: "*.kilo.alpha", Rebuild: true, NoSnapshot: true},
+			` · Rebuild templates <span class="vm">on</span> · Baseline snapshot <span class="vm">off</span>`},
 	} {
 		id := h.submitJob(c.in, byOperator)
 		contains(t, string(c.in.Kind)+" job page", h.get(&op, "/logs/"+itoa(id)).Body.String(), c.want)

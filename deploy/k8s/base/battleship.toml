@@ -43,7 +43,6 @@ master_tag = "dev"
 disk_mbps_rd = 300
 disk_mbps_wr = 300
 snapshot_name = "initial"          # the baseline a deploy takes
-baseline_patterns = ["fresh_clone_*"]  # old-tool baselines; reset uses the newest if no snapshot_name
 gpu_vga = "virtio-gl"
 
 # config_calls and template_builds are PER REPLICA, so roughly half the

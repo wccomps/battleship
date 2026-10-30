@@ -27,8 +27,8 @@ type Inputs struct {
 	// Set is the template set a teardown takes (pods.ParseSet); empty takes
 	// everything in its pods (among Hosts).
 	Set pods.Set `json:"set,omitempty"`
-	// Snapshot is a reset's target (empty: baseline) or a snapshot job's
-	// new snapshot.
+	// Snapshot is a reset's target (empty: deploy.snapshot_name) or a
+	// snapshot job's new snapshot.
 	Snapshot    string `json:"snapshot,omitempty"`
 	Description string `json:"description,omitempty"` // snapshot
 	VMState     bool   `json:"vmstate,omitempty"`     // snapshot: also save the RAM of running VMs

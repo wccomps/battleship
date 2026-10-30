@@ -28,8 +28,8 @@ func TestDetailReadsLive(t *testing.T) {
 	if d.Config["net0"] != "virtio=BC:24:11:00:00:01,bridge=vmbr0" || d.Config["scsi0"] == "" {
 		t.Errorf("config = %v, want the live config", d.Config)
 	}
-	if !reflect.DeepEqual(d.Snapshots, []string{"initial", "pre-inject"}) || d.Baseline != "initial" {
-		t.Errorf("snapshots %v baseline %q, want [initial pre-inject] and initial", d.Snapshots, d.Baseline)
+	if !reflect.DeepEqual(d.Snapshots, []string{"initial", "pre-inject"}) {
+		t.Errorf("snapshots %v, want [initial pre-inject]", d.Snapshots)
 	}
 	want := []Drift{{Kind: DriftNetwork, Reason: "network differs from pod 01's: net0 should be virtio=BC:24:11:00:00:01,bridge=ext01"}}
 	if d.Cell.State != StateDrifted || !reflect.DeepEqual(d.Cell.Drift, want) || d.Cell.VMID != 10101 {
@@ -89,7 +89,7 @@ func TestDetailOfMissingVM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Cell.State != StateMissing || d.Cell.Name != "team02-dc" || d.Config != nil || d.Snapshots != nil || d.Baseline != "" {
+	if d.Cell.State != StateMissing || d.Cell.Name != "team02-dc" || d.Config != nil || d.Snapshots != nil {
 		t.Errorf("detail of a missing VM = %+v", d)
 	}
 	if reads, _, _ := h.api.counts(); reads != 0 {
