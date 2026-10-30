@@ -61,6 +61,14 @@ for the event streams.
   `pve_ticket_sealed`, `pve_csrf_sealed`, `pve_issued_at` and
   `pve_login_at` (keeping the step that ends a Proxmox login), and the one
   after drops them.
+- **Pending.** Jobs move to being pinned to the replica that took their
+  confirm, which holds the ticket in memory only. This release leaves jobs
+  with `jobs.replica` set alone; deploy the release that pins them only
+  once no older replica is left, since older ones would claim pinned jobs
+  they hold no ticket for. That release must fail the queued jobs of a
+  replica that stops or dies, or they block newer jobs on the same VMs;
+  rolling back from it strands its pinned jobs until cancelled. The release
+  after drops `job_credentials` and `jobs.Renewer`.
 - **No service token.** `battleship serve` refuses to start with
   `BATTLESHIP_PROXMOX_TOKEN_ID` set; users act with their own Proxmox
   permissions.

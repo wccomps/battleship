@@ -63,6 +63,7 @@ var migrationSums = map[int]string{
 	15: "997c2357ec0fe41f",
 	16: "8a193bfc9df42efa",
 	17: "764f959be89d1dbd",
+	18: "569ff5d7b6f1f56a",
 }
 
 func TestShippedMigrationsDontChange(t *testing.T) {
