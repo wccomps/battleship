@@ -21,10 +21,9 @@ const claimLockID = 727071
 const blocksSQL = `(o.lock_writes && j.lock_writes OR o.lock_writes && j.lock_reads OR o.lock_reads && j.lock_writes)
 	AND (o.status = 'running' OR (o.status = 'pending' AND o.id < j.id))`
 
-// Claim starts the oldest pending, unpinned job nothing blocks (see
-// blocksSQL), or returns nil. Overlapping jobs run in creation order.
-// ReapStale reaps it once it has no heartbeat for staleAfter, which must be
-// positive.
+// Claim starts the oldest pending job nothing blocks (see blocksSQL), or
+// returns nil. Overlapping jobs run in creation order. ReapStale reaps it
+// once it has no heartbeat for staleAfter, which must be positive.
 func (s *Store) Claim(ctx context.Context, worker string, staleAfter time.Duration) (*Job, error) {
 	if staleAfter <= 0 {
 		return nil, fmt.Errorf("claiming a job: stale_after %v isn't positive", staleAfter)
@@ -42,7 +41,6 @@ func (s *Store) Claim(ctx context.Context, worker string, staleAfter time.Durati
 		WHERE id = (SELECT j.id FROM jobs j
 			WHERE j.status = 'pending'
 			  AND NOT j.cancel_requested
-			  AND j.replica IS NULL
 			  AND NOT EXISTS (SELECT 1 FROM jobs o WHERE `+blocksSQL+`)
 			ORDER BY j.id LIMIT 1)
 		  AND status = 'pending' AND NOT cancel_requested
