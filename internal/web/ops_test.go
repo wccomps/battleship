@@ -236,7 +236,7 @@ func TestPreviewShowsThePlan(t *testing.T) {
 		"<tr><td><span class=\"vm\">team01-dc</span></td><td><span class=\"vm\">n1</span></td><td>stop · rollback to initial · start</td><td></td></tr>",
 		`<tr class="blk"><td><span class="vm">team01-web</span></td>`,
 		`no snapshot &#34;initial&#34; (has: other)`,
-		"1 VM rolls back to snapshot <span class=\"name\">initial</span> and starts. Work since then is lost.",
+		"1 VM rolls back to snapshot initial and starts. Work since then is lost.",
 		`<button type="submit" class="btn pri bad">`, "Reset 1 VM</button>",
 		`<a class="btn first" href="/reset?snapshot=initial&amp;teams=1" data-panel-link>Back</a>`,
 	)

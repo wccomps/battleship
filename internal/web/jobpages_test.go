@@ -199,6 +199,7 @@ func TestJobPage(t *testing.T) {
 // (askedFacts).
 func TestJobPageRecapsWhatWasAsked(t *testing.T) {
 	h := newHarness(t)
+	addMasters(h)
 	h.poll()
 	op := h.login(asOperator)
 	for _, c := range []struct {
