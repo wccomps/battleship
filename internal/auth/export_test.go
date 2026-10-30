@@ -16,3 +16,7 @@ func OpenRefreshToken(s *Service, sessionID, stored string) (string, error) {
 func OpenSessionTicket(s *Service, sess store.Session) (proxmox.Credential, bool) {
 	return s.openTicket(sess)
 }
+
+func OpenTicketCookie(s *Service, sessionID, value string) (proxmox.Credential, bool) {
+	return s.openTicketCookie(sessionID, value)
+}

@@ -4,9 +4,6 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
-	"time"
-
-	"github.com/wccomps/battleship/internal/auth"
 )
 
 // A preview reads the cluster as the signed-in user, and the job a confirm
@@ -49,9 +46,7 @@ func TestNoProxmoxCallWithoutATicket(t *testing.T) {
 	h.poll()
 	before := len(h.usedCreds())
 	sess := h.login(asLead)
-	if err := h.st.ClearSessionTicket(t.Context(), auth.HashToken(sess.Cookie.Value), time.Time{}); err != nil {
-		t.Fatal(err)
-	}
+	sess.Ticket = nil
 	rec := h.post(&sess, "/power/preview", url.Values{"teams": {"1"}, "action": {"stop"}})
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("preview without a ticket = %d", rec.Code)

@@ -20,7 +20,8 @@ import (
 //     hash and the endpoint that answered, and redirects there.
 //  2. GET /auth/proxmox/callback checks the state and sends the code to
 //     the same endpoint (Proxmox keeps login state on that node's disk
-//     only); the returned ticket is sealed into the session.
+//     only); the returned ticket is sealed into the ticket cookie and the
+//     session row.
 //
 // Each step waits seconds on Proxmox and Authentik, so a browser's first
 // request to it gets an interstitial that loads it again with finish=1.
@@ -90,7 +91,7 @@ func (s *Service) proxmoxCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	next := safeNext(sess.PVELoginNext)
 	if sess.PVELoginState == "" || subtle.ConstantTimeCompare([]byte(HashToken(q.Get("state"))), []byte(sess.PVELoginState)) != 1 {
-		if _, ok := s.usableTicket(sess, s.now()); ok {
+		if _, _, ok := s.loadTicket(r, sess, s.now()); ok {
 			// Another tab's sign-in, started later, replaced this one's
 			// state and has already finished: the session is signed in.
 			http.Redirect(w, r, next, http.StatusSeeOther)
@@ -135,9 +136,9 @@ func (s *Service) proxmoxCallback(w http.ResponseWriter, r *http.Request) {
 			Link: "/auth/login", LinkText: "Log in again"})
 		return
 	}
-	err = s.st.SetSessionTicket(r.Context(), sess.ID, time.Time{}, SealSessionTicket(s.cfg, sess.ID, cred))
+	err = s.st.SetSessionTicket(r.Context(), sess.ID, SealSessionTicket(s.cfg, sess.ID, cred))
 	if errors.Is(err, store.ErrSessionNotFound) {
-		s.clearSessionCookie(w)
+		s.clearSessionCookies(w)
 		s.unauthenticated(w, r)
 		return
 	}
@@ -145,6 +146,7 @@ func (s *Service) proxmoxCallback(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "saving your Proxmox sign-in", err)
 		return
 	}
+	s.setTicketCookie(w, sess, cred, s.now())
 	s.logf("auth: proxmox login: subject=%q user=%q node=%s", sess.Subject, cred.User, sess.PVELoginEndpoint)
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
@@ -198,42 +200,33 @@ func proxmoxFailedPage(next string) Page {
 // once it is ticket_renew_after old. ok is false once it has responded by
 // sending the user through the Proxmox step.
 func (s *Service) sessionTicket(ctx context.Context, w http.ResponseWriter, r *http.Request, sess store.Session, now time.Time) (proxmox.Credential, bool) {
-	cred, ok := s.usableTicket(sess, now)
+	cred, inCookie, ok := s.loadTicket(r, sess, now)
 	if !ok {
 		s.needProxmox(w, r)
 		return cred, false
 	}
-	if now.Sub(cred.Issued) < s.cfg.Proxmox.TicketRenewAfter {
-		return cred, true
-	}
-	rctx, cancel := context.WithTimeout(ctx, providerTimeout)
-	defer cancel()
-	next, err := s.pve.RenewTicket(rctx, cred, now)
-	switch {
-	case proxmox.RenewalRefused(err):
-		s.logf("auth: proxmox ticket refused at renewal: subject=%q user=%q: %v", sess.Subject, cred.User, err)
-		if err := s.st.ClearSessionTicket(ctx, sess.ID, cred.Issued); err != nil {
-			s.logf("auth: clearing the Proxmox ticket of subject=%q: %v", sess.Subject, err)
+	if now.Sub(cred.Issued) >= s.cfg.Proxmox.TicketRenewAfter {
+		rctx, cancel := context.WithTimeout(ctx, providerTimeout)
+		defer cancel()
+		next, err := s.pve.RenewTicket(rctx, cred, now)
+		switch {
+		case proxmox.RenewalRefused(err):
+			s.logf("auth: proxmox ticket refused at renewal: subject=%q user=%q: %v", sess.Subject, cred.User, err)
+			s.dropTicket(ctx, w, sess, cred)
+			s.needProxmox(w, r)
+			return cred, false
+		case err != nil:
+			// Proxmox unreachable: the current ticket is still valid.
+			s.logf("auth: renewing the proxmox ticket of subject=%q failed, using the current one: %v", sess.Subject, err)
+		default:
+			s.saveRenewedTicket(ctx, w, sess, next, now)
+			return next, true
 		}
-		s.needProxmox(w, r)
-		return cred, false
-	case err != nil:
-		// Proxmox unreachable: the current ticket is still valid.
-		s.logf("auth: renewing the proxmox ticket of subject=%q failed, using the current one: %v", sess.Subject, err)
-		return cred, true
 	}
-	err = s.st.SetSessionTicket(ctx, sess.ID, cred.Issued, SealSessionTicket(s.cfg, sess.ID, next))
-	if err != nil && !errors.Is(err, store.ErrTicketChanged) { // changed: another request renewed it first
-		s.logf("auth: saving the renewed proxmox ticket of subject=%q: %v", sess.Subject, err)
+	if !inCookie {
+		s.setTicketCookie(w, sess, cred, now)
 	}
-	return next, true
-}
-
-// usableTicket is the session's ticket if it can be used at now: it opens,
-// hasn't expired, and its login is younger than proxmox.ticket_max_age.
-func (s *Service) usableTicket(sess store.Session, now time.Time) (proxmox.Credential, bool) {
-	cred, ok := s.openTicket(sess)
-	return cred, ok && !cred.Lapsed(now, s.cfg.Proxmox.TicketMaxAge)
+	return cred, true
 }
 
 // needProxmox sends a session without a usable ticket through the Proxmox

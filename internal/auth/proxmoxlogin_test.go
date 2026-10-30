@@ -20,6 +20,33 @@ func (b *browser) pveTicket() (proxmox.Credential, bool) {
 	return auth.OpenSessionTicket(b.h.svc, sess)
 }
 
+// cookieTicket is the browser's ticket cookie, opened for its session.
+func (b *browser) cookieTicket() (proxmox.Credential, bool) {
+	b.h.t.Helper()
+	u, _ := url.Parse(b.h.app.URL)
+	for _, c := range b.jar.Cookies(u) {
+		if c.Name == auth.TicketCookie {
+			return auth.OpenTicketCookie(b.h.svc, b.session().ID, c.Value)
+		}
+	}
+	return proxmox.Credential{}, false
+}
+
+func (b *browser) setTicketCookie(v string) {
+	u, _ := url.Parse(b.h.app.URL)
+	b.jar.SetCookies(u, []*http.Cookie{{Name: auth.TicketCookie, Value: v, Path: "/"}})
+}
+
+func (b *browser) ticketCookieValue() string {
+	u, _ := url.Parse(b.h.app.URL)
+	for _, c := range b.jar.Cookies(u) {
+		if c.Name == auth.TicketCookie {
+			return c.Value
+		}
+	}
+	return ""
+}
+
 func TestLoginSignsInToProxmoxToo(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
@@ -37,6 +64,13 @@ func TestLoginSignsInToProxmoxToo(t *testing.T) {
 	}
 	if !cred.LoginAt.Equal(h.clock.Now()) {
 		t.Fatalf("login time %v, want %v", cred.LoginAt, h.clock.Now())
+	}
+	inCookie, ok := b.cookieTicket()
+	if !ok || inCookie.Ticket != cred.Ticket || inCookie.CSRF != cred.CSRF || !inCookie.LoginAt.Equal(cred.LoginAt) {
+		t.Fatalf("ticket cookie = %v, %v; want %v", inCookie, ok, cred)
+	}
+	if v := b.ticketCookieValue(); strings.Contains(v, cred.Ticket) || strings.Contains(v, cred.CSRF) {
+		t.Fatal("the ticket cookie carries the ticket in the clear")
 	}
 	if !strings.Contains(h.logs.String(), `auth: proxmox login: subject="sub-alice" user="alice@auth.example.org"`) {
 		t.Errorf("logs: %s", h.logs)
@@ -60,9 +94,7 @@ func TestSessionWithoutATicketGoesThroughProxmox(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	b.login(alice)
-	if err := h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
-		t.Fatal(err)
-	}
+	b.dropTicket()
 	resp := b.do(http.MethodGet, "/private?x=1", nil, nil)
 	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/auth/proxmox?next="+url.QueryEscape("/private?x=1") {
 		t.Fatalf("GET without a ticket: %d to %q", resp.StatusCode, resp.Header.Get("Location"))
@@ -86,9 +118,7 @@ func TestProxmoxCallbackChecksState(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	b.login(alice)
-	if err := h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
-		t.Fatal(err)
-	}
+	b.dropTicket()
 	h.pve.SignIn(pveUser(alice))
 	start := b.pastInterstitial("/auth/proxmox?next=/private")
 	if start.StatusCode != http.StatusFound {
@@ -116,9 +146,7 @@ func TestProxmoxSignInFailureSaysTryAgain(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	b.login(alice)
-	if err := h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
-		t.Fatal(err)
-	}
+	b.dropTicket()
 	h.pve.Disable(pveUser(alice)) // Proxmox refuses the login with a bare 401
 	h.pve.SignIn(pveUser(alice))
 	resp := b.get("/private")
@@ -127,6 +155,84 @@ func TestProxmoxSignInFailureSaysTryAgain(t *testing.T) {
 	}
 	if !strings.Contains(h.logs.String(), "proxmox login failed") || !strings.Contains(h.logs.String(), h.pve.Endpoint()) {
 		t.Errorf("the failure isn't logged with the node to check: %s", h.logs)
+	}
+}
+
+// A ticket stored only in the session row, as the previous release stores
+// it, is used and moved into the cookie.
+func TestStoredTicketMovesToTheCookie(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	stored, _ := b.pveTicket()
+	u, _ := url.Parse(h.app.URL)
+	b.jar.SetCookies(u, []*http.Cookie{{Name: auth.TicketCookie, Path: "/", MaxAge: -1}})
+	if resp := b.get("/private"); resp.StatusCode != http.StatusOK || !strings.Contains(resp.body, "pve=alice@auth.example.org") {
+		t.Fatalf("with the stored ticket only: %d %q", resp.StatusCode, resp.body)
+	}
+	if got, ok := b.cookieTicket(); !ok || got.Ticket != stored.Ticket {
+		t.Fatalf("ticket cookie = %v, %v; want the stored ticket", got, ok)
+	}
+}
+
+// The ticket cookie alone signs a session in to Proxmox, and only its own.
+func TestTicketCookieIsBoundToItsSession(t *testing.T) {
+	h := newHarness(t)
+	a, l := h.browser(), h.browser()
+	a.login(alice)
+	l.login(lena)
+	if err := h.st.ClearSessionTicket(ctx, l.session().ID, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if resp := l.get("/private"); resp.StatusCode != http.StatusOK || !strings.Contains(resp.body, "pve=lena@auth.example.org") {
+		t.Fatalf("lena with her ticket cookie alone: %d %q", resp.StatusCode, resp.body)
+	}
+	l.setTicketCookie(a.ticketCookieValue())
+	if resp := l.do(http.MethodGet, "/private", nil, nil); resp.StatusCode != http.StatusSeeOther ||
+		!strings.HasPrefix(resp.Header.Get("Location"), "/auth/proxmox?") {
+		t.Fatalf("lena with alice's ticket cookie: %d to %q %s", resp.StatusCode, resp.Header.Get("Location"), resp.body)
+	}
+}
+
+func TestTicketCookieWinsOverTheRow(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.login(alice)
+	id := b.session().ID
+	if err := h.st.SetSessionTicket(ctx, id, auth.SealSessionTicket(h.cfg, id, h.pve.Ticket(pveUser(lena)))); err != nil {
+		t.Fatal(err)
+	}
+	if resp := b.get("/private"); !strings.Contains(resp.body, "pve=alice@auth.example.org") {
+		t.Fatalf("with lena's ticket in the row: %d %q", resp.StatusCode, resp.body)
+	}
+}
+
+// A renewal stores the renewed ticket in the session row even when the row
+// held another ticket, as one a previous release's replica renewed.
+func TestRenewalKeepsTheRowCurrent(t *testing.T) {
+	h := newHarness(t, func(c *config.Config) {
+		c.Web.SessionIdle, c.Web.SessionRefresh, c.Web.SessionMax = 5*time.Hour, 4*time.Hour, 24*time.Hour
+	})
+	b := h.browser()
+	b.login(alice)
+	first, _ := b.pveTicket()
+	h.clock.Advance(time.Second)
+	id := b.session().ID
+	renewed := h.pve.Ticket(pveUser(alice))
+	renewed.LoginAt = first.LoginAt
+	if err := h.st.SetSessionTicket(ctx, id, auth.SealSessionTicket(h.cfg, id, renewed)); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		h.clock.Advance(61 * time.Minute)
+		if resp := b.get("/private"); resp.StatusCode != http.StatusOK {
+			t.Fatalf("%d %s", resp.StatusCode, resp.body)
+		}
+		row, _ := b.pveTicket()
+		inCookie, _ := b.cookieTicket()
+		if row.Ticket != inCookie.Ticket || !row.Issued.Equal(h.clock.Now()) {
+			t.Fatalf("row %v, cookie %v at %v; want both the renewed ticket", row, inCookie, h.clock.Now())
+		}
 	}
 }
 
@@ -152,6 +258,9 @@ func TestTicketRenewedOnUse(t *testing.T) {
 	}
 	if !after.LoginAt.Equal(before.LoginAt) {
 		t.Fatal("renewal moved the login time")
+	}
+	if inCookie, ok := b.cookieTicket(); !ok || inCookie.Ticket != after.Ticket {
+		t.Fatalf("ticket cookie after renewal = %v, %v; want the renewed ticket", inCookie, ok)
 	}
 }
 
@@ -184,6 +293,9 @@ func TestLapsedTicketSendsBackThroughProxmox(t *testing.T) {
 		}
 		if _, ok := b.pveTicket(); ok {
 			t.Fatal("the refused ticket was kept")
+		}
+		if _, ok := b.cookieTicket(); ok {
+			t.Fatal("the refused ticket's cookie was kept")
 		}
 	})
 	t.Run("past ticket_max_age", func(t *testing.T) {
@@ -220,9 +332,7 @@ func TestSessionWithoutAUsernameLogsInAgain(t *testing.T) {
 		RefreshToken: sess.RefreshToken, RefreshedAt: sess.RefreshedAt}); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.st.ClearSessionTicket(ctx, sess.ID, time.Time{}); err != nil {
-		t.Fatal(err)
-	}
+	b.dropTicket()
 	resp := b.get("/private")
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(resp.body, "Log in again") || !strings.Contains(resp.body, "/auth/login?next=%2Fprivate") {
 		t.Fatalf("without a username: %d %q", resp.StatusCode, resp.body)
@@ -240,9 +350,7 @@ func TestProxmoxCallbackShowsInterstitialFirst(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	b.login(alice)
-	if err := h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
-		t.Fatal(err)
-	}
+	b.dropTicket()
 	h.pve.SignIn(pveUser(alice))
 	start := b.pastInterstitial("/auth/proxmox?next=/private")
 	idp := b.do(http.MethodGet, start.Header.Get("Location"), nil, nil)
@@ -281,9 +389,7 @@ func TestProxmoxCallbackErrorSkipsInterstitial(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	b.login(alice)
-	if err := h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
-		t.Fatal(err)
-	}
+	b.dropTicket()
 	start := b.pastInterstitial("/auth/proxmox?next=/private")
 	u, err := url.Parse(start.Header.Get("Location"))
 	if err != nil {
@@ -310,9 +416,7 @@ func TestProxmoxStartShowsInterstitialFirst(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	b.login(alice)
-	if err := h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
-		t.Fatal(err)
-	}
+	b.dropTicket()
 	page := b.do(http.MethodGet, "/auth/proxmox?next=/private", nil, nil)
 	if page.StatusCode != http.StatusOK || refreshOf(page.body) != "/auth/proxmox?finish=1&next=%2Fprivate" {
 		t.Fatalf("/auth/proxmox = %d refreshing to %q", page.StatusCode, refreshOf(page.body))
@@ -331,9 +435,7 @@ func TestScriptRequestsSkipInterstitial(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	b.login(alice)
-	if err := h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
-		t.Fatal(err)
-	}
+	b.dropTicket()
 	for mode, want := range map[string]int{"cors": http.StatusFound, "same-origin": http.StatusFound, "navigate": http.StatusOK} {
 		resp := b.do(http.MethodGet, "/auth/proxmox?next=/private", nil, http.Header{"Sec-Fetch-Mode": {mode}})
 		if resp.StatusCode != want {

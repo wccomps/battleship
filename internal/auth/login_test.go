@@ -427,8 +427,10 @@ func TestLogout(t *testing.T) {
 	if got := h.revoked(); len(live) != 1 || !slices.Equal(got, live) || len(h.liveTokens()) != 0 {
 		t.Errorf("revoked %v of %v; still live %v", got, live, h.liveTokens())
 	}
-	if c := resp.cookie(auth.SessionCookie); c == nil || c.MaxAge >= 0 {
-		t.Errorf("session cookie after logout = %+v, want it cleared", c)
+	for _, name := range []string{auth.SessionCookie, auth.TicketCookie} {
+		if c := resp.cookie(name); c == nil || c.MaxAge >= 0 {
+			t.Errorf("%s cookie after logout = %+v, want it cleared", name, c)
+		}
 	}
 	h.sessionGone(token)
 	wantLoginRedirect(t, b.do(http.MethodGet, "/private", nil, nil), "/private")
@@ -784,7 +786,7 @@ func TestHostPrefixedCookiesWorkThroughTheFlow(t *testing.T) {
 	}
 	// As if that sign-in had finished.
 	id := auth.HashToken(token)
-	if err := h.st.SetSessionTicket(ctx, id, time.Time{}, auth.SealSessionTicket(h.cfg, id, h.pve.Ticket(pveUser(alice)))); err != nil {
+	if err := h.st.SetSessionTicket(ctx, id, auth.SealSessionTicket(h.cfg, id, h.pve.Ticket(pveUser(alice)))); err != nil {
 		t.Fatal(err)
 	}
 	if rec := serve(http.MethodGet, "/private", "__Host-battleship_session", nil); rec.Code != http.StatusOK {

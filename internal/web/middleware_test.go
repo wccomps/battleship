@@ -33,7 +33,9 @@ func TestBodyCap(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form+strings.Repeat("x", n-len(form))))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		if signedIn {
-			req.AddCookie(op.Cookie)
+			for _, c := range op.Cookies() {
+				req.AddCookie(c)
+			}
 		}
 		if chunked {
 			req.ContentLength = -1

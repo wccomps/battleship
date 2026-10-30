@@ -47,13 +47,24 @@ type User struct {
 // Session is a logged-in test browser.
 type Session struct {
 	Cookie *http.Cookie // the session cookie
+	Ticket *http.Cookie // the Proxmox ticket cookie; nil with NoProxmox
 	CSRF   string       // the session's CSRF token
 }
 
-// Apply adds the session cookie to r and, unless GET or HEAD, the CSRF
+// Cookies are the browser's cookies for the session.
+func (s Session) Cookies() []*http.Cookie {
+	if s.Ticket == nil {
+		return []*http.Cookie{s.Cookie}
+	}
+	return []*http.Cookie{s.Cookie, s.Ticket}
+}
+
+// Apply adds the session's cookies to r and, unless GET or HEAD, the CSRF
 // token to its form body, which must be form-encoded.
 func (s Session) Apply(r *http.Request) {
-	r.AddCookie(s.Cookie)
+	for _, c := range s.Cookies() {
+		r.AddCookie(c)
+	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return
 	}
@@ -72,7 +83,7 @@ func (s Session) Apply(r *http.Request) {
 }
 
 // Login stores a session for u, as a successful login would, and returns
-// its cookie and CSRF token.
+// its cookies and CSRF token.
 func Login(t testing.TB, st *store.Store, cfg config.Config, u User) Session {
 	t.Helper()
 	if u.At.IsZero() {
@@ -97,8 +108,9 @@ func Login(t testing.TB, st *store.Store, cfg config.Config, u User) Session {
 	if err != nil {
 		t.Fatalf("authtest: creating session: %v", err)
 	}
+	var cred proxmox.Credential
 	if !u.NoProxmox {
-		cred := u.Proxmox
+		cred = u.Proxmox
 		if !cred.Usable() {
 			user := u.PVEUser
 			if user == "" {
@@ -109,23 +121,16 @@ func Login(t testing.TB, st *store.Store, cfg config.Config, u User) Session {
 		if cred.LoginAt.IsZero() {
 			cred.LoginAt = cred.Issued
 		}
-		id := auth.HashToken(token)
-		if err := st.SetSessionTicket(t.Context(), id, time.Time{}, auth.SealSessionTicket(cfg, id, cred)); err != nil {
-			t.Fatalf("authtest: storing the Proxmox ticket: %v", err)
-		}
 	}
-	secure := auth.SecureBaseURL(cfg.Web.BaseURL)
-	name := auth.SessionCookie
-	if secure {
-		name = "__Host-" + name
+	cookies, err := auth.SignedInCookies(cfg, token, cred, u.At)
+	if err != nil {
+		t.Fatalf("authtest: %v", err)
 	}
-	return Session{
-		Cookie: &http.Cookie{
-			Name: name, Value: token, Path: "/",
-			HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode,
-		},
-		CSRF: csrf,
+	sess := Session{Cookie: cookies[0], CSRF: csrf}
+	if len(cookies) > 1 {
+		sess.Ticket = cookies[1]
 	}
+	return sess
 }
 
 // username is u's preferred_username.

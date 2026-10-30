@@ -88,24 +88,21 @@ func (s *Service) hasSessionCookie(r *http.Request) bool {
 	return err == nil
 }
 
-// setSessionCookie gives the browser the session token for the time left.
-func (s *Service) setSessionCookie(w http.ResponseWriter, token string, left time.Duration) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     s.names.session,
-		Value:    token,
-		Path:     "/",
-		MaxAge:   max(1, int(math.Ceil(left.Seconds()))), // 0 would mean "no Max-Age"
-		HttpOnly: true,
-		Secure:   s.secure,
-		SameSite: http.SameSiteLaxMode,
-	})
+func siteCookie(name, value string, secure bool, maxAge int) *http.Cookie {
+	return &http.Cookie{Name: name, Value: value, Path: "/", MaxAge: maxAge, HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode}
 }
 
-func (s *Service) clearSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name: s.names.session, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, Secure: s.secure, SameSite: http.SameSiteLaxMode,
-	})
+// cookieMaxAge is a Max-Age for left, at least 1: 0 would mean none.
+func cookieMaxAge(left time.Duration) int { return max(1, int(math.Ceil(left.Seconds()))) }
+
+// setSessionCookie gives the browser the session token for the time left.
+func (s *Service) setSessionCookie(w http.ResponseWriter, token string, left time.Duration) {
+	http.SetCookie(w, siteCookie(s.names.session, token, s.secure, cookieMaxAge(left)))
+}
+
+func (s *Service) clearSessionCookies(w http.ResponseWriter) {
+	http.SetCookie(w, siteCookie(s.names.session, "", s.secure, -1))
+	http.SetCookie(w, siteCookie(s.names.ticket, "", s.secure, -1))
 }
 
 // noStore keeps responses that set or clear cookies out of caches.
@@ -117,16 +114,16 @@ const hostPrefix = "__Host-"
 
 // cookieNames are the names (and the login cookie's path) the service uses.
 type cookieNames struct {
-	session, login, loginPath string
+	session, ticket, login, loginPath string
 }
 
 // namesFor chooses cookie names: __Host- prefixed for https, plain names
 // (login cookie on /auth/) for development over http.
 func namesFor(secure bool) cookieNames {
 	if secure {
-		return cookieNames{session: hostPrefix + SessionCookie, login: hostPrefix + loginCookie, loginPath: "/"}
+		return cookieNames{session: hostPrefix + SessionCookie, ticket: hostPrefix + TicketCookie, login: hostPrefix + loginCookie, loginPath: "/"}
 	}
-	return cookieNames{session: SessionCookie, login: loginCookie, loginPath: "/auth/"}
+	return cookieNames{session: SessionCookie, ticket: TicketCookie, login: loginCookie, loginPath: "/auth/"}
 }
 
 // SecureBaseURL reports whether base_url is https, which makes cookies
