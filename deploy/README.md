@@ -56,6 +56,11 @@ for the event streams.
 - **Migrations** run at startup and only forward: back up the database
   before upgrading. Old pods keep serving during a rolling update, so drop
   a column one release after the code stops using it.
+- **Pending.** Once the release with the Proxmox ticket cookie is deployed,
+  the next stops reading and writing `sessions.pve_user`,
+  `pve_ticket_sealed`, `pve_csrf_sealed`, `pve_issued_at` and
+  `pve_login_at` (keeping the step that ends a Proxmox login), and the one
+  after drops them.
 - **No service token.** `battleship serve` refuses to start with
   `BATTLESHIP_PROXMOX_TOKEN_ID` set; users act with their own Proxmox
   permissions.

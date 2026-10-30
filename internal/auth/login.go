@@ -158,7 +158,7 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	sess, err := s.lookup(r)
 	if errors.Is(err, errNoSession) {
-		s.clearSessionCookie(w)
+		s.clearSessionCookies(w)
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
@@ -176,7 +176,7 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "ending your session", err)
 		return
 	}
-	s.clearSessionCookie(w)
+	s.clearSessionCookies(w)
 	s.logf("auth: logout: subject=%q", sess.Subject)
 	if ok {
 		sess.IDToken = ended.IDToken // as deleted: a refresh may have replaced it since sess was read

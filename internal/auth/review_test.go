@@ -48,9 +48,7 @@ func TestProxmoxSignInFromTwoTabs(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	b.login(alice)
-	if err := h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
-		t.Fatal(err)
-	}
+	b.dropTicket()
 	h.pve.SignIn(pveUser(alice))
 	first := b.proxmoxCallback("/logs")
 	second := b.proxmoxCallback("/private")
@@ -69,9 +67,7 @@ func TestProxmoxSignInAsSomeoneElseIsRefused(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	b.login(alice)
-	if err := h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
-		t.Fatal(err)
-	}
+	b.dropTicket()
 	h.pve.SignIn(pveUser(lena))
 	resp := b.get("/private")
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(resp.body, "lena@auth.example.org") {
@@ -88,9 +84,7 @@ func TestProxmoxSignInWithSkewedClocksWorks(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	b.login(alice)
-	if err := h.st.ClearSessionTicket(ctx, b.session().ID, time.Time{}); err != nil {
-		t.Fatal(err)
-	}
+	b.dropTicket()
 	h.pve.SetClock(func() time.Time { return h.clock.Now().Add(-3 * time.Hour) })
 	h.pve.SignIn(pveUser(alice))
 	cb := b.proxmoxCallback("/private")

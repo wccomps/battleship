@@ -36,7 +36,8 @@ type Session struct {
 	// RefreshFailedAt is the last failure to reach the identity provider
 	// since the last success; zero if none.
 	RefreshFailedAt time.Time
-	// PVE is the user's Proxmox ticket; zero until the Proxmox login.
+	// PVE is the session row's copy of the Proxmox ticket, which auth's
+	// ticket cookie supersedes; zero until the Proxmox login.
 	PVE SessionTicket
 	// An in-progress Proxmox login: SHA-256 hex of its state, the redirect
 	// after it, and the endpoint that started it, which alone can finish it
@@ -46,8 +47,8 @@ type Session struct {
 	PVELoginEndpoint string
 }
 
-// SessionTicket is a session's Proxmox ticket. Ticket and CSRF are sealed by
-// auth.
+// SessionTicket is a session row's copy of its Proxmox ticket. Ticket and
+// CSRF are sealed by auth.
 type SessionTicket struct {
 	User     string
 	Ticket   string
@@ -56,10 +57,6 @@ type SessionTicket struct {
 	// LoginAt is the original login time; renewals keep it.
 	LoginAt time.Time
 }
-
-// ErrTicketChanged means the ticket was renewed or cleared since the caller
-// read it.
-var ErrTicketChanged = errors.New("the session's Proxmox ticket changed")
 
 // SessionUpdate is what a refresh learns from the identity provider.
 type SessionUpdate struct {
@@ -123,32 +120,45 @@ func (s *Store) Session(ctx context.Context, id string) (Session, error) {
 	return x, nil
 }
 
-// SetSessionTicket stores the Proxmox ticket and ends any login in progress.
-// It replaces only a ticket issued at prev (zero: any), so of two concurrent
-// renewals one gets ErrTicketChanged.
-func (s *Store) SetSessionTicket(ctx context.Context, id string, prev time.Time, t SessionTicket) error {
-	if t.User == "" || t.Ticket == "" || t.CSRF == "" || t.IssuedAt.IsZero() || t.LoginAt.IsZero() {
+func (t SessionTicket) valid() bool {
+	return t.User != "" && t.Ticket != "" && t.CSRF != "" && !t.IssuedAt.IsZero() && !t.LoginAt.IsZero()
+}
+
+// SetSessionTicket stores the ticket a Proxmox login returned and ends the
+// login in progress.
+func (s *Store) SetSessionTicket(ctx context.Context, id string, t SessionTicket) error {
+	if !t.valid() {
 		return ErrEmptySession
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE sessions SET pve_user = $2, pve_ticket_sealed = $3, pve_csrf_sealed = $4,
-			pve_issued_at = $5, pve_login_at = $7, pve_login_state = '', pve_login_next = '', pve_login_endpoint = ''
-		WHERE id = $1 AND ($6::timestamptz IS NULL OR pve_issued_at = $6)`,
-		id, t.User, t.Ticket, t.CSRF, t.IssuedAt, nullTime(prev), t.LoginAt)
+			pve_issued_at = $5, pve_login_at = $6, pve_login_state = '', pve_login_next = '', pve_login_endpoint = ''
+		WHERE id = $1`, id, t.User, t.Ticket, t.CSRF, t.IssuedAt, t.LoginAt)
 	if err != nil {
 		return fmt.Errorf("storing the Proxmox ticket: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		if _, err := s.Session(ctx, id); err != nil {
-			return err
-		}
-		return ErrTicketChanged
+		return ErrSessionNotFound
 	}
 	return nil
 }
 
-// ClearSessionTicket drops the Proxmox ticket, forcing a new login. A
-// non-zero prev drops only a ticket issued at prev, so a stale refusal can't
-// wipe a newer ticket.
+// RenewSessionTicket stores a renewed ticket unless the session row holds
+// one issued no earlier.
+func (s *Store) RenewSessionTicket(ctx context.Context, id string, t SessionTicket) error {
+	if !t.valid() {
+		return ErrEmptySession
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE sessions SET pve_user = $2, pve_ticket_sealed = $3, pve_csrf_sealed = $4,
+			pve_issued_at = $5, pve_login_at = $6
+		WHERE id = $1 AND (pve_issued_at IS NULL OR pve_issued_at < $5)`,
+		id, t.User, t.Ticket, t.CSRF, t.IssuedAt, t.LoginAt); err != nil {
+		return fmt.Errorf("storing the renewed Proxmox ticket: %w", err)
+	}
+	return nil
+}
+
+// ClearSessionTicket drops the session row's ticket. A non-zero prev drops
+// only a ticket issued at prev, so a stale refusal can't wipe a newer one.
 func (s *Store) ClearSessionTicket(ctx context.Context, id string, prev time.Time) error {
 	if _, err := s.pool.Exec(ctx, `UPDATE sessions SET pve_ticket_sealed = '', pve_csrf_sealed = '', pve_issued_at = NULL,
 		pve_login_at = NULL WHERE id = $1 AND ($2::timestamptz IS NULL OR pve_issued_at = $2)`, id, nullTime(prev)); err != nil {

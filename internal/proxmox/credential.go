@@ -47,9 +47,18 @@ func (c Credential) Expired(now time.Time) bool {
 	return !now.Before(c.Issued.Add(TicketLifetime))
 }
 
+// LapsesAt is when the ticket expires or its login turns maxAge old,
+// whichever comes first.
+func (c Credential) LapsesAt(maxAge time.Duration) time.Time {
+	if l := c.LoginAt.Add(maxAge); l.Before(c.Issued.Add(TicketLifetime)) {
+		return l
+	}
+	return c.Issued.Add(TicketLifetime)
+}
+
 // Lapsed reports whether the ticket expired or its login is maxAge old.
 func (c Credential) Lapsed(now time.Time, maxAge time.Duration) bool {
-	return c.Expired(now) || !now.Before(c.LoginAt.Add(maxAge))
+	return !now.Before(c.LapsesAt(maxAge))
 }
 
 func (c Credential) String() string {

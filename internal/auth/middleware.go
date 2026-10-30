@@ -97,7 +97,7 @@ func (s *Service) RequireUser(next http.Handler) http.Handler {
 		sess, err := s.lookup(r)
 		if errors.Is(err, errNoSession) {
 			if s.hasSessionCookie(r) {
-				s.clearSessionCookie(w)
+				s.clearSessionCookies(w)
 			}
 			s.unauthenticated(w, r)
 			return
@@ -130,7 +130,7 @@ func (s *Service) RequireUser(next http.Handler) http.Handler {
 			exp := expiresAt(s.cfg.Web, sess.CreatedAt, now)
 			err := s.st.TouchSession(ctx, sess.ID, now, exp)
 			if errors.Is(err, store.ErrSessionNotFound) { // logged out meanwhile
-				s.clearSessionCookie(w)
+				s.clearSessionCookies(w)
 				s.unauthenticated(w, r)
 				return
 			}
@@ -214,7 +214,7 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 		}
 		rerr := s.st.RecordSessionRefreshFailure(ctx, sess.ID, refreshToken, failedAt, failedAt.Add(refreshBackoff))
 		if errors.Is(rerr, store.ErrSessionNotFound) { // logged out meanwhile
-			s.clearSessionCookie(w)
+			s.clearSessionCookies(w)
 			s.unauthenticated(w, r)
 			return sess, false
 		}
@@ -235,7 +235,7 @@ func (s *Service) refreshSession(ctx context.Context, w http.ResponseWriter, r *
 		IDToken: idToken, RefreshedAt: now}
 	err = s.st.UpdateSession(ctx, sess.ID, up)
 	if errors.Is(err, store.ErrSessionNotFound) { // logged out meanwhile
-		s.clearSessionCookie(w)
+		s.clearSessionCookies(w)
 		s.unauthenticated(w, r)
 		return sess, false
 	}
@@ -325,7 +325,7 @@ func (s *Service) endSession(w http.ResponseWriter, r *http.Request, sess store.
 	if _, _, err := s.end(context.WithoutCancel(r.Context()), sess.ID); err != nil {
 		s.logf("auth: ending the session of subject=%q: %v", sess.Subject, err)
 	}
-	s.clearSessionCookie(w)
+	s.clearSessionCookies(w)
 }
 
 // EndExpiredSessions ends the sessions expired at now (see end), a batch at

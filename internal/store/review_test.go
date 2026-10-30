@@ -13,7 +13,7 @@ func TestClearSessionTicketOnlyClearsTheTicketItRead(t *testing.T) {
 	s := storetest.New(t)
 	createSession(t, s, newSession("sess-1"))
 	newer := store.SessionTicket{User: "u", Ticket: "v1:new", CSRF: "v1:c", IssuedAt: t0.Add(time.Hour), LoginAt: t0}
-	if err := s.SetSessionTicket(ctx, "sess-1", time.Time{}, newer); err != nil {
+	if err := s.SetSessionTicket(ctx, "sess-1", newer); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ClearSessionTicket(ctx, "sess-1", t0); err != nil { // the old ticket's issue time

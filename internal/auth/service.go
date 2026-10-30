@@ -24,6 +24,9 @@ const (
 	// SessionCookie names the session token cookie; over https it is
 	// __Host- prefixed.
 	SessionCookie = "battleship_session"
+	// TicketCookie names the cookie that carries the session's sealed
+	// Proxmox ticket; over https it is __Host- prefixed.
+	TicketCookie = "battleship_pve"
 	// CSRFField is the form field that carries a session's CSRF token on
 	// state-changing requests.
 	CSRFField = "csrf"
@@ -75,7 +78,8 @@ type Service struct {
 	origin        string           // base_url's origin, for the Origin check
 	loginKey      seal.Key         // seals the login cookie (loginstate.go)
 	refreshKey    seal.Key         // seals refresh tokens at rest (refreshtoken.go)
-	ticketKey     seal.Key         // seals Proxmox tickets at rest (ticket.go)
+	ticketKey     seal.Key         // opens the session row's ticket copy (ticket.go)
+	cookieKey     seal.Key         // seals the Proxmox ticket cookie (ticket.go)
 	pve           ProxmoxLogin
 }
 
@@ -131,6 +135,7 @@ func NewService(ctx context.Context, cfg config.Config, st *store.Store, opts Op
 		revokeKick:  make(chan struct{}, 1),
 		revokeRetry: cmp.Or(opts.RevokeRetry, time.Minute),
 		ticketKey:   ticketKey(cfg),
+		cookieKey:   cookieKey(cfg),
 		pve:         opts.Proxmox,
 	}
 	if s.now == nil {
