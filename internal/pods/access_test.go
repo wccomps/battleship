@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/wccomps/battleship/internal/config"
@@ -291,6 +292,7 @@ func TestFreeDisksNeeds(t *testing.T) {
 // fakePerms answers Proxmox's two reads: the listed paths, and one path's
 // effective privileges.
 type fakePerms struct {
+	mu     sync.Mutex
 	err    error // Permissions fails with it
 	listed proxmox.Permissions
 	at     map[string]map[string]bool
@@ -299,16 +301,22 @@ type fakePerms struct {
 }
 
 func (f *fakePerms) Permissions(context.Context) (proxmox.Permissions, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "all")
 	return f.listed, f.err
 }
 
 func (f *fakePerms) PermissionsAt(_ context.Context, path string) (map[string]bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, path)
 	return f.at[path], nil
 }
 
 func (f *fakePerms) TagAccess(context.Context) (proxmox.TagAccess, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "tags")
 	return f.tags, nil
 }

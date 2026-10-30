@@ -254,9 +254,6 @@ func (e Environment) DNS() string {
 	return DNSRouter
 }
 
-// envReads is how many Proxmox reads environment planning makes at once.
-const envReads = 8
-
 // Environments reads every slot: the VMs in its pool with their notes, the
 // other VMs on its bridges, and its half-deleted VMs. Templates never run,
 // so they hold no slot; team VMs (see Classify) are on team bridges, so
@@ -327,7 +324,7 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 func (p Planner) readConfigs(ctx context.Context, vms []proxmox.VM) ([]map[string]string, error) {
 	cfgs := make([]map[string]string, len(vms))
 	var g errgroup.Group
-	g.SetLimit(envReads)
+	g.SetLimit(batchSize)
 	for i, vm := range vms {
 		g.Go(func() error {
 			cfg, err := p.API.VMConfig(ctx, vm.Node, vm.VMID)

@@ -159,7 +159,7 @@ func (p Planner) slotHeld(ctx context.Context, slot Slot, vms []proxmox.VM) (boo
 	}
 	// errSlotHeld cancels gctx, which stops the rest.
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(envReads)
+	g.SetLimit(batchSize)
 	for id := slot.FirstVMID; id <= slot.LastVMID(); id++ {
 		g.Go(func() error {
 			held, err := use.inUse(gctx, id)

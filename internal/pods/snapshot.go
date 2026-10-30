@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
@@ -68,20 +70,28 @@ func (p Planner) Snapshot(ctx context.Context, req SnapshotRequest) (*Plan, erro
 	if err != nil {
 		return nil, err
 	}
+	var g errgroup.Group
+	g.SetLimit(batchSize)
 	for i := range plan.Items {
 		it := &plan.Items[i]
 		if it.Blocked != "" {
 			continue
 		}
-		snaps, err := p.API.Snapshots(ctx, it.Node, it.VMID)
-		switch {
-		case err != nil && ctx.Err() != nil:
-			return nil, err
-		case err != nil:
-			it.Blocked = "cannot list snapshots: " + proxmox.Describe(err)
-		case slices.Contains(SnapshotNames(snaps), req.Name):
-			it.Blocked = alreadyHas(req.Name)
-		}
+		g.Go(func() error {
+			snaps, err := p.API.Snapshots(ctx, it.Node, it.VMID)
+			switch {
+			case err != nil && ctx.Err() != nil:
+				return err
+			case err != nil:
+				it.Blocked = "cannot list snapshots: " + proxmox.Describe(err)
+			case slices.Contains(SnapshotNames(snaps), req.Name):
+				it.Blocked = alreadyHas(req.Name)
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 	return plan, nil
 }
