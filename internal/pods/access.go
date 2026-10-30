@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
@@ -40,19 +42,20 @@ type PermissionReader interface {
 // paths are never guessed from parents, since a deeper ACL replaces the
 // inherited one. Safe for concurrent use; caches for its whole life.
 type UserAccess struct {
-	r       PermissionReader
-	mu      sync.Mutex
-	listed  proxmox.Permissions // nil until read
-	listErr error               // the listing failed: kept, and not asked again
-	at      map[string]map[string]bool
-	tagsSet bool
-	tags    proxmox.TagAccess
-	tagsErr error
+	r        PermissionReader
+	mu       sync.Mutex
+	listed   proxmox.Permissions // nil until read
+	listErr  error               // the listing failed: kept, and not asked again
+	at       map[string]map[string]bool
+	inflight map[string]chan struct{}
+	tagsSet  bool
+	tags     proxmox.TagAccess
+	tagsErr  error
 }
 
 // NewAccess reads privileges through r.
 func NewAccess(r PermissionReader) *UserAccess {
-	return &UserAccess{r: r, at: map[string]map[string]bool{}}
+	return &UserAccess{r: r, at: map[string]map[string]bool{}, inflight: map[string]chan struct{}{}}
 }
 
 func (a *UserAccess) TagAccess(ctx context.Context) (proxmox.TagAccess, error) {
@@ -106,20 +109,37 @@ func (a *UserAccess) Privileges(ctx context.Context, path string) (map[string]bo
 	if p, ok := listed[path]; ok {
 		return p, nil
 	}
-	a.mu.Lock()
-	p, ok := a.at[path]
-	a.mu.Unlock()
-	if ok {
+	for {
+		a.mu.Lock()
+		if p, ok := a.at[path]; ok {
+			a.mu.Unlock()
+			return p, nil
+		}
+		if wait, ok := a.inflight[path]; ok {
+			a.mu.Unlock()
+			select {
+			case <-wait:
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		wait := make(chan struct{})
+		a.inflight[path] = wait
+		a.mu.Unlock()
+		p, err := a.r.PermissionsAt(ctx, path)
+		a.mu.Lock()
+		delete(a.inflight, path)
+		if err == nil {
+			a.at[path] = p
+		}
+		close(wait)
+		a.mu.Unlock()
+		if err != nil {
+			return nil, fmt.Errorf("reading your Proxmox privileges on %s: %w", path, err)
+		}
 		return p, nil
 	}
-	p, err = a.r.PermissionsAt(ctx, path)
-	if err != nil {
-		return nil, fmt.Errorf("reading your Proxmox privileges on %s: %w", path, err)
-	}
-	a.mu.Lock()
-	a.at[path] = p
-	a.mu.Unlock()
-	return p, nil
 }
 
 // Anywhere reports whether any listed path grants priv, which decides
@@ -394,20 +414,32 @@ func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Co
 		return errors.New("planning without the user's privileges")
 	}
 	templates := map[string]*TemplateSpec{}
-	unpermitted := map[string]bool{} // templates blocked here
+	unpermitted := make([]bool, len(plan.Templates)) // templates blocked here
+	var g errgroup.Group
+	g.SetLimit(batchSize)
 	for i := range plan.Templates {
 		t := &plan.Templates[i]
 		templates[t.Name] = t
 		if t.Blocked != "" {
 			continue
 		}
-		why, err := missing(ctx, acc, templateNeeds(*t, cfg))
-		if err != nil {
-			return err
-		}
-		if why != "" {
-			t.Blocked, t.WillStopMaster, unpermitted[t.Name] = why, false, true
-		}
+		g.Go(func() error {
+			why, err := missing(ctx, acc, templateNeeds(*t, cfg))
+			if err != nil {
+				return err
+			}
+			if why != "" {
+				t.Blocked, t.WillStopMaster, unpermitted[i] = why, false, true
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	unpermByName := map[string]bool{}
+	for i, t := range plan.Templates {
+		unpermByName[t.Name] = unpermitted[i]
 	}
 	var tags proxmox.TagAccess
 	for _, it := range plan.Items {
@@ -428,17 +460,23 @@ func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Co
 		tpl := templates[it.Template]
 		if tpl != nil && tpl.Blocked != "" && slices.Contains(it.Steps, StepClone) {
 			it.Node = it.OldNode
-			it.Blocked, it.Unpermitted = "template "+tpl.Name+": "+tpl.Blocked, unpermitted[tpl.Name]
+			it.Blocked, it.Unpermitted = "template "+tpl.Name+": "+tpl.Blocked, unpermByName[tpl.Name]
 			continue
 		}
 		if tpl == nil && it.Source == nil && slices.Contains(it.Steps, StepClone) {
 			continue // the planner blocks a clone without a template
 		}
-		why, err := missing(ctx, acc, itemNeeds(*it, tpl, cfg, tags))
-		if err != nil {
-			return err
-		}
-		it.Blocked, it.Unpermitted = why, why != ""
+		g.Go(func() error {
+			why, err := missing(ctx, acc, itemNeeds(*it, tpl, cfg, tags))
+			if err != nil {
+				return err
+			}
+			it.Blocked, it.Unpermitted = why, why != ""
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return err
 	}
 	plan.BlockUnrebuildable()
 	return nil

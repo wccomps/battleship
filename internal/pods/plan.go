@@ -506,15 +506,41 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		}
 	}
 	cpuModels := p.customCPUModels(ctx, nodes[0])
-	for _, m := range kept {
-		spec, ws, err := p.templateSpec(ctx, m, req.Rebuild, req.Teams, byName, used, vms, slotByPool, cpuModels)
-		if err != nil {
-			return nil, err
+	specs := make([]TemplateSpec, len(kept))
+	warnings := make([][]string, len(kept))
+	var g errgroup.Group
+	g.SetLimit(batchSize)
+	for i, m := range kept {
+		g.Go(func() error {
+			spec, ws, err := p.templateSpec(ctx, m, req.Rebuild, req.Teams, byName, vms, slotByPool, cpuModels)
+			if err != nil {
+				return err
+			}
+			specs[i], warnings[i] = spec, ws
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	base := p.Cfg.Naming.TemplateVMIDBase
+	for i, m := range kept {
+		spec := specs[i]
+		if spec.VMID == 0 {
+			id := p.Naming.TemplateVMID(m.VMID)
+			for used[id] != "" {
+				id++
+			}
+			used[id] = spec.Name
+			spec.VMID = id
 		}
-		if len(ws) > 0 {
-			plan.Notices = append(plan.Notices, fmt.Sprintf("%s: %s.", m.Name, strings.Join(ws, "; ")))
+		if spec.Blocked == "" && (spec.VMID < base || spec.VMID >= base+100) {
+			spec.Blocked = fmt.Sprintf("template VMID %d is outside %d-%d, so its clone VMIDs could collide with another template's", spec.VMID, base, base+99)
 		}
 		spec.WillStopMaster = spec.Blocked == "" && spec.Builds() && m.Status == "running"
+		if len(warnings[i]) > 0 {
+			plan.Notices = append(plan.Notices, fmt.Sprintf("%s: %s.", m.Name, strings.Join(warnings[i], "; ")))
+		}
 		plan.Templates = append(plan.Templates, spec)
 	}
 	p.blockDuplicateHosts(plan.Templates, req.Teams[0])
@@ -594,7 +620,7 @@ func (p *Plan) BlockUnrebuildable() {
 }
 
 func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, teams []string,
-	byName map[string][]proxmox.VM, used map[int]string, vms []proxmox.VM,
+	byName map[string][]proxmox.VM, vms []proxmox.VM,
 	slotByPool map[string]Slot, cpuModels []string) (TemplateSpec, []string, error) {
 	cfg, err := p.API.VMConfig(ctx, m.Node, m.VMID)
 	if err != nil {
@@ -643,16 +669,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, t
 		}
 		spec.VMID, spec.Node, spec.OldNode, spec.Exists, spec.Rebuild = existing.VMID, m.Node, existing.Node, true, true
 	default:
-		id := p.Naming.TemplateVMID(m.VMID)
-		for used[id] != "" {
-			id++
-		}
-		used[id] = spec.Name
-		spec.VMID, spec.Node = id, m.Node
-	}
-	base := p.Cfg.Naming.TemplateVMIDBase
-	if spec.Blocked == "" && (spec.VMID < base || spec.VMID >= base+100) {
-		spec.Blocked = fmt.Sprintf("template VMID %d is outside %d-%d, so its clone VMIDs could collide with another template's", spec.VMID, base, base+99)
+		spec.Node = m.Node
 	}
 	return spec, ws, nil
 }
@@ -860,7 +877,7 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	listed := make([][]string, len(nodes))
 	var mu sync.Mutex
 	var g errgroup.Group
-	g.SetLimit(orphanListings)
+	g.SetLimit(batchSize)
 	for i, node := range nodes {
 		for _, vmid := range cands {
 			g.Go(func() error {
@@ -902,8 +919,8 @@ func (p Planner) orphanedDisks(ctx context.Context, plan *Plan, vms []proxmox.VM
 	return nil
 }
 
-// orphanListings is how many storage listings run at once.
-const orphanListings = 16
+// batchSize is how many Proxmox reads planning makes at once.
+const batchSize = 16
 
 // orphanCandidates are the VMIDs teams' VMs get when cloned from templates
 // in template_vmid_base..template_vmid_base+99 (CloneVMID), only set's when
@@ -974,27 +991,35 @@ func (p Planner) Reset(ctx context.Context, teams, hosts []string, snapshot stri
 	if err != nil {
 		return nil, err
 	}
+	var g errgroup.Group
+	g.SetLimit(batchSize)
 	for i := range plan.Items {
 		it := &plan.Items[i]
 		if it.Blocked != "" {
 			continue
 		}
-		snaps, err := p.API.Snapshots(ctx, it.Node, it.VMID)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, err
+		g.Go(func() error {
+			snaps, err := p.API.Snapshots(ctx, it.Node, it.VMID)
+			if err != nil {
+				if ctx.Err() != nil {
+					return err
+				}
+				it.Blocked = "cannot list snapshots: " + proxmox.Describe(err)
+				return nil
 			}
-			it.Blocked = "cannot list snapshots: " + proxmox.Describe(err)
-			continue
-		}
-		names := SnapshotNames(Finished(snaps))
-		has := "has none"
-		if len(names) > 0 {
-			has = "has: " + strings.Join(names, ", ")
-		}
-		if !slices.Contains(names, snapshot) {
-			it.Blocked = fmt.Sprintf("no snapshot %q (%s)", snapshot, has)
-		}
+			names := SnapshotNames(Finished(snaps))
+			has := "has none"
+			if len(names) > 0 {
+				has = "has: " + strings.Join(names, ", ")
+			}
+			if !slices.Contains(names, snapshot) {
+				it.Blocked = fmt.Sprintf("no snapshot %q (%s)", snapshot, has)
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 	return plan, nil
 }

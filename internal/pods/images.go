@@ -312,12 +312,12 @@ func baseNote(cfg map[string]string) string {
 	return n.Base
 }
 
-// eachConfig reads each VM's config as the user, envReads at a time, and
+// eachConfig reads each VM's config as the user, batchSize at a time, and
 // calls fn with it, or with the error (and a nil config).
 func (p Planner) eachConfig(ctx context.Context, vms []proxmox.VM, fn func(i int, cfg map[string]string, err error)) {
 	var mu sync.Mutex
 	var g errgroup.Group
-	g.SetLimit(envReads)
+	g.SetLimit(batchSize)
 	for i, vm := range vms {
 		g.Go(func() error {
 			cfg, err := p.API.VMConfig(ctx, vm.Node, vm.VMID)
