@@ -40,7 +40,7 @@ func TestPropProxmoxSignInIsTheSessionsUser(t *testing.T) {
 			if accepted != (name == want) {
 				t.Fatalf("session of %q, Proxmox signed in %q: %d at %s, want accepted %v", username, name, resp.StatusCode, resp.Request.URL, !accepted)
 			}
-			if cred, ok := b.pveTicket(); ok && cred.User != want {
+			if cred, ok := b.cookieTicket(); ok && cred.User != want {
 				t.Fatalf("session of %q holds %q's ticket", username, cred.User)
 			}
 		}

@@ -770,7 +770,7 @@ func TestTrackSubject(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	b.login(alice)
-	token, csrf := b.sessionToken(), b.csrf()
+	token, ticket, csrf := b.sessionToken(), b.ticketCookieValue(), b.csrf()
 
 	// serve runs one request through the app the way a request log does:
 	// from outside, with only TrackSubject to see who it was.
@@ -779,6 +779,7 @@ func TestTrackSubject(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		if cookie {
 			req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: token})
+			req.AddCookie(&http.Cookie{Name: auth.TicketCookie, Value: ticket})
 		}
 		ctx, subject := auth.TrackSubject(req.Context())
 		rec := httptest.NewRecorder()

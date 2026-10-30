@@ -771,10 +771,14 @@ func TestHostPrefixedCookiesWorkThroughTheFlow(t *testing.T) {
 	if resp.Code != http.StatusSeeOther || token == "" {
 		t.Fatalf("callback = %d, cookies %v", resp.Code, resp.Result().Cookies())
 	}
+	var ticket *http.Cookie
 	serve := func(method, target, name string, form url.Values) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, target, strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.AddCookie(&http.Cookie{Name: name, Value: token})
+		if ticket != nil {
+			req.AddCookie(ticket)
+		}
 		rec := httptest.NewRecorder()
 		h.mux.Load().ServeHTTP(rec, req)
 		return rec
@@ -785,9 +789,9 @@ func TestHostPrefixedCookiesWorkThroughTheFlow(t *testing.T) {
 		t.Fatalf("/private with __Host-battleship_session = %d to %q", rec.Code, rec.Header().Get("Location"))
 	}
 	// As if that sign-in had finished.
-	id := auth.HashToken(token)
-	if err := h.st.SetSessionTicket(ctx, id, auth.SealSessionTicket(h.cfg, id, h.pve.Ticket(pveUser(alice)))); err != nil {
-		t.Fatal(err)
+	cookies := auth.SignedInCookies(h.cfg, token, h.pve.Ticket(pveUser(alice)), h.clock.Now())
+	if ticket = cookies[1]; ticket.Name != "__Host-battleship_pve" {
+		t.Fatalf("ticket cookie named %q", ticket.Name)
 	}
 	if rec := serve(http.MethodGet, "/private", "__Host-battleship_session", nil); rec.Code != http.StatusOK {
 		t.Fatalf("/private with __Host-battleship_session = %d %s", rec.Code, rec.Body)

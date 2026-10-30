@@ -6,7 +6,6 @@ import (
 
 	"github.com/chromedp/cdproto/security"
 
-	"github.com/wccomps/battleship/internal/auth"
 	"github.com/wccomps/battleship/internal/auth/authtest"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
@@ -26,13 +25,6 @@ func TestBrowserProxmoxSignIn(t *testing.T) {
 	b.run("trusting the fake Proxmox's certificate", security.SetIgnoreCertificateErrors(true))
 	b.open("/")
 	b.waitFor("the grid after the Proxmox sign-in", `location.pathname === "/" && !!document.getElementById("grid-form")`)
-	stored, err := h.st.Session(t.Context(), auth.HashToken(sess.Cookie.Value))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.PVE.User != user {
-		t.Fatalf("the session's Proxmox user is %q, want %q", stored.PVE.User, user)
-	}
 	if logins, _, _ := h.pve.Counts(); logins != 1 {
 		t.Fatalf("Proxmox saw %d logins", logins)
 	}

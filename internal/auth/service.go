@@ -78,7 +78,6 @@ type Service struct {
 	origin        string           // base_url's origin, for the Origin check
 	loginKey      seal.Key         // seals the login cookie (loginstate.go)
 	refreshKey    seal.Key         // seals refresh tokens at rest (refreshtoken.go)
-	ticketKey     seal.Key         // opens the session row's ticket copy (ticket.go)
 	cookieKey     seal.Key         // seals the Proxmox ticket cookie (ticket.go)
 	pve           ProxmoxLogin
 }
@@ -134,7 +133,6 @@ func NewService(ctx context.Context, cfg config.Config, st *store.Store, opts Op
 		refreshKey:  seal.NewKey(cfg.OIDC.ClientSecret, refreshTokenPurpose),
 		revokeKick:  make(chan struct{}, 1),
 		revokeRetry: cmp.Or(opts.RevokeRetry, time.Minute),
-		ticketKey:   ticketKey(cfg),
 		cookieKey:   cookieKey(cfg),
 		pve:         opts.Proxmox,
 	}

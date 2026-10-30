@@ -122,10 +122,7 @@ func Login(t testing.TB, st *store.Store, cfg config.Config, u User) Session {
 			cred.LoginAt = cred.Issued
 		}
 	}
-	cookies, err := auth.SignedInCookies(cfg, token, cred, u.At)
-	if err != nil {
-		t.Fatalf("authtest: %v", err)
-	}
+	cookies := auth.SignedInCookies(cfg, token, cred, u.At)
 	sess := Session{Cookie: cookies[0], CSRF: csrf}
 	if len(cookies) > 1 {
 		sess.Ticket = cookies[1]
