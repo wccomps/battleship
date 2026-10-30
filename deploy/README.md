@@ -56,14 +56,8 @@ for the event streams.
 - **Migrations** run at startup and only forward: back up the database
   before upgrading. Old pods keep serving during a rolling update, so drop
   a column one release after the code stops using it.
-- **Pending.** Jobs move to being pinned to the replica that took their
-  confirm, which holds the ticket in memory only. This release leaves jobs
-  with `jobs.replica` set alone; deploy the release that pins them only
-  once no older replica is left, since older ones would claim pinned jobs
-  they hold no ticket for. That release must fail the queued jobs of a
-  replica that stops or dies, or they block newer jobs on the same VMs;
-  rolling back from it strands its pinned jobs until cancelled. The release
-  after drops `job_credentials` and `jobs.Renewer`.
+- **Pending.** Once the release that stopped reading `jobs.replica` is
+  deployed, the next drops that unused column.
 - **No service token.** `battleship serve` refuses to start with
   `BATTLESHIP_PROXMOX_TOKEN_ID` set; users act with their own Proxmox
   permissions.

@@ -429,27 +429,3 @@ func TestReservedKeys(t *testing.T) {
 		t.Errorf("ReservedKeys but %d = %v, %v; want %v", pending, got, err, want)
 	}
 }
-
-// A job pinned to a replica is left to it, and still keeps newer
-// overlapping jobs waiting, as an older pending job does.
-func TestClaimSkipsPinnedJobs(t *testing.T) {
-	s := storetest.New(t)
-	pinned := create(t, s, "team:01")
-	conn, err := store.Acquire(ctx, s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = conn.Exec(ctx, `UPDATE jobs SET replica = 'other' WHERE id = $1`, pinned)
-	conn.Release()
-	if err != nil {
-		t.Fatal(err)
-	}
-	behind := create(t, s, "team:01")
-	free := create(t, s, "team:02")
-	if got := mustClaim(t, s, "w"); got == nil || got.ID != free {
-		t.Fatalf("claim = %+v, want the unpinned job %d", got, free)
-	}
-	if got := mustClaim(t, s, "w"); got != nil {
-		t.Fatalf("claimed %d; %d is pinned elsewhere and %d waits for it", got.ID, pinned, behind)
-	}
-}
