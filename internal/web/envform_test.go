@@ -322,8 +322,6 @@ func TestAddHostsForm(t *testing.T) {
 	if rows := formRows(body); len(rows) != blankRows || rows[0] != (formRow{}) {
 		t.Errorf("host rows = %+v, want %d empty one", rows, blankRows)
 	}
-	// An environment without a router also starts with one host row and no router row,
-	// and offers router images in the host image select so a router can be added.
 	noRouter := h.get(&sess, "/environments/oscar.lima/add").Body.String()
 	lacks(t, "add hosts without a router", noRouter, `name="router_name"`, `name="router_image"`, "<span>gw")
 	contains(t, "add hosts image choice", selectOf(t, noRouter, "host_image"), `<optgroup label="Router"><option value="gw">gw · v1</option></optgroup>`)

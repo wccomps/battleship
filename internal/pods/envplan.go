@@ -269,10 +269,14 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 	}
 	for i, h := range hosts {
 		name := h.Host + "." + env.Domain
-		it := Item{Name: name, Host: h.Host, Pool: env.Slot.Pool}
+		tags := p.Cfg.Deploy.MasterTag + ";" + env.Domain
+		im, found := Newest(images, h.Family)
+		if found && im.Kind == ImageRouter {
+			tags += ";" + ImageRouter
+		}
+		it := Item{Name: name, Host: h.Host, Pool: env.Slot.Pool, Tags: tags}
 		plan.Items = append(plan.Items, it)
 		ip := &plan.Items[len(plan.Items)-1]
-		im, found := Newest(images, h.Family)
 		if found {
 			ip.Source, ip.Node = &Source{VMID: im.VMID, Node: im.Node, Name: im.Name}, im.Node
 		}
@@ -302,7 +306,6 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 			return nil, err
 		}
 		ip.Source.Bridges = sourceBridges(cfg)
-		tags := p.Cfg.Deploy.MasterTag + ";" + env.Domain
 		notes := Notes{Base: im.Name, DNS: dnsChoice}
 		if resumed {
 			notes.Base = cmp.Or(existing.Notes.Base, im.Name)
@@ -313,7 +316,6 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 				ip.Blocked = "base image " + im.Name + " has one NIC; a router needs two (WAN on net0, LAN on net1)"
 				continue
 			}
-			tags += ";" + ImageRouter
 		default:
 			if cfg["net0"] == "" {
 				ip.Blocked = "base image " + im.Name + " has no net0"
@@ -321,7 +323,6 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 			}
 		}
 		ip.NICs = env.Slot.wantNICs(im.Kind == ImageRouter)
-		ip.Tags = tags
 		ip.Steps = []Step{StepClone, StepLabel, StepNetwork, StepStart}
 		if resumed {
 			ip.Steps = ip.Steps[1:]
