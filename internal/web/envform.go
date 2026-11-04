@@ -76,7 +76,7 @@ type hereChip struct{ Name, Addr string }
 
 // imageGroup is one kind's images in an image select.
 type imageGroup struct {
-	Kind   string // Windows, Linux / BSD or Other
+	Kind   string // Router, Windows, Linux / BSD or Other
 	Images []imageOpt
 }
 
@@ -99,7 +99,11 @@ const blankRows = 1
 // at least blankRows, plus blankRows for Add host without JavaScript.
 func (s *Server) newEnvForm(ctx context.Context, p catalogPage, form url.Values) envForm {
 	f := envForm{RouterImages: imageOpts(p.Routers), Gateway: pods.GatewayOctet, FirstOctet: pods.FirstHostOctet, LastOctet: pods.LastHostOctet}
-	for _, im := range p.Others { // by kind (newCatalogPage)
+	images := p.Others
+	if p.Op.Kind == pods.KindEnvAdd {
+		images = append(slices.Clone(p.Routers), p.Others...)
+	}
+	for _, im := range images { // by kind (newCatalogPage)
 		if n := len(f.HostImages); n == 0 || f.HostImages[n-1].Kind != kindLabels[im.Kind] {
 			f.HostImages = append(f.HostImages, imageGroup{Kind: kindLabels[im.Kind]})
 		}

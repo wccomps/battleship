@@ -322,12 +322,17 @@ func TestAddHostsForm(t *testing.T) {
 	if rows := formRows(body); len(rows) != blankRows || rows[0] != (formRow{}) {
 		t.Errorf("host rows = %+v, want %d empty one", rows, blankRows)
 	}
-	// An environment without a router also starts with one host row and no router row.
 	noRouter := h.get(&sess, "/environments/oscar.lima/add").Body.String()
 	lacks(t, "add hosts without a router", noRouter, `name="router_name"`, `name="router_image"`, "<span>gw")
+	contains(t, "add hosts image choice", selectOf(t, noRouter, "host_image"), `<optgroup label="Router"><option value="gw">gw · v1</option></optgroup>`)
 	if rows := formRows(noRouter); len(rows) != blankRows || rows[0] != (formRow{}) {
 		t.Errorf("oscar.lima host rows = %+v, want %d empty one", rows, blankRows)
 	}
+	_, fields, preview := h.preview(&sess, "/environments/oscar.lima/add", url.Values{"host_name": {"fw"}, "host_image": {"gw"}, "host_octet": {""}})
+	if fields.Get("env_hosts") != "fw=gw" {
+		t.Errorf("env_hosts = %q, want fw=gw", fields.Get("env_hosts"))
+	}
+	contains(t, "router add preview", preview, `<span class="vm">fw.oscar.lima</span> <span class="chip">router</span>`, `<code>.2</code>`)
 
 	form := rowsForm("", "", [3]string{"teak", "debian-12", ""}, [3]string{"oak", "debian-12", "10"}, [3]string{"ash", "debian-12", "5"}, [3]string{"fir", "debian-12", "11"})
 	form.Del("router_name")

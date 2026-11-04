@@ -204,7 +204,8 @@ func envReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *r
 	atRouter := false  // whether dns is their gateway
 	for _, it := range plan.Items {
 		spec := specs[it.Host]
-		row := reviewRow{Name: it.Name, Router: router.Host != "" && it.Host == router.Host, Image: spec.Family,
+		isRouter := slices.Contains(pods.Tags(it.Tags), pods.ImageRouter) || router.Host != "" && it.Host == router.Host
+		row := reviewRow{Name: it.Name, Router: isRouter, Image: spec.Family,
 			Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}
 		if it.Source != nil {
 			row.Image = it.Source.Name
