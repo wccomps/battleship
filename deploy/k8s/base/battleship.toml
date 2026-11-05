@@ -56,7 +56,7 @@ template_builds = 2                # templates built at once, per replica
 deletes = 2                        # VM deletes at once, across all replicas; more time out on Proxmox's user.cfg lock
 
 [retry]
-transient_patterns = ["file exists", "does not exist", "got no worker upid", "can't lock file", "is locked", "timeout"]
+transient_patterns = ["file exists", "does not exist", "no such file or directory", "got no worker upid", "can't lock file", "is locked", "timeout"]
 attempts = 7
 initial_backoff = "1s"
 max_backoff = "30s"

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-var testPatterns = []string{"file exists", "does not exist", "got no worker upid", "is locked", "timeout"}
+var testPatterns = []string{"file exists", "does not exist", "no such file or directory", "got no worker upid", "is locked", "timeout"}
 
 func TestTransient(t *testing.T) {
 	c := NewClassifier(testPatterns)
@@ -20,6 +20,11 @@ func TestTransient(t *testing.T) {
 		{"nil", nil, false},
 		// Real messages from Proxmox tasks.
 		{"cloud-init file exists", &APIError{Status: 500, Message: "mkdir /mnt/pve/competitions/images/10052: File exists at /usr/share/perl5/PVE/Storage/Plugin.pm line 1055."}, true},
+		{"snapshot disk not yet visible on target node", &TaskError{
+			UPID:       "UPID:bulbasaur:0036F817:0A44C49F:6AEAE3D5:qmsnapshot:10010:u@realm:",
+			ExitStatus: "command '/usr/bin/qemu-img snapshot -c initial -- /mnt/pve/competitions/images/10010/vm-10010-disk-0.qcow2' failed: exit code 1",
+			LogTail:    []string{"qemu-img: Could not open '/mnt/pve/competitions/images/10010/vm-10010-disk-0.qcow2': No such file or directory"},
+		}, true},
 		{"no worker upid", &APIError{Status: 500, Message: "got no worker upid - start worker failed"}, true},
 		{"permission denied", &APIError{Status: 403, Message: "Permission check failed (/vms/10126, VM.Config.CDROM)"}, false},
 		{"403 whose message matches a pattern", &APIError{Status: 403, Message: "file exists"}, false},

@@ -283,6 +283,7 @@ func Default() Config {
 			TransientPatterns: []string{
 				"file exists",
 				"does not exist",
+				"no such file or directory",
 				"got no worker upid",
 				"can't lock file",
 				"is locked",

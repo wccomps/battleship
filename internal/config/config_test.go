@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +127,11 @@ func TestRetryDefaultsOutlastNFSCache(t *testing.T) {
 	}
 	if waited <= 60*time.Second {
 		t.Errorf("default retries wait %v per call, want over 60s", waited)
+	}
+	for _, want := range []string{"does not exist", "no such file or directory"} {
+		if !slices.Contains(r.TransientPatterns, want) {
+			t.Errorf("default TransientPatterns %v missing %q", r.TransientPatterns, want)
+		}
 	}
 }
 
