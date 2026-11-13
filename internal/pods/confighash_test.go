@@ -27,7 +27,7 @@ var hashedFor = map[string]map[string][]Kind{
 		"Linked":  {KindDeploy}, "DiskMBpsRead": {KindDeploy}, "DiskMBpsWrite": {KindDeploy},
 		"SnapshotName": {KindDeploy},
 		"MasterTag":    envKinds, // environment VMs are tagged with it
-		"ApprovedTag":  nil,      // read when a set is offered, never by a plan
+		"ApprovedTag":  nil,      // gates an approved-set deploy, which the worker's re-plan asks again; shapes no plan
 		"GPUVGA":       nil,
 	},
 	"Images": {

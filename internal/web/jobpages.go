@@ -1087,9 +1087,10 @@ func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 
 // mayCancel reports whether u may cancel j: its starter, or anyone holding the
 // operation's privilege on every VM of the job (on the VM or its pool, for VMs
-// yet to be created), as Proxmox resolves it.
+// yet to be created), as Proxmox resolves it. Only a job from the volunteer
+// pages has a starter among them.
 func (s *Server) mayCancel(ctx context.Context, j store.Job, plan pods.Plan, items []store.Item, u auth.User) bool {
-	if j.CreatedBy == actor(u) {
+	if j.Origin == store.OriginWeb && j.CreatedBy == actor(u) {
 		return true
 	}
 	acc := s.accessFor(ctx)

@@ -197,21 +197,19 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 		ErrorLog:          slog.NewLogLogger(log.With("component", "http").Handler(), slog.LevelWarn),
 	}
 	httpSrv.RegisterOnShutdown(app.CloseStreams)
-	// The session interface, when [practice] is set: its own listener, with
-	// none of the volunteer pages' routes. Its answers are short, so writes
-	// are bounded too.
-	var practiceSrv *http.Server
+	// The session interface, when [practice] is set: its own listener.
+	servers := map[string]*http.Server{"web": httpSrv}
 	var practiceLn net.Listener
 	if h := app.PracticeHandler(); h != nil {
 		if practiceLn, err = d.listen("tcp", cfg.Practice.Listen); err != nil {
 			_ = ln.Close()
 			return cantStart(fmt.Errorf("practice.listen: %w", err))
 		}
-		practiceSrv = &http.Server{
+		servers["practice"] = &http.Server{
 			Handler:           h,
 			ReadHeaderTimeout: 10 * time.Second,
 			ReadTimeout:       30 * time.Second,
-			WriteTimeout:      time.Minute,
+			WriteTimeout:      web.PracticeCallTimeout + 15*time.Second,
 			IdleTimeout:       2 * time.Minute,
 			ErrorLog:          slog.NewLogLogger(log.With("component", "practice").Handler(), slog.LevelWarn),
 		}
@@ -235,10 +233,10 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	workCtx, stopJobs := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopJobs()
 	workersDone := startWorkers(workCtx, draining, cfg, st, pve.Bind, creds, lim, hub, log)
-	served := make(chan error, 2)
+	served := make(chan error, len(servers))
 	go func() { served <- httpSrv.Serve(ln) }()
 	log.Info("serving", "listen", ln.Addr().String(), "workers", cfg.Web.Workers)
-	if practiceSrv != nil {
+	if practiceSrv := servers["practice"]; practiceSrv != nil {
 		go func() { served <- practiceSrv.Serve(practiceLn) }()
 		log.Info("serving the session interface", "listen", practiceLn.Addr().String(),
 			"pods", cfg.Practice.Pods, "principal", cfg.Practice.Principal)
@@ -281,15 +279,16 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 		d.drain()
 	}
 	httpCtx, stopHTTP := context.WithDeadline(context.Background(), minTime(time.Now().Add(httpShutdownTimeout), deadline))
-	if err := httpSrv.Shutdown(httpCtx); err != nil {
-		log.Warn("requests still running when the HTTP server stopped; cutting them off", "err", err)
-		_ = httpSrv.Close()
+	var stopping sync.WaitGroup
+	for name, srv := range servers {
+		stopping.Go(func() {
+			if err := srv.Shutdown(httpCtx); err != nil {
+				log.Warn("requests still running when the HTTP server stopped; cutting them off", "server", name, "err", err)
+				_ = srv.Close()
+			}
+		})
 	}
-	if practiceSrv != nil {
-		if err := practiceSrv.Shutdown(httpCtx); err != nil {
-			_ = practiceSrv.Close()
-		}
-	}
+	stopping.Wait()
 	stopHTTP()
 
 	timeout := time.NewTimer(time.Until(deadline))

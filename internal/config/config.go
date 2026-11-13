@@ -80,7 +80,7 @@ type Deploy struct {
 	Storage       string `toml:"storage"`
 	Linked        bool   `toml:"linked"`
 	MasterTag     string `toml:"master_tag"`
-	ApprovedTag   string `toml:"approved_tag"` // masters approved for self-service sessions carry it too; empty approves none
+	ApprovedTag   string `toml:"approved_tag"` // masters approved for self-service sessions carry it too; a Proxmox registered tag, or empty to approve none
 	DiskMBpsRead  int    `toml:"disk_mbps_rd"`
 	DiskMBpsWrite int    `toml:"disk_mbps_wr"`
 	SnapshotName  string `toml:"snapshot_name"` // the baseline a deploy takes

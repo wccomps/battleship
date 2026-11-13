@@ -17,16 +17,22 @@
         ],
         "name": "kilo.alpha",
         "pod": {
-          "cpus": 5,
-          "disk_bytes": 85899345920,
-          "memory_bytes": 10737418240
+          "cpus": 3,
+          "disk_bytes": 51539607552,
+          "memory_bytes": 6442450944
         },
         "templates": [
           {
-            "digest": "28f0e826f2140f88a37f01ab40ae078fc1557d6842a87cdb666ef01173e2f4a3",
+            "digest": "bb3b84add0f82f6dd08fd9305f45e45b553411c0a5cbb67fad30ad705b761f13",
             "host": "dc",
             "name": "dc.kilo.alpha.tpl",
             "vmid": 9001
+          },
+          {
+            "digest": "9a9525af894d72477fb0c91b273f9945df26b25cb0c00680b8278850df7f7765",
+            "host": "web",
+            "name": "web.kilo.alpha.tpl",
+            "vmid": 9002
           }
         ]
       }

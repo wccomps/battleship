@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/wccomps/battleship/internal/auth/authtest"
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/jobs"
 	"github.com/wccomps/battleship/internal/pods"
@@ -22,8 +26,8 @@ import (
 )
 
 // updatePracticeExamples rewrites testdata/practice: one request and its
-// answer per call of the session interface, which the practice app's client
-// is tested against.
+// answer per call of the session interface, for the practice app's client to
+// be tested against.
 var updatePracticeExamples = flag.Bool("update-practice-examples", false, "rewrite testdata/practice from the current answers")
 
 const (
@@ -32,7 +36,8 @@ const (
 )
 
 // practiceHarness is the harness with the session interface on for pods
-// 51-59 and a principal holding every privilege.
+// 51-59, a principal holding every privilege, and "approved" a registered
+// tag.
 type practiceHarness struct {
 	*harness
 	practice http.Handler // PracticeHandler
@@ -48,6 +53,7 @@ func newPracticeHarness(t *testing.T) *practiceHarness {
 	}
 	h.pve.AddUser(practicePrincipal, nil)
 	h.pve.Grant(practicePrincipal, "/", podstest.AllPrivileges...)
+	h.pve.SetTagAccess(proxmox.TagAccess{Registered: []string{"approved"}})
 	p := &practiceHarness{harness: h, practice: h.srv.PracticeHandler()}
 	if p.practice == nil {
 		t.Fatal("PracticeHandler is nil with [practice] set")
@@ -55,22 +61,29 @@ func newPracticeHarness(t *testing.T) *practiceHarness {
 	return p
 }
 
-// addSet adds a set's masters, dc (4 GiB, 2 processors, a 32 GiB disk) and
-// web (8 GiB, 4, 64 GiB), each with the given tags.
-func (p *practiceHarness) addSet(set string, firstVMID int, dcTags, webTags string) {
+// addSet adds a set's masters, dc and web, each with the given tags, at
+// firstVMID and the next. With built, each has its template (addTemplate):
+// dc's of one unit and web's of two, at the VMIDs a deploy would give them.
+func (p *practiceHarness) addSet(set string, firstVMID int, dcTags, webTags string, built bool) {
 	for i, m := range []struct{ host, tags string }{{"dc", dcTags}, {"web", webTags}} {
-		size := int64(i+1) * 4 * gib
-		p.api.add(proxmox.VM{VMID: firstVMID + i, Name: m.host + "." + set, Node: "n1", Status: "stopped", Tags: m.tags,
-			MaxMem: size, MaxCPU: (i + 1) * 2, MaxDisk: 8 * size},
+		name := m.host + "." + set
+		p.api.add(proxmox.VM{VMID: firstVMID + i, Name: name, Node: "n1", Status: "stopped", Tags: m.tags},
 			map[string]string{"net0": "virtio=BC:24:11:00:00:0" + itoa(int64(i)) + ",bridge=vmbr0"})
+		if built {
+			p.addTemplate(name+".tpl", 9000+(firstVMID+i)%100, i+1, "5f1c2a9e-0000-4000-8000-00000000000"+itoa(int64(i)))
+		}
 	}
 }
 
-// addTemplate adds a built template of half dc's size. uuid stands for what
-// Proxmox gives every clone anew, so a rebuilt template has another.
-func (p *practiceHarness) addTemplate(name string, vmid int, uuid string) {
-	p.api.add(proxmox.VM{VMID: vmid, Name: name, Node: "n2", Template: true, MaxMem: 2 * gib, MaxCPU: 1, MaxDisk: 16 * gib},
-		map[string]string{"net0": "virtio=BC:24:11:00:00:00,bridge=vmbr0", "smbios1": "uuid=" + uuid})
+// addTemplate adds a built template of units x (2 GiB, 1 processor, a 16 GiB
+// disk). uuid stands for what Proxmox gives every clone anew.
+func (p *practiceHarness) addTemplate(name string, vmid, units int, uuid string) {
+	p.api.add(proxmox.VM{VMID: vmid, Name: name, Node: "n1", Template: true, MaxMem: int64(units) * 2 * gib, MaxCPU: units},
+		map[string]string{
+			"net0":    "virtio=BC:24:11:00:00:00,bridge=vmbr0",
+			"smbios1": "uuid=" + uuid,
+			"scsi0":   fmt.Sprintf("competitions:base-%d-disk-0,size=%dG", vmid, 16*units),
+		})
 }
 
 // sets reads GET /v1/sets.
@@ -190,17 +203,16 @@ func (p *practiceHarness) example(name, method, target, body string, rec *httpte
 		p.t.Fatalf("%v (run go test ./internal/web -run TestPractice -update-practice-examples)", err)
 	}
 	if !bytes.Equal(got, want) {
-		p.t.Errorf("%s differs from the exchange; the practice app's client is tested against it, so change both together "+
+		p.t.Errorf("%s differs from the exchange; it is the practice app's client's fixture, so change both together "+
 			"(-update-practice-examples rewrites it)\n got: %s\nwant: %s", path, got, want)
 	}
 }
 
 func TestPracticeListsApprovedSets(t *testing.T) {
 	p := newPracticeHarness(t)
-	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved")
-	p.addTemplate("dc.kilo.alpha.tpl", 9001, "5f1c2a9e-0000-4000-8000-000000000001")
-	p.addSet("lima.bravo", 5011, "dev;approved", "dev") // a host added after approval
-	p.addSet("mike.charlie", 5021, "dev", "dev")
+	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
+	p.addSet("lima.bravo", 5011, "dev;approved", "dev", true) // a host added after approval
+	p.addSet("mike.charlie", 5021, "dev", "dev", true)
 
 	rec := p.call(http.MethodGet, "/v1/sets", "")
 	if rec.Code != http.StatusOK {
@@ -216,58 +228,98 @@ func TestPracticeListsApprovedSets(t *testing.T) {
 	}
 }
 
-// A set's templates are reported with a digest that a rebuild changes, so the
-// practice app can tell an environment is no longer the one staff published.
+// Approval rests on a tag only Sys.Modify may set. Where anyone who edits a
+// master could add it, no set is offered.
+func TestPracticeListsNoSetsUnderATagAnyoneMaySet(t *testing.T) {
+	p := newPracticeHarness(t)
+	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
+	p.pve.SetTagAccess(proxmox.TagAccess{})
+	rec := p.call(http.MethodGet, "/v1/sets", "")
+	if rec.Code != http.StatusConflict || problem(t, rec) != "not_approved" || !strings.Contains(rec.Body.String(), "registered tags") {
+		t.Errorf("GET /v1/sets with an unregistered tag = %d %s", rec.Code, rec.Body)
+	}
+}
+
+// A set's templates are reported with a digest that follows the template's
+// config, so the practice app can tell an environment is no longer the one
+// staff published.
 func TestPracticeSetsReportTemplates(t *testing.T) {
 	p := newPracticeHarness(t)
-	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved")
+	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", false)
 	if got := p.sets(); len(got) != 1 || len(got[0].Templates) != 0 {
 		t.Fatalf("before any template is built: %+v", got)
 	}
 
-	p.addTemplate("dc.kilo.alpha.tpl", 9001, "5f1c2a9e-0000-4000-8000-000000000001")
+	p.addTemplate("dc.kilo.alpha.tpl", 9001, 1, "5f1c2a9e-0000-4000-8000-000000000001")
 	first := p.sets()[0].Templates
-	if len(first) != 1 || first[0].Host != "dc" || first[0].Name != "dc.kilo.alpha.tpl" || first[0].VMID != 9001 || first[0].Digest == "" {
+	if len(first) != 1 || first[0].Host != "dc" || first[0].Name != "dc.kilo.alpha.tpl" || first[0].VMID != 9001 || first[0].Digest == "" || first[0].Error != "" {
 		t.Fatalf("templates = %+v, want dc's with a digest", first)
 	}
-	if again := p.sets()[0].Templates; !slices.Equal(again, first) {
-		t.Errorf("an unchanged template reads differently: %+v then %+v", first, again)
+	// Tags and notes aren't the template.
+	p.api.Mu.Lock()
+	p.api.VMs[9001].Config["tags"], p.api.VMs[9001].Config["description"] = "dev;reviewed", "checked by a lead"
+	p.api.Mu.Unlock()
+	if again := p.sets()[0].Templates; again[0].Digest != first[0].Digest {
+		t.Errorf("the digest changed with the template's tags and notes: %q then %q", first[0].Digest, again[0].Digest)
 	}
 
-	// Rebuilt: deleted and cloned from its master again, at the same VMID.
+	// Another clone of the master at the same VMID has its own identifiers.
 	p.api.remove("dc.kilo.alpha.tpl")
-	p.addTemplate("dc.kilo.alpha.tpl", 9001, "5f1c2a9e-0000-4000-8000-000000000002")
+	p.addTemplate("dc.kilo.alpha.tpl", 9001, 1, "5f1c2a9e-0000-4000-8000-000000000002")
 	rebuilt := p.sets()[0].Templates
 	if len(rebuilt) != 1 || rebuilt[0].VMID != 9001 || rebuilt[0].Digest == first[0].Digest {
-		t.Errorf("a rebuilt template reports digest %q, the same as before", rebuilt[0].Digest)
+		t.Errorf("a template with another uuid reports digest %q, the same as before", rebuilt[0].Digest)
 	}
 
-	// Two VMs sharing the template's name: neither is reported, as a deploy would block.
-	p.addTemplate("dc.kilo.alpha.tpl", 9002, "5f1c2a9e-0000-4000-8000-000000000003")
+	// Two VMs sharing the template's name: neither is reported, as a deploy blocks both.
+	p.api.add(proxmox.VM{VMID: 9102, Name: "dc.kilo.alpha.tpl", Node: "n1"}, nil)
 	if got := p.sets()[0].Templates; len(got) != 0 {
-		t.Errorf("with two templates of one name, reported %+v", got)
+		t.Errorf("with two VMs of one template name, reported %+v", got)
 	}
 }
 
-// One pod's size is the sum over the set's hosts, each sized by its template
-// where one is built and by its master where none is.
+// One template whose config can't be read, as on a node that is down, is
+// marked; every other template and set is still answered.
+func TestPracticeSetsMarkAnUnreadableTemplate(t *testing.T) {
+	p := newPracticeHarness(t)
+	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
+	p.addSet("lima.bravo", 5011, "dev;approved", "dev;approved", true)
+	p.api.setReadErr(9001, &proxmox.APIError{Status: 595, Message: "no route to host"})
+
+	sets := p.sets()
+	if len(sets) != 2 {
+		t.Fatalf("sets = %+v, want both", sets)
+	}
+	kilo, lima := sets[0], sets[1]
+	if dc := kilo.Templates[0]; dc.Host != "dc" || dc.Error == "" || dc.Digest != "" {
+		t.Errorf("the unreadable template = %+v, want an error and no digest", dc)
+	}
+	if web := kilo.Templates[1]; web.Error != "" || web.Digest == "" {
+		t.Errorf("its sibling = %+v, want read", web)
+	}
+	if want := (practiceSize{MemoryBytes: 4 * gib, CPUs: 2, DiskBytes: 32 * gib}); kilo.Pod != want {
+		t.Errorf("kilo.alpha's pod = %+v, want web's alone %+v", kilo.Pod, want)
+	}
+	if want := (practiceSize{MemoryBytes: 6 * gib, CPUs: 3, DiskBytes: 48 * gib}); lima.Pod != want || lima.Templates[0].Error != "" {
+		t.Errorf("lima.bravo = %+v, want untouched with pod %+v", lima, want)
+	}
+}
+
+// One pod's size is the sum over the set's built templates: memory and
+// processors as Proxmox lists them, disk as the sum of every disk's size.
 func TestPracticeSetsReportPodSize(t *testing.T) {
 	p := newPracticeHarness(t)
-	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved")
-	if got, want := p.sets()[0].Pod, (practiceSize{MemoryBytes: 12 * gib, CPUs: 6, DiskBytes: 96 * gib}); got != want {
-		t.Errorf("pod sized by masters = %+v, want %+v", got, want)
+	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", false)
+	if got := p.sets()[0].Pod; got != (practiceSize{}) {
+		t.Errorf("pod with no template built = %+v, want nothing", got)
 	}
-	p.addTemplate("dc.kilo.alpha.tpl", 9001, "5f1c2a9e-0000-4000-8000-000000000001")
-	if got, want := p.sets()[0].Pod, (practiceSize{MemoryBytes: 10 * gib, CPUs: 5, DiskBytes: 80 * gib}); got != want {
-		t.Errorf("pod with dc's template built = %+v, want %+v", got, want)
-	}
-	// A set whose name ends another's is sized by its own masters alone,
-	// though "*.alpha" matches both.
-	p.addSet("alpha", 5031, "dev;approved", "dev;approved")
-	for _, set := range p.sets() {
-		if want := (practiceSize{MemoryBytes: 12 * gib, CPUs: 6, DiskBytes: 96 * gib}); set.Name == "alpha" && set.Pod != want {
-			t.Errorf("alpha's pod = %+v, want its own two masters' %+v", set.Pod, want)
-		}
+	p.addTemplate("dc.kilo.alpha.tpl", 9001, 1, "5f1c2a9e-0000-4000-8000-000000000001")
+	p.addTemplate("web.kilo.alpha.tpl", 9002, 2, "5f1c2a9e-0000-4000-8000-000000000002")
+	p.api.Mu.Lock()
+	p.api.VMs[9002].Config["virtio1"] = "competitions:base-9002-disk-1,size=100G" // a data disk
+	p.api.Mu.Unlock()
+	if got, want := p.sets()[0].Pod, (practiceSize{MemoryBytes: 6 * gib, CPUs: 3, DiskBytes: 148 * gib}); got != want {
+		t.Errorf("pod = %+v, want %+v", got, want)
 	}
 }
 
@@ -321,19 +373,26 @@ func (p *practiceHarness) submitted(rec *httptest.ResponseRecorder) (store.Job, 
 
 func TestPracticeSubmitsADeploy(t *testing.T) {
 	p := newPracticeHarness(t)
-	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved")
+	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
 
 	const body = `{"kind": "deploy", "pods": "51-52", "set": "kilo.alpha"}`
 	rec := p.call(http.MethodPost, "/v1/jobs", body)
 	j, in := p.submitted(rec)
 	p.example("deploy", http.MethodPost, "/v1/jobs", body, rec)
 
-	if j.Kind != "deploy" || j.CreatedBy != practiceActor || j.CreatedAs != practicePrincipal || j.Status != store.StatusPending {
-		t.Errorf("job = kind %q by %q as %q, %s", j.Kind, j.CreatedBy, j.CreatedAs, j.Status)
+	if j.Kind != "deploy" || j.Origin != store.OriginSession || j.CreatedBy != practicePrincipal || j.CreatedAs != practicePrincipal || j.Status != store.StatusPending {
+		t.Errorf("job = kind %q from %q by %q as %q, %s", j.Kind, j.Origin, j.CreatedBy, j.CreatedAs, j.Status)
 	}
 	want := jobs.Inputs{Kind: pods.KindDeploy, Teams: "51-52", Pattern: "*.kilo.alpha", ApprovedOnly: true}
 	if in.Kind != want.Kind || in.Teams != want.Teams || in.Pattern != want.Pattern || !in.ApprovedOnly || in.Rebuild || in.NoSnapshot || len(in.Hosts) > 0 {
 		t.Errorf("inputs = %+v, want %+v", in, want)
+	}
+	items, err := p.st.Items(context.Background(), j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 4 {
+		t.Errorf("the deploy has %d VMs, want two pods' 4", len(items))
 	}
 	// The job runs with a ticket of the principal's that Proxmox takes.
 	jc, err := p.st.JobCredential(context.Background(), j.ID)
@@ -352,6 +411,27 @@ func TestPracticeSubmitsADeploy(t *testing.T) {
 	}
 }
 
+// A deploy takes the named set's masters and no other's, though one set's
+// name ends another's and that other is unapproved.
+func TestPracticeDeploysExactlyTheNamedSet(t *testing.T) {
+	p := newPracticeHarness(t)
+	p.addSet("alpha", 5031, "dev;approved", "dev;approved", true)
+	p.addSet("kilo.alpha", 5001, "dev", "dev", true)
+
+	j, _ := p.submitted(p.call(http.MethodPost, "/v1/jobs", `{"kind": "deploy", "pods": "51", "set": "alpha"}`))
+	items, err := p.st.Items(context.Background(), j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vmids []int
+	for _, it := range items {
+		vmids = append(vmids, it.VMID)
+	}
+	if want := []int{15131, 15132}; !slices.Equal(vmids, want) {
+		t.Errorf("the deploy's VMs are %v, want alpha's two %v", vmids, want)
+	}
+}
+
 func TestPracticeSubmitsATeardown(t *testing.T) {
 	p := newPracticeHarness(t)
 	p.addPod("51", 15101, "dc", "web")
@@ -361,8 +441,8 @@ func TestPracticeSubmitsATeardown(t *testing.T) {
 	rec := p.call(http.MethodPost, "/v1/jobs", body)
 	j, in := p.submitted(rec)
 	p.example("teardown", http.MethodPost, "/v1/jobs", body, rec)
-	if j.Kind != "teardown" || j.CreatedAs != practicePrincipal || in.Teams != "51-52" || in.Set != "" {
-		t.Errorf("job = kind %q as %q, inputs %+v", j.Kind, j.CreatedAs, in)
+	if j.Kind != "teardown" || j.Origin != store.OriginSession || j.CreatedAs != practicePrincipal || in.Teams != "51-52" || in.Set != "" {
+		t.Errorf("job = kind %q from %q as %q, inputs %+v", j.Kind, j.Origin, j.CreatedAs, in)
 	}
 	items, err := p.st.Items(context.Background(), j.ID)
 	if err != nil {
@@ -401,7 +481,7 @@ func TestPracticeReadsAndCancelsItsJob(t *testing.T) {
 		t.Fatalf("cancel = %d %s", rec.Code, rec.Body)
 	}
 	p.example("cancel", http.MethodPost, path+"/cancel", "", rec)
-	if after, err := p.st.Job(context.Background(), j.ID); err != nil || after.Status != store.StatusCancelled || after.CancelledBy != practiceActor {
+	if after, err := p.st.Job(context.Background(), j.ID); err != nil || after.Status != store.StatusCancelled || after.CancelledBy != practicePrincipal {
 		t.Errorf("after the cancel the job is %s, cancelled by %q (%v)", after.Status, after.CancelledBy, err)
 	}
 	rec = p.call(http.MethodPost, path+"/cancel", "")
@@ -411,6 +491,24 @@ func TestPracticeReadsAndCancelsItsJob(t *testing.T) {
 	p.example("refused", http.MethodPost, path+"/cancel", "", rec)
 }
 
+// A session job's starter is the interface, not whoever the volunteer pages
+// know by the same name: only Proxmox privileges let a volunteer cancel it.
+func TestVolunteerNamedAsThePrincipalCannotCancelASessionJob(t *testing.T) {
+	p := newPracticeHarness(t)
+	p.addPod("51", 15101, "dc")
+	j, _ := p.submitted(p.call(http.MethodPost, "/v1/jobs", `{"kind": "teardown", "pods": "51"}`))
+
+	cred := p.ticketWith("mallory", []string{"VM.Audit", "Pool.Audit"})
+	mallory := authtest.Login(t, p.st, p.cfg, authtest.User{Subject: "mallory", Email: practicePrincipal, At: p.clock.Now(), Proxmox: cred})
+	p.openView(cred)
+	if rec := p.post(&mallory, "/logs/"+itoa(j.ID)+"/cancel", url.Values{}); rec.Code != http.StatusForbidden {
+		t.Errorf("cancel by a volunteer whose email is the principal's name = %d, want 403", rec.Code)
+	}
+	if after, err := p.st.Job(context.Background(), j.ID); err != nil || after.CancelRequested || after.Status != store.StatusPending {
+		t.Errorf("the session job is %s, cancel requested %t (%v)", after.Status, after.CancelRequested, err)
+	}
+}
+
 func TestPracticeOffUnlessSet(t *testing.T) {
 	h := newHarness(t)
 	if h.srv.PracticeHandler() != nil {
@@ -418,7 +516,7 @@ func TestPracticeOffUnlessSet(t *testing.T) {
 	}
 	// Set, it is still no part of the volunteer pages' handler.
 	p := newPracticeHarness(t)
-	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved")
+	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
 	for _, target := range []string{"/v1/sets", "/v1/pods/51/vms", "/v1/jobs/1"} {
 		req := httptest.NewRequest(http.MethodGet, target, nil)
 		req.Header.Set("Authorization", "Bearer "+practiceTestKey)
@@ -434,13 +532,12 @@ func TestPracticeOffUnlessSet(t *testing.T) {
 	}
 }
 
-// TestPracticeRefusals is every way the interface says no. None stores a job
-// or changes the cluster.
+// No refusal stores a job or changes the cluster.
 func TestPracticeRefusals(t *testing.T) {
 	p := newPracticeHarness(t)
-	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved")
-	p.addSet("lima.bravo", 5011, "dev;approved", "dev")
-	p.addSet("alpha", 5031, "dev;approved", "dev;approved") // "*.alpha" also matches kilo.alpha's masters
+	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
+	p.addSet("lima.bravo", 5011, "dev;approved", "dev", true)
+	p.addSet("mike.charlie", 5021, "dev;approved", "dev;approved", false) // approved, never built
 	p.addPod("51", 15101, "dc")
 	ctx := context.Background()
 
@@ -457,7 +554,7 @@ func TestPracticeRefusals(t *testing.T) {
 	}
 	theirPath := "/v1/jobs/" + itoa(theirs)
 
-	const deploy = `{"kind": "deploy", "pods": "51", "set": "kilo.alpha"}`
+	const deploy = `{"kind": "deploy", "pods": "52", "set": "kilo.alpha"}`
 	header := func(name, value string) func(*http.Request) {
 		return func(r *http.Request) {
 			if value == "" {
@@ -488,19 +585,24 @@ func TestPracticeRefusals(t *testing.T) {
 		{name: "deploy to a range reaching outside", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "50-52", "set": "kilo.alpha"}`, status: 403, code: "pod_out_of_range"},
 		{name: "teardown of a pod outside the range", method: "POST", path: "/v1/jobs", body: `{"kind": "teardown", "pods": "1-3"}`, status: 403, code: "pod_out_of_range"},
 		{name: "VMs of a pod outside the range", method: "GET", path: "/v1/pods/01/vms", status: 403, code: "pod_out_of_range"},
-		{name: "VMs of several pods", method: "GET", path: "/v1/pods/51-52/vms", status: 422, code: "bad_pod"},
+		{name: "deploy to a pod past the range", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "60", "set": "kilo.alpha"}`, status: 403, code: "pod_out_of_range"},
+		{name: "teardown reaching past the range", method: "POST", path: "/v1/jobs", body: `{"kind": "teardown", "pods": "51,61"}`, status: 403, code: "pod_out_of_range"},
+		{name: "VMs of a pod past the range", method: "GET", path: "/v1/pods/99/vms", status: 403, code: "pod_out_of_range"},
+		{name: "VMs of several pods", method: "GET", path: "/v1/pods/51-52/vms", status: 422, code: "bad_pods"},
+		{name: "VMs of no pod number", method: "GET", path: "/v1/pods/first/vms", status: 422, code: "bad_pods"},
+		{name: "deploy to no pod number", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "all", "set": "kilo.alpha"}`, status: 422, code: "bad_pods"},
 		{name: "another kind", method: "POST", path: "/v1/jobs", body: `{"kind": "reset", "pods": "51"}`, status: 422, code: "bad_kind"},
 		{name: "an environment kind", method: "POST", path: "/v1/jobs", body: `{"kind": "env-teardown", "pods": "51"}`, status: 422, code: "bad_kind"},
 		{name: "no kind", method: "POST", path: "/v1/jobs", body: `{"pods": "51"}`, status: 422, code: "bad_kind"},
-		{name: "a field the interface doesn't take", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "51", "set": "kilo.alpha", "rebuild": true}`, status: 400, code: "bad_json"},
+		{name: "a field the interface doesn't take", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "52", "set": "kilo.alpha", "rebuild": true}`, status: 400, code: "bad_json"},
 		{name: "two requests in one", method: "POST", path: "/v1/jobs", body: deploy + deploy, status: 400, code: "bad_json"},
-		{name: "a body over the cap", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "51", "set": "` + strings.Repeat("a", practiceMaxBody) + `"}`, status: 400, code: "bad_json"},
-		{name: "deploy of a pattern", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "51", "set": "*"}`, status: 422, code: "bad_set"},
-		{name: "deploy of no set", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "51"}`, status: 422, code: "bad_set"},
+		{name: "a body over the cap", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "52", "set": "` + strings.Repeat("a", practiceMaxBody) + `"}`, status: 400, code: "bad_json"},
+		{name: "deploy of a pattern", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "52", "set": "*"}`, status: 422, code: "bad_set"},
+		{name: "deploy of no set", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "52"}`, status: 422, code: "bad_set"},
 		{name: "teardown of one set", method: "POST", path: "/v1/jobs", body: `{"kind": "teardown", "pods": "51", "set": "kilo.alpha"}`, status: 422, code: "bad_set"},
-		{name: "deploy of an unapproved set", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "51", "set": "lima.bravo"}`, status: 409, code: "not_approved"},
-		{name: "deploy of a set that isn't there", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "51", "set": "no.such"}`, status: 409, code: "plan_failed"},
-		{name: "deploy of a set whose name ends another's", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "51", "set": "alpha"}`, status: 409, code: "plan_failed"},
+		{name: "deploy of an unapproved set", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "52", "set": "lima.bravo"}`, status: 409, code: "not_approved"},
+		{name: "deploy of a set that isn't there", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "52", "set": "no.such"}`, status: 409, code: "plan_failed"},
+		{name: "deploy of a set with no template built", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "52", "set": "mike.charlie"}`, status: 409, code: "blocked"},
 		{name: "teardown of an empty pod", method: "POST", path: "/v1/jobs", body: `{"kind": "teardown", "pods": "59"}`, status: 409, code: "nothing_to_run"},
 		{name: "read of a volunteer's job", method: "GET", path: theirPath, status: 404, code: "not_found"},
 		{name: "cancel of a volunteer's job", method: "POST", path: theirPath + "/cancel", status: 404, code: "not_found"},
@@ -562,7 +664,7 @@ func TestPracticeRefusesADisabledPrincipal(t *testing.T) {
 // whole request and names it.
 func TestPracticeDeployIsAllOrNothing(t *testing.T) {
 	p := newPracticeHarness(t)
-	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved")
+	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
 	p.pve.Revoke(practicePrincipal, "/")
 	p.pve.Grant(practicePrincipal, "/", "VM.Audit", "Sys.Audit", "Datastore.Audit", "Pool.Audit")
 
@@ -574,10 +676,32 @@ func TestPracticeDeployIsAllOrNothing(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Blocked) == 0 || got.Blocked[0].Name == "" || got.Blocked[0].Reason == "" {
-		t.Errorf("the refusal names nothing blocked: %+v", got)
+	if len(got.Blocked) == 0 || got.Blocked[0].Name == "" || !strings.Contains(got.Blocked[0].Reason, "you don't have VM.Clone") {
+		t.Errorf("the refusal doesn't name what the principal may not do: %+v", got)
 	}
 	if n := len(p.jobsInStore()); n != 0 {
 		t.Errorf("%d jobs stored", n)
 	}
+}
+
+// An outage is not a refusal: while Proxmox can't be reached, a submission is
+// answered as Proxmox's failure, so the practice app tries again later.
+func TestPracticeAnswersAnOutageAsOne(t *testing.T) {
+	p := newPracticeHarness(t)
+	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
+	const deploy = `{"kind": "deploy", "pods": "51", "set": "kilo.alpha"}`
+	for name, down := range map[string]error{
+		"no connection": &url.Error{Op: "Get", URL: "https://pve.example:8006/api2/json/cluster/resources", Err: errors.New("connect: connection refused")},
+		"a node error":  &proxmox.APIError{Method: "GET", Path: "/cluster/resources", Status: 595, Message: "no route to host"},
+	} {
+		p.api.setListErr(down)
+		for _, c := range []struct{ method, path, body string }{{"POST", "/v1/jobs", deploy}, {"GET", "/v1/sets", ""}, {"GET", "/v1/pods/51/vms", ""}} {
+			rec := p.call(c.method, c.path, c.body)
+			if rec.Code != http.StatusBadGateway || problem(t, rec) != "proxmox_failed" {
+				t.Errorf("%s: %s %s = %d %s, want 502 proxmox_failed", name, c.method, c.path, rec.Code, rec.Body)
+			}
+		}
+	}
+	p.api.setListErr(nil)
+	p.submitted(p.call(http.MethodPost, "/v1/jobs", deploy))
 }

@@ -37,6 +37,7 @@ type Job struct {
 	CreatedBy       string
 	CreatedRole     string // the creator's battleship role, for jobs from before roles were removed
 	CreatedAs       string // the Proxmox user the job acts as
+	Origin          string // what submitted it: OriginWeb or OriginSession
 	CreatedAt       time.Time
 	StartedAt       *time.Time
 	FinishedAt      *time.Time
@@ -56,6 +57,12 @@ func (j Job) CancelCameTooLate() bool {
 	return j.CancelRequested && JobStatus(j.Status).CancelTooLate()
 }
 
+// What submitted a job.
+const (
+	OriginWeb     = ""        // the volunteer pages
+	OriginSession = "session" // the session interface
+)
+
 type NewJob struct {
 	Kind        string
 	Inputs      json.RawMessage
@@ -64,6 +71,7 @@ type NewJob struct {
 	LockKeys    []string // what it changes, and "read:"+K for what it only reads (see blocksSQL)
 	CreatedBy   string
 	CreatedAs   string // the Proxmox user it acts as
+	Origin      string // OriginWeb or OriginSession
 	Items       []NewItem
 	// Preview, if set, is the web preview this job submits; CreateJob fails
 	// (ErrPreview*) unless it exists, is unexpired and unused.
@@ -113,13 +121,13 @@ type Event struct {
 	Message string
 }
 
-const jobColumns = `j.id, j.kind, j.inputs, j.plan, j.fingerprint, j.lock_keys, j.status, j.created_by, j.created_role, j.created_as, j.created_at,
+const jobColumns = `j.id, j.kind, j.inputs, j.plan, j.fingerprint, j.lock_keys, j.status, j.created_by, j.created_role, j.created_as, j.origin, j.created_at,
 	j.started_at, j.finished_at, coalesce(j.claimed_by, ''), j.cancel_requested,
 	coalesce(j.cancelled_by, ''), j.summary, j.error`
 
 func jobDest(j *Job) []any {
 	return []any{&j.ID, &j.Kind, &j.Inputs, &j.Plan, &j.Fingerprint, &j.LockKeys, &j.Status, &j.CreatedBy,
-		&j.CreatedRole, &j.CreatedAs, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.ClaimedBy, &j.CancelRequested,
+		&j.CreatedRole, &j.CreatedAs, &j.Origin, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.ClaimedBy, &j.CancelRequested,
 		&j.CancelledBy, &j.Summary, &j.Error}
 }
 
@@ -153,9 +161,9 @@ func (s *Store) CreateJob(ctx context.Context, nj NewJob) (int64, error) {
 		}
 	}
 	var id int64
-	err = tx.QueryRow(ctx, `INSERT INTO jobs (kind, inputs, plan, fingerprint, lock_keys, created_by, created_as)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-		nj.Kind, nj.Inputs, plan, nj.Fingerprint, nj.LockKeys, nj.CreatedBy, nj.CreatedAs).Scan(&id)
+	err = tx.QueryRow(ctx, `INSERT INTO jobs (kind, inputs, plan, fingerprint, lock_keys, created_by, created_as, origin)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+		nj.Kind, nj.Inputs, plan, nj.Fingerprint, nj.LockKeys, nj.CreatedBy, nj.CreatedAs, nj.Origin).Scan(&id)
 	if err != nil {
 		return 0, err
 	}

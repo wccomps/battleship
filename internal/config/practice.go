@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/netip"
 	"strings"
 	"unicode"
 )
@@ -16,17 +15,16 @@ import (
 type Practice struct {
 	Pods string `toml:"pods"` // the pods it may act on, e.g. "51-59"
 	// Principal is the one Proxmox user whose ticket it accepts, e.g.
-	// practice@pve. Never a user of proxmox.realm: every job a volunteer
-	// submits acts as a user of that realm, so the principal's jobs are told
-	// from theirs by the user they act as.
+	// practice@pve. Never a user of proxmox.realm, where the identity
+	// provider decides who holds a name.
 	Principal string `toml:"principal"`
-	Listen    string `toml:"listen"` // its own address, e.g. ":8081"; never web.listen
+	Listen    string `toml:"listen"` // its own address, e.g. ":8081"
 	// Key is what the practice app proves itself with. Overridden by
 	// BATTLESHIP_PRACTICE_KEY.
 	Key string `toml:"key"`
 }
 
-// MinPracticeKey is the shortest practice.key accepted.
+// MinPracticeKey is the shortest practice.key accepted, in bytes.
 const MinPracticeKey = 32
 
 // maxPod is the highest pod number battleship can name (two digits).
@@ -36,13 +34,6 @@ const maxPod = 99
 // refuses a partly set [practice], so in a loaded config any setting means
 // all of them.
 func (p Practice) Enabled() bool { return p != Practice{} }
-
-// PodRange is the first and last pod the interface may act on, for an
-// Enabled and validated p.
-func (p Practice) PodRange() (lo, hi int) {
-	lo, hi, _ = ParseRange(p.Pods)
-	return lo, hi
-}
 
 // String redacts the key so a config can be logged safely.
 func (p Practice) String() string {
@@ -81,15 +72,13 @@ func (c Config) validatePractice() []error {
 		strings.ContainsFunc(p.Principal, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }):
 		errs = append(errs, fmt.Errorf("practice.principal must be a Proxmox user as name@realm, e.g. practice@pve, not %q", p.Principal))
 	case strings.EqualFold(p.Principal[at+1:], c.Proxmox.Realm):
-		errs = append(errs, fmt.Errorf("practice.principal must not be in proxmox.realm (%s): volunteers' jobs act as users of that realm, and names there come from the identity provider; use a user of a Proxmox realm such as pve", c.Proxmox.Realm))
+		errs = append(errs, fmt.Errorf("practice.principal must not be in proxmox.realm (%s): whoever the identity provider gives that name would hold the principal's tickets; use a user of a Proxmox realm such as pve", c.Proxmox.Realm))
 	}
 
 	if p.Listen == "" {
 		errs = append(errs, errors.New(`practice.listen is required`+once+` (the address only the practice app can reach, e.g. ":8081")`))
 	} else if _, port, err := net.SplitHostPort(p.Listen); err != nil || port == "" {
 		errs = append(errs, fmt.Errorf("practice.listen must be host:port or :port, not %q", p.Listen))
-	} else if sameSocket(p.Listen, c.Web.Listen) {
-		errs = append(errs, errors.New("practice.listen must not be web.listen: the session interface is served apart from the volunteer pages, on an address only the practice app can reach"))
 	}
 
 	switch {
@@ -99,23 +88,4 @@ func (c Config) validatePractice() []error {
 		errs = append(errs, fmt.Errorf("practice.key must be at least %d characters", MinPracticeKey))
 	}
 	return errs
-}
-
-// sameSocket reports whether two host:port addresses would bind the same
-// socket: equal ports, and equal hosts or either one every address.
-func sameSocket(a, b string) bool {
-	ha, pa, errA := net.SplitHostPort(a)
-	hb, pb, errB := net.SplitHostPort(b)
-	if errA != nil || errB != nil || pa != pb {
-		return false
-	}
-	return ha == hb || anyAddress(ha) || anyAddress(hb)
-}
-
-func anyAddress(host string) bool {
-	if host == "" {
-		return true
-	}
-	ip, err := netip.ParseAddr(host)
-	return err == nil && ip.IsUnspecified()
 }

@@ -365,7 +365,7 @@ func TestValidateRanges(t *testing.T) {
 			wantErr: "deploy.approved_tag must differ from deploy.master_tag",
 		},
 		{
-			name: "approved_tag empty approves nothing",
+			name: "approved_tag empty is accepted",
 			mutate: func(c *Config) {
 				c.Deploy.ApprovedTag = ""
 			},

@@ -449,14 +449,15 @@ func NewPlanner(api Reads, cfg config.Config) Planner {
 }
 
 type DeployRequest struct {
-	Pattern  string   // master name pattern, e.g. "*.kilo.alpha"
-	Teams    []string // two-digit team numbers
-	Hosts    []string // optional host filter
-	Rebuild  bool
-	Snapshot bool
-	// ApprovedOnly refuses the deploy unless every master Pattern matches
-	// carries deploy.approved_tag (see MasterSet.AllApproved).
-	ApprovedOnly bool
+	Pattern string // master name pattern, e.g. "*.kilo.alpha"
+	// ApprovedSet, in place of Pattern, takes exactly this set's masters. The
+	// deploy is refused (ErrNotApproved) unless the set is approved, and it
+	// clones only templates already built.
+	ApprovedSet Set
+	Teams       []string // two-digit team numbers
+	Hosts       []string // optional host filter
+	Rebuild     bool
+	Snapshot    bool
 }
 
 func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
@@ -479,14 +480,9 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 	if len(nodes) == 0 {
 		return nil, fmt.Errorf("no online Proxmox nodes")
 	}
-	masters, untagged, err := FindMasters(vms, p.Naming, req.Pattern, p.Cfg.Deploy.MasterTag)
+	masters, untagged, err := p.deployMasters(ctx, req, vms)
 	if err != nil {
 		return nil, err
-	}
-	if req.ApprovedOnly {
-		if err := requireApproved(masters, req.Pattern, p.Cfg.Deploy.ApprovedTag); err != nil {
-			return nil, err
-		}
 	}
 	var kept []proxmox.VM
 	for _, m := range masters {
@@ -495,9 +491,13 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		}
 	}
 	if len(kept) == 0 {
-		msg := fmt.Sprintf("no master VMs match %q with tag %q", req.Pattern, p.Cfg.Deploy.MasterTag)
+		of := fmt.Sprintf("match %q", req.Pattern)
+		if req.ApprovedSet != "" {
+			of = fmt.Sprintf("are of set %s", req.ApprovedSet)
+		}
+		msg := fmt.Sprintf("no master VMs %s with tag %q", of, p.Cfg.Deploy.MasterTag)
 		if len(req.Hosts) > 0 {
-			msg = fmt.Sprintf("no master VMs match %q with tag %q and hosts %s", req.Pattern, p.Cfg.Deploy.MasterTag, strings.Join(req.Hosts, ", "))
+			msg += " and hosts " + strings.Join(req.Hosts, ", ")
 		}
 		if len(untagged) > 0 {
 			msg += fmt.Sprintf(" (%d match but lack the tag, e.g. %s)", len(untagged), untagged[0].Name)
@@ -556,6 +556,9 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		if spec.Blocked == "" && (spec.VMID < base || spec.VMID >= base+100) {
 			spec.Blocked = fmt.Sprintf("template VMID %d is outside %d-%d, so its clone VMIDs could collide with another template's", spec.VMID, base, base+99)
 		}
+		if req.ApprovedSet != "" && spec.Blocked == "" && spec.Builds() {
+			spec.Blocked = "no template is built: a session deploy clones a template a volunteer built and builds none"
+		}
 		spec.WillStopMaster = spec.Blocked == "" && spec.Builds() && m.Status == "running"
 		if len(warnings[i]) > 0 {
 			plan.Notices = append(plan.Notices, fmt.Sprintf("%s: %s.", m.Name, strings.Join(warnings[i], "; ")))
@@ -588,23 +591,25 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 	return plan, nil
 }
 
-// ErrNotApproved: a DeployRequest.ApprovedOnly deploy names masters that
-// don't all carry deploy.approved_tag.
-var ErrNotApproved = errors.New("not approved for self-service sessions")
-
-// requireApproved is ErrNotApproved unless every master carries the approved
-// tag. The plan is rebuilt when the job runs, so approval removed after a
-// job was submitted stops it.
-func requireApproved(masters []proxmox.VM, pattern, approved string) error {
-	if strings.TrimSpace(approved) == "" {
-		return fmt.Errorf("%s is %w: deploy.approved_tag is empty, so no set is", pattern, ErrNotApproved)
+// deployMasters is the masters req names: Pattern's matches, with the
+// untagged ones, or ApprovedSet's own once the set is approved.
+func (p Planner) deployMasters(ctx context.Context, req DeployRequest, vms []proxmox.VM) (masters, untagged []proxmox.VM, err error) {
+	if req.ApprovedSet == "" {
+		return FindMasters(vms, p.Naming, req.Pattern, p.Cfg.Deploy.MasterTag)
 	}
-	for _, m := range masters {
-		if !hasTag(m.Tags, approved) {
-			return fmt.Errorf("%s is %w: %s lacks tag %q", pattern, ErrNotApproved, m.Name, approved)
-		}
+	if p.Access == nil {
+		return nil, nil, errors.New("planning without the user's privileges")
 	}
-	return nil
+	tags, err := p.Access.TagAccess(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	tag, err := approvalTag(p.Cfg.Deploy, tags)
+	if err != nil {
+		return nil, nil, err
+	}
+	masters = mastersBySet(vms, p.Naming, p.Cfg.Deploy.MasterTag)[req.ApprovedSet]
+	return masters, nil, requireApproved(req.ApprovedSet, masters, tag)
 }
 
 // blockDuplicateHosts blocks templates whose hostnames collide: their team
@@ -676,6 +681,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, t
 	spec.Interfaces, spec.GPU = p.describe(cfg)
 	spec.CPU, spec.CloudInit, spec.Bridges = cfg["cpu"], HasCloudInit(cfg), NICBridges(cfg)
 	named := byName[spec.Name]
+	_, reusable := usableTemplate(named)
 	var existing proxmox.VM
 	exists := len(named) > 0
 	if exists {
@@ -688,7 +694,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, t
 	case exists && !rebuild && !existing.Template:
 		spec.VMID, spec.Node = existing.VMID, existing.Node
 		spec.Blocked = "exists but is not a template (an earlier build may have been interrupted); deploy with rebuild"
-	case exists && !rebuild:
+	case reusable && !rebuild:
 		spec.VMID, spec.Node, spec.Exists = existing.VMID, existing.Node, true
 		// Clones copy the template, so it describes the pod, not the master.
 		tcfg, err := p.API.VMConfig(ctx, existing.Node, existing.VMID)
@@ -710,6 +716,15 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, t
 		spec.Node = m.Node
 	}
 	return spec, ws, nil
+}
+
+// usableTemplate is the template a deploy clones without building one: the
+// only VM with a template's name, when that VM is a template.
+func usableTemplate(named []proxmox.VM) (proxmox.VM, bool) {
+	if len(named) != 1 || !named[0].Template {
+		return proxmox.VM{}, false
+	}
+	return named[0], true
 }
 
 // describe reads the NIC count and GPU flag from a VM config.

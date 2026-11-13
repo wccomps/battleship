@@ -24,9 +24,10 @@ type Inputs struct {
 	Pattern    string    `json:"pattern,omitempty"`     // deploy
 	Rebuild    bool      `json:"rebuild,omitempty"`     // deploy
 	NoSnapshot bool      `json:"no_snapshot,omitempty"` // deploy
-	// ApprovedOnly, on a deploy from the session interface, refuses a set
-	// whose masters don't all carry deploy.approved_tag, at submission and
-	// again when the job runs.
+	// ApprovedOnly, on a deploy from the session interface, takes exactly the
+	// set Pattern names ("*.<set>"), only while that set is approved and from
+	// templates already built (pods.DeployRequest.ApprovedSet), at submission
+	// and again when the job runs.
 	ApprovedOnly bool `json:"approved_only,omitempty"`
 	// Set is the template set a teardown takes (pods.ParseSet); empty takes
 	// everything in its pods (among Hosts).
@@ -86,13 +87,18 @@ var requests = map[pods.Kind]request{
 			if strings.TrimSpace(in.Pattern) == "" {
 				return []error{errors.New("deploy needs a template pattern")}
 			}
+			if _, ok := pods.SetOfPattern(in.Pattern); in.ApprovedOnly && !ok {
+				return []error{fmt.Errorf("an approved-only deploy names one set as *.<set>, not %q", in.Pattern)}
+			}
 			return nil
 		},
 		plan: func(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*pods.Plan, error) {
-			return p.Deploy(ctx, pods.DeployRequest{
-				Pattern: in.Pattern, Teams: teams, Hosts: in.Hosts, Rebuild: in.Rebuild, Snapshot: !in.NoSnapshot,
-				ApprovedOnly: in.ApprovedOnly,
-			})
+			req := pods.DeployRequest{Pattern: in.Pattern, Teams: teams, Hosts: in.Hosts, Rebuild: in.Rebuild, Snapshot: !in.NoSnapshot}
+			if in.ApprovedOnly {
+				req.Pattern = ""
+				req.ApprovedSet, _ = pods.SetOfPattern(in.Pattern)
+			}
+			return p.Deploy(ctx, req)
 		},
 	},
 	pods.KindTeardown: {

@@ -15,21 +15,24 @@ import (
 func TestWorkerRefusesDeployOfSetNoLongerApproved(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		tags   string // the master's tags when the job runs
+		change func(f *fakeAPI) // between submission and the run
 		status string
 		clones bool
 	}{
-		{name: "still approved", tags: "dev;approved", status: store.StatusSucceeded, clones: true},
-		{name: "approval removed", tags: "dev", status: store.StatusFailed},
+		{name: "still approved", change: func(*fakeAPI) {}, status: store.StatusSucceeded, clones: true},
+		{name: "the tag removed from a master", change: func(f *fakeAPI) { f.VMs[5021].Config["tags"] = "dev" }, status: store.StatusFailed},
+		{name: "the tag no longer registered", change: func(f *fakeAPI) { f.Tags = proxmox.TagAccess{} }, status: store.StatusFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := storetest.New(t)
 			f := twoTeams()
-			// VMID 5021 gives pod 01's clone VMID 10121, which is free.
+			f.Tags = proxmox.TagAccess{Registered: []string{"approved"}}
+			// VMID 9021 gives pod 01's clone VMID 10121, which is free.
 			f.addVM(proxmox.VM{VMID: 5021, Name: "teak.kilo.alpha", Node: "n1", Status: "stopped", Tags: "dev;approved"})
+			f.addVM(proxmox.VM{VMID: 9021, Name: "teak.kilo.alpha.tpl", Node: "n1", Template: true})
 			id := submit(t, st, f, Inputs{Kind: pods.KindDeploy, Teams: "1", Pattern: "*.kilo.alpha", ApprovedOnly: true})
 			f.Mu.Lock()
-			f.VMs[5021].Config["tags"] = tc.tags // where the fake's listing reads them
+			tc.change(f)
 			f.Mu.Unlock()
 
 			newWorker(st, f).runJob(bg, claim(t, st))
@@ -48,13 +51,23 @@ func TestWorkerRefusesDeployOfSetNoLongerApproved(t *testing.T) {
 	}
 }
 
-// Only a deploy carries approved_only; Normalize keeps it there and drops it
-// elsewhere.
-func TestNormalizeKeepsApprovedOnlyOnDeploys(t *testing.T) {
-	if in := (Inputs{Kind: pods.KindDeploy, Teams: "51", Pattern: "*.kilo.alpha", ApprovedOnly: true}).Normalize(); !in.ApprovedOnly {
-		t.Error("Normalize dropped approved_only from a deploy")
+// approved_only belongs to a deploy of one set: Normalize drops it elsewhere,
+// and Validate refuses it with a pattern that names no set.
+func TestApprovedOnlyInputs(t *testing.T) {
+	if in := (Inputs{Kind: pods.KindDeploy, Teams: "51", Pattern: "*.kilo.alpha", ApprovedOnly: true}).Normalize(); !in.ApprovedOnly || in.Validate() != nil {
+		t.Errorf("a deploy of one set: approved_only %t, Validate %v", in.ApprovedOnly, in.Validate())
 	}
 	if in := (Inputs{Kind: pods.KindTeardown, Teams: "51", ApprovedOnly: true}).Normalize(); in.ApprovedOnly {
 		t.Error("Normalize kept approved_only on a teardown")
+	}
+	for _, pattern := range []string{"*", "dc.*", "*.kilo.*", "kilo.alpha"} {
+		in := Inputs{Kind: pods.KindDeploy, Teams: "51", Pattern: pattern, ApprovedOnly: true}
+		if err := in.Validate(); err == nil || !strings.Contains(err.Error(), "names one set") {
+			t.Errorf("approved_only with pattern %q: Validate = %v", pattern, err)
+		}
+		in.ApprovedOnly = false
+		if err := in.Validate(); err != nil {
+			t.Errorf("a volunteer's deploy of %q is refused: %v", pattern, err)
+		}
 	}
 }

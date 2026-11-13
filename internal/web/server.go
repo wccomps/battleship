@@ -35,8 +35,8 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// Deps are what the web app runs on. All but Clock, Logf and AccessLog are
-// required.
+// Deps are what the web app runs on. All but Clock, Logf, AccessLog and,
+// without [practice], Tickets are required.
 type Deps struct {
 	Config config.Config
 	Store  *store.Store

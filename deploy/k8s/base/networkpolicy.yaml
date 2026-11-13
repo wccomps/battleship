@@ -26,18 +26,6 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
-    # The session interface, with [practice] set: only the practice app's
-    # pods, never the ingress controller. CHANGE ME: its namespace and labels.
-    # - from:
-    #     - namespaceSelector:
-    #         matchLabels:
-    #           kubernetes.io/metadata.name: practice
-    #       podSelector:
-    #         matchLabels:
-    #           app.kubernetes.io/name: practice
-    #   ports:
-    #     - protocol: TCP
-    #       port: 8081
   egress:
     # Cluster DNS (CoreDNS / kube-dns in kube-system).
     - to:

@@ -31,9 +31,11 @@ func (f *Fake) PermissionsAt(context.Context, string) (map[string]bool, error) {
 	return allPrivileges(), nil
 }
 
-// TagAccess is unrestricted.
+// TagAccess is Tags.
 func (f *Fake) TagAccess(context.Context) (proxmox.TagAccess, error) {
-	return proxmox.TagAccess{}, nil
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	return f.Tags, nil
 }
 
 // NodeTasks lists no tasks.

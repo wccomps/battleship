@@ -195,9 +195,15 @@ type TagAccess struct {
 	Registered []string
 }
 
+// Registers reports whether tag is a registered tag, which only Sys.Modify
+// on / may set whatever Mode says.
+func (t TagAccess) Registers(tag string) bool {
+	return slices.ContainsFunc(t.Registered, func(r string) bool { return strings.EqualFold(r, tag) })
+}
+
 // Allows reports whether a user without Sys.Modify on / may set tag.
 func (t TagAccess) Allows(tag string) bool {
-	if slices.ContainsFunc(t.Registered, func(r string) bool { return strings.EqualFold(r, tag) }) {
+	if t.Registers(tag) {
 		return false
 	}
 	return t.Mode == "" || t.Mode == "free" ||

@@ -56,9 +56,6 @@ listen = "127.0.0.1:8081"
 	if !cfg.Practice.Enabled() || cfg.Practice.Key != key {
 		t.Fatalf("Practice = %#v, key from the environment = %t", cfg.Practice, cfg.Practice.Key == key)
 	}
-	if lo, hi := cfg.Practice.PodRange(); lo != 51 || hi != 59 {
-		t.Errorf("PodRange = %d-%d, want 51-59", lo, hi)
-	}
 }
 
 func TestPracticeValidation(t *testing.T) {
@@ -82,8 +79,6 @@ func TestPracticeValidation(t *testing.T) {
 		{"principal with a space", func(c *Config) { c.Practice.Principal = "practice @pve" }, "practice.principal must be a Proxmox user as name@realm"},
 		{"principal in the OpenID realm", func(c *Config) { c.Practice.Principal = "practice@" + strings.ToUpper(c.Proxmox.Realm) }, "practice.principal must not be in proxmox.realm"},
 		{"listen without port", func(c *Config) { c.Practice.Listen = "8081" }, "practice.listen must be host:port or :port"},
-		{"listen is web.listen", func(c *Config) { c.Practice.Listen = c.Web.Listen }, "practice.listen must not be web.listen"},
-		{"listen overlaps web.listen", func(c *Config) { c.Web.Listen = "0.0.0.0:8081" }, "practice.listen must not be web.listen"},
 		{"short key", func(c *Config) { c.Practice.Key = "short" }, "practice.key must be at least 32 characters"},
 	}
 	for _, tc := range cases {
@@ -98,12 +93,6 @@ func TestPracticeValidation(t *testing.T) {
 	}
 	if err := practiceConfig().Validate(); err != nil {
 		t.Fatalf("a full [practice] is refused: %v", err)
-	}
-	// The same port on another host is another socket.
-	c := practiceConfig()
-	c.Web.Listen, c.Practice.Listen = "127.0.0.1:8080", "10.0.0.5:8080"
-	if err := c.Validate(); err != nil {
-		t.Errorf("distinct hosts on one port are refused: %v", err)
 	}
 }
 

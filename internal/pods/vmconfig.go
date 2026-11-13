@@ -1,8 +1,11 @@
 package pods
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
+	"math"
 	"regexp"
 	"slices"
 	"strconv"
@@ -238,6 +241,48 @@ func DiskVolumes(cfg map[string]string) map[string]string {
 		out[k] = head
 	}
 	return out
+}
+
+// DiskBytes is the total size of a VM's disks (DiskVolumes), from each
+// one's size option.
+func DiskBytes(cfg map[string]string) int64 {
+	var total int64
+	for k := range DiskVolumes(cfg) {
+		_, opts := splitOptions(cfg[k])
+		total += sizeBytes(opts["size"])
+	}
+	return total
+}
+
+// sizeBytes reads a disk size as Proxmox writes it: bytes, or a whole
+// number of K, M, G or T (powers of 1024). Anything else is 0.
+func sizeBytes(s string) int64 {
+	shift := 0
+	if s != "" {
+		if i := strings.IndexByte("KMGT", s[len(s)-1]); i >= 0 {
+			shift, s = 10*(i+1), s[:len(s)-1]
+		}
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n < 0 || n > math.MaxInt64>>shift {
+		return 0
+	}
+	return n << shift
+}
+
+// ConfigDigest is a SHA-256 of a VM's config, for telling whether a template
+// is still the one it was. It leaves out what changes while the VM stays the
+// same machine: Proxmox's own digest, a task's lock, tags and notes.
+func ConfigDigest(cfg map[string]string) string {
+	h := sha256.New()
+	for _, k := range slices.Sorted(maps.Keys(cfg)) {
+		switch k {
+		case "digest", "lock", "tags", "description":
+			continue
+		}
+		fmt.Fprintf(h, "%q=%q\n", k, cfg[k])
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // VolumeFile is a volume's last path segment, e.g. "vm-10105-disk-0.qcow2"

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/proxmox"
 )
 
 const practiceTestPrincipal = "practice@pve"
@@ -29,7 +30,7 @@ func withPractice(ln net.Listener, key string) serveOption {
 
 // The session interface is served on practice.listen and nowhere else, and
 // stops with serve. Without [practice], serve opens no second listener:
-// startServe's listen refuses any address but web.listen, in every other test.
+// startServe's listen refuses any address but web.listen.
 func TestServeSessionInterfaceHasItsOwnListener(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -39,6 +40,9 @@ func TestServeSessionInterfaceHasItsOwnListener(t *testing.T) {
 	e := startServe(t, withPractice(ln, key))
 	e.pve.AddUser(practiceTestPrincipal, nil)
 	e.pve.Grant(practiceTestPrincipal, "/", "VM.Audit")
+	e.api.Mu.Lock()
+	e.api.Tags = proxmox.TagAccess{Registered: []string{"approved"}}
+	e.api.Mu.Unlock()
 
 	sets := func(base string) (int, string) {
 		req, err := http.NewRequest(http.MethodGet, base+"/v1/sets", nil)
