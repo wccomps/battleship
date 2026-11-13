@@ -255,7 +255,7 @@ func (p *Poller) failing() bool { return p.err != "" && p.err != WaitingForPoll 
 // compose builds the grid from the current inputs. p.mu must be held.
 func (p *Poller) compose() Grid {
 	teams, hosts, rows := p.rules.grid(p.in)
-	sets, others := pods.MasterSets(p.in.vms, p.rules.naming, p.rules.cfg.Deploy.MasterTag)
+	sets, others := pods.MasterSets(p.in.vms, p.rules.naming, p.rules.cfg.Deploy.MasterTag, p.rules.cfg.Deploy.ApprovedTag)
 	return Grid{
 		Sets:         sets,
 		OtherMasters: others,

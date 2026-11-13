@@ -279,7 +279,7 @@ func TestMasterSets(t *testing.T) {
 		{VMID: 9, Name: "dc.kilo.alpha.tpl", Tags: "dev", Template: true},
 		{VMID: 10, Name: "team01-dc", Tags: "dev", Status: "running"},
 	}
-	sets, others := MasterSets(vms, n, "dev")
+	sets, others := MasterSets(vms, n, "dev", "approved")
 	want := []MasterSet{
 		{Name: "kilo.alpha", Hosts: []string{"dc", "web"}, Masters: 3, Running: 2},
 		{Name: "looney.tunes", Hosts: []string{"bugs"}, Masters: 1, Running: 0},
@@ -290,8 +290,54 @@ func TestMasterSets(t *testing.T) {
 	if want := []string{"blank", "trailing.", "y"}; !reflect.DeepEqual(others, want) {
 		t.Errorf("others = %v, want %v", others, want)
 	}
-	if sets, others := MasterSets(nil, n, "dev"); sets != nil || others != nil {
+	if sets, others := MasterSets(nil, n, "dev", "approved"); sets != nil || others != nil {
 		t.Errorf("no VMs: sets %v, others %v; want none", sets, others)
+	}
+}
+
+// A set is approved only when every one of its masters carries the approval
+// tag: one without it, as a host added later or a second VM of the same
+// name, leaves the set unapproved. A VM that isn't a master counts neither
+// way, and with no approval tag configured nothing is approved.
+func TestMasterSetsApproval(t *testing.T) {
+	n := NewNaming(config.Default().Naming)
+	vms := []proxmox.VM{
+		{VMID: 1, Name: "dc.all.set", Tags: "dev;approved"},
+		{VMID: 2, Name: "web.all.set", Tags: "Approved;dev"},
+		{VMID: 3, Name: "mail.all.set", Tags: "approved"}, // no master tag: not a master
+		{VMID: 4, Name: "dc.some.set", Tags: "dev;approved"},
+		{VMID: 5, Name: "web.some.set", Tags: "dev"},
+		{VMID: 6, Name: "dc.none.set", Tags: "dev;approved-soon"},
+		{VMID: 7, Name: "dc.twice.set", Tags: "dev;approved"},
+		{VMID: 8, Name: "dc.twice.set", Tags: "dev"},
+	}
+	want := map[Set]struct {
+		approved int
+		all      bool
+	}{
+		"all.set":   {2, true},
+		"some.set":  {1, false},
+		"none.set":  {0, false},
+		"twice.set": {1, false},
+	}
+	sets, _ := MasterSets(vms, n, "dev", "approved")
+	if len(sets) != len(want) {
+		t.Fatalf("sets = %+v, want %d of them", sets, len(want))
+	}
+	for _, s := range sets {
+		if w := want[s.Name]; s.Approved != w.approved || s.AllApproved() != w.all {
+			t.Errorf("%s: %d of %d masters approved, AllApproved %v; want %d, %v", s.Name, s.Approved, s.Masters, s.AllApproved(), w.approved, w.all)
+		}
+	}
+
+	sets, _ = MasterSets(vms, n, "dev", "")
+	for _, s := range sets {
+		if s.Approved != 0 || s.AllApproved() {
+			t.Errorf("%s with no approval tag: %d approved, AllApproved %v; want none", s.Name, s.Approved, s.AllApproved())
+		}
+	}
+	if (MasterSet{}).AllApproved() {
+		t.Error("a set with no masters is approved")
 	}
 }
 

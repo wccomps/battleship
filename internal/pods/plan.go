@@ -454,6 +454,9 @@ type DeployRequest struct {
 	Hosts    []string // optional host filter
 	Rebuild  bool
 	Snapshot bool
+	// ApprovedOnly refuses the deploy unless every master Pattern matches
+	// carries deploy.approved_tag (see MasterSet.AllApproved).
+	ApprovedOnly bool
 }
 
 func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
@@ -479,6 +482,11 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 	masters, untagged, err := FindMasters(vms, p.Naming, req.Pattern, p.Cfg.Deploy.MasterTag)
 	if err != nil {
 		return nil, err
+	}
+	if req.ApprovedOnly {
+		if err := requireApproved(masters, req.Pattern, p.Cfg.Deploy.ApprovedTag); err != nil {
+			return nil, err
+		}
 	}
 	var kept []proxmox.VM
 	for _, m := range masters {
@@ -578,6 +586,25 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 	}
 	plan.BlockUnrebuildable()
 	return plan, nil
+}
+
+// ErrNotApproved: a DeployRequest.ApprovedOnly deploy names masters that
+// don't all carry deploy.approved_tag.
+var ErrNotApproved = errors.New("not approved for self-service sessions")
+
+// requireApproved is ErrNotApproved unless every master carries the approved
+// tag. The plan is rebuilt when the job runs, so approval removed after a
+// job was submitted stops it.
+func requireApproved(masters []proxmox.VM, pattern, approved string) error {
+	if strings.TrimSpace(approved) == "" {
+		return fmt.Errorf("%s is %w: deploy.approved_tag is empty, so no set is", pattern, ErrNotApproved)
+	}
+	for _, m := range masters {
+		if !hasTag(m.Tags, approved) {
+			return fmt.Errorf("%s is %w: %s lacks tag %q", pattern, ErrNotApproved, m.Name, approved)
+		}
+	}
+	return nil
 }
 
 // blockDuplicateHosts blocks templates whose hostnames collide: their team

@@ -24,6 +24,10 @@ type Inputs struct {
 	Pattern    string    `json:"pattern,omitempty"`     // deploy
 	Rebuild    bool      `json:"rebuild,omitempty"`     // deploy
 	NoSnapshot bool      `json:"no_snapshot,omitempty"` // deploy
+	// ApprovedOnly, on a deploy from the session interface, refuses a set
+	// whose masters don't all carry deploy.approved_tag, at submission and
+	// again when the job runs.
+	ApprovedOnly bool `json:"approved_only,omitempty"`
 	// Set is the template set a teardown takes (pods.ParseSet); empty takes
 	// everything in its pods (among Hosts).
 	Set pods.Set `json:"set,omitempty"`
@@ -87,6 +91,7 @@ var requests = map[pods.Kind]request{
 		plan: func(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*pods.Plan, error) {
 			return p.Deploy(ctx, pods.DeployRequest{
 				Pattern: in.Pattern, Teams: teams, Hosts: in.Hosts, Rebuild: in.Rebuild, Snapshot: !in.NoSnapshot,
+				ApprovedOnly: in.ApprovedOnly,
 			})
 		},
 	},
@@ -540,6 +545,7 @@ func (in Inputs) Normalize() Inputs {
 		out.Pattern = strings.TrimSpace(in.Pattern)
 		out.Rebuild = in.Rebuild
 		out.NoSnapshot = in.NoSnapshot
+		out.ApprovedOnly = in.ApprovedOnly
 	case pods.KindTeardown:
 		out.Set = pods.Set(strings.ToLower(strings.TrimSpace(string(in.Set))))
 	case pods.KindReset:

@@ -193,16 +193,24 @@ func vmLoad(vm proxmox.VM) int64 { return max((vm.MaxMem>>20)+int64(vm.MaxCPU)<<
 // MasterSet is the masters of one set (SplitMaster), e.g. dc.kilo.alpha
 // and web.kilo.alpha form kilo.alpha.
 type MasterSet struct {
-	Name    Set
-	Hosts   []string // sorted, each once
-	Masters int      // master VMs, counting any that share a name
-	Running int      // of them, those running; a template build stops them
+	Name     Set
+	Hosts    []string // sorted, each once
+	Masters  int      // master VMs, counting any that share a name
+	Running  int      // of them, those running; a template build stops them
+	Approved int      // of them, those carrying deploy.approved_tag (see AllApproved)
 }
 
-// MasterSets groups masters tagged tag into sets, sorted by name. Masters
-// with nothing after the host (like "y" or "tern.") go in others, sorted
-// and unique.
-func MasterSets(vms []proxmox.VM, n Naming, tag string) (sets []MasterSet, others []string) {
+// AllApproved reports whether the set is approved for self-service sessions:
+// every one of its masters carries deploy.approved_tag. One without it, as a
+// host added after the set was approved, leaves the whole set unapproved, and
+// so does a set with no masters.
+func (s MasterSet) AllApproved() bool { return s.Masters > 0 && s.Approved == s.Masters }
+
+// MasterSets groups masters tagged tag into sets, sorted by name, counting
+// in each the masters that also carry approved (none when it is empty).
+// Masters with nothing after the host (like "y" or "tern.") go in others,
+// sorted and unique.
+func MasterSets(vms []proxmox.VM, n Naming, tag, approved string) (sets []MasterSet, others []string) {
 	masters, _, _ := FindMasters(vms, n, "*", tag)
 	index := map[Set]int{}
 	for _, m := range masters {
@@ -227,12 +235,50 @@ func MasterSets(vms []proxmox.VM, n Naming, tag string) (sets []MasterSet, other
 		if m.Status == "running" {
 			s.Running++
 		}
+		if hasTag(m.Tags, approved) {
+			s.Approved++
+		}
 	}
 	for i := range sets {
 		sort.Strings(sets[i].Hosts)
 	}
 	sort.Slice(sets, func(i, j int) bool { return sets[i].Name < sets[j].Name })
 	return sets, others
+}
+
+// SetMember is one master of a set and the template pods are cloned from
+// for it: the one template with its template name, or nil when there is none
+// or the name is shared (a deploy blocks both cases or builds one).
+type SetMember struct {
+	Host     string
+	Master   proxmox.VM
+	Template *proxmox.VM
+}
+
+// SetMembers is set's masters tagged tag with their templates, sorted by
+// master name.
+func SetMembers(vms []proxmox.VM, n Naming, set Set, tag string) []SetMember {
+	masters, _, _ := FindMasters(vms, n, set.Pattern(), tag)
+	var out []SetMember
+	for _, m := range masters {
+		host, of := n.SplitMaster(m.Name)
+		if of != set {
+			continue // "*.<set>" also matches a longer set ending in it
+		}
+		member := SetMember{Host: host, Master: m}
+		name, found := n.TemplateName(m.Name), 0
+		for i := range vms {
+			if vms[i].Name == name && vms[i].Template {
+				member.Template = &vms[i]
+				found++
+			}
+		}
+		if found != 1 {
+			member.Template = nil
+		}
+		out = append(out, member)
+	}
+	return out
 }
 
 // AllTeamVMs is every team VM, as findForTeams finds them, sorted by name.

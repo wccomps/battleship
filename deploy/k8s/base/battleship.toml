@@ -5,6 +5,7 @@
 #   BATTLESHIP_OIDC_CLIENT_SECRET    oidc.client_secret
 #   BATTLESHIP_SEAL_KEY              database.seal_key
 #   BATTLESHIP_DATABASE_URL          database.url
+#   BATTLESHIP_PRACTICE_KEY          practice.key, only with [practice] set
 #
 # CHANGE ME values are placeholders; overlays replace this whole file.
 # Patterns use {team} (two digits, e.g. 07) and {host} (e.g. teak).
@@ -40,6 +41,7 @@ cicustom = "vendor=competitions:snippets/ssh-keys.yaml"
 storage = "competitions"           # clone storage; whoever deploys needs Datastore.AllocateSpace on it
 linked = true
 master_tag = "dev"
+approved_tag = "approved"          # a set whose masters all carry it too is approved for self-service sessions
 disk_mbps_rd = 300
 disk_mbps_wr = 300
 snapshot_name = "initial"          # the baseline a deploy takes
@@ -105,3 +107,12 @@ scopes = ["openid", "profile", "email", "offline_access"]
 
 # No [roles]: Authentik policy bindings (which exclude students) decide who may
 # open battleship, Proxmox what each user may do.
+
+# The session interface, for the practice app. Off unless set. To turn it on,
+# also uncomment the "practice" port and BATTLESHIP_PRACTICE_KEY in
+# deployment.yaml and the ingress rule in networkpolicy.yaml, and give the
+# practice app a Service for the port. It must never be behind the Ingress.
+# [practice]
+# pods = "51-59"                   # the only pods it may act on
+# principal = "practice@pve"       # the one Proxmox user whose ticket it accepts
+# listen = ":8081"

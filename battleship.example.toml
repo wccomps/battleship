@@ -35,6 +35,7 @@ url = "https://192.0.2.123:8006"
 # storage = "competitions"
 # linked = true
 # master_tag = "dev"
+# approved_tag = "approved"         # a set whose masters all carry it too is approved for self-service sessions; "" approves none
 # disk_mbps_rd = 300
 # disk_mbps_wr = 300
 # snapshot_name = "initial"          # the baseline a deploy takes
@@ -110,3 +111,12 @@ client_id = "battleship"             # or the BATTLESHIP_OIDC_CLIENT_ID environm
 
 # No roles: Authentik policy bindings decide who may open it, Proxmox ACLs what
 # each person may do. See the README.
+
+# The session interface: the practice app deploys and tears down the session
+# pods through it, with its own Proxmox login. Off unless set; set one and all
+# four are required.
+# [practice]
+# pods = "51-59"                 # the only pods it may act on
+# principal = "practice@pve"     # the one Proxmox user whose ticket it accepts; not a user of proxmox.realm
+# listen = ":8081"               # its own address, reachable only by the practice app; never web.listen
+# key = ""                       # prefer the BATTLESHIP_PRACTICE_KEY environment variable; 32 or more random characters

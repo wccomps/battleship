@@ -86,7 +86,7 @@ func TestExampleConfigLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, section := range []string{"[proxmox]", "[naming]", "[network]", "[deploy]", "[images]", "[environments]", "[concurrency]", "[retry]", "[database]", "[jobs]", "[web]", "[oidc]"} {
+	for _, section := range []string{"[proxmox]", "[naming]", "[network]", "[deploy]", "[images]", "[environments]", "[concurrency]", "[retry]", "[database]", "[jobs]", "[web]", "[oidc]", "[practice]"} {
 		if !strings.Contains(string(raw), section) {
 			t.Errorf("battleship.example.toml missing section %s", section)
 		}
@@ -356,6 +356,19 @@ func TestValidateRanges(t *testing.T) {
 				c.Deploy.MasterTag = "   "
 			},
 			wantErr: "deploy.master_tag is required",
+		},
+		{
+			name: "approved_tag same as master_tag",
+			mutate: func(c *Config) {
+				c.Deploy.ApprovedTag = " Dev "
+			},
+			wantErr: "deploy.approved_tag must differ from deploy.master_tag",
+		},
+		{
+			name: "approved_tag empty approves nothing",
+			mutate: func(c *Config) {
+				c.Deploy.ApprovedTag = ""
+			},
 		},
 	}
 
