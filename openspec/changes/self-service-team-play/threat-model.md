@@ -75,7 +75,7 @@ The list of rights is read from code. Task 1.5 runs a real deploy with it and pr
 - Session job inputs are a kind, a pod range and a set name. They carry no booking reference and no customer details, since every volunteer can read them.
 - The key alone does nothing: Battleship still holds no credential.
 - Approval is read as the session user sees the cluster. A master it cannot see is not counted, so it needs `VM.Audit` on whole sets, and practice records an environment's templates at publishing (S-04).
-- Approval counts only if the tag is one of Proxmox's registered tags. Battleship checks this on every listing and every session deploy, and approves nothing otherwise.
+- Approval counts only if the tag is one of Proxmox's registered tags, in the exact spelling. Battleship checks this on every listing and every session deploy, and approves nothing otherwise. To see the registered tags the session user needs `Sys.Audit` on `/`, a read-only right over the whole cluster; that Proxmox refuses the same tag in another case is to test (task 1.6).
 - A session deploy clones built templates and never builds one from a master, so the session user needs no clone right on any master.
 - The interface's listener is plain HTTP. The key and the session user's ticket cross it unencrypted, so only practice may be able to reach it, over a network nobody else can read.
 

@@ -126,11 +126,11 @@ These checks stand in for the preview, fingerprint and typed confirmation a volu
 As built: the settings are Battleship's `[practice]` section (`pods`, `principal`, `listen`, `key`), off when unset. The calls are `GET /v1/sets`, `GET /v1/pods/{pod}/vms`, `POST /v1/jobs`, `GET /v1/jobs/{id}` and `POST /v1/jobs/{id}/cancel`. Each job records where it came from, and the interface reads and cancels only jobs it submitted. A request is a kind, a pod range and a set name, and nothing else. `internal/web/testdata/practice` in Battleship holds one recorded request and answer per call, for practice's client to be tested against (task 6.1).
 
 What "approved" means in code:
-- The approval tag must be one of Proxmox's registered tags. If it is not, anyone who may edit a master's options could add it, so Battleship lists no set and refuses every session deploy.
+- The approval tag must be one of Proxmox's registered tags, spelled exactly as in Battleship's config. If it is not, then under Proxmox's default tag setting anyone who may edit a master's options could add it, so Battleship lists no set and refuses every session deploy. The session principal needs `Sys.Audit` on `/` to see the registered tags; without it the result is the same.
 - A deploy takes exactly the named set's masters. A set whose name is the ending of another's (`alpha` and `kilo.alpha`) is its own set.
 - A session deploy clones templates a volunteer has built and never builds one. A host with no built template blocks the deploy.
 
-`GET /v1/sets` gives each approved set's hosts, its built templates (host, name, VMID and a digest), and one pod's memory, processors and disk, summed over those templates. The digest is Battleship's hash of the template's config without its lock, tags and notes, so a note or a backup does not change it. A rebuilt template is a new clone with new identifiers in its config, so its digest should differ; that is read from how Proxmox clones, not yet seen on the org's cluster (task 2.7). A template whose config cannot be read, as when its node is down, is listed with the error and no digest, and the other sets are still answered.
+`GET /v1/sets` plans a deploy of each approved set, so it lists exactly the templates a deploy would clone: per set its hosts, its built templates (host, name, VMID and a digest), the templates a deploy could not use with the planner's reason, and one pod's memory, processors and boot disks, summed over the built templates as Proxmox lists them. The digest is Battleship's hash of the template's config without its lock, tags and notes, so a note or a backup does not change it. A rebuilt template is a new clone with new identifiers in its config, so its digest should differ; that is read from how Proxmox clones, not yet seen on the org's cluster (task 2.7). A set or template that cannot be read, as when its node is down, is listed with the error, and the other sets are still answered.
 
 The interface has no call that lists its jobs. If practice loses the answer to a submission, it cannot find that job (task 2.9).
 
@@ -141,6 +141,7 @@ Practice holds the session principal's Proxmox password and logs in for each job
 - `VM.Allocate`, `VM.Config.Network`, `VM.Config.Disk`, `VM.Config.CDROM`, `VM.Config.Options`, `VM.Config.Cloudinit`, `VM.Snapshot`, `VM.PowerMgmt` on the session pools.
 - `SDN.Use` on the session pods' networks.
 - `Datastore.AllocateSpace` on `deploy.storage`.
+- `Sys.Audit` on `/`. Proxmox shows the registered tags to nobody without it, and Battleship approves nothing it cannot see registered. It is read-only, but it is over the whole cluster.
 - The right to enable and disable the nine session users in Proxmox (decision 6).
 
 Not granted: `Datastore.Allocate`, which would let it delete any volume on the storage. Freeing leftover disks (`StepFreeDisks`) therefore stays blocked for session jobs; staff clear leftovers. Not granted: `Sys.Modify`.
@@ -190,7 +191,7 @@ An environment can be booked only when three things hold:
 2. Staff have published it in the practice app.
 3. The session principal holds `VM.Clone` on each of its templates. This is the only one of the three that Proxmox enforces.
 
-**Published version, frozen.** A deploy reuses a template that exists and rebuilds it only when asked (`TemplateSpec.Rebuild`); the session principal cannot rebuild (decision 5). So sessions always get the templates as built, never a half-finished edit to a master. Publishing records each template's VMID and Proxmox config digest, read through the session interface. The offer list and Start compare them: a template missing or replaced since publishing makes the environment unbookable and alerts staff. To update an environment, staff rebuild its templates with a volunteer deploy, then publish again. Its masters must stay where they are: the planner finds templates through them, so tearing down the Battleship environment makes it unbookable.
+**Published version, frozen.** A deploy reuses a template that exists and rebuilds it only when asked (`TemplateSpec.Rebuild`); the session principal cannot rebuild (decision 5). So sessions always get the templates as built, never a half-finished edit to a master. Publishing records each template's VMID and config digest, read through the session interface. The offer list and Start compare them: a template missing or replaced since publishing makes the environment unbookable and alerts staff. To update an environment, staff rebuild its templates with a volunteer deploy, then publish again. Its masters must stay where they are: the planner finds templates through them, so tearing down the Battleship environment makes it unbookable.
 
 An environment that has been sold is public from then on and must not be used for a scored event.
 
@@ -350,7 +351,8 @@ To test:
 - Session pods cannot reach each other, official pods or the management network, and reach the internet only through the proxy, which logs by pod. Task 1.7.
 - The proxy can tell one pod from another by source address. Task 1.7.
 - The proxy and name resolution official teams use have no route to pods 51 to 59. Task 1.7.
-- Rebuilding a template changes its Proxmox config digest, so a replaced template is noticed. Task 2.7.
+- Rebuilding a template changes its config digest, so a replaced template is noticed. Task 2.7.
+- The session principal, holding `Sys.Audit` on `/`, is shown Proxmox's registered tags, and a user without `Sys.Modify` on `/` cannot put the approval tag, or the same tag in another case, on a VM. Tasks 1.5 and 1.6.
 - How the jump box is built, and that a session account on it reaches only its own pod. Task 1.10.
 - A deploy of an approved set succeeds with only the rights in decision 5. Templates keep their masters' network cards, on dev-slot networks, and Proxmox may ask for rights on those at clone time. Task 1.5.
 - Battleship and every other org application refuse a session account. Task 1.3.
