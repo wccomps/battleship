@@ -35,6 +35,7 @@ url = "https://192.0.2.123:8006"
 # storage = "competitions"
 # linked = true
 # master_tag = "dev"
+# approved_tag: spell it in lower case unless Datacenter tag-style is case-sensitive; Proxmox stores tags lower-cased by default.
 # approved_tag = "approved"         # a set whose masters all carry it too is approved for self-service sessions; must be one of Proxmox's registered tags; "" approves none
 # disk_mbps_rd = 300
 # disk_mbps_wr = 300

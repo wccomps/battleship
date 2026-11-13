@@ -41,7 +41,7 @@ func TestServeSessionInterfaceHasItsOwnListener(t *testing.T) {
 	e.pve.AddUser(practiceTestPrincipal, nil)
 	e.pve.Grant(practiceTestPrincipal, "/", "VM.Audit")
 	e.api.Mu.Lock()
-	e.api.Tags = proxmox.TagAccess{Registered: []string{"approved"}}
+	e.api.Tags = proxmox.TagAccess{Registered: []string{"approved"}, CaseSensitive: true}
 	e.api.Mu.Unlock()
 
 	sets := func(base string) (int, string) {

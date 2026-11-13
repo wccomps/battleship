@@ -216,6 +216,9 @@ type TemplateSpec struct {
 	// Bridges are the template's net0 and net1 bridges, which clones start on
 	// until the network step rewires them.
 	Bridges []string `json:"bridges,omitempty"`
+	// Digest is ConfigDigest of the template a deploy reuses, as the session
+	// interface reports it.
+	Digest string `json:"digest,omitempty"`
 }
 
 type Item struct {
@@ -491,9 +494,13 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		}
 	}
 	if len(kept) == 0 {
-		msg := fmt.Sprintf("no master VMs match %q with tag %q", req.Pattern, p.Cfg.Deploy.MasterTag)
+		of := fmt.Sprintf("match %q", req.Pattern)
+		if req.ApprovedSet != "" {
+			of = fmt.Sprintf("are of set %s", req.ApprovedSet)
+		}
+		msg := fmt.Sprintf("no master VMs %s with tag %q", of, p.Cfg.Deploy.MasterTag)
 		if len(req.Hosts) > 0 {
-			msg = fmt.Sprintf("no master VMs match %q with tag %q and hosts %s", req.Pattern, p.Cfg.Deploy.MasterTag, strings.Join(req.Hosts, ", "))
+			msg += " and hosts " + strings.Join(req.Hosts, ", ")
 		}
 		if len(untagged) > 0 {
 			msg += fmt.Sprintf(" (%d match but lack the tag, e.g. %s)", len(untagged), untagged[0].Name)
@@ -699,6 +706,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, t
 		}
 		spec.Interfaces, spec.GPU = p.describe(tcfg)
 		spec.CPU, spec.CloudInit, spec.Bridges = tcfg["cpu"], HasCloudInit(tcfg), NICBridges(tcfg)
+		spec.Digest = ConfigDigest(tcfg)
 	case exists && rebuild:
 		// Proxmox refuses to delete a template whose base disk a linked clone still uses.
 		for _, vm := range vms {

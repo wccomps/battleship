@@ -69,8 +69,12 @@ for the event streams.
   only. Never route the Ingress to it: it speaks plain HTTP and carries a
   Proxmox ticket. `deploy.approved_tag` must be one of Proxmox's registered
   tags (Datacenter → Options), spelled the same, and the practice app's
-  Proxmox user needs `Sys.Audit` on `/` to see that it is; otherwise no set
-  is approved.
+  Proxmox user needs `Sys.Audit` on `/`, granted with propagation off, to
+  see that it is; otherwise no set is approved. Set Datacenter → Options →
+  Tag Style to case-sensitive, or User Tag Access to anything but free (a
+  list holding no case variant of the tag), or no set is approved: else
+  anyone may set the tag in another case and Proxmox stores it lower-cased.
+  A volunteer who retries a session deploy needs `Sys.Audit` on `/` too.
 
 | Symptom | Likely cause |
 |---|---|

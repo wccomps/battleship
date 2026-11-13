@@ -13,8 +13,8 @@ import (
 )
 
 // registered is a tag policy under which "approved" approves: it is a
-// registered tag.
-var registered = proxmox.TagAccess{Registered: []string{"approved"}}
+// registered tag and tags are case-sensitive.
+var registered = proxmox.TagAccess{Registered: []string{"approved"}, CaseSensitive: true}
 
 // approvedCluster has set tango.delta's masters teak and oak, each with a
 // built template unless its host is in unbuilt, under the registered policy.
@@ -156,6 +156,40 @@ func TestApprovedSets(t *testing.T) {
 	cfg.ApprovedTag = ""
 	if _, err := ApprovedSets(vms, n, cfg, registered); !errors.Is(err, ErrNotApproved) {
 		t.Errorf("no approval tag configured: err %v, want ErrNotApproved", err)
+	}
+}
+
+// The tag approves only while a user without Sys.Modify can't set a case
+// variant of it, which Proxmox would store as the tag.
+func TestApprovalTagCaseVariant(t *testing.T) {
+	reg := []string{"approved", "1337"}
+	for _, tc := range []struct {
+		name   string
+		tag    string
+		policy proxmox.TagAccess
+		ok     bool
+	}{
+		{"free, case-insensitive", "approved", proxmox.TagAccess{Registered: reg}, false},
+		{"free named, case-insensitive", "approved", proxmox.TagAccess{Mode: "free", Registered: reg}, false},
+		{"free, case-sensitive", "approved", proxmox.TagAccess{Registered: reg, CaseSensitive: true}, true},
+		{"list with a variant", "approved", proxmox.TagAccess{Mode: "list", Allowed: []string{"dev", "Approved"}, Registered: reg}, false},
+		{"list without a variant", "approved", proxmox.TagAccess{Mode: "list", Allowed: []string{"dev", "approved"}, Registered: reg}, true},
+		{"none", "approved", proxmox.TagAccess{Mode: "none", Registered: reg}, true},
+		{"existing", "approved", proxmox.TagAccess{Mode: "existing", Allowed: []string{"Approved"}, Registered: reg}, true},
+		{"no letters, free", "1337", proxmox.TagAccess{Registered: reg}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := approvalTag(config.Deploy{ApprovedTag: tc.tag}, tc.policy)
+			if tc.ok {
+				if err != nil || got != tc.tag {
+					t.Fatalf("approvalTag = %q, %v; want %q", got, err, tc.tag)
+				}
+				return
+			}
+			if !errors.Is(err, ErrNotApproved) || !strings.Contains(err.Error(), "case variant") {
+				t.Fatalf("approvalTag = %q, %v; want ErrNotApproved naming the case variant", got, err)
+			}
+		})
 	}
 }
 

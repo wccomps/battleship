@@ -26,6 +26,9 @@ var fingerprinted = map[string]map[string]bool{
 		"Host": false, "MasterName": false, "Node": false, "OldNode": false, "MasterNode": false,
 		// Only decide the privileges needed, which Blocked covers.
 		"CPU": false, "CloudInit": false, "Bridges": false,
+		// What the session interface reports of a reused template; a
+		// volunteer's deploy never read it.
+		"Digest": false,
 	},
 	"Item": {
 		"Name": true, "Rename": true, "VMID": true, "Steps": true, "Blocked": true, "Snapshot": true, "Action": true, "Template": true,

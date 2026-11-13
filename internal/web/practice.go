@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -40,10 +41,10 @@ const (
 	// practiceMaxBody caps a request body; a job request is under 100 bytes.
 	practiceMaxBody = 4 << 10
 	// practiceSetPlans caps the sets GET /v1/sets plans at once, and
-	// practiceReadTimeout each template config it reads, so one node that
-	// hangs can't use up the call.
-	practiceSetPlans    = 4
-	practiceReadTimeout = 10 * time.Second
+	// practiceSetTimeout each plan, so a node that hangs fails its own sets
+	// and not the call.
+	practiceSetPlans   = 4
+	practiceSetTimeout = 15 * time.Second
 )
 
 // PracticeCallTimeout bounds one call of the session interface. The
@@ -135,20 +136,23 @@ func practiceRefuse(w http.ResponseWriter, status int, code, message string) {
 }
 
 // practiceProxmoxFailed answers a call Proxmox failed: it answered with an
-// error, or not at all, or not in time.
+// error, or not at all.
 func (s *Server) practiceProxmoxFailed(w http.ResponseWriter, what string, err error) {
-	s.logf("practice: %s: %v", what, err)
-	if errors.Is(err, context.DeadlineExceeded) {
-		practiceRefuse(w, http.StatusGatewayTimeout, "timed_out", what+" took too long")
-		return
-	}
-	practiceRefuse(w, http.StatusBadGateway, "proxmox_failed", what+": "+proxmox.Describe(err))
+	s.practiceFailed(w, what, err, http.StatusBadGateway, "proxmox_failed", what+": "+proxmox.Describe(err))
 }
 
-// practiceStoreFailed answers a call the database failed.
 func (s *Server) practiceStoreFailed(w http.ResponseWriter, what string, err error) {
+	s.practiceFailed(w, what, err, http.StatusInternalServerError, "failed", "battleship had a problem "+what)
+}
+
+// practiceFailed answers a call that failed through no fault of the request,
+// as given unless it ran out of time.
+func (s *Server) practiceFailed(w http.ResponseWriter, what string, err error, status int, code, message string) {
 	s.logf("practice: %s: %v", what, err)
-	practiceRefuse(w, http.StatusInternalServerError, "failed", "battleship had a problem "+what)
+	if errors.Is(err, context.DeadlineExceeded) {
+		status, code, message = http.StatusGatewayTimeout, "timed_out", what+" took too long"
+	}
+	practiceRefuse(w, status, code, message)
 }
 
 // practicePods reads a pod spec ("51", "51-53") whose pods all lie inside
@@ -172,10 +176,10 @@ func (s *Server) practicePods(w http.ResponseWriter, spec string) (teams []strin
 type practiceSet struct {
 	Name  string   `json:"name"`
 	Hosts []string `json:"hosts"`
-	// Templates are the built templates a deploy to a session pod would
-	// clone, as the planner resolves them.
+	// Templates are the built templates a deploy to the first session pod
+	// would clone, as that deploy is planned.
 	Templates []practiceTemplate `json:"templates"`
-	// Blocked are the templates such a deploy could not clone, and why.
+	// Blocked are the templates that deploy could not clone, and why.
 	Blocked []practiceBlocked `json:"blocked"`
 	// Pod is what one pod of the set takes: the sum over Templates.
 	Pod practiceSize `json:"pod"`
@@ -184,13 +188,10 @@ type practiceSet struct {
 }
 
 type practiceTemplate struct {
-	Host string `json:"host"`
-	Name string `json:"name"`
-	VMID int    `json:"vmid"`
-	// Digest is pods.ConfigDigest of the template's config.
-	Digest string `json:"digest"`
-	// Error is why the config could not be read; Digest is then empty.
-	Error string `json:"error,omitempty"`
+	Host   string `json:"host"`
+	Name   string `json:"name"`
+	VMID   int    `json:"vmid"`
+	Digest string `json:"digest"` // pods.TemplateSpec.Digest
 }
 
 type practiceSize struct {
@@ -245,37 +246,33 @@ func (s *Server) practiceSets(w http.ResponseWriter, r *http.Request, cred proxm
 	}{sets})
 }
 
-// practiceSet describes one approved set by planning a deploy of it to pod,
-// so the planner alone decides which template each host is cloned from. A
-// set or template that can't be read, as on a node that is down, carries the
-// error and leaves the other sets answered.
+// practiceSet describes one approved set as practiceDeploy of it to pod is
+// planned, so the listing and a submission ask the same plan.
 func (s *Server) practiceSet(ctx context.Context, planner pods.Planner, set pods.Set, pod string, listed map[int]proxmox.VM) practiceSet {
 	out := practiceSet{Name: string(set), Hosts: []string{}, Templates: []practiceTemplate{}, Blocked: []practiceBlocked{}}
-	plan, err := planner.Deploy(ctx, pods.DeployRequest{ApprovedSet: set, Teams: []string{pod}})
+	ctx, cancel := context.WithTimeout(ctx, practiceSetTimeout)
+	defer cancel()
+	plan, err := jobs.BuildPlan(ctx, planner, practiceDeploy(set, pod))
 	if err != nil {
 		s.logf("practice: planning set %s: %v", set, err)
 		out.Error = proxmox.Describe(err)
 		return out
 	}
+	unpermitted := map[string]string{} // by template: why the principal may not clone it to pod
+	for _, it := range plan.Items {
+		if it.Unpermitted {
+			unpermitted[it.Template] = it.Blocked
+		}
+	}
 	for _, t := range plan.Templates {
 		if !slices.Contains(out.Hosts, t.Host) {
 			out.Hosts = append(out.Hosts, t.Host)
 		}
-		if t.Blocked != "" {
-			out.Blocked = append(out.Blocked, practiceBlocked{Name: t.Name, Reason: t.Blocked})
+		if why := cmp.Or(t.Blocked, unpermitted[t.Name]); why != "" {
+			out.Blocked = append(out.Blocked, practiceBlocked{Name: t.Name, Reason: why})
 			continue
 		}
-		tpl := practiceTemplate{Host: t.Host, Name: t.Name, VMID: t.VMID}
-		readCtx, cancel := context.WithTimeout(ctx, practiceReadTimeout)
-		cfg, err := planner.API.VMConfig(readCtx, t.Node, t.VMID)
-		cancel()
-		if err != nil {
-			s.logf("practice: reading template %s: %v", t.Name, err)
-			tpl.Error = proxmox.Describe(err)
-		} else {
-			tpl.Digest = pods.ConfigDigest(cfg)
-		}
-		out.Templates = append(out.Templates, tpl)
+		out.Templates = append(out.Templates, practiceTemplate{Host: t.Host, Name: t.Name, VMID: t.VMID, Digest: t.Digest})
 		vm := listed[t.VMID]
 		out.Pod.MemoryBytes += vm.MaxMem
 		out.Pod.CPUs += vm.MaxCPU
@@ -326,6 +323,12 @@ type practiceJobRequest struct {
 	Set  string `json:"set"`
 }
 
+// practiceDeploy is the deploy of set that the interface submits, and plans
+// to list a set.
+func practiceDeploy(set pods.Set, teams string) jobs.Inputs {
+	return jobs.Inputs{Kind: pods.KindDeploy, Teams: teams, Pattern: set.Pattern(), ApprovedOnly: true}.Normalize()
+}
+
 // practiceInputs is the job the request asks for. ok is false once it has
 // refused the call. It contacts nothing.
 func (s *Server) practiceInputs(w http.ResponseWriter, req practiceJobRequest) (in jobs.Inputs, ok bool) {
@@ -336,13 +339,13 @@ func (s *Server) practiceInputs(w http.ResponseWriter, req practiceJobRequest) (
 			practiceRefuse(w, http.StatusUnprocessableEntity, "bad_set", "a deploy names one set, e.g. kilo.alpha")
 			return in, false
 		}
-		in = jobs.Inputs{Kind: pods.KindDeploy, Pattern: set.Pattern(), ApprovedOnly: true}
+		in = practiceDeploy(set, req.Pods)
 	case pods.KindTeardown:
 		if req.Set != "" {
 			practiceRefuse(w, http.StatusUnprocessableEntity, "bad_set", "a teardown takes everything in its pods; leave set out")
 			return in, false
 		}
-		in = jobs.Inputs{Kind: pods.KindTeardown}
+		in = jobs.Inputs{Kind: pods.KindTeardown, Teams: req.Pods}.Normalize()
 	default:
 		practiceRefuse(w, http.StatusUnprocessableEntity, "bad_kind", "kind must be deploy or teardown")
 		return in, false
@@ -350,8 +353,6 @@ func (s *Server) practiceInputs(w http.ResponseWriter, req practiceJobRequest) (
 	if _, ok := s.practicePods(w, req.Pods); !ok {
 		return in, false
 	}
-	in.Teams = req.Pods
-	in = in.Normalize()
 	if err := in.Validate(); err != nil {
 		practiceRefuse(w, http.StatusUnprocessableEntity, "bad_request", err.Error())
 		return in, false
@@ -379,22 +380,18 @@ func (s *Server) practiceSubmit(w http.ResponseWriter, r *http.Request, cred pro
 	}
 
 	ctx := r.Context()
-	planner := pods.NewPlanner(s.as(cred), s.cfg)
-	var storeErr error
-	planner.Reserved = func(ctx context.Context) (map[string]bool, error) {
-		keys, err := s.st.ReservedKeys(ctx, 0)
-		storeErr = err
-		return keys, err
+	reserved, err := s.st.ReservedKeys(ctx, 0)
+	if err != nil {
+		s.practiceStoreFailed(w, "reading what queued jobs will create", err)
+		return
 	}
-	// Past practiceInputs, planning fails only on what it reads: Proxmox,
-	// and the store for the VMIDs queued jobs will create.
+	planner := pods.NewPlanner(s.as(cred), s.cfg)
+	planner.Reserved = func(context.Context) (map[string]bool, error) { return reserved, nil }
+	// Past practiceInputs, planning fails only on what it reads of Proxmox.
 	plan, err := jobs.BuildPlan(ctx, planner, in)
 	switch {
 	case errors.Is(err, pods.ErrNotApproved):
 		practiceRefuse(w, http.StatusConflict, "not_approved", err.Error())
-		return
-	case err != nil && storeErr != nil:
-		s.practiceStoreFailed(w, "planning the job", err)
 		return
 	case err != nil:
 		s.practiceProxmoxFailed(w, "planning the job", err)

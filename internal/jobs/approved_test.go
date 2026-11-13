@@ -21,12 +21,12 @@ func TestWorkerRefusesDeployOfSetNoLongerApproved(t *testing.T) {
 	}{
 		{name: "still approved", change: func(*fakeAPI) {}, status: store.StatusSucceeded, clones: true},
 		{name: "the tag removed from a master", change: func(f *fakeAPI) { f.VMs[5021].Config["tags"] = "dev" }, status: store.StatusFailed},
-		{name: "the tag no longer registered", change: func(f *fakeAPI) { f.Tags = proxmox.TagAccess{} }, status: store.StatusFailed},
+		{name: "the tag no longer registered", change: func(f *fakeAPI) { f.Tags = proxmox.TagAccess{CaseSensitive: true} }, status: store.StatusFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := storetest.New(t)
 			f := twoTeams()
-			f.Tags = proxmox.TagAccess{Registered: []string{"approved"}}
+			f.Tags = proxmox.TagAccess{Registered: []string{"approved"}, CaseSensitive: true}
 			// VMID 9021 gives pod 01's clone VMID 10121, which is free.
 			f.addVM(proxmox.VM{VMID: 5021, Name: "teak.kilo.alpha", Node: "n1", Status: "stopped", Tags: "dev;approved"})
 			f.addVM(proxmox.VM{VMID: 9021, Name: "teak.kilo.alpha.tpl", Node: "n1", Template: true})

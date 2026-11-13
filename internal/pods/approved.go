@@ -13,10 +13,8 @@ import (
 
 var ErrNotApproved = errors.New("not approved for self-service sessions")
 
-// approvalTag is deploy.approved_tag, or ErrNotApproved when it is empty or
-// not, in that exact spelling, one of the registered tags Proxmox shows the
-// reader. Only Sys.Modify on / may put a registered tag on a VM, and only
-// Sys.Audit on / may read which tags are registered.
+// approvalTag is deploy.approved_tag, or ErrNotApproved unless it is registered,
+// spelled exactly, and a user without Sys.Modify can't set a case variant.
 func approvalTag(cfg config.Deploy, tags proxmox.TagAccess) (string, error) {
 	tag := strings.TrimSpace(cfg.ApprovedTag)
 	switch {
@@ -25,13 +23,30 @@ func approvalTag(cfg config.Deploy, tags proxmox.TagAccess) (string, error) {
 	case !slices.Contains(tags.Registered, tag):
 		return "", fmt.Errorf("every set is %w: deploy.approved_tag %q is not, spelled exactly so, one of the registered tags Proxmox shows this user "+
 			"(Datacenter, Options; reading them needs Sys.Audit on /)", ErrNotApproved, tag)
+	case variantSettable(tag, tags):
+		return "", fmt.Errorf("every set is %w: a user without Sys.Modify on / may tag a VM with a case variant of deploy.approved_tag %q, which Proxmox stores lower-cased; "+
+			"set Datacenter, Options, Tag Style case-sensitive, or User Tag Access to existing, none, or a list without a variant", ErrNotApproved, tag)
 	}
 	return tag, nil
 }
 
+// variantSettable reports whether a user without Sys.Modify may set a case
+// variant of tag: Proxmox checks tags as typed, then lower-cases them.
+func variantSettable(tag string, tags proxmox.TagAccess) bool {
+	if tags.CaseSensitive || strings.ToLower(tag) == strings.ToUpper(tag) {
+		return false
+	}
+	switch tags.Mode {
+	case "", "free":
+		return true
+	case "list":
+		return slices.ContainsFunc(tags.Allowed, func(a string) bool { return a != tag && strings.EqualFold(a, tag) })
+	}
+	return false
+}
+
 // requireApproved is ErrNotApproved unless set has masters and each carries
-// tag in that exact spelling: Proxmox reserves a registered tag as written,
-// so a variant in another case is one anybody may set.
+// tag, spelled exactly.
 func requireApproved(set Set, masters []proxmox.VM, tag string) error {
 	if len(masters) == 0 {
 		return fmt.Errorf("%s is %w: it has no masters", set, ErrNotApproved)

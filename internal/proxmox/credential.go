@@ -2,6 +2,7 @@ package proxmox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -193,32 +194,45 @@ type TagAccess struct {
 	Mode       string
 	Allowed    []string
 	Registered []string
+	// CaseSensitive is tag-style's case-sensitive; without it Proxmox stores
+	// tags lower-cased after checking them as typed.
+	CaseSensitive bool
 }
 
-// Allows reports whether a user without Sys.Modify on / may set tag.
+// Allows reports whether a user without Sys.Modify on / may set tag. Like
+// Proxmox, it looks the tag up as typed.
 func (t TagAccess) Allows(tag string) bool {
-	if slices.ContainsFunc(t.Registered, func(r string) bool { return strings.EqualFold(r, tag) }) {
+	if slices.Contains(t.Registered, tag) {
 		return false
 	}
-	return t.Mode == "" || t.Mode == "free" ||
-		slices.ContainsFunc(t.Allowed, func(a string) bool { return strings.EqualFold(a, tag) })
+	return t.Mode == "" || t.Mode == "free" || slices.Contains(t.Allowed, tag)
 }
 
 // TagAccess reads the cluster's tag policy for the caller from /cluster/options.
+// tag-style comes as an object with case-sensitive 0 or 1, shown to any caller.
 func (c *Client) TagAccess(ctx context.Context) (TagAccess, error) {
 	var raw struct {
 		UserTagAccess *struct {
 			UserAllow string `json:"user-allow"`
 		} `json:"user-tag-access"`
+		TagStyle *struct {
+			CaseSensitive json.RawMessage `json:"case-sensitive"`
+		} `json:"tag-style"`
 		Allowed    []string `json:"allowed-tags"`
 		Registered []string `json:"registered-tags"`
 	}
 	if err := c.do(ctx, http.MethodGet, "/cluster/options", nil, &raw); err != nil {
 		return TagAccess{}, err
 	}
-	var mode string
+	t := TagAccess{Allowed: raw.Allowed, Registered: raw.Registered}
 	if raw.UserTagAccess != nil {
-		mode = raw.UserTagAccess.UserAllow
+		t.Mode = raw.UserTagAccess.UserAllow
 	}
-	return TagAccess{Mode: mode, Allowed: raw.Allowed, Registered: raw.Registered}, nil
+	if raw.TagStyle != nil {
+		switch strings.Trim(string(raw.TagStyle.CaseSensitive), `"`) {
+		case "1", "true":
+			t.CaseSensitive = true
+		}
+	}
+	return t, nil
 }

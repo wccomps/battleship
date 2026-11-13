@@ -54,7 +54,7 @@ func newPracticeHarness(t *testing.T) *practiceHarness {
 	}
 	h.pve.AddUser(practicePrincipal, nil)
 	h.pve.Grant(practicePrincipal, "/", podstest.AllPrivileges...)
-	h.pve.SetTagAccess(proxmox.TagAccess{Registered: []string{"approved"}})
+	h.pve.SetTagAccess(proxmox.TagAccess{Registered: []string{"approved"}, CaseSensitive: true})
 	p := &practiceHarness{harness: h, practice: h.srv.PracticeHandler()}
 	if p.practice == nil {
 		t.Fatal("PracticeHandler is nil with [practice] set")
@@ -271,7 +271,7 @@ func TestPracticeSetsReportTemplates(t *testing.T) {
 
 	p.addTemplate("dc.kilo.alpha.tpl", 9001, 1, "5f1c2a9e-0000-4000-8000-000000000001")
 	first := p.sets()[0].Templates
-	if len(first) != 1 || first[0].Host != "dc" || first[0].Name != "dc.kilo.alpha.tpl" || first[0].VMID != 9001 || first[0].Digest == "" || first[0].Error != "" {
+	if len(first) != 1 || first[0].Host != "dc" || first[0].Name != "dc.kilo.alpha.tpl" || first[0].VMID != 9001 || first[0].Digest == "" {
 		t.Fatalf("templates = %+v, want dc's with a digest", first)
 	}
 	// Tags and notes aren't the template.
@@ -290,9 +290,7 @@ func TestPracticeSetsReportTemplates(t *testing.T) {
 		t.Errorf("a template with another uuid reports digest %q, the same as before", rebuilt[0].Digest)
 	}
 
-	// What a deploy could not clone is listed as blocked, with the planner's
-	// reason, and never as a template: a second VM of the template's name, a
-	// template outside the VMID block, a second master of one host.
+	// What the planner blocks is listed as blocked with its reason, never as a template.
 	blockedBy := func(change func()) string {
 		t.Helper()
 		change()
@@ -321,35 +319,45 @@ func TestPracticeSetsReportTemplates(t *testing.T) {
 	}
 }
 
-// A set or template that can't be read, as on a node that is down, carries
-// the error; every other template and set is still answered.
+// A set that can't be planned, as on a node that is down, carries the error;
+// every other set is still answered.
 func TestPracticeSetsMarkWhatCannotBeRead(t *testing.T) {
 	p := newPracticeHarness(t)
 	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
-	p.addSet("lima.bravo", 5011, "dev;approved", "dev;approved", true)
-	p.addSet("mike.charlie", 5021, "dev;approved", "dev;approved", true)
-	down := &proxmox.APIError{Status: 595, Message: "no route to host"}
-	p.api.setReadErr(5021, down) // a master of mike.charlie: the set can't be planned
-	p.api.Mu.Lock()
-	p.api.FailOn("config:9001", nil, down) // the planner reads dc.kilo.alpha.tpl, then the digest read fails
-	p.api.Mu.Unlock()
+	p.addSet("lima.bravo", 5021, "dev;approved", "dev;approved", true)
+	p.api.setReadErr(5021, &proxmox.APIError{Status: 595, Message: "no route to host"})
 
 	sets := p.sets()
-	if len(sets) != 3 {
-		t.Fatalf("sets = %+v, want all three", sets)
+	if len(sets) != 2 {
+		t.Fatalf("sets = %+v, want both", sets)
 	}
-	kilo, lima, mike := sets[0], sets[1], sets[2]
-	if dc := kilo.Templates[0]; dc.Host != "dc" || dc.Error == "" || dc.Digest != "" {
-		t.Errorf("the unreadable template = %+v, want an error and no digest", dc)
+	kilo, lima := sets[0], sets[1]
+	if lima.Error == "" || len(lima.Templates) != 0 || lima.Pod != (practiceSize{}) {
+		t.Errorf("the set that can't be planned = %+v, want an error and nothing else", lima)
 	}
-	if web := kilo.Templates[1]; web.Error != "" || web.Digest == "" {
-		t.Errorf("its sibling = %+v, want read", web)
+	if want := (practiceSize{MemoryBytes: 6 * gib, CPUs: 3, BootDiskBytes: 48 * gib}); kilo.Pod != want || kilo.Error != "" || len(kilo.Templates) != 2 {
+		t.Errorf("kilo.alpha = %+v, want both templates and pod %+v", kilo, want)
 	}
-	if mike.Error == "" || len(mike.Templates) != 0 {
-		t.Errorf("the set that can't be planned = %+v, want an error and no templates", mike)
+}
+
+// A template the principal may not clone is listed as blocked with the
+// privilege it lacks, as a deploy of it would be refused, and is not counted.
+func TestPracticeSetsBlockWhatThePrincipalCannotClone(t *testing.T) {
+	p := newPracticeHarness(t)
+	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
+	p.pve.Revoke(practicePrincipal, "/")
+	p.pve.Grant(practicePrincipal, "/", slices.DeleteFunc(slices.Clone(podstest.AllPrivileges), func(priv string) bool { return priv == "VM.Clone" })...)
+	p.pve.Grant(practicePrincipal, "/vms/9002", podstest.AllPrivileges...) // a path's grant replaces what / gives
+
+	set := p.sets()[0]
+	if len(set.Templates) != 1 || set.Templates[0].VMID != 9002 {
+		t.Errorf("templates = %+v, want web's alone", set.Templates)
 	}
-	if want := (practiceSize{MemoryBytes: 6 * gib, CPUs: 3, BootDiskBytes: 48 * gib}); lima.Pod != want || lima.Error != "" || lima.Templates[0].Error != "" {
-		t.Errorf("lima.bravo = %+v, want untouched with pod %+v", lima, want)
+	if len(set.Blocked) != 1 || set.Blocked[0].Name != "dc.kilo.alpha.tpl" || !strings.Contains(set.Blocked[0].Reason, "VM.Clone on /vms/9001") {
+		t.Errorf("blocked = %+v, want dc's template for want of VM.Clone on /vms/9001", set.Blocked)
+	}
+	if want := (practiceSize{MemoryBytes: 4 * gib, CPUs: 2, BootDiskBytes: 32 * gib}); set.Pod != want {
+		t.Errorf("pod = %+v, want web's alone %+v", set.Pod, want)
 	}
 }
 
