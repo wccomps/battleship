@@ -229,6 +229,11 @@ func cpuMapping(cpu string) string {
 	return ""
 }
 
+// Unclonable is why acc may not clone VM vmid, or "" when it may.
+func Unclonable(ctx context.Context, acc Access, vmid int) (string, error) {
+	return missing(ctx, acc, []need{one(VMPath(vmid), "VM.Clone")})
+}
+
 // templateNeeds is what building t needs; nothing when it is reused.
 func templateNeeds(t TemplateSpec, cfg config.Config) []need {
 	if !t.Builds() {

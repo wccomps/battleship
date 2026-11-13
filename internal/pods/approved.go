@@ -23,26 +23,11 @@ func approvalTag(cfg config.Deploy, tags proxmox.TagAccess) (string, error) {
 	case !slices.Contains(tags.Registered, tag):
 		return "", fmt.Errorf("every set is %w: deploy.approved_tag %q is not, spelled exactly so, one of the registered tags Proxmox shows this user "+
 			"(Datacenter, Options; reading them needs Sys.Audit on /)", ErrNotApproved, tag)
-	case variantSettable(tag, tags):
+	case tags.AllowsVariantOf(tag):
 		return "", fmt.Errorf("every set is %w: a user without Sys.Modify on / may tag a VM with a case variant of deploy.approved_tag %q, which Proxmox stores lower-cased; "+
-			"set Datacenter, Options, Tag Style case-sensitive, or User Tag Access to existing, none, or a list without a variant", ErrNotApproved, tag)
+			"set Datacenter, Options, Tag Style case-sensitive, or User Tag Access to none, or to list or existing with no case variant of it allowed", ErrNotApproved, tag)
 	}
 	return tag, nil
-}
-
-// variantSettable reports whether a user without Sys.Modify may set a case
-// variant of tag: Proxmox checks tags as typed, then lower-cases them.
-func variantSettable(tag string, tags proxmox.TagAccess) bool {
-	if tags.CaseSensitive || strings.ToLower(tag) == strings.ToUpper(tag) {
-		return false
-	}
-	switch tags.Mode {
-	case "", "free":
-		return true
-	case "list":
-		return slices.ContainsFunc(tags.Allowed, func(a string) bool { return a != tag && strings.EqualFold(a, tag) })
-	}
-	return false
 }
 
 // requireApproved is ErrNotApproved unless set has masters and each carries

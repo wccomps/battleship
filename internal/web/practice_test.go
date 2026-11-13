@@ -341,23 +341,31 @@ func TestPracticeSetsMarkWhatCannotBeRead(t *testing.T) {
 }
 
 // A template the principal may not clone is listed as blocked with the
-// privilege it lacks, as a deploy of it would be refused, and is not counted.
+// privilege it lacks, as a deploy of it would be refused, and is not counted,
+// whether or not the first session pod already holds the set.
 func TestPracticeSetsBlockWhatThePrincipalCannotClone(t *testing.T) {
-	p := newPracticeHarness(t)
-	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
-	p.pve.Revoke(practicePrincipal, "/")
-	p.pve.Grant(practicePrincipal, "/", slices.DeleteFunc(slices.Clone(podstest.AllPrivileges), func(priv string) bool { return priv == "VM.Clone" })...)
-	p.pve.Grant(practicePrincipal, "/vms/9002", podstest.AllPrivileges...) // a path's grant replaces what / gives
+	for name, held := range map[string]bool{"an empty pod": false, "a pod that holds the set": true} {
+		t.Run(name, func(t *testing.T) {
+			p := newPracticeHarness(t)
+			p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
+			if held {
+				p.addPod("51", 15101, "dc", "web")
+			}
+			p.pve.Revoke(practicePrincipal, "/")
+			p.pve.Grant(practicePrincipal, "/", slices.DeleteFunc(slices.Clone(podstest.AllPrivileges), func(priv string) bool { return priv == "VM.Clone" })...)
+			p.pve.Grant(practicePrincipal, "/vms/9002", podstest.AllPrivileges...) // a path's grant replaces what / gives
 
-	set := p.sets()[0]
-	if len(set.Templates) != 1 || set.Templates[0].VMID != 9002 {
-		t.Errorf("templates = %+v, want web's alone", set.Templates)
-	}
-	if len(set.Blocked) != 1 || set.Blocked[0].Name != "dc.kilo.alpha.tpl" || !strings.Contains(set.Blocked[0].Reason, "VM.Clone on /vms/9001") {
-		t.Errorf("blocked = %+v, want dc's template for want of VM.Clone on /vms/9001", set.Blocked)
-	}
-	if want := (practiceSize{MemoryBytes: 4 * gib, CPUs: 2, BootDiskBytes: 32 * gib}); set.Pod != want {
-		t.Errorf("pod = %+v, want web's alone %+v", set.Pod, want)
+			set := p.sets()[0]
+			if len(set.Templates) != 1 || set.Templates[0].VMID != 9002 {
+				t.Errorf("templates = %+v, want web's alone", set.Templates)
+			}
+			if len(set.Blocked) != 1 || set.Blocked[0].Name != "dc.kilo.alpha.tpl" || !strings.Contains(set.Blocked[0].Reason, "VM.Clone on /vms/9001") {
+				t.Errorf("blocked = %+v, want dc's template for want of VM.Clone on /vms/9001", set.Blocked)
+			}
+			if want := (practiceSize{MemoryBytes: 4 * gib, CPUs: 2, BootDiskBytes: 32 * gib}); set.Pod != want {
+				t.Errorf("pod = %+v, want web's alone %+v", set.Pod, want)
+			}
+		})
 	}
 }
 

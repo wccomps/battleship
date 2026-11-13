@@ -175,7 +175,9 @@ func TestApprovalTagCaseVariant(t *testing.T) {
 		{"list with a variant", "approved", proxmox.TagAccess{Mode: "list", Allowed: []string{"dev", "Approved"}, Registered: reg}, false},
 		{"list without a variant", "approved", proxmox.TagAccess{Mode: "list", Allowed: []string{"dev", "approved"}, Registered: reg}, true},
 		{"none", "approved", proxmox.TagAccess{Mode: "none", Registered: reg}, true},
-		{"existing", "approved", proxmox.TagAccess{Mode: "existing", Allowed: []string{"Approved"}, Registered: reg}, true},
+		{"existing with a variant", "approved", proxmox.TagAccess{Mode: "existing", Allowed: []string{"Approved"}, Registered: reg}, false},
+		{"existing without a variant", "approved", proxmox.TagAccess{Mode: "existing", Allowed: []string{"dev"}, Registered: reg}, true},
+		{"list with a registered variant", "approved", proxmox.TagAccess{Mode: "list", Allowed: []string{"Approved"}, Registered: append(slices.Clone(reg), "Approved")}, true},
 		{"no letters, free", "1337", proxmox.TagAccess{Registered: reg}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

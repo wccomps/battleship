@@ -71,9 +71,10 @@ for the event streams.
   tags (Datacenter → Options), spelled the same, and the practice app's
   Proxmox user needs `Sys.Audit` on `/`, granted with propagation off, to
   see that it is; otherwise no set is approved. Set Datacenter → Options →
-  Tag Style to case-sensitive, or User Tag Access to anything but free (a
-  list holding no case variant of the tag), or no set is approved: else
-  anyone may set the tag in another case and Proxmox stores it lower-cased.
+  Tag Style to case-sensitive (simplest), or User Tag Access to none, or to
+  list or existing with no case variant of the tag in the list or on any
+  guest the practice user can see; otherwise no set is approved, since
+  anyone could set the tag in another case and Proxmox stores it lower-cased.
   A volunteer who retries a session deploy needs `Sys.Audit` on `/` too.
 
 | Symptom | Likely cause |

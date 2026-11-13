@@ -191,7 +191,10 @@ func (c *Client) PermissionsAt(ctx context.Context, path string) (map[string]boo
 type TagAccess struct {
 	// Mode is user-tag-access's user-allow setting: "" or "free" (the
 	// default), "existing", "list" or "none".
-	Mode       string
+	Mode string
+	// Allowed is allowed-tags as Proxmox works it out for the reader:
+	// user-allow-list unless Mode is none, and under free or existing the
+	// tags on guests the reader may audit.
 	Allowed    []string
 	Registered []string
 	// CaseSensitive is tag-style's case-sensitive; without it Proxmox stores
@@ -206,6 +209,18 @@ func (t TagAccess) Allows(tag string) bool {
 		return false
 	}
 	return t.Mode == "" || t.Mode == "free" || slices.Contains(t.Allowed, tag)
+}
+
+// AllowsVariantOf reports whether a user without Sys.Modify on / may set a
+// case variant of tag, which Proxmox stores as tag unless CaseSensitive.
+func (t TagAccess) AllowsVariantOf(tag string) bool {
+	if t.CaseSensitive || strings.ToLower(tag) == strings.ToUpper(tag) {
+		return false
+	}
+	if t.Mode == "" || t.Mode == "free" {
+		return true
+	}
+	return slices.ContainsFunc(t.Allowed, func(a string) bool { return a != tag && strings.EqualFold(a, tag) && t.Allows(a) })
 }
 
 // TagAccess reads the cluster's tag policy for the caller from /cluster/options.
