@@ -123,9 +123,16 @@ Battleship checks, for every call:
 
 These checks stand in for the preview, fingerprint and typed confirmation a volunteer gives. The job's ticket is sealed in `job_credentials` and deleted when the job ends, as today. Battleship still holds no credential: the key without a valid ticket does nothing.
 
-As built: the settings are Battleship's `[practice]` section (`pods`, `principal`, `listen`, `key`), off when unset. The calls are `GET /v1/sets`, `GET /v1/pods/{pod}/vms`, `POST /v1/jobs`, `GET /v1/jobs/{id}` and `POST /v1/jobs/{id}/cancel`. A job is the interface's when it acts as the principal; config refuses a principal in the realm volunteers sign in through, so no volunteer's job can. A request is a kind, a pod range and a set name, and nothing else. `internal/web/testdata/practice` in Battleship holds one recorded request and answer per call, which practice's client is tested against (task 6.1).
+As built: the settings are Battleship's `[practice]` section (`pods`, `principal`, `listen`, `key`), off when unset. The calls are `GET /v1/sets`, `GET /v1/pods/{pod}/vms`, `POST /v1/jobs`, `GET /v1/jobs/{id}` and `POST /v1/jobs/{id}/cancel`. Each job records where it came from, and the interface reads and cancels only jobs it submitted. A request is a kind, a pod range and a set name, and nothing else. `internal/web/testdata/practice` in Battleship holds one recorded request and answer per call, for practice's client to be tested against (task 6.1).
 
-`GET /v1/sets` gives each approved set's hosts, its built templates (host, name, VMID and Proxmox's digest of the template's config), and one pod's memory, processors and disk. A host is sized by its template, or by its master where no template is built. The digest is Proxmox's own; a rebuilt template is a new clone with a new identifier in its config, so its digest differs. That last point is read from Proxmox's behaviour, not yet seen on the org's cluster (task 2.7).
+What "approved" means in code:
+- The approval tag must be one of Proxmox's registered tags. If it is not, anyone who may edit a master's options could add it, so Battleship lists no set and refuses every session deploy.
+- A deploy takes exactly the named set's masters. A set whose name is the ending of another's (`alpha` and `kilo.alpha`) is its own set.
+- A session deploy clones templates a volunteer has built and never builds one. A host with no built template blocks the deploy.
+
+`GET /v1/sets` gives each approved set's hosts, its built templates (host, name, VMID and a digest), and one pod's memory, processors and disk, summed over those templates. The digest is Battleship's hash of the template's config without its lock, tags and notes, so a note or a backup does not change it. A rebuilt template is a new clone with new identifiers in its config, so its digest should differ; that is read from how Proxmox clones, not yet seen on the org's cluster (task 2.7). A template whose config cannot be read, as when its node is down, is listed with the error and no digest, and the other sets are still answered.
+
+The interface has no call that lists its jobs. If practice loses the answer to a submission, it cannot find that job (task 2.9).
 
 Practice holds the session principal's Proxmox password and logs in for each job. This is the price of unattended work, since Battleship takes tickets only. The principal's rights, from `itemNeeds` and `templateNeeds` in `internal/pods/access.go`:
 

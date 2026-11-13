@@ -69,12 +69,15 @@ The list of rights is read from code. Task 1.5 runs a real deploy with it and pr
 
 - Accepts only tickets of the configured session user. Without this a stolen volunteer ticket plus the key would run jobs with no Authentik session behind it. Battleship does not judge the ticket itself: it asks Proxmox to renew it as the session user, which Proxmox does only for a ticket it issued to that user.
 - The key is checked first. A call without it sends nothing to Proxmox.
-- Own listener, off the public address. Config refuses the public listener's address.
+- Own listener, off the public address.
 - No human confirm. In its place: deploy and teardown only, pods inside a configured range checked in Battleship, approved sets only, and a deploy refused whole if any VM in it is blocked.
-- Reads and cancels only jobs it created, told by the Proxmox user a job acts as. Config refuses a session user in the volunteers' sign-in realm, so no volunteer's job can look like one of its own. Volunteers' jobs hold lab logins (§8).
+- Reads and cancels only jobs it created. Each job records where it came from, and only the interface writes its own mark. Volunteers' jobs hold lab logins (§8).
 - Session job inputs are a kind, a pod range and a set name. They carry no booking reference and no customer details, since every volunteer can read them.
 - The key alone does nothing: Battleship still holds no credential.
 - Approval is read as the session user sees the cluster. A master it cannot see is not counted, so it needs `VM.Audit` on whole sets, and practice records an environment's templates at publishing (S-04).
+- Approval counts only if the tag is one of Proxmox's registered tags. Battleship checks this on every listing and every session deploy, and approves nothing otherwise.
+- A session deploy clones built templates and never builds one from a master, so the session user needs no clone right on any master.
+- The interface's listener is plain HTTP. The key and the session user's ticket cross it unencrypted, so only practice may be able to reach it, over a network nobody else can read.
 
 Battleship's `THREAT_MODEL.md` §1, §2, §3, §6 and §7 are updated in the same change (task 2.6).
 
@@ -158,7 +161,7 @@ A session submits two Battleship jobs, deploy and teardown. Teams' resets do not
 
 ### S-15 Audit — Low, In spec
 
-Every booking transition and session action is recorded in practice with booking, pod and who did it. Battleship jobs carry the booking reference. A pod's actions are attributable to the pod, not a person, as with shared team accounts today.
+Every booking transition and session action is recorded in practice with booking, pod and who did it. Practice keeps the Battleship job number beside the booking; the job itself names no booking. A pod's actions are attributable to the pod, not a person, as with shared team accounts today.
 
 ### S-16 The jump box and name resolution — Medium, In spec, to test
 

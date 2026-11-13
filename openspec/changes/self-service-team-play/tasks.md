@@ -23,8 +23,9 @@
 - [x] 2.4 Refuse, without contacting Proxmox for a change: a ticket of any other user, a missing or wrong key, a pod outside the range, a kind other than deploy or teardown, a deploy of an unapproved set, and a read or cancel of a job the interface did not create; verify with one test per refusal
 - [x] 2.5 Verify with a worker test that a set whose approval is removed after submission ends the job without deploying
 - [x] 2.6 Update `THREAT_MODEL.md` (sections 1, 2, 3, 6 and 7) and `ARCHITECTURE.md` for the interface; verify `go test -race ./...` passes
-- [ ] 2.7 Report each approved set's templates with their VMIDs and config digests; verify with a test that rebuilding a template changes the reported digest, and by rebuilding a template on the real cluster (the code and the test are done; the check on the real cluster is left)
-- [x] 2.8 Report the memory, processors and disk one pod of each approved set takes; verify with a test against masters of known size
+- [ ] 2.7 Report each approved set's templates with their VMIDs and config digests; verify with a test that a template with another config reports another digest, and by rebuilding a template on the real cluster (the code and the test are done; the check on the real cluster is left)
+- [x] 2.8 Report the memory, processors and disk one pod of each approved set takes; verify with a test against templates of known size
+- [ ] 2.9 Let practice list the session interface's active jobs, so a submission whose answer was lost can still be found and cancelled; verify with a test that the list holds only jobs the interface submitted
 
 ## 3. The practice app: foundation, and the portal's one endpoint
 
