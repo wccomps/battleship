@@ -126,11 +126,11 @@ These checks stand in for the preview, fingerprint and typed confirmation a volu
 As built: the settings are Battleship's `[practice]` section (`pods`, `principal`, `listen`, `key`), off when unset. The calls are `GET /v1/sets`, `GET /v1/pods/{pod}/vms`, `POST /v1/jobs`, `GET /v1/jobs/{id}` and `POST /v1/jobs/{id}/cancel`. Each job records where it came from, and the interface reads and cancels only jobs it submitted. A request is a kind, a pod range and a set name, and nothing else. `internal/web/testdata/practice` in Battleship holds one recorded request and answer per call, for practice's client to be tested against (task 6.1).
 
 What "approved" means in code:
-- The approval tag must be one of Proxmox's registered tags, spelled exactly as in Battleship's config. If it is not, then under Proxmox's default tag setting anyone who may edit a master's options could add it, so Battleship lists no set and refuses every session deploy. The session principal needs `Sys.Audit` on `/` to see the registered tags; without it the result is the same.
+- The approval tag must be one of Proxmox's registered tags, spelled exactly as in Battleship's config. If it is not, then under Proxmox's default tag setting anyone who may edit a master's options could add it, so Battleship lists no set and refuses every session deploy. Proxmox checks a tag as typed but, unless `tag-style` is case-sensitive, stores it lower-cased, so under its defaults anyone could add `Approved` and have `approved` stored. Battleship therefore also refuses approval unless `tag-style` is case-sensitive, or `user-tag-access` is other than free (a list holding no case variant of the tag), or the tag has no letters. The session principal needs `Sys.Audit` on `/` to see the registered tags; without it the result is the same.
 - A deploy takes exactly the named set's masters. A set whose name is the ending of another's (`alpha` and `kilo.alpha`) is its own set.
 - A session deploy clones templates a volunteer has built and never builds one. A host with no built template blocks the deploy.
 
-`GET /v1/sets` plans a deploy of each approved set, so it lists exactly the templates a deploy would clone: per set its hosts, its built templates (host, name, VMID and a digest), the templates a deploy could not use with the planner's reason, and one pod's memory, processors and boot disks, summed over the built templates as Proxmox lists them. The digest is Battleship's hash of the template's config without its lock, tags and notes, so a note or a backup does not change it. A rebuilt template is a new clone with new identifiers in its config, so its digest should differ; that is read from how Proxmox clones, not yet seen on the org's cluster (task 2.7). A set or template that cannot be read, as when its node is down, is listed with the error, and the other sets are still answered.
+`GET /v1/sets` plans a deploy of each approved set through Battleship's job planner with the principal's privileges, so it lists exactly the templates a deploy would clone and shows as blocked what the principal could not clone: per set its hosts, its built templates (host, name, VMID and a digest), the templates a deploy could not use with the planner's reason, and one pod's memory, processors and boot disks, summed over the built templates as Proxmox lists them. The digest is Battleship's hash of the template's config without its lock, tags and notes, so a note or a backup does not change it. A rebuilt template is a new clone with new identifiers in its config, so its digest should differ; that is read from how Proxmox clones, not yet seen on the org's cluster (task 2.7). A set that cannot be planned within its per-set timeout, as when its node is down, is listed with the error, and the other sets are still answered.
 
 The interface has no call that lists its jobs. If practice loses the answer to a submission, it cannot find that job (task 2.9).
 
@@ -187,7 +187,7 @@ The files are stored in the practice app, keyed by the domain. Battleship keeps 
 
 An environment can be booked only when three things hold:
 
-1. Every master in its set carries `deploy.approved_tag`. The tag is listed in Proxmox's registered tags, so only someone with `Sys.Modify` on `/` can set it (`TagAccess`).
+1. Every master in its set carries `deploy.approved_tag`. The tag is listed in Proxmox's registered tags, so only someone with `Sys.Modify` on `/` can set it (`TagAccess`), as long as no case variant of it can be set (above). A clone copies its source's tags unchecked, so anyone with `VM.Clone` on a tagged VM and `VM.Allocate` can make an approved master; `VM.Clone` on approved masters and templates goes to trusted people only.
 2. Staff have published it in the practice app.
 3. The session principal holds `VM.Clone` on each of its templates. This is the only one of the three that Proxmox enforces.
 
@@ -352,7 +352,7 @@ To test:
 - The proxy can tell one pod from another by source address. Task 1.7.
 - The proxy and name resolution official teams use have no route to pods 51 to 59. Task 1.7.
 - Rebuilding a template changes its config digest, so a replaced template is noticed. Task 2.7.
-- The session principal, holding `Sys.Audit` on `/`, is shown Proxmox's registered tags, and a user without `Sys.Modify` on `/` cannot put the approval tag, or the same tag in another case, on a VM. Tasks 1.5 and 1.6.
+- The session principal, holding `Sys.Audit` on `/` granted with propagation off, is shown Proxmox's registered tags and `user-tag-access`, and with `tag-style` case-sensitive or `user-allow` other than free a user without `Sys.Modify` on `/` cannot put the approval tag, or the same tag in another case, on a VM. Tasks 1.5 and 1.6.
 - How the jump box is built, and that a session account on it reaches only its own pod. Task 1.10.
 - A deploy of an approved set succeeds with only the rights in decision 5. Templates keep their masters' network cards, on dev-slot networks, and Proxmox may ask for rights on those at clone time. Task 1.5.
 - Battleship and every other org application refuse a session account. Task 1.3.
