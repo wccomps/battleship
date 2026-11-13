@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/jobs",
+    "headers": {
+      "Authorization": "Bearer <practice.key>",
+      "X-Proxmox-Ticket": "<a Proxmox ticket of practice.principal>"
+    },
+    "body": {
+      "kind": "deploy",
+      "pods": "51-52",
+      "set": "kilo.alpha"
+    }
+  },
+  "status": 201,
+  "answer": {
+    "blocked": [],
+    "id": 1
+  }
+}

@@ -56,6 +56,30 @@ job, its submitter); battleship holds none of its own (see
 LISTEN/NOTIFY wakes idle workers, cancels jobs at once, and pushes changes to
 open pages.
 
+## The session interface
+
+The practice app books self-service sessions and has no person at a browser
+when one starts or ends, so it can't preview and confirm. With `[practice]`
+set, `battleship serve` opens a second listener (`practice.listen`) that
+serves `web.Server.PracticeHandler` and none of the pages:
+
+| Call | Does |
+|---|---|
+| `GET /v1/sets` | The approved sets: their hosts, their built templates with Proxmox's config digest of each, and what one pod takes |
+| `GET /v1/pods/{pod}/vms` | One session pod's VMs |
+| `POST /v1/jobs` | Submits a deploy of an approved set to pods, or a teardown of pods |
+| `GET /v1/jobs/{id}`, `POST /v1/jobs/{id}/cancel` | Reads or cancels a job the interface submitted |
+
+Each call carries `practice.key` and a Proxmox ticket of `practice.principal`,
+which the practice app gets by logging in to Proxmox itself. Battleship
+proves the ticket with Proxmox and acts with it, so it still holds no
+credential. Its jobs enter the same queue at step 2, skipping the preview:
+the interface's own checks stand in for it (pods inside `practice.pods`,
+deploy or teardown only, an approved set, nothing blocked in a deploy). A
+session deploy carries `approved_only`, so the worker's re-plan (step 4)
+reads approval again. `internal/web/testdata/practice` holds an example of
+each call, which the practice app's client is tested against.
+
 ## Packages
 
 | Package | Role |
@@ -65,7 +89,7 @@ open pages.
 | `jobs` | Submitting, fingerprints, retries, the worker, credential renewal |
 | `store` | Postgres: jobs, items, events, claims and locks, sessions, previews, queued refresh token revocations |
 | `status` | Each viewer's live grid (polls and drift scans) and the notification hub |
-| `web` | Server-rendered pages, forms, live updates (server-sent events) |
+| `web` | Server-rendered pages, forms, live updates (server-sent events); the session interface |
 | `auth` | Authentik login, the Proxmox sign-in, sessions (and revoking their refresh tokens) and CSRF |
 | `proxmox` | Typed Proxmox API client with node failover and task waiting |
 | `config` | The TOML config |
@@ -80,6 +104,7 @@ open pages.
 | **pod** | A team's VMs, cloned from templates; the code and config call it by its team number (`teams`, `{team}`) |
 | **set** | Masters sharing what follows the host, lower-cased: `dc.kilo.alpha` and `web.Kilo.Alpha` are set `kilo.alpha` (`pods.Set`). A deploy tags each pod VM with its set's tag, `set-kilo.alpha`; from a master with nothing after the host it removes any set tag. A VM whose one set tag is a set's is of that set; with none, several, or a bare `set-`, its set is unknown (`pods.SetRecord`). A teardown of a set takes that set's VMs, and frees disks only at its templates' clone VMIDs, since disks have no tag; a VM of an unknown set goes only with a teardown that names no set |
 | **master / template** | A tagged source VM / its `.tpl` copy that pods are cloned from |
+| **approved set** | A set whose masters all carry `deploy.approved_tag` as well as the master tag (`pods.MasterSet.AllApproved`): one a self-service session may be given. A master without it leaves the whole set unapproved |
 | **plan, item, step** | What a job will do: one item per VM, each with ordered steps (clone, network, …, start) |
 | **blocked** | An item that can't run (missing privilege, missing snapshot); shown in the preview |
 | **fingerprint** | A hash of a plan, to tell whether the cluster changed since the preview |

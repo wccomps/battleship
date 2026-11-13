@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/jobs/1/cancel",
+    "headers": {
+      "Authorization": "Bearer <practice.key>",
+      "X-Proxmox-Ticket": "<a Proxmox ticket of practice.principal>"
+    }
+  },
+  "status": 409,
+  "answer": {
+    "error": "not_active",
+    "message": "the job already finished"
+  }
+}

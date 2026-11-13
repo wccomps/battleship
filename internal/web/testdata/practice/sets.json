@@ -1,0 +1,35 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/sets",
+    "headers": {
+      "Authorization": "Bearer <practice.key>",
+      "X-Proxmox-Ticket": "<a Proxmox ticket of practice.principal>"
+    }
+  },
+  "status": 200,
+  "answer": {
+    "sets": [
+      {
+        "hosts": [
+          "dc",
+          "web"
+        ],
+        "name": "kilo.alpha",
+        "pod": {
+          "cpus": 5,
+          "disk_bytes": 85899345920,
+          "memory_bytes": 10737418240
+        },
+        "templates": [
+          {
+            "digest": "28f0e826f2140f88a37f01ab40ae078fc1557d6842a87cdb666ef01173e2f4a3",
+            "host": "dc",
+            "name": "dc.kilo.alpha.tpl",
+            "vmid": 9001
+          }
+        ]
+      }
+    ]
+  }
+}

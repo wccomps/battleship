@@ -73,6 +73,10 @@ spec:
             - name: http
               containerPort: 8080 # web.listen
               protocol: TCP
+            # The session interface (practice.listen), with [practice] set:
+            # - name: practice
+            #   containerPort: 8081
+            #   protocol: TCP
           env:
             # No Proxmox token: battleship acts as each signed-in person.
             # The seal key encrypts the Proxmox credentials jobs keep.
@@ -93,6 +97,13 @@ spec:
                 secretKeyRef:
                   name: battleship-db-app
                   key: uri
+            # With [practice] set: the key the practice app sends, 32 or more
+            # random characters.
+            # - name: BATTLESHIP_PRACTICE_KEY
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: battleship-secrets
+            #       key: practice-key
           volumeMounts:
             - name: config
               mountPath: /config
