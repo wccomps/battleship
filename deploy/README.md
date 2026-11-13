@@ -68,7 +68,9 @@ for the event streams.
   allow ingress to it in the NetworkPolicy from the practice app's pods
   only. Never route the Ingress to it: it speaks plain HTTP and carries a
   Proxmox ticket. `deploy.approved_tag` must be one of Proxmox's registered
-  tags (Datacenter → Options), or no set is approved.
+  tags (Datacenter → Options), spelled the same, and the practice app's
+  Proxmox user needs `Sys.Audit` on `/` to see that it is; otherwise no set
+  is approved.
 
 | Symptom | Likely cause |
 |---|---|

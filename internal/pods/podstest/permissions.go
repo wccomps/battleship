@@ -31,7 +31,6 @@ func (f *Fake) PermissionsAt(context.Context, string) (map[string]bool, error) {
 	return allPrivileges(), nil
 }
 
-// TagAccess is Tags.
 func (f *Fake) TagAccess(context.Context) (proxmox.TagAccess, error) {
 	f.Mu.Lock()
 	defer f.Mu.Unlock()

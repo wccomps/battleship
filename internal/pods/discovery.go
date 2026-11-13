@@ -199,12 +199,12 @@ type MasterSet struct {
 	Running int      // of them, those running; a template build stops them
 }
 
-// MasterSets groups masters tagged tag into sets, sorted by name. Masters
-// with nothing after the host (like "y" or "tern.") go in others, sorted
-// and unique.
-func MasterSets(vms []proxmox.VM, n Naming, tag string) (sets []MasterSet, others []string) {
+// mastersBySet groups the masters tagged tag by their set (SplitMaster), each
+// group sorted by name. Masters with nothing after the host (like "y" or
+// "tern.") are of no set; their names go in others, sorted and unique.
+func mastersBySet(vms []proxmox.VM, n Naming, tag string) (bySet map[Set][]proxmox.VM, others []string) {
 	masters, _, _ := FindMasters(vms, n, "*", tag)
-	index := map[Set]int{}
+	bySet = map[Set][]proxmox.VM{}
 	for _, m := range masters {
 		host, set := n.SplitMaster(m.Name)
 		if host == "" || set == "" {
@@ -213,25 +213,29 @@ func MasterSets(vms []proxmox.VM, n Naming, tag string) (sets []MasterSet, other
 			}
 			continue
 		}
-		i, ok := index[set]
-		if !ok {
-			i = len(sets)
-			index[set] = i
-			sets = append(sets, MasterSet{Name: set})
-		}
-		s := &sets[i]
-		if !slices.Contains(s.Hosts, host) {
-			s.Hosts = append(s.Hosts, host)
-		}
-		s.Masters++
-		if m.Status == "running" {
-			s.Running++
-		}
+		bySet[set] = append(bySet[set], m)
 	}
-	for i := range sets {
-		sort.Strings(sets[i].Hosts)
+	return bySet, others
+}
+
+// MasterSets is the sets of the masters tagged tag (mastersBySet), sorted by
+// name, and the masters of no set.
+func MasterSets(vms []proxmox.VM, n Naming, tag string) (sets []MasterSet, others []string) {
+	bySet, others := mastersBySet(vms, n, tag)
+	for _, name := range slices.Sorted(maps.Keys(bySet)) {
+		set := MasterSet{Name: name}
+		for _, m := range bySet[name] {
+			if host, _ := n.SplitMaster(m.Name); !slices.Contains(set.Hosts, host) {
+				set.Hosts = append(set.Hosts, host)
+			}
+			set.Masters++
+			if m.Status == "running" {
+				set.Running++
+			}
+		}
+		sort.Strings(set.Hosts)
+		sets = append(sets, set)
 	}
-	sort.Slice(sets, func(i, j int) bool { return sets[i].Name < sets[j].Name })
 	return sets, others
 }
 

@@ -24,10 +24,9 @@ type Inputs struct {
 	Pattern    string    `json:"pattern,omitempty"`     // deploy
 	Rebuild    bool      `json:"rebuild,omitempty"`     // deploy
 	NoSnapshot bool      `json:"no_snapshot,omitempty"` // deploy
-	// ApprovedOnly, on a deploy from the session interface, takes exactly the
-	// set Pattern names ("*.<set>"), only while that set is approved and from
-	// templates already built (pods.DeployRequest.ApprovedSet), at submission
-	// and again when the job runs.
+	// ApprovedOnly, on a deploy from the session interface, plans the one set
+	// Pattern names ("*.<set>") as pods.DeployRequest.ApprovedSet, at
+	// submission and again when the job runs.
 	ApprovedOnly bool `json:"approved_only,omitempty"`
 	// Set is the template set a teardown takes (pods.ParseSet); empty takes
 	// everything in its pods (among Hosts).

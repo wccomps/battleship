@@ -449,15 +449,15 @@ func NewPlanner(api Reads, cfg config.Config) Planner {
 }
 
 type DeployRequest struct {
-	Pattern string // master name pattern, e.g. "*.kilo.alpha"
+	Pattern  string   // master name pattern, e.g. "*.kilo.alpha"
+	Teams    []string // two-digit team numbers
+	Hosts    []string // optional host filter
+	Rebuild  bool
+	Snapshot bool
 	// ApprovedSet, in place of Pattern, takes exactly this set's masters. The
 	// deploy is refused (ErrNotApproved) unless the set is approved, and it
 	// clones only templates already built.
 	ApprovedSet Set
-	Teams       []string // two-digit team numbers
-	Hosts       []string // optional host filter
-	Rebuild     bool
-	Snapshot    bool
 }
 
 func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
@@ -491,13 +491,9 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		}
 	}
 	if len(kept) == 0 {
-		of := fmt.Sprintf("match %q", req.Pattern)
-		if req.ApprovedSet != "" {
-			of = fmt.Sprintf("are of set %s", req.ApprovedSet)
-		}
-		msg := fmt.Sprintf("no master VMs %s with tag %q", of, p.Cfg.Deploy.MasterTag)
+		msg := fmt.Sprintf("no master VMs match %q with tag %q", req.Pattern, p.Cfg.Deploy.MasterTag)
 		if len(req.Hosts) > 0 {
-			msg += " and hosts " + strings.Join(req.Hosts, ", ")
+			msg = fmt.Sprintf("no master VMs match %q with tag %q and hosts %s", req.Pattern, p.Cfg.Deploy.MasterTag, strings.Join(req.Hosts, ", "))
 		}
 		if len(untagged) > 0 {
 			msg += fmt.Sprintf(" (%d match but lack the tag, e.g. %s)", len(untagged), untagged[0].Name)
@@ -608,7 +604,8 @@ func (p Planner) deployMasters(ctx context.Context, req DeployRequest, vms []pro
 	if err != nil {
 		return nil, nil, err
 	}
-	masters = mastersBySet(vms, p.Naming, p.Cfg.Deploy.MasterTag)[req.ApprovedSet]
+	bySet, _ := mastersBySet(vms, p.Naming, p.Cfg.Deploy.MasterTag)
+	masters = bySet[req.ApprovedSet]
 	return masters, nil, requireApproved(req.ApprovedSet, masters, tag)
 }
 
@@ -681,7 +678,6 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, t
 	spec.Interfaces, spec.GPU = p.describe(cfg)
 	spec.CPU, spec.CloudInit, spec.Bridges = cfg["cpu"], HasCloudInit(cfg), NICBridges(cfg)
 	named := byName[spec.Name]
-	_, reusable := usableTemplate(named)
 	var existing proxmox.VM
 	exists := len(named) > 0
 	if exists {
@@ -694,7 +690,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, t
 	case exists && !rebuild && !existing.Template:
 		spec.VMID, spec.Node = existing.VMID, existing.Node
 		spec.Blocked = "exists but is not a template (an earlier build may have been interrupted); deploy with rebuild"
-	case reusable && !rebuild:
+	case exists && !rebuild:
 		spec.VMID, spec.Node, spec.Exists = existing.VMID, existing.Node, true
 		// Clones copy the template, so it describes the pod, not the master.
 		tcfg, err := p.API.VMConfig(ctx, existing.Node, existing.VMID)
@@ -716,15 +712,6 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, t
 		spec.Node = m.Node
 	}
 	return spec, ws, nil
-}
-
-// usableTemplate is the template a deploy clones without building one: the
-// only VM with a template's name, when that VM is a template.
-func usableTemplate(named []proxmox.VM) (proxmox.VM, bool) {
-	if len(named) != 1 || !named[0].Template {
-		return proxmox.VM{}, false
-	}
-	return named[0], true
 }
 
 // describe reads the NIC count and GPU flag from a VM config.

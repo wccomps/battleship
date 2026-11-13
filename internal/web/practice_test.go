@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -76,9 +77,10 @@ func (p *practiceHarness) addSet(set string, firstVMID int, dcTags, webTags stri
 }
 
 // addTemplate adds a built template of units x (2 GiB, 1 processor, a 16 GiB
-// disk). uuid stands for what Proxmox gives every clone anew.
+// boot disk). uuid stands for what Proxmox gives every clone anew.
 func (p *practiceHarness) addTemplate(name string, vmid, units int, uuid string) {
-	p.api.add(proxmox.VM{VMID: vmid, Name: name, Node: "n1", Template: true, MaxMem: int64(units) * 2 * gib, MaxCPU: units},
+	size := int64(units) * 2 * gib
+	p.api.add(proxmox.VM{VMID: vmid, Name: name, Node: "n1", Template: true, MaxMem: size, MaxCPU: units, MaxDisk: 8 * size},
 		map[string]string{
 			"net0":    "virtio=BC:24:11:00:00:00,bridge=vmbr0",
 			"smbios1": "uuid=" + uuid,
@@ -228,15 +230,32 @@ func TestPracticeListsApprovedSets(t *testing.T) {
 	}
 }
 
-// Approval rests on a tag only Sys.Modify may set. Where anyone who edits a
-// master could add it, no set is offered.
-func TestPracticeListsNoSetsUnderATagAnyoneMaySet(t *testing.T) {
-	p := newPracticeHarness(t)
-	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
-	p.pve.SetTagAccess(proxmox.TagAccess{})
-	rec := p.call(http.MethodGet, "/v1/sets", "")
-	if rec.Code != http.StatusConflict || problem(t, rec) != "not_approved" || !strings.Contains(rec.Body.String(), "registered tags") {
-		t.Errorf("GET /v1/sets with an unregistered tag = %d %s", rec.Code, rec.Body)
+// Approval rests on a tag only Sys.Modify may set. Where the tag isn't
+// registered, or the principal can't see that it is (Proxmox shows the
+// registered tags only to Sys.Audit on /), no set is offered or deployed.
+func TestPracticeApprovesNothingWithoutARegisteredTagItCanSee(t *testing.T) {
+	const deploy = `{"kind": "deploy", "pods": "51", "set": "kilo.alpha"}`
+	for name, change := range map[string]func(p *practiceHarness){
+		"the tag isn't registered": func(p *practiceHarness) { p.pve.SetTagAccess(proxmox.TagAccess{}) },
+		"the principal lacks Sys.Audit on /": func(p *practiceHarness) {
+			p.pve.Revoke(practicePrincipal, "/")
+			p.pve.Grant(practicePrincipal, "/", slices.DeleteFunc(slices.Clone(podstest.AllPrivileges), func(priv string) bool { return priv == "Sys.Audit" })...)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPracticeHarness(t)
+			p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
+			change(p)
+			for _, c := range []struct{ method, path, body string }{{"GET", "/v1/sets", ""}, {"POST", "/v1/jobs", deploy}} {
+				rec := p.call(c.method, c.path, c.body)
+				if rec.Code != http.StatusConflict || problem(t, rec) != "not_approved" || !strings.Contains(rec.Body.String(), "Sys.Audit on /") {
+					t.Errorf("%s %s = %d %s, want 409 not_approved naming the right to read registered tags", c.method, c.path, rec.Code, rec.Body)
+				}
+			}
+			if n := len(p.jobsInStore()); n != 0 {
+				t.Errorf("%d jobs stored", n)
+			}
+		})
 	}
 }
 
@@ -271,42 +290,71 @@ func TestPracticeSetsReportTemplates(t *testing.T) {
 		t.Errorf("a template with another uuid reports digest %q, the same as before", rebuilt[0].Digest)
 	}
 
-	// Two VMs sharing the template's name: neither is reported, as a deploy blocks both.
-	p.api.add(proxmox.VM{VMID: 9102, Name: "dc.kilo.alpha.tpl", Node: "n1"}, nil)
-	if got := p.sets()[0].Templates; len(got) != 0 {
-		t.Errorf("with two VMs of one template name, reported %+v", got)
+	// What a deploy could not clone is listed as blocked, with the planner's
+	// reason, and never as a template: a second VM of the template's name, a
+	// template outside the VMID block, a second master of one host.
+	blockedBy := func(change func()) string {
+		t.Helper()
+		change()
+		set := p.sets()[0]
+		if len(set.Templates) != 1 || set.Templates[0].Host != "web" || len(set.Blocked) == 0 {
+			t.Fatalf("set = %+v, want web's template alone and dc's blocked", set)
+		}
+		return set.Blocked[0].Reason
+	}
+	p.addTemplate("web.kilo.alpha.tpl", 9002, 2, "5f1c2a9e-0000-4000-8000-000000000009")
+	if why := blockedBy(func() { p.api.add(proxmox.VM{VMID: 9102, Name: "dc.kilo.alpha.tpl", Node: "n1"}, nil) }); !strings.Contains(why, "several VMs are named") {
+		t.Errorf("two VMs of one template name: %q", why)
+	}
+	if why := blockedBy(func() {
+		p.api.remove("dc.kilo.alpha.tpl")
+		p.addTemplate("dc.kilo.alpha.tpl", 7042, 1, "5f1c2a9e-0000-4000-8000-000000000003")
+	}); !strings.Contains(why, "is outside") {
+		t.Errorf("a template outside the VMID block: %q", why)
+	}
+	if why := blockedBy(func() {
+		p.api.remove("dc.kilo.alpha.tpl")
+		p.addTemplate("dc.kilo.alpha.tpl", 9001, 1, "5f1c2a9e-0000-4000-8000-000000000004")
+		p.api.add(proxmox.VM{VMID: 5003, Name: "dc.kilo.alpha", Node: "n1", Tags: "dev;approved"}, map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=vmbr0"})
+	}); !strings.Contains(why, "team51-dc") {
+		t.Errorf("two masters of one host: %q", why)
 	}
 }
 
-// One template whose config can't be read, as on a node that is down, is
-// marked; every other template and set is still answered.
-func TestPracticeSetsMarkAnUnreadableTemplate(t *testing.T) {
+// A set or template that can't be read, as on a node that is down, carries
+// the error; every other template and set is still answered.
+func TestPracticeSetsMarkWhatCannotBeRead(t *testing.T) {
 	p := newPracticeHarness(t)
 	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
 	p.addSet("lima.bravo", 5011, "dev;approved", "dev;approved", true)
-	p.api.setReadErr(9001, &proxmox.APIError{Status: 595, Message: "no route to host"})
+	p.addSet("mike.charlie", 5021, "dev;approved", "dev;approved", true)
+	down := &proxmox.APIError{Status: 595, Message: "no route to host"}
+	p.api.setReadErr(5021, down) // a master of mike.charlie: the set can't be planned
+	p.api.Mu.Lock()
+	p.api.FailOn("config:9001", nil, down) // the planner reads dc.kilo.alpha.tpl, then the digest read fails
+	p.api.Mu.Unlock()
 
 	sets := p.sets()
-	if len(sets) != 2 {
-		t.Fatalf("sets = %+v, want both", sets)
+	if len(sets) != 3 {
+		t.Fatalf("sets = %+v, want all three", sets)
 	}
-	kilo, lima := sets[0], sets[1]
+	kilo, lima, mike := sets[0], sets[1], sets[2]
 	if dc := kilo.Templates[0]; dc.Host != "dc" || dc.Error == "" || dc.Digest != "" {
 		t.Errorf("the unreadable template = %+v, want an error and no digest", dc)
 	}
 	if web := kilo.Templates[1]; web.Error != "" || web.Digest == "" {
 		t.Errorf("its sibling = %+v, want read", web)
 	}
-	if want := (practiceSize{MemoryBytes: 4 * gib, CPUs: 2, DiskBytes: 32 * gib}); kilo.Pod != want {
-		t.Errorf("kilo.alpha's pod = %+v, want web's alone %+v", kilo.Pod, want)
+	if mike.Error == "" || len(mike.Templates) != 0 {
+		t.Errorf("the set that can't be planned = %+v, want an error and no templates", mike)
 	}
-	if want := (practiceSize{MemoryBytes: 6 * gib, CPUs: 3, DiskBytes: 48 * gib}); lima.Pod != want || lima.Templates[0].Error != "" {
+	if want := (practiceSize{MemoryBytes: 6 * gib, CPUs: 3, BootDiskBytes: 48 * gib}); lima.Pod != want || lima.Error != "" || lima.Templates[0].Error != "" {
 		t.Errorf("lima.bravo = %+v, want untouched with pod %+v", lima, want)
 	}
 }
 
-// One pod's size is the sum over the set's built templates: memory and
-// processors as Proxmox lists them, disk as the sum of every disk's size.
+// One pod's size is the sum over the set's built templates, as Proxmox lists
+// each one.
 func TestPracticeSetsReportPodSize(t *testing.T) {
 	p := newPracticeHarness(t)
 	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", false)
@@ -314,11 +362,11 @@ func TestPracticeSetsReportPodSize(t *testing.T) {
 		t.Errorf("pod with no template built = %+v, want nothing", got)
 	}
 	p.addTemplate("dc.kilo.alpha.tpl", 9001, 1, "5f1c2a9e-0000-4000-8000-000000000001")
+	if got, want := p.sets()[0].Pod, (practiceSize{MemoryBytes: 2 * gib, CPUs: 1, BootDiskBytes: 16 * gib}); got != want {
+		t.Errorf("pod with dc's template built = %+v, want %+v", got, want)
+	}
 	p.addTemplate("web.kilo.alpha.tpl", 9002, 2, "5f1c2a9e-0000-4000-8000-000000000002")
-	p.api.Mu.Lock()
-	p.api.VMs[9002].Config["virtio1"] = "competitions:base-9002-disk-1,size=100G" // a data disk
-	p.api.Mu.Unlock()
-	if got, want := p.sets()[0].Pod, (practiceSize{MemoryBytes: 6 * gib, CPUs: 3, DiskBytes: 148 * gib}); got != want {
+	if got, want := p.sets()[0].Pod, (practiceSize{MemoryBytes: 6 * gib, CPUs: 3, BootDiskBytes: 48 * gib}); got != want {
 		t.Errorf("pod = %+v, want %+v", got, want)
 	}
 }
@@ -601,7 +649,7 @@ func TestPracticeRefusals(t *testing.T) {
 		{name: "deploy of no set", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "52"}`, status: 422, code: "bad_set"},
 		{name: "teardown of one set", method: "POST", path: "/v1/jobs", body: `{"kind": "teardown", "pods": "51", "set": "kilo.alpha"}`, status: 422, code: "bad_set"},
 		{name: "deploy of an unapproved set", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "52", "set": "lima.bravo"}`, status: 409, code: "not_approved"},
-		{name: "deploy of a set that isn't there", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "52", "set": "no.such"}`, status: 409, code: "plan_failed"},
+		{name: "deploy of a set that isn't there", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "52", "set": "no.such"}`, status: 409, code: "not_approved"},
 		{name: "deploy of a set with no template built", method: "POST", path: "/v1/jobs", body: `{"kind": "deploy", "pods": "52", "set": "mike.charlie"}`, status: 409, code: "blocked"},
 		{name: "teardown of an empty pod", method: "POST", path: "/v1/jobs", body: `{"kind": "teardown", "pods": "59"}`, status: 409, code: "nothing_to_run"},
 		{name: "read of a volunteer's job", method: "GET", path: theirPath, status: 404, code: "not_found"},
@@ -691,8 +739,9 @@ func TestPracticeAnswersAnOutageAsOne(t *testing.T) {
 	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
 	const deploy = `{"kind": "deploy", "pods": "51", "set": "kilo.alpha"}`
 	for name, down := range map[string]error{
-		"no connection": &url.Error{Op: "Get", URL: "https://pve.example:8006/api2/json/cluster/resources", Err: errors.New("connect: connection refused")},
-		"a node error":  &proxmox.APIError{Method: "GET", Path: "/cluster/resources", Status: 595, Message: "no route to host"},
+		"no connection":  &url.Error{Op: "Get", URL: "https://pve.example:8006/api2/json/cluster/resources", Err: errors.New("connect: connection refused")},
+		"a node error":   &proxmox.APIError{Method: "GET", Path: "/cluster/resources", Status: 595, Message: "no route to host"},
+		"a dropped body": fmt.Errorf("GET /cluster/resources: %w", io.ErrUnexpectedEOF),
 	} {
 		p.api.setListErr(down)
 		for _, c := range []struct{ method, path, body string }{{"POST", "/v1/jobs", deploy}, {"GET", "/v1/sets", ""}, {"GET", "/v1/pods/51/vms", ""}} {

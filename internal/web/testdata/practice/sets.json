@@ -11,14 +11,15 @@
   "answer": {
     "sets": [
       {
+        "blocked": [],
         "hosts": [
           "dc",
           "web"
         ],
         "name": "kilo.alpha",
         "pod": {
+          "boot_disk_bytes": 51539607552,
           "cpus": 3,
-          "disk_bytes": 51539607552,
           "memory_bytes": 6442450944
         },
         "templates": [

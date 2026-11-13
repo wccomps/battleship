@@ -197,22 +197,28 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 		ErrorLog:          slog.NewLogLogger(log.With("component", "http").Handler(), slog.LevelWarn),
 	}
 	httpSrv.RegisterOnShutdown(app.CloseStreams)
-	// The session interface, when [practice] is set: its own listener.
-	servers := map[string]*http.Server{"web": httpSrv}
-	var practiceLn net.Listener
+	type listening struct {
+		name string
+		srv  *http.Server
+		ln   net.Listener
+	}
+	listeners := []listening{{"web", httpSrv, ln}}
 	if h := app.PracticeHandler(); h != nil {
-		if practiceLn, err = d.listen("tcp", cfg.Practice.Listen); err != nil {
+		practiceLn, err := d.listen("tcp", cfg.Practice.Listen)
+		if err != nil {
 			_ = ln.Close()
 			return cantStart(fmt.Errorf("practice.listen: %w", err))
 		}
-		servers["practice"] = &http.Server{
+		listeners = append(listeners, listening{"practice", &http.Server{
 			Handler:           h,
 			ReadHeaderTimeout: 10 * time.Second,
 			ReadTimeout:       30 * time.Second,
 			WriteTimeout:      web.PracticeCallTimeout + 15*time.Second,
 			IdleTimeout:       2 * time.Minute,
 			ErrorLog:          slog.NewLogLogger(log.With("component", "practice").Handler(), slog.LevelWarn),
-		}
+		}, practiceLn})
+		log.Info("serving the session interface", "listen", practiceLn.Addr().String(),
+			"pods", cfg.Practice.Pods, "principal", cfg.Practice.Principal)
 	}
 
 	// Background work stops after the workers, which stop claiming when the
@@ -233,14 +239,11 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	workCtx, stopJobs := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopJobs()
 	workersDone := startWorkers(workCtx, draining, cfg, st, pve.Bind, creds, lim, hub, log)
-	served := make(chan error, len(servers))
-	go func() { served <- httpSrv.Serve(ln) }()
-	log.Info("serving", "listen", ln.Addr().String(), "workers", cfg.Web.Workers)
-	if practiceSrv := servers["practice"]; practiceSrv != nil {
-		go func() { served <- practiceSrv.Serve(practiceLn) }()
-		log.Info("serving the session interface", "listen", practiceLn.Addr().String(),
-			"pods", cfg.Practice.Pods, "principal", cfg.Practice.Principal)
+	served := make(chan error, len(listeners))
+	for _, l := range listeners {
+		go func() { served <- l.srv.Serve(l.ln) }()
 	}
+	log.Info("serving", "listen", ln.Addr().String(), "workers", cfg.Web.Workers)
 
 	var failure error
 	select {
@@ -280,11 +283,11 @@ func serve(ctx context.Context, cfg config.Config, d serveDeps) error {
 	}
 	httpCtx, stopHTTP := context.WithDeadline(context.Background(), minTime(time.Now().Add(httpShutdownTimeout), deadline))
 	var stopping sync.WaitGroup
-	for name, srv := range servers {
+	for _, l := range listeners {
 		stopping.Go(func() {
-			if err := srv.Shutdown(httpCtx); err != nil {
-				log.Warn("requests still running when the HTTP server stopped; cutting them off", "server", name, "err", err)
-				_ = srv.Close()
+			if err := l.srv.Shutdown(httpCtx); err != nil {
+				log.Warn("requests still running when the HTTP server stopped; cutting them off", "server", l.name, "err", err)
+				_ = l.srv.Close()
 			}
 		})
 	}

@@ -8,7 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -39,8 +39,11 @@ const (
 	practiceTicketHeader = "X-Proxmox-Ticket"
 	// practiceMaxBody caps a request body; a job request is under 100 bytes.
 	practiceMaxBody = 4 << 10
-	// practiceConfigReads caps the template configs read at once for one call.
-	practiceConfigReads = 8
+	// practiceSetPlans caps the sets GET /v1/sets plans at once, and
+	// practiceReadTimeout each template config it reads, so one node that
+	// hangs can't use up the call.
+	practiceSetPlans    = 4
+	practiceReadTimeout = 10 * time.Second
 )
 
 // PracticeCallTimeout bounds one call of the session interface. The
@@ -99,7 +102,7 @@ func (s *Server) practice(next practiceCall) http.Handler {
 			practiceRefuse(w, http.StatusForbidden, "ticket_refused", "Proxmox does not accept the ticket as "+principal+"'s")
 			return
 		case err != nil:
-			s.practiceFailed(w, "asking Proxmox about the ticket", err)
+			s.practiceProxmoxFailed(w, "asking Proxmox about the ticket", err)
 			return
 		}
 		next(w, r.WithContext(ctx), cred)
@@ -131,34 +134,22 @@ func practiceRefuse(w http.ResponseWriter, status int, code, message string) {
 	practiceAnswer(w, status, practiceProblem{Error: code, Message: message})
 }
 
-// practiceFailed answers a call that failed through no fault of the request:
-// Proxmox or the database could not be asked, or took too long.
-func (s *Server) practiceFailed(w http.ResponseWriter, what string, err error) {
+// practiceProxmoxFailed answers a call Proxmox failed: it answered with an
+// error, or not at all, or not in time.
+func (s *Server) practiceProxmoxFailed(w http.ResponseWriter, what string, err error) {
 	s.logf("practice: %s: %v", what, err)
-	switch {
-	case errors.Is(err, context.DeadlineExceeded):
+	if errors.Is(err, context.DeadlineExceeded) {
 		practiceRefuse(w, http.StatusGatewayTimeout, "timed_out", what+" took too long")
-	case fromProxmox(err):
-		practiceRefuse(w, http.StatusBadGateway, "proxmox_failed", what+": "+proxmox.Describe(err))
-	default:
-		practiceRefuse(w, http.StatusInternalServerError, "failed", "battleship had a problem "+what)
+		return
 	}
+	practiceRefuse(w, http.StatusBadGateway, "proxmox_failed", what+": "+proxmox.Describe(err))
 }
 
-// fromProxmox reports whether err is Proxmox answering with an error, or not
-// answering.
-func fromProxmox(err error) bool {
-	var api *proxmox.APIError
-	var everyEndpoint *proxmox.EndpointsError
-	var transport *url.Error
-	return errors.As(err, &api) || errors.As(err, &everyEndpoint) || errors.As(err, &transport)
+// practiceStoreFailed answers a call the database failed.
+func (s *Server) practiceStoreFailed(w http.ResponseWriter, what string, err error) {
+	s.logf("practice: %s: %v", what, err)
+	practiceRefuse(w, http.StatusInternalServerError, "failed", "battleship had a problem "+what)
 }
-
-// storeError marks a database read that failed inside planning, which is
-// otherwise all Proxmox reads and the planner's own refusals.
-type storeError struct{ error }
-
-func (e storeError) Unwrap() error { return e.error }
 
 // practicePods reads a pod spec ("51", "51-53") whose pods all lie inside
 // practice.pods. ok is false once it has refused the call.
@@ -181,13 +172,15 @@ func (s *Server) practicePods(w http.ResponseWriter, spec string) (teams []strin
 type practiceSet struct {
 	Name  string   `json:"name"`
 	Hosts []string `json:"hosts"`
-	// Templates are the built templates a deploy would clone, one per host
-	// that has one. A session deploy builds none, so a host without one
-	// can't be deployed.
+	// Templates are the built templates a deploy to a session pod would
+	// clone, as the planner resolves them.
 	Templates []practiceTemplate `json:"templates"`
-	// Pod is what one pod of the set takes: the sum over Templates read
-	// without an error.
+	// Blocked are the templates such a deploy could not clone, and why.
+	Blocked []practiceBlocked `json:"blocked"`
+	// Pod is what one pod of the set takes: the sum over Templates.
 	Pod practiceSize `json:"pod"`
+	// Error is why the set could not be planned; nothing else is then listed.
+	Error string `json:"error,omitempty"`
 }
 
 type practiceTemplate struct {
@@ -198,29 +191,29 @@ type practiceTemplate struct {
 	Digest string `json:"digest"`
 	// Error is why the config could not be read; Digest is then empty.
 	Error string `json:"error,omitempty"`
-
-	vm   proxmox.VM
-	disk int64
 }
 
 type practiceSize struct {
 	MemoryBytes int64 `json:"memory_bytes"`
 	CPUs        int   `json:"cpus"`
-	DiskBytes   int64 `json:"disk_bytes"`
+	// BootDiskBytes sums each template's boot disk, the one size Proxmox
+	// lists for a VM and pods.EstimateCapacity uses.
+	BootDiskBytes int64 `json:"boot_disk_bytes"`
 }
 
-// practiceSets lists the approved sets (pods.ApprovedSets), as the principal
-// sees the cluster, each with its templates and the size of a pod.
+// practiceSets lists the approved sets (pods.ApprovedSets) as the principal
+// sees the cluster, each as a deploy of it is planned.
 func (s *Server) practiceSets(w http.ResponseWriter, r *http.Request, cred proxmox.Credential) {
 	ctx, api := r.Context(), s.as(cred)
+	planner := pods.NewPlanner(api, s.cfg)
 	vms, err := api.ClusterVMs(ctx)
 	if err != nil {
-		s.practiceFailed(w, "listing the cluster's VMs", err)
+		s.practiceProxmoxFailed(w, "listing the cluster's VMs", err)
 		return
 	}
-	tags, err := api.TagAccess(ctx)
+	tags, err := planner.Access.TagAccess(ctx)
 	if err != nil {
-		s.practiceFailed(w, "reading Proxmox's tag settings", err)
+		s.practiceProxmoxFailed(w, "reading Proxmox's tag settings", err)
 		return
 	}
 	approved, err := pods.ApprovedSets(vms, s.naming, s.cfg.Deploy, tags)
@@ -228,46 +221,67 @@ func (s *Server) practiceSets(w http.ResponseWriter, r *http.Request, cred proxm
 		practiceRefuse(w, http.StatusConflict, "not_approved", err.Error())
 		return
 	}
+	listed := map[int]proxmox.VM{}
+	for _, vm := range vms {
+		listed[vm.VMID] = vm
+	}
+	lo, _, _ := config.ParseRange(s.cfg.Practice.Pods) // validated at startup
 	sets := make([]practiceSet, len(approved))
 	var g errgroup.Group
-	g.SetLimit(practiceConfigReads)
+	g.SetLimit(practiceSetPlans)
 	for i, set := range approved {
-		sets[i] = practiceSet{Name: string(set.Name), Hosts: []string{}, Templates: []practiceTemplate{}}
-		for _, m := range set.Members {
-			sets[i].Hosts = append(sets[i].Hosts, m.Host)
-			if m.Template != nil {
-				sets[i].Templates = append(sets[i].Templates, practiceTemplate{Host: m.Host, Name: m.Template.Name, VMID: m.Template.VMID, vm: *m.Template})
-			}
-		}
-		for j := range sets[i].Templates {
-			t := &sets[i].Templates[j]
-			g.Go(func() error {
-				cfg, err := api.VMConfig(ctx, t.vm.Node, t.vm.VMID)
-				if err != nil {
-					// One unreadable template, as on a node that is down,
-					// leaves the other sets usable.
-					s.logf("practice: reading template %s: %v", t.Name, err)
-					t.Error = proxmox.Describe(err)
-					return nil
-				}
-				t.Digest, t.disk = pods.ConfigDigest(cfg), pods.DiskBytes(cfg)
-				return nil
-			})
-		}
+		g.Go(func() error {
+			sets[i] = s.practiceSet(ctx, planner, set, pods.FormatTeam(lo), listed)
+			return nil
+		})
 	}
 	_ = g.Wait()
-	for i := range sets {
-		for _, t := range sets[i].Templates {
-			if t.Error == "" {
-				sets[i].Pod.MemoryBytes += t.vm.MaxMem
-				sets[i].Pod.CPUs += t.vm.MaxCPU
-				sets[i].Pod.DiskBytes += t.disk
-			}
-		}
+	if err := ctx.Err(); err != nil {
+		s.practiceProxmoxFailed(w, "reading the approved sets", err)
+		return
 	}
 	practiceAnswer(w, http.StatusOK, struct {
 		Sets []practiceSet `json:"sets"`
 	}{sets})
+}
+
+// practiceSet describes one approved set by planning a deploy of it to pod,
+// so the planner alone decides which template each host is cloned from. A
+// set or template that can't be read, as on a node that is down, carries the
+// error and leaves the other sets answered.
+func (s *Server) practiceSet(ctx context.Context, planner pods.Planner, set pods.Set, pod string, listed map[int]proxmox.VM) practiceSet {
+	out := practiceSet{Name: string(set), Hosts: []string{}, Templates: []practiceTemplate{}, Blocked: []practiceBlocked{}}
+	plan, err := planner.Deploy(ctx, pods.DeployRequest{ApprovedSet: set, Teams: []string{pod}})
+	if err != nil {
+		s.logf("practice: planning set %s: %v", set, err)
+		out.Error = proxmox.Describe(err)
+		return out
+	}
+	for _, t := range plan.Templates {
+		if !slices.Contains(out.Hosts, t.Host) {
+			out.Hosts = append(out.Hosts, t.Host)
+		}
+		if t.Blocked != "" {
+			out.Blocked = append(out.Blocked, practiceBlocked{Name: t.Name, Reason: t.Blocked})
+			continue
+		}
+		tpl := practiceTemplate{Host: t.Host, Name: t.Name, VMID: t.VMID}
+		readCtx, cancel := context.WithTimeout(ctx, practiceReadTimeout)
+		cfg, err := planner.API.VMConfig(readCtx, t.Node, t.VMID)
+		cancel()
+		if err != nil {
+			s.logf("practice: reading template %s: %v", t.Name, err)
+			tpl.Error = proxmox.Describe(err)
+		} else {
+			tpl.Digest = pods.ConfigDigest(cfg)
+		}
+		out.Templates = append(out.Templates, tpl)
+		vm := listed[t.VMID]
+		out.Pod.MemoryBytes += vm.MaxMem
+		out.Pod.CPUs += vm.MaxCPU
+		out.Pod.BootDiskBytes += vm.MaxDisk
+	}
+	return out
 }
 
 type practiceVM struct {
@@ -289,7 +303,7 @@ func (s *Server) practicePodVMs(w http.ResponseWriter, r *http.Request, cred pro
 	}
 	all, err := s.as(cred).ClusterVMs(r.Context())
 	if err != nil {
-		s.practiceFailed(w, "listing the cluster's VMs", err)
+		s.practiceProxmoxFailed(w, "listing the cluster's VMs", err)
 		return
 	}
 	vms := []practiceVM{}
@@ -366,24 +380,24 @@ func (s *Server) practiceSubmit(w http.ResponseWriter, r *http.Request, cred pro
 
 	ctx := r.Context()
 	planner := pods.NewPlanner(s.as(cred), s.cfg)
+	var storeErr error
 	planner.Reserved = func(ctx context.Context) (map[string]bool, error) {
 		keys, err := s.st.ReservedKeys(ctx, 0)
-		if err != nil {
-			return nil, storeError{err}
-		}
-		return keys, nil
+		storeErr = err
+		return keys, err
 	}
+	// Past practiceInputs, planning fails only on what it reads: Proxmox,
+	// and the store for the VMIDs queued jobs will create.
 	plan, err := jobs.BuildPlan(ctx, planner, in)
-	var db storeError
 	switch {
 	case errors.Is(err, pods.ErrNotApproved):
 		practiceRefuse(w, http.StatusConflict, "not_approved", err.Error())
 		return
-	case fromProxmox(err), errors.As(err, &db), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		s.practiceFailed(w, "planning the job", err)
+	case err != nil && storeErr != nil:
+		s.practiceStoreFailed(w, "planning the job", err)
 		return
 	case err != nil:
-		practiceRefuse(w, http.StatusConflict, "plan_failed", err.Error())
+		s.practiceProxmoxFailed(w, "planning the job", err)
 		return
 	}
 	blocked := practiceBlockedIn(plan)
@@ -401,7 +415,7 @@ func (s *Server) practiceSubmit(w http.ResponseWriter, r *http.Request, cred pro
 		})
 		return
 	case err != nil:
-		s.practiceFailed(w, "submitting the job", err)
+		s.practiceStoreFailed(w, "submitting the job", err)
 		return
 	}
 	s.logf("practice: job %d submitted: as=%q kind=%s pods=%s", id, cred.User, in.Kind, in.Teams)
@@ -440,7 +454,7 @@ func (s *Server) practiceOwned(w http.ResponseWriter, r *http.Request) (store.Jo
 		practiceRefuse(w, http.StatusNotFound, "not_found", "no such job")
 		return store.Job{}, false
 	case err != nil:
-		s.practiceFailed(w, "reading the job", err)
+		s.practiceStoreFailed(w, "reading the job", err)
 		return store.Job{}, false
 	}
 	return j, true
@@ -474,7 +488,7 @@ func (s *Server) practiceJob(w http.ResponseWriter, r *http.Request, _ proxmox.C
 	}
 	rows, err := s.st.Items(r.Context(), j.ID)
 	if err != nil {
-		s.practiceFailed(w, "reading the job's VMs", err)
+		s.practiceStoreFailed(w, "reading the job's VMs", err)
 		return
 	}
 	items := make([]practiceItem, len(rows))
@@ -508,7 +522,7 @@ func (s *Server) practiceCancel(w http.ResponseWriter, r *http.Request, cred pro
 	case errors.Is(err, store.ErrNotFound):
 		practiceRefuse(w, http.StatusNotFound, "not_found", "no such job")
 	case err != nil:
-		s.practiceFailed(w, "cancelling the job", err)
+		s.practiceStoreFailed(w, "cancelling the job", err)
 	default:
 		s.logf("practice: job %d cancel requested", j.ID)
 		w.Header().Set("Cache-Control", "no-store")
