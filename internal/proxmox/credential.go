@@ -212,15 +212,17 @@ func (t TagAccess) Allows(tag string) bool {
 }
 
 // AllowsVariantOf reports whether a user without Sys.Modify on / may set a
-// case variant of tag, which Proxmox stores as tag unless CaseSensitive.
+// case variant of tag; without CaseSensitive Proxmox stores it lower-cased.
+// Under existing each user may also set the tags on guests it audits, which
+// no one reader sees whole, so existing counts as allowing one.
 func (t TagAccess) AllowsVariantOf(tag string) bool {
-	if t.CaseSensitive || strings.ToLower(tag) == strings.ToUpper(tag) {
+	switch {
+	case t.CaseSensitive || strings.ToLower(tag) == strings.ToUpper(tag):
 		return false
+	case t.Mode == "list":
+		return slices.ContainsFunc(t.Allowed, func(a string) bool { return a != tag && strings.EqualFold(a, tag) && t.Allows(a) })
 	}
-	if t.Mode == "" || t.Mode == "free" {
-		return true
-	}
-	return slices.ContainsFunc(t.Allowed, func(a string) bool { return a != tag && strings.EqualFold(a, tag) && t.Allows(a) })
+	return t.Mode != "none"
 }
 
 // TagAccess reads the cluster's tag policy for the caller from /cluster/options.

@@ -25,7 +25,7 @@ func approvalTag(cfg config.Deploy, tags proxmox.TagAccess) (string, error) {
 			"(Datacenter, Options; reading them needs Sys.Audit on /)", ErrNotApproved, tag)
 	case tags.AllowsVariantOf(tag):
 		return "", fmt.Errorf("every set is %w: a user without Sys.Modify on / may tag a VM with a case variant of deploy.approved_tag %q, which Proxmox stores lower-cased; "+
-			"set Datacenter, Options, Tag Style case-sensitive, or User Tag Access to none, or to list or existing with no case variant of it allowed", ErrNotApproved, tag)
+			"set Datacenter, Options, Tag Style case-sensitive, or User Tag Access to none, or to a list with no case variant of it", ErrNotApproved, tag)
 	}
 	return tag, nil
 }

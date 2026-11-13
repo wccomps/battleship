@@ -341,8 +341,8 @@ func TestPracticeSetsMarkWhatCannotBeRead(t *testing.T) {
 }
 
 // A template the principal may not clone is listed as blocked with the
-// privilege it lacks, as a deploy of it would be refused, and is not counted,
-// whether or not the first session pod already holds the set.
+// privilege it lacks and is not counted, whether or not the first session pod
+// already holds the set.
 func TestPracticeSetsBlockWhatThePrincipalCannotClone(t *testing.T) {
 	for name, held := range map[string]bool{"an empty pod": false, "a pod that holds the set": true} {
 		t.Run(name, func(t *testing.T) {
@@ -366,6 +366,21 @@ func TestPracticeSetsBlockWhatThePrincipalCannotClone(t *testing.T) {
 				t.Errorf("pod = %+v, want web's alone %+v", set.Pod, want)
 			}
 		})
+	}
+}
+
+// A template whose deploy lacks another of the principal's rights, here
+// VM.Allocate for the clone in the pod's pool, is listed as blocked with it.
+func TestPracticeSetsBlockWhatThePrincipalCannotDeploy(t *testing.T) {
+	p := newPracticeHarness(t)
+	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
+	noAllocate := slices.DeleteFunc(slices.Clone(podstest.AllPrivileges), func(priv string) bool { return priv == "VM.Allocate" })
+	p.pve.Grant(practicePrincipal, "/vms/15101", noAllocate...)
+	p.pve.Grant(practicePrincipal, "/pool/pool-51", noAllocate...)
+
+	set := p.sets()[0]
+	if len(set.Blocked) != 1 || set.Blocked[0].Name != "dc.kilo.alpha.tpl" || !strings.Contains(set.Blocked[0].Reason, "VM.Allocate") {
+		t.Errorf("blocked = %+v, want dc's template for want of VM.Allocate", set.Blocked)
 	}
 }
 

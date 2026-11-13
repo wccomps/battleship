@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -177,11 +178,12 @@ func (s *Server) practicePods(w http.ResponseWriter, spec string) (teams []strin
 type practiceSet struct {
 	Name  string   `json:"name"`
 	Hosts []string `json:"hosts"`
-	// Templates are the built templates a deploy to the first session pod
-	// would clone, as that deploy is planned.
+	// Templates are the set's built templates the planner would use and the
+	// principal may clone.
 	Templates []practiceTemplate `json:"templates"`
-	// Blocked are the templates that deploy could not use, or the principal
-	// may not clone, and why.
+	// Blocked are the templates the planner refuses, whose deploy to the
+	// first session pod lacks one of the principal's rights, or which it may
+	// not clone, and why.
 	Blocked []practiceBlocked `json:"blocked"`
 	// Pod is what one pod of the set takes: the sum over Templates.
 	Pod practiceSize `json:"pod"`
@@ -250,28 +252,36 @@ func (s *Server) practiceSets(w http.ResponseWriter, r *http.Request, cred proxm
 	}{sets})
 }
 
-// practiceSet describes one approved set as a deploy of it to pod is planned,
-// with each template the principal may not clone listed as blocked.
+// practiceSet describes one approved set as practiceDeploy of it to pod is
+// planned, so the listing and a submission ask the same plan.
 func (s *Server) practiceSet(ctx context.Context, planner pods.Planner, set pods.Set, pod string, listed map[int]proxmox.VM) practiceSet {
-	out := practiceSet{Name: string(set), Hosts: []string{}, Templates: []practiceTemplate{}, Blocked: []practiceBlocked{}}
-	ctx, cancel := context.WithTimeout(ctx, practiceSetTimeout)
-	defer cancel()
+	empty := practiceSet{Name: string(set), Hosts: []string{}, Templates: []practiceTemplate{}, Blocked: []practiceBlocked{}}
+	out := empty
 	failed := func(err error) practiceSet {
 		s.logf("practice: planning set %s: %v", set, err)
-		return practiceSet{Name: string(set), Hosts: []string{}, Templates: []practiceTemplate{}, Blocked: []practiceBlocked{}, Error: proxmox.Describe(err)}
+		empty.Error = proxmox.Describe(err)
+		return empty
 	}
-	plan, err := planner.Deploy(ctx, pods.DeployRequest{ApprovedSet: set, Teams: []string{pod}})
+	ctx, cancel := context.WithTimeout(ctx, practiceSetTimeout)
+	defer cancel()
+	plan, err := jobs.BuildPlan(ctx, planner, practiceDeploy(set, pod))
 	if err != nil {
 		return failed(err)
+	}
+	unpermitted := map[string]string{} // by template: a right its deploy to pod lacks
+	for _, it := range plan.Items {
+		if it.Unpermitted {
+			unpermitted[it.Template] = it.Blocked
+		}
 	}
 	for _, t := range plan.Templates {
 		if !slices.Contains(out.Hosts, t.Host) {
 			out.Hosts = append(out.Hosts, t.Host)
 		}
-		why := t.Blocked
+		why := cmp.Or(t.Blocked, unpermitted[t.Name])
 		if why == "" {
-			// Asked of the template itself: a pod that already holds the set
-			// clones nothing, so its plan checks no clone right.
+			// A pod that already holds the set clones nothing, so its plan
+			// asks no clone right; it is asked of the template here.
 			if why, err = pods.Unclonable(ctx, planner.Access, t.VMID); err != nil {
 				return failed(err)
 			}
@@ -331,6 +341,12 @@ type practiceJobRequest struct {
 	Set  string `json:"set"`
 }
 
+// practiceDeploy is the deploy of set that the interface submits, and plans
+// to list a set.
+func practiceDeploy(set pods.Set, teams string) jobs.Inputs {
+	return jobs.Inputs{Kind: pods.KindDeploy, Teams: teams, Pattern: set.Pattern(), ApprovedOnly: true}.Normalize()
+}
+
 // practiceInputs is the job the request asks for. ok is false once it has
 // refused the call. It contacts nothing.
 func (s *Server) practiceInputs(w http.ResponseWriter, req practiceJobRequest) (in jobs.Inputs, ok bool) {
@@ -341,7 +357,7 @@ func (s *Server) practiceInputs(w http.ResponseWriter, req practiceJobRequest) (
 			practiceRefuse(w, http.StatusUnprocessableEntity, "bad_set", "a deploy names one set, e.g. kilo.alpha")
 			return in, false
 		}
-		in = jobs.Inputs{Kind: pods.KindDeploy, Teams: req.Pods, Pattern: set.Pattern(), ApprovedOnly: true}.Normalize()
+		in = practiceDeploy(set, req.Pods)
 	case pods.KindTeardown:
 		if req.Set != "" {
 			practiceRefuse(w, http.StatusUnprocessableEntity, "bad_set", "a teardown takes everything in its pods; leave set out")
