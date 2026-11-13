@@ -1,0 +1,9 @@
+schema: spec-driven
+created: 2026-11-13
+goal: "Sell an optional AI add-on for practice sessions: AI grading of inject
+  submissions and a bounded scripted red team"
+affected_areas:
+  - practice/worker
+  - practice/environments
+  - quotient/practice-instance
+  - network/session-pods

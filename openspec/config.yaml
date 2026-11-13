@@ -1,0 +1,30 @@
+schema: spec-driven
+
+context: |
+  Battleship (wccomps/battleship, Go) deploys, resets, snapshots, and tears down Proxmox competition VM pods, dev environments, and base images.
+  WCComps Portal (wccomps/wccomps-portal, Python/Django + Discord bot) manages team accounts, Authentik SSO, registration, packets, injects, scoring, and ticketing.
+  Any change that adds or alters routes, principals, credentials, authorization rules, or guest-agent calls in Battleship MUST update THREAT_MODEL.md in the same change.
+  Any change in WCComps Portal that adds URLs, bot commands, DiscordTask payloads, permissions, or upstream services MUST update its THREAT_MODEL.md and property-test coverage tables.
+  Practice (wccomps/practice, Go, not yet created) sells and runs self-service practice sessions. It is separate from the portal and Battleship, holds only session secrets, copies Battleship's sign-in and page security, and keeps its own THREAT_MODEL.md.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always state what is out of scope
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
