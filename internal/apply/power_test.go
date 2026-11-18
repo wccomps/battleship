@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/pods/podstest"
@@ -34,6 +35,46 @@ func TestPowerSkipsVMsAlreadyInTheStateTheActionLeaves(t *testing.T) {
 				t.Errorf("%s on a %s VM left it %s, want %s", a.Value, status, f.VMs[10121].Status, a.Leaves)
 			}
 		}
+	}
+}
+
+// A reboot reboots a running VM and starts a stopped one.
+func TestRebootStartsAStoppedVM(t *testing.T) {
+	for status, want := range map[string]string{"running": "power:10121:reboot", "stopped": "power:10121:start"} {
+		f := newCluster()
+		f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: status}, map[string]string{"name": "team01-teak"})
+		plan, err := testPlanner(f).Power(context.Background(), []string{"01"}, []string{"teak"}, "reboot")
+		if err != nil {
+			t.Fatal(err)
+		}
+		res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
+		if len(res.Succeeded) != 1 || f.Called("power:") != 1 || f.Called(want) != 1 {
+			t.Errorf("reboot of a %s VM: result %+v, calls %v; want only %s", status, res, f.Calls, want)
+		}
+	}
+}
+
+// A power job cut off mid-task has changed no config: it reports the VM's
+// config converged.
+func TestCancelledPowerJobLeavesTheConfigConverged(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
+	plan, err := testPlanner(f).Power(context.Background(), []string{"01"}, []string{"teak"}, "stop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	f.WaitGate = func(sctx context.Context, upid string) error {
+		cancel(ErrCancelRequested)
+		<-sctx.Done() // still running when the grace runs out
+		return sctx.Err()
+	}
+	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Jobs.CancelGrace = 20 * time.Millisecond
+	err = ex.Run(ctx, plan).Interrupted["team01-teak"]
+	if err == nil || LeftBy(err) != LeftConverged {
+		t.Errorf("interrupted = %v (left %q), want converged", err, LeftBy(err))
 	}
 }
 

@@ -507,3 +507,28 @@ func TestTemplateBuildSlotOnlyCoversMasterCopy(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 }
+
+// A template built in the first round is not checked again by a retry
+// round of an item that failed after cloning from it.
+func TestRetryRoundDoesNotRecheckABuiltTemplate(t *testing.T) {
+	f := newCluster()
+	plan := deployTeak(t, f, "01")
+	f.FailOn("power:10121:start", &proxmox.APIError{Status: 400, Message: "start: bad request"})
+	rec := &recorder{}
+	ex := testExecutor(f, rec)
+	ex.Cfg.Retry.Rounds = 1
+
+	res := ex.Run(context.Background(), plan)
+	if len(res.Succeeded) != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	var got []string
+	for _, e := range rec.events {
+		if e.Item == "teak.tango.delta.tpl" && e.Status != EventInfo {
+			got = append(got, string(e.Status)+" "+e.Message)
+		}
+	}
+	if want := []string{string(EventDone) + " template created"}; !slices.Equal(got, want) {
+		t.Errorf("template events = %q, want %q", got, want)
+	}
+}

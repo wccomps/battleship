@@ -108,6 +108,69 @@ func TestConvertIsVerifiedEvenWhenTheTaskSucceeds(t *testing.T) {
 	}
 }
 
+// A copy gone once its conversion ends fails the build: with the
+// conversion's own failure if it failed, else as gone.
+func TestCopyGoneAfterItsConversionFailsTheBuild(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		convert error  // the conversion's answer
+		goneAt  string // the call after which the copy is gone
+		want    string
+	}{
+		{"conversion failed", &proxmox.APIError{Status: 400, Message: "convert: bad request"}, "template:9021", "convert: bad request"},
+		{"conversion ran", nil, "wait:" + podstest.UPID("cedar", "qmtemplate", 9021), "converting to template: VM 9021 disappeared"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCluster()
+			plan := deployTeak(t, f, "01")
+			if tc.convert != nil {
+				f.FailOn("template:9021", tc.convert)
+			}
+			f.OnRecord = func(key string) {
+				if key == tc.goneAt {
+					delete(f.VMs, 9021)
+				}
+			}
+			ex := testExecutor(f, &recorder{})
+			ex.Cfg.Retry.Rounds = 0
+
+			res := ex.Run(context.Background(), plan)
+			if err := res.Failed["team01-teak"]; err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("failed = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// A conversion whose answer was lost is given time (convertWait) to rename
+// its disks before it is judged half-done.
+func TestConvertWithLostAnswerWaitsForItsDisks(t *testing.T) {
+	f := newCluster()
+	plan := deployTeak(t, f, "01")
+	f.ConvertLeavesDisk = map[int]bool{9021: true}
+	f.ConvertThenFail = map[int]error{9021: &proxmox.APIError{Status: 596, Message: "Connection timed out"}}
+	converted, reads := false, 0
+	f.OnRecord = func(key string) {
+		switch {
+		case key == "template:9021":
+			converted = true
+		case converted && key == "config:9021":
+			if reads++; reads == 5 { // the task renames the disk a few reads later
+				vm := f.VMs[9021]
+				vm.Config["scsi0"] = strings.Replace(vm.Config["scsi0"], "vm-9021-disk-0", "base-9021-disk-0", 1)
+			}
+		}
+	}
+	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Retry.Rounds = 0
+	ex.Sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() } // polls end with their wait's deadline
+
+	res := ex.Run(context.Background(), plan)
+	if len(res.Succeeded) != 1 || f.Called("template:9021") != 1 {
+		t.Errorf("result = %+v, %d conversions; want one, awaited", res, f.Called("template:9021"))
+	}
+}
+
 // A failed convert that left the VM unconverted is not restarted; its
 // error is reported as is.
 func TestFailedConvertIsNotRestarted(t *testing.T) {
@@ -260,6 +323,37 @@ func TestRebuildFreesOldTemplateDisk(t *testing.T) {
 	}
 }
 
+// A template's base disk found left on the storage is freed under the
+// storage-ops slot, as its destroy would have been.
+func TestFoundLeftoverBaseDiskWaitsForStorageOps(t *testing.T) {
+	f := newCluster()
+	vol := "competitions:9021/base-9021-disk-0.qcow2"
+	f.Vols[vol] = 9021 // its template is gone
+	ex := testExecutor(f, &recorder{})
+	ex.init()
+	ex.present = map[int]proxmox.VM{}
+	holding, release := make(chan struct{}), make(chan struct{})
+	go ex.lim.storageOps.do(context.Background(), true, func() error { close(holding); <-release; return nil })
+	<-holding
+
+	done := make(chan error, 1)
+	go func() { done <- ex.retryLeftovers(context.Background(), 9021, "cedar", "teak.tango.delta.tpl") }()
+	for queued := false; !queued; time.Sleep(time.Millisecond) {
+		select {
+		case err := <-done:
+			t.Fatalf("freed while another storage op held the slot (err %v)", err)
+		default:
+		}
+		ex.lim.storageOps.mu.Lock()
+		queued = len(ex.lim.storageOps.lo) == 1
+		ex.lim.storageOps.mu.Unlock()
+	}
+	close(release)
+	if err := <-done; err != nil || len(f.VolumesOf(9021)) != 0 {
+		t.Errorf("err = %v, volumes left %q; want %s freed", err, f.VolumesOf(9021), vol)
+	}
+}
+
 func wantLeftoverAdvice(t *testing.T, err error, vols ...string) {
 	t.Helper()
 	if err == nil {
@@ -291,10 +385,16 @@ func TestLeftoverDisksThatCannotBeFreedFailWithAdvice(t *testing.T) {
 		f.FailOn("volume:"+v, denied, denied, denied, denied)
 	}
 
-	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
+	rec := &recorder{}
+	res := testExecutor(f, rec).Run(context.Background(), plan)
 	wantLeftoverAdvice(t, res.Failed["team01-teak"], left...)
 	if len(res.Succeeded) != 0 {
 		t.Errorf("succeeded = %v, want none", res.Succeeded)
+	}
+	for _, ev := range rec.find("team01-teak", EventInfo) {
+		if strings.HasPrefix(ev.Message, "freed disks") {
+			t.Errorf("info %q, but no disk was freed", ev.Message)
+		}
 	}
 }
 

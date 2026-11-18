@@ -201,3 +201,34 @@ func TestCancelDuringRerunWaitStops(t *testing.T) {
 		t.Errorf("execs = %+v", f.Execs)
 	}
 }
+
+// A setup state read still running is polled until it exits; one that
+// never exits fails the wait, saying how long it was given.
+func TestSetupStateReadIsPolledUntilItExits(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		runsFor int
+		want    string // the failure, or "" for success
+	}{
+		{"slow", 2, ""},
+		{"never exits", 1 << 20, "reading the setup state took over 30s"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := guestFake(t)
+			f.ExecRunsFor = func(int) int { return tc.runsFor }
+			it := guestItem(pods.ImageWindows)
+			it.Steps = []pods.Step{pods.StepGuest}
+			rec := &recorder{}
+			e := catalogExec(f)
+			e.OnEvent = rec.add
+			res := e.Run(context.Background(), &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{it}})
+			err := res.Failed["oak.kilo.alpha"]
+			switch {
+			case tc.want == "" && (err != nil || len(f.Execs) != 1 || len(infoMessages(rec, "oak.kilo.alpha")) != 0):
+				t.Errorf("failed = %v, %d execs, info %q; want the script run at once", err, len(f.Execs), infoMessages(rec, "oak.kilo.alpha"))
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want) || len(f.Execs) != 0):
+				t.Errorf("failed = %v, %d execs; want it to fail with %q", err, len(f.Execs), tc.want)
+			}
+		})
+	}
+}
