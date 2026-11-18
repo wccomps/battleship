@@ -39,8 +39,8 @@ import (
 //	docker run -d --rm --network host chromedp/headless-shell
 //	BATTLESHIP_BROWSER=http://127.0.0.1:9222 go test ./internal/web -run Browser
 //
-// and are skipped without it. BATTLESHIP_SHOTS, if set, is a directory for
-// screenshots of each state.
+// and are skipped without it (README.md, Tests, has the details).
+// BATTLESHIP_SHOTS, if set, is a directory for screenshots of each state.
 
 // browser is a tab on the app under test.
 type browser struct {
@@ -159,7 +159,12 @@ func newBrowser(t *testing.T, h *harness, sess *authtest.Session, width, height 
 		emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: scheme}}),
 	}
 	if sess != nil {
-		tasks = append(tasks, network.SetCookie(sess.Cookie.Name, sess.Cookie.Value).WithURL(srv.URL).WithHTTPOnly(true))
+		// The session cookie and, unless NoProxmox, the Proxmox ticket
+		// cookie: without it every page sends the tab through the Proxmox
+		// sign-in, whose fake IdP's certificate Chrome refuses.
+		for _, c := range sess.Cookies() {
+			tasks = append(tasks, network.SetCookie(c.Name, c.Value).WithURL(srv.URL).WithPath(c.Path).WithHTTPOnly(c.HttpOnly))
+		}
 	}
 	if err := chromedp.Run(ctx, tasks); err != nil {
 		t.Fatalf("starting the browser: %v", err)

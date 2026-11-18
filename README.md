@@ -36,4 +36,11 @@ export BATTLESHIP_TEST_DATABASE_URL='postgres://postgres:test@127.0.0.1:55432/po
 go test -race ./...
 ```
 
-Set `BATTLESHIP_BROWSER=http://127.0.0.1:9222` (for example `chromedp/headless-shell`) to include the browser tests.
+To include the browser tests, run a Chrome DevTools endpoint and point `BATTLESHIP_BROWSER` at it:
+
+```sh
+docker run -d --rm --name battleship-chrome --network host chromedp/headless-shell
+BATTLESHIP_BROWSER=http://127.0.0.1:9222 go test -race ./internal/web -run Browser
+```
+
+Pass the image no Chrome flags: its entrypoint already listens on 9222 and forwards to Chrome on 9223, so `--remote-debugging-port=9222` leaves nothing answering. `BATTLESHIP_SHOTS=<dir>` saves screenshots of each state.
