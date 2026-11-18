@@ -213,6 +213,38 @@ func TestAssignNodes(t *testing.T) {
 			wantAssign: map[string]string{"01": "a"},
 		},
 		{
+			name:  "a team without VMs doesn't stop later teams staying on their node",
+			teams: []string{"01", "02"},
+			nodes: []string{"a", "b"},
+			vms: []proxmox.VM{
+				{Node: "a", VMID: 10201, Name: "team02-elmer", Status: "stopped", MaxMem: 8 << 30, MaxCPU: 2},
+				{Node: "a", VMID: 1, Status: "running", MaxMem: 64 << 30, MaxCPU: 16},
+			},
+			podVMs:     []proxmox.VM{{Name: "elmer.kilo.alpha", MaxMem: 8 << 30, MaxCPU: 2}},
+			wantAssign: map[string]string{"01": "b", "02": "a"},
+		},
+		{
+			name:  "a pod split evenly stays on the first node alphabetically",
+			teams: []string{"01"},
+			nodes: []string{"b", "a"},
+			vms: []proxmox.VM{
+				{Node: "b", VMID: 10101, Name: "team01-elmer", Status: "stopped"},
+				{Node: "a", VMID: 10102, Name: "team01-bugs", Status: "stopped"},
+			},
+			wantAssign: map[string]string{"01": "a"},
+		},
+		{
+			name:  "a pod host already running on its node adds no load there",
+			teams: []string{"01", "02"},
+			nodes: []string{"a", "b"},
+			vms: []proxmox.VM{
+				{Node: "a", VMID: 10101, Name: "team01-elmer", Status: "running", MaxMem: 8 << 30, MaxCPU: 2},
+				{Node: "b", VMID: 1, Status: "running", MaxMem: 12 << 30, MaxCPU: 3},
+			},
+			podVMs:     []proxmox.VM{{Name: "elmer.kilo.alpha", MaxMem: 8 << 30, MaxCPU: 2}},
+			wantAssign: map[string]string{"01": "a", "02": "a"},
+		},
+		{
 			name:       "empty nodes returns empty map",
 			teams:      []string{"01"},
 			nodes:      []string{},

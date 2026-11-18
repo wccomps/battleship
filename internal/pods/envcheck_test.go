@@ -9,6 +9,7 @@ import (
 
 	"pgregory.net/rapid"
 
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -175,6 +176,46 @@ func TestRouterRowNeedsARouterImage(t *testing.T) {
 	req.Router.Family = "gw"
 	if probs := CheckEnv(KindEnvCreate, envs, nil, BaseImages(mustVMs(t, p)), req); len(probs) != 0 {
 		t.Errorf("a router image is refused: %+v", probs)
+	}
+}
+
+// Only a router before it makes a router host a second one; another host
+// doesn't.
+func TestCheckEnvRouterAfterOtherHosts(t *testing.T) {
+	p := checkFake()
+	envs, vms, err := p.Environments(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := EnvRequest{Domain: "kilo.bravo", Slot: 2, Hosts: []HostSpec{{Host: "web", Family: "debian-12"}, {Host: "fw", Family: "gw"}}}
+	if got := CheckEnv(KindEnvCreate, envs, nil, BaseImages(vms), req); !slices.Equal(got, []EnvProblem{errNoRouter}) {
+		t.Errorf("CheckEnv = %+v, want only the missing router row", got)
+	}
+}
+
+// A resumed host keeps the address it has; one without an address yet
+// claims the one it names, before any new host can, and a resumed host
+// doesn't stop later hosts claiming theirs.
+func TestCheckEnvResumedHostsAndAddressClaims(t *testing.T) {
+	f := checkFake().API.(*podstest.Fake)
+	f.Add(proxmox.VM{VMID: 2103, Name: "elm.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "stopped"},
+		map[string]string{"description": "battleship: os=linux base=debian-12-v1 dns=router"})
+	p := NewPlanner(f, envConfig())
+	envs, vms, err := p.Environments(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		hosts []HostSpec
+		want  []EnvProblem
+	}{
+		{[]HostSpec{{Host: "teak", Family: "debian-12"}, {Host: "web", Family: "debian-12", Octet: 30}}, nil},
+		{[]HostSpec{{Host: "elm", Family: "debian-12", Octet: 30}, {Host: "web", Family: "debian-12", Octet: 30}},
+			[]EnvProblem{{Row: 2, Field: FieldAddress, Why: "address .30 is already taken in kilo.alpha"}}},
+	} {
+		if got := CheckEnv(KindEnvAdd, envs, nil, BaseImages(vms), EnvRequest{Domain: "kilo.alpha", Hosts: c.hosts}); !slices.Equal(got, c.want) {
+			t.Errorf("%+v:\n got %+v\nwant %+v", c.hosts, got, c.want)
+		}
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 
 	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -292,12 +293,13 @@ func TestFreeDisksNeeds(t *testing.T) {
 // fakePerms answers Proxmox's two reads: the listed paths, and one path's
 // effective privileges.
 type fakePerms struct {
-	mu     sync.Mutex
-	err    error // Permissions fails with it
-	listed proxmox.Permissions
-	at     map[string]map[string]bool
-	tags   proxmox.TagAccess
-	calls  []string
+	mu      sync.Mutex
+	err     error // Permissions fails with it
+	listed  proxmox.Permissions
+	at      map[string]map[string]bool
+	tags    proxmox.TagAccess
+	tagsErr error // TagAccess fails with it
+	calls   []string
 }
 
 func (f *fakePerms) Permissions(context.Context) (proxmox.Permissions, error) {
@@ -318,7 +320,7 @@ func (f *fakePerms) TagAccess(context.Context) (proxmox.TagAccess, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "tags")
-	return f.tags, nil
+	return f.tags, f.tagsErr
 }
 
 // When datacenter user-tag-access restricts tags (or registers set-<name>),
@@ -517,5 +519,274 @@ func TestBlockUnpermittedClearsWillStopMaster(t *testing.T) {
 	}
 	if plan.Templates[0].Blocked == "" || plan.Templates[0].WillStopMaster {
 		t.Fatalf("template = %+v, want Blocked set and WillStopMaster cleared", plan.Templates[0])
+	}
+}
+
+// Callers asking for one unlisted path at once share a read: the later one
+// waits for it and gets its answer.
+func TestAccessConcurrentCallersShareARead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &gatedPerms{fakePerms: fakePerms{listed: proxmox.Permissions{}, at: map[string]map[string]bool{"/vms/9021": {"VM.Clone": false}}},
+			release: make(chan struct{})}
+		acc := NewAccess(f)
+		got := make([]map[string]bool, 2)
+		errs := make([]error, 2)
+		var wg sync.WaitGroup
+		for i := range 2 {
+			wg.Go(func() { got[i], errs[i] = acc.Privileges(context.Background(), "/vms/9021") })
+			synctest.Wait() // the first is reading; the second waits for it
+		}
+		close(f.release)
+		wg.Wait()
+		for i := range 2 {
+			if _, ok := got[i]["VM.Clone"]; !ok || errs[i] != nil {
+				t.Errorf("caller %d: %v, %v", i, got[i], errs[i])
+			}
+		}
+		if strings.Join(f.calls, ",") != "all,/vms/9021" {
+			t.Errorf("calls = %v, want one read of the path", f.calls)
+		}
+	})
+}
+
+// gatedPerms is fakePerms whose path reads wait for release.
+type gatedPerms struct {
+	fakePerms
+	release chan struct{}
+}
+
+func (g *gatedPerms) PermissionsAt(ctx context.Context, path string) (map[string]bool, error) {
+	<-g.release
+	return g.fakePerms.PermissionsAt(ctx, path)
+}
+
+// Tag access is read once; a refusal is remembered, while a read the
+// caller cancelled or timed out isn't.
+func TestAccessTagAccessIsReadOnce(t *testing.T) {
+	ctx := context.Background()
+	f := &fakePerms{tags: proxmox.TagAccess{Mode: "list"}}
+	acc := NewAccess(f)
+	for range 2 {
+		if ta, err := acc.TagAccess(ctx); err != nil || ta.Mode != "list" {
+			t.Fatalf("tag access = %+v, %v", ta, err)
+		}
+	}
+	if len(f.calls) != 1 {
+		t.Errorf("read %d times, want once", len(f.calls))
+	}
+
+	refused := &fakePerms{tagsErr: &proxmox.APIError{Status: 403, Message: "forbidden"}}
+	acc = NewAccess(refused)
+	for range 2 {
+		if _, err := acc.TagAccess(ctx); err == nil {
+			t.Fatal("a refused read succeeded")
+		}
+	}
+	if len(refused.calls) != 1 {
+		t.Errorf("a refused read was asked %d times, want once", len(refused.calls))
+	}
+
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		f := &fakePerms{tagsErr: cause}
+		acc := NewAccess(f)
+		if _, err := acc.TagAccess(ctx); !errors.Is(err, cause) {
+			t.Fatalf("first read: %v", err)
+		}
+		f.tagsErr, f.tags = nil, proxmox.TagAccess{Mode: "free"}
+		if ta, err := acc.TagAccess(ctx); err != nil || ta.Mode != "free" {
+			t.Errorf("after %v: %+v, %v; want it asked again", cause, ta, err)
+		}
+	}
+}
+
+// Only a custom CPU model needs Mapping.Use on its mapping.
+func TestCPUNeedsMappingOnlyForCustomModels(t *testing.T) {
+	for cpu, want := range map[string]string{
+		"host":                 "",
+		"x86-64-v2-AES,flags=": "",
+		"custom-lab":           "you don't have Mapping.Use on /mapping/cpu/lab",
+	} {
+		plan := &Plan{Kind: KindDeploy, Items: []Item{{Team: "01", Name: "team01-teak", VMID: 10121, CPU: cpu, Steps: []Step{StepCPU}}}}
+		if err := BlockUnpermitted(context.Background(), plan, grants{"/vms/10121": {"VM.Config.CPU"}}, config.Default()); err != nil {
+			t.Fatal(err)
+		}
+		if got := plan.Items[0].Blocked; got != want {
+			t.Errorf("cpu %q: blocked %q, want %q", cpu, got, want)
+		}
+	}
+}
+
+// A clone source's team bridges need SDN.Use in the teams zone; a bridge
+// that is no vnet is left to Proxmox.
+func TestCloneNeedsSDNUseOnSourceTeamBridges(t *testing.T) {
+	cfg := config.Default()
+	g := grants{
+		"/vms/8002":                      {"VM.Clone"},
+		"/pool/pool-01":                  {"VM.Allocate"},
+		"/storage/" + cfg.Deploy.Storage: {"Datastore.AllocateSpace"},
+		"/sdn/zones/teams/ext01":         {"SDN.Use"},
+	}
+	plan := func() *Plan {
+		return &Plan{Kind: KindDeploy, Items: []Item{{Team: "01", Name: "team01-teak", VMID: 10121,
+			Source: &Source{VMID: 8002, Bridges: []string{"ext01", "vmbr0"}}, Steps: []Step{StepClone}}}}
+	}
+	p := plan()
+	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "" {
+		t.Errorf("with SDN.Use on ext01: blocked %q, %v", p.Items[0].Blocked, err)
+	}
+	delete(g, "/sdn/zones/teams/ext01")
+	p = plan()
+	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "you don't have SDN.Use on /sdn/zones/teams/ext01" {
+		t.Errorf("without SDN.Use on ext01: blocked %q, %v", p.Items[0].Blocked, err)
+	}
+}
+
+// An environment host's NICs need SDN.Use only on catalog vnets.
+func TestNICsNeedSDNUseOnlyOnCatalogVnets(t *testing.T) {
+	cfg := envConfig()
+	vnet := "/sdn/zones/" + cfg.Environments.SDNZone + "/devint01"
+	g := grants{"/vms/2101": {"VM.Config.Network"}, vnet: {"SDN.Use"}}
+	plan := func() *Plan {
+		return &Plan{Kind: KindEnvAdd, Items: []Item{{Name: "oak.kilo.alpha", VMID: 2101,
+			NICs: map[string]string{"net0": "devint01", "net1": "vmbr0"}, Steps: []Step{StepNetwork}}}}
+	}
+	p := plan()
+	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "" {
+		t.Errorf("with SDN.Use on devint01: blocked %q, %v", p.Items[0].Blocked, err)
+	}
+	delete(g, vnet)
+	p = plan()
+	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "you don't have SDN.Use on "+vnet {
+		t.Errorf("without SDN.Use on devint01: blocked %q, %v", p.Items[0].Blocked, err)
+	}
+}
+
+// Reconfiguring an existing VM's network doesn't touch its template's
+// bridges, so it needs no SDN.Use there.
+func TestExistingVMNeedsNoSDNUseOnTemplateBridges(t *testing.T) {
+	tpl := TemplateSpec{Name: "teak.x.tpl", VMID: 9021, MasterVMID: 121, Exists: true, Interfaces: 1, Bridges: []string{"ext01"}}
+	plan := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{tpl},
+		Items: []Item{{Team: "01", Name: "team01-teak", VMID: 10121, Template: tpl.Name, Steps: []Step{StepNetwork}}}}
+	acc := grants{"/vms/10121": {"VM.Config.Network"}, "/sdn/zones/teams/int01": {"SDN.Use"}}
+	if err := BlockUnpermitted(context.Background(), plan, acc, config.Default()); err != nil || plan.Items[0].Blocked != "" {
+		t.Errorf("blocked %q, %v", plan.Items[0].Blocked, err)
+	}
+}
+
+// The guest step's reboot of a Windows host needs VM.PowerMgmt; a Linux
+// host's doesn't reboot.
+func TestGuestStepPowerNeedsWindows(t *testing.T) {
+	for os, want := range map[string]string{ImageWindows: "you don't have VM.PowerMgmt on /vms/2101", ImageLinux: ""} {
+		plan := &Plan{Kind: KindEnvAdd, Items: []Item{{Name: "oak.kilo.alpha", VMID: 2101, Guest: &Guest{OS: os}, Steps: []Step{StepGuest}}}}
+		if err := BlockUnpermitted(context.Background(), plan, grants{"/vms/2101": {"VM.GuestAgent.Unrestricted"}}, envConfig()); err != nil {
+			t.Fatal(err)
+		}
+		if got := plan.Items[0].Blocked; got != want {
+			t.Errorf("%s: blocked %q, want %q", os, got, want)
+		}
+	}
+}
+
+// Every template and item is checked, whatever is before it: an item
+// blocked already, one blocked with its template, or a clone without one.
+// Unpermitted marks just the items blocked for privileges here.
+func TestBlockUnpermittedChecksEveryTemplateAndItem(t *testing.T) {
+	plan := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{
+		{Name: "elm.x.tpl", VMID: 9023, MasterVMID: 123, Blocked: "no master"},
+		{Name: "teak.x.tpl", VMID: 9021, MasterVMID: 121, Interfaces: 1},
+	}, Items: []Item{
+		{Team: "01", Name: "team01-dc", VMID: 10101, Steps: []Step{StepPower}, Blocked: "no snapshot"},
+		{Team: "01", Name: "team01-elm", VMID: 10123, Template: "elm.x.tpl", Steps: []Step{StepClone}},
+		{Team: "01", Name: "team01-ash", VMID: 10124, Template: "ash.x.tpl", Steps: []Step{StepClone}},
+		{Team: "01", Name: "team01-web", VMID: 10102, Steps: []Step{StepPower}},
+		{Team: "01", Name: "team01-db", VMID: 10103, Steps: []Step{StepPower}},
+	}}
+	if err := BlockUnpermitted(context.Background(), plan, grants{"/vms/10103": {"VM.PowerMgmt"}}, config.Default()); err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.Templates[1].Blocked; !strings.HasPrefix(got, "you don't have VM.Clone on /vms/121") {
+		t.Errorf("teak.x.tpl blocked %q", got)
+	}
+	want := []struct {
+		blocked     string
+		unpermitted bool
+	}{
+		{"no snapshot", false},
+		{"template elm.x.tpl: no master", false},
+		{"", false},
+		{"you don't have VM.PowerMgmt on /vms/10102", true},
+		{"", false},
+	}
+	for i, it := range plan.Items {
+		if it.Blocked != want[i].blocked || it.Unpermitted != want[i].unpermitted {
+			t.Errorf("%s: blocked %q, unpermitted %v; want %q, %v", it.Name, it.Blocked, it.Unpermitted, want[i].blocked, want[i].unpermitted)
+		}
+	}
+}
+
+// failingAt is grants whose reads of path fail.
+type failingAt struct {
+	grants
+	path string
+}
+
+func (f failingAt) Privileges(ctx context.Context, path string) (map[string]bool, error) {
+	if path == f.path {
+		return nil, errors.New("proxmox: 500")
+	}
+	return f.grants.Privileges(ctx, path)
+}
+
+// A privilege read that fails fails the check, but a need held on its pool
+// isn't then read on the VM's path.
+func TestBlockUnpermittedReadFailures(t *testing.T) {
+	cfg := config.Default()
+	if err := BlockUnpermitted(context.Background(), powerPlan(), failingAt{grants{}, "/vms/10102"}, cfg); err == nil {
+		t.Error("a failed read was ignored")
+	}
+	acc := failingAt{grants{
+		"/vms/8002":                      {"VM.Clone"},
+		"/pool/pool-01":                  {"VM.Allocate"},
+		"/storage/" + cfg.Deploy.Storage: {"Datastore.AllocateSpace"},
+	}, "/vms/10121"}
+	plan := &Plan{Kind: KindDeploy, Items: []Item{{Team: "01", Name: "team01-teak", VMID: 10121, Source: &Source{VMID: 8002}, Steps: []Step{StepClone}}}}
+	if err := BlockUnpermitted(context.Background(), plan, acc, cfg); err != nil || plan.Items[0].Blocked != "" {
+		t.Errorf("held on the pool: blocked %q, %v", plan.Items[0].Blocked, err)
+	}
+}
+
+// noTagAccess is grants that can't read tag access.
+type noTagAccess struct{ grants }
+
+func (noTagAccess) TagAccess(context.Context) (proxmox.TagAccess, error) {
+	return proxmox.TagAccess{}, errors.New("proxmox: 500")
+}
+
+// Tag access is read only for a set tag an unblocked item writes.
+func TestBlockUnpermittedReadsTagAccessOnlyForSetTags(t *testing.T) {
+	plan := &Plan{Kind: KindDeploy, Items: []Item{
+		{Team: "01", Name: "team01-teak", VMID: 10121, Set: "kilo.alpha", Steps: []Step{StepSetTag}, Blocked: "no template"},
+		{Team: "01", Name: "team01-dc", VMID: 10101, Steps: []Step{StepSetTag}},
+	}}
+	if err := BlockUnpermitted(context.Background(), plan, noTagAccess{grants{"/vms/10101": {"VM.Config.Options"}}}, config.Default()); err != nil {
+		t.Fatalf("tag access read: %v", err)
+	}
+	if b := plan.Items[1].Blocked; b != "" {
+		t.Errorf("blocked %q", b)
+	}
+}
+
+// Retiring the version a register supersedes edits that version's tags;
+// a first version retires nothing.
+func TestRetireNeedsOptionsOnTheSupersededVersion(t *testing.T) {
+	plan := &Plan{Kind: KindImageRegister, Items: []Item{
+		{Name: "debian-12-v2", VMID: 8002, Supersedes: &Source{VMID: 8001}, Steps: []Step{StepRetire}},
+		{Name: "debian-13-v1", VMID: 8003, Steps: []Step{StepRetire}},
+	}}
+	if err := BlockUnpermitted(context.Background(), plan, grants{}, envConfig()); err != nil {
+		t.Fatal(err)
+	}
+	if got := blocked(plan); len(got) != 1 || got["debian-12-v2"] != "you don't have VM.Config.Options on /vms/8001" {
+		t.Errorf("blocked = %v", got)
 	}
 }
