@@ -35,7 +35,13 @@ form ──> preview ──> confirm ──> stored job ──> worker claims it
 5. **Run.** The executor (`apply.Executor`) runs each item's steps, records
    events, retries transient failures, and on a cancel or failure removes
    what it half-built (and reports what it couldn't, such as when the
-   claim is unsure).
+   claim is unsure). Items are VMs or their disks, but for record items:
+   an environment created with no machines (no router, no hosts) is one
+   item that writes `[env <domain>]` into its slot pool's Proxmox comment,
+   and an add with no blocked host into, or a teardown of, an environment
+   whose pool carries that marker ends with an item that takes it out, run
+   after the others and only if none of them failed (`pods.Item.Last`); a
+   retry narrowed to the VMs that didn't finish has no such item.
 6. **Finish.** The worker records the outcome (`store.Finish`). Retrying a
    pod job, or an environment's create or add, previews and submits a new
    job for just the VMs that didn't finish; an environment's teardown is
@@ -83,4 +89,4 @@ open pages.
 | **leftover / orphaned disks** | Disks a deleted VM left on the storage |
 | **view** | One user's live grid, read with their own ticket |
 | **base image, family** | A template tagged `base` and a kind, named `<family>-v<N>`; the versions of one OS build make its family |
-| **environment, dev slot** | A dev slot is a numbered pool with its own bridges and VMID block; the environment is the domain-named VMs in it |
+| **environment, dev slot** | A dev slot is a numbered pool with its own bridges and VMID block; the environment is the domain-named VMs in it, or, while it has none, the slot pool's comment marker `[env <domain>]` (`pods.EnvMarker`; the rest of the comment is the admins'). An add into a marker-only environment clears the marker once all its hosts succeed; a blocked or failed host, or a narrowed retry, leaves it beside the VMs. A marker naming another domain than the VMs makes the slot mixed, as VMs of two domains do |

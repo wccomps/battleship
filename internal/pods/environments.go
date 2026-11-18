@@ -144,11 +144,14 @@ func (h EnvHost) LANAddr(env Environment) netip.Addr {
 // Environment is what a slot holds.
 type Environment struct {
 	Slot   Slot
-	Domain string    // the domain its VMs share; "" when free or Mixed
+	Domain string    // the domain its VMs share, else its Marker's; "" when free or Mixed
 	Hosts  []EnvHost // the VMs in its pool, by name
+	// Marker is the domain its pool's comment records (EnvMarker): an
+	// environment created without machines. Reading it needs Pool.Audit.
+	Marker string
 	// Users are VMs outside its pool with a NIC on one of its bridges.
 	Users []string
-	Mixed bool // its VMs don't all share one domain
+	Mixed bool // its VMs, and Marker, don't all share one domain
 	LAN   config.LAN
 	// HalfDeleted are VMs, in its pool or else its VMIDs, that a failed
 	// destroy left locked as destroyed, without their names. Only tearing it
@@ -156,8 +159,9 @@ type Environment struct {
 	HalfDeleted []EnvHost
 }
 
-// EnvByDomain is the environment, of envs, whose hosts share domain (the
-// lowest slot if two do). Environments leaves a mixed one's Domain empty.
+// EnvByDomain is the environment, of envs, whose hosts or marker share
+// domain (the lowest slot if two do). Environments leaves a mixed one's
+// Domain empty.
 func EnvByDomain(envs []Environment, domain string) (Environment, bool) {
 	for _, e := range envs {
 		if domain != "" && e.Domain == domain {
@@ -179,7 +183,13 @@ func slotN(envs []Environment, n int) (Environment, error) {
 func (e Environment) Gateway() netip.Addr { return e.LAN.Host(GatewayOctet) }
 
 func (e Environment) Free() bool {
-	return len(e.Hosts) == 0 && len(e.Users) == 0 && len(e.HalfDeleted) == 0
+	return len(e.Hosts) == 0 && len(e.Users) == 0 && len(e.HalfDeleted) == 0 && e.Marker == ""
+}
+
+// Empty reports whether it is an environment without VMs, half-deleted ones
+// included: one only its marker records.
+func (e Environment) Empty() bool {
+	return len(e.Hosts) == 0 && len(e.HalfDeleted) == 0 && e.Marker != ""
 }
 
 func (e Environment) HasRouter() bool { return e.RouterName() != "" }
@@ -255,14 +265,18 @@ func (e Environment) DNS() string {
 }
 
 // Environments reads every slot: the VMs in its pool with their notes, the
-// other VMs on its bridges, and its half-deleted VMs. Templates never run,
-// so they hold no slot; team VMs (see Classify) are on team bridges, so
-// they aren't read, but a VM only named like one may be anywhere. It also
-// returns the VM listing it read.
+// other VMs on its bridges, its half-deleted VMs, and its pool's marker.
+// Templates never run, so they hold no slot; team VMs (see Classify) are on
+// team bridges, so they aren't read, but a VM only named like one may be
+// anywhere. It also returns the VM listing it read.
 func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM, error) {
 	vms, err := p.API.ClusterVMs(ctx)
 	if err != nil {
 		return nil, nil, err
+	}
+	pools, err := p.API.Pools(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading the slot pools: %w", err)
 	}
 	slots := Slots(p.Cfg.Environments)
 	byPool := map[string]int{}
@@ -272,6 +286,11 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 		envs[i].Slot, envs[i].LAN = s, p.Cfg.Environments.Subnet
 		byPool[s.Pool] = i
 		bridgeSlot[s.IntBridge], bridgeSlot[s.ExtBridge] = i, i
+	}
+	for _, pl := range pools {
+		if si, ok := byPool[pl.ID]; ok {
+			envs[si].Marker = EnvMarker(pl.Comment)
+		}
 	}
 	var read []proxmox.VM
 	for _, vm := range vms {
@@ -367,8 +386,10 @@ func (p Planner) buildEnvHost(vm proxmox.VM, cfg map[string]string, slot Slot, c
 	return h
 }
 
+// setEnvDomain sets e.Domain from its marker and hosts' names; disagreeing ones make it Mixed.
 func setEnvDomain(e *Environment) {
 	sort.Slice(e.Hosts, func(a, b int) bool { return e.Hosts[a].Name < e.Hosts[b].Name })
+	e.Domain = e.Marker
 	for _, h := range e.Hosts {
 		d := Domain(h.Name)
 		switch {

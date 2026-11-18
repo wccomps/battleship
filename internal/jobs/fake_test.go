@@ -97,8 +97,8 @@ func (f *fakeAPI) as(src func() proxmox.Credential, refused func()) pods.API {
 	return &boundFake{Fake: f.Fake, f: f, src: src, refused: refused}
 }
 
-// permsFake is boundFake that also reads the caller's privileges, from
-// the fake's pvetest, with the credential of the call.
+// permsFake is boundFake that also reads the caller's privileges, and the
+// pools' comments, from the fake's pvetest, with the credential of the call.
 type permsFake struct{ *boundFake }
 
 // view is the pvetest client as the call's credential, calling refused on
@@ -121,6 +121,14 @@ func (p *permsFake) PermissionsAt(ctx context.Context, path string) (map[string]
 
 func (p *permsFake) TagAccess(ctx context.Context) (proxmox.TagAccess, error) {
 	return p.view().TagAccess(ctx)
+}
+
+func (p *permsFake) Pools(ctx context.Context) ([]proxmox.Pool, error) {
+	return p.view().Pools(ctx)
+}
+
+func (p *permsFake) SetPoolComment(ctx context.Context, pool, comment string) error {
+	return p.view().SetPoolComment(ctx, pool, comment)
 }
 
 // boundFake checks the credential of the calls below; the others go

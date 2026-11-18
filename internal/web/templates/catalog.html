@@ -33,6 +33,9 @@
 {{- with .Users}}
 <p class="fix">{{icon "warn"}}<span>{{if $b.Hosts}}Also on its networks, from outside {{$b.Slot}}{{else}}Nothing is in {{$b.Slot}}, but VMs outside it are on its networks, so Create skips it{{end}}: {{range $i, $u := .}}{{if $i}}, {{end}}<code>{{$u}}</code>{{end}}.</span></p>
 {{- end}}
+{{- if .Empty}}
+<p class="say">No machines yet: {{.Slot}} records {{.Domain}}, so Create skips it. Add hosts to it, or tear it down to free the slot.</p>
+{{- end}}
 {{- with .Hosts}}
 <table class="tbl envt">
 <thead><tr><th scope="col">Host</th><th scope="col">Address</th><th scope="col">Status · image</th><th scope="col">Notes</th><th scope="col" class="chev"><span class="sr">Open</span></th></tr></thead>

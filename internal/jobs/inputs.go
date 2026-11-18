@@ -40,7 +40,7 @@ type Inputs struct {
 	// Environments.
 	Domain     string   `json:"domain,omitempty"`
 	Slot       string   `json:"slot,omitempty"`        // create, teardown: two digits, e.g. "02"; empty takes the first free, or the domain's
-	Router     string   `json:"router,omitempty"`      // create: "name=family"
+	Router     string   `json:"router,omitempty"`      // create, add, optional: "name=family"
 	EnvHosts   []string `json:"env_hosts,omitempty"`   // create, add: "name=family[:octet]" each
 	EnvHost    string   `json:"env_host,omitempty"`    // env-edit, env-delete-host: host label or full VM name
 	Octet      int      `json:"octet,omitempty"`       // env-edit: FirstHostOctet..LastHostOctet, ClearOctet, or 0
@@ -136,13 +136,7 @@ var requests = map[pods.Kind]request{
 	},
 	pods.KindEnvCreate: {
 		takes: inDomain | inSlot | inVMs,
-		check: func(in Inputs) []error {
-			if req, _ := in.EnvRequest(); req.Router.Host == "" {
-				return []error{errors.New("a new environment needs a router, e.g. gw=opnsense")}
-			}
-			return nil
-		},
-		plan: envPlan(pods.Planner.EnvCreate),
+		plan:  envPlan(pods.Planner.EnvCreate),
 	},
 	pods.KindEnvAdd: {
 		takes: inDomain | inVMs,

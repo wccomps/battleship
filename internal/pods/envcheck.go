@@ -55,9 +55,6 @@ func CheckEnv(kind Kind, envs []Environment, queued []Slot, images []BaseImage, 
 			err = EnvProblem{Field: FieldSlot, Why: allSlotsInUse}
 		}
 		add(err)
-		if !withRouter {
-			add(errNoRouter)
-		}
 	case KindEnvAdd:
 		e, ok := EnvByDomain(envs, req.Domain)
 		if !ok {
@@ -205,7 +202,5 @@ func oneRouter(env Environment, req EnvRequest) error {
 	}
 	return nil
 }
-
-var errNoRouter = EnvProblem{Field: FieldName, Why: "a new environment needs a router"}
 
 const allSlotsInUse = "every dev slot is in use; archive an environment to free one"

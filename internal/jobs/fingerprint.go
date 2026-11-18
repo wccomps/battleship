@@ -38,6 +38,7 @@ func Fingerprint(plan *pods.Plan) string {
 		// reads them: changed since the preview, the job is stale, not a lost
 		// update.
 		Replaces *pods.NotesRead `json:",omitempty"`
+		Record   string          `json:",omitempty"`
 	}
 	type fpTemplate struct {
 		Name           string
@@ -87,6 +88,7 @@ func Fingerprint(plan *pods.Plan) string {
 
 			Source: sourceFP(it.Source), Pool: it.Pool, Tags: it.Tags, Notes: it.Notes,
 			NICs: it.NICs, CPU: it.CPU, Guest: it.Guest, Supersedes: sourceFP(it.Supersedes), Details: it.Details, Replaces: it.DetailsWas,
+			Record: it.Record,
 		})
 	}
 	b, _ := json.Marshal(fp) // plain structs of strings, ints, bools and addresses can't fail

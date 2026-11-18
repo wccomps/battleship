@@ -61,12 +61,15 @@
 {{- if and .Image (not $found)}}<option value="{{.Image}}" selected data-stale>{{.Image}} · not a current router image</option>{{end}}
 </select>
 <div class="addr fixed a"><span class="pre l">{{$.Data.Subnet}}.</span><span class="pre s">.</span><b>{{$.Data.Gateway}}</b></div>
-<span class="x"></span>
+<button type="submit" class="btn ghost sq x" name="drop" value="router" formnovalidate data-remove-row aria-label="Remove router">{{icon "dash"}}</button>
 {{- with .Err}}<span class="ferr" id="r-err">{{.}}</span>{{end}}
 </div>
 {{- end}}
-{{- range .Rows}}
+{{- range .RowsAndSpare}}
 {{- $h := .}}{{$err := print "h" .N "-err"}}
+{{- if .Spare}}
+<template data-spare>
+{{- end}}
 <div class="mrow" data-row>
 <input class="inp n" type="text" name="host_name" value="{{.Name}}" placeholder="name" aria-label="Host {{.N}} name" autocomplete="off" spellcheck="false"{{if eq .Bad "name"}} aria-invalid="true" aria-describedby="{{$err}}"{{end}}>
 <select class="inp im" name="host_image" aria-label="Host {{.N}} image"{{if eq .Bad "image"}} aria-invalid="true" aria-describedby="{{$err}}"{{end}}>
@@ -75,12 +78,16 @@
 {{- if and .Image (not $found)}}<option value="{{.Image}}" selected data-stale>{{.Image}} · not a current image</option>{{end}}
 </select>
 <label class="addr a"><span class="pre l">{{$.Data.Subnet}}.</span><span class="pre s">.</span><input type="text" name="host_octet" value="{{.Octet}}" inputmode="numeric" placeholder="auto" aria-label="Host {{.N}} last octet" autocomplete="off"{{if eq .Bad "addr"}} aria-invalid="true" aria-describedby="{{$err}}"{{end}}></label>
-<button type="button" class="btn ghost sq x" data-remove-row aria-label="Remove host {{.N}}" hidden>{{icon "close"}}</button>
+<button type="submit" class="btn ghost sq x" name="drop" value="{{.N}}" formnovalidate data-remove-row aria-label="Remove host {{.N}}">{{icon "dash"}}</button>
 {{- with .Err}}<span class="ferr" id="{{$err}}">{{.}}</span>{{end}}
 </div>
+{{- if .Spare}}
+</template>
+{{- end}}
 {{- end}}
 </div>
-<div class="madd"><button type="submit" class="btn sm" name="more" value="yes" formnovalidate data-add-row>{{icon "plus"}}Add host</button><span class="hint">Blank address: one is picked · blank rows are ignored</span></div>
+<input type="hidden" name="rows" value="posted">
+<div class="madd"><button type="submit" class="btn sq" name="more" value="yes" formnovalidate data-add-row aria-label="Add host" title="Add host">{{icon "plus"}}</button><span class="hint">Blank address: one is picked · blank rows are ignored</span></div>
 </fieldset>
 {{- if or .Routers .Others}}
 <details>

@@ -337,6 +337,9 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAc
 			ns = append(ns, one(VMPath(it.VMID), "VM.Allocate"))
 		case StepFreeDisks:
 			ns = append(ns, one("/storage/"+cfg.Deploy.Storage, "Datastore.Allocate"))
+		case StepRecord, StepClearRecord:
+			// The step reads the comment it rewrites, so it keeps the rest.
+			ns = append(ns, one(PoolPath(it.Pool), "Pool.Allocate"), one(PoolPath(it.Pool), "Pool.Audit"))
 		case StepLabel, StepDetails, StepNotes:
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Options"))
 		case StepSetTag:

@@ -186,13 +186,16 @@ const (
 	fieldImageKind   = "image_kind"
 	fieldImage       = "image"
 	// The environment forms' router and host rows (envForm), read into
-	// Router and EnvHosts when present.
+	// Router and EnvHosts when the form posts fieldRows ("posted"), even
+	// with no rows left.
+	fieldRows        = "rows"
 	fieldRouterName  = "router_name"
 	fieldRouterImage = "router_image"
 	fieldHostName    = "host_name"
 	fieldHostImage   = "host_image"
 	fieldHostOctet   = "host_octet"
 	fieldMore        = "more" // asks the form again with more host rows (blankRows)
+	fieldDrop        = "drop" // asks the form again without a row (dropRouter, or a host row's number)
 	// The details fields (detailsFields). fieldDetails is yes, or
 	// detailsWithNotes when the free text comes too, which a server from
 	// before Edit notes refuses rather than drop the text.
@@ -241,13 +244,11 @@ func formInputs(kind pods.Kind, form url.Values) jobs.Inputs {
 			Image:     form.Get(fieldImage),
 		},
 	}
-	if (kind == pods.KindEnvCreate || kind == pods.KindEnvAdd) && form.Has(fieldRouterImage) {
+	if (kind == pods.KindEnvCreate || kind == pods.KindEnvAdd) && form.Has(fieldRows) {
 		in.Router = ""
-		if r := rawRow(form.Get(fieldRouterName), form.Get(fieldRouterImage), ""); r.Image != "" {
+		if r := rawRow(form.Get(fieldRouterName), form.Get(fieldRouterImage), ""); form.Has(fieldRouterName) && r.Image != "" {
 			in.Router = r.line()
 		}
-	}
-	if (kind == pods.KindEnvCreate || kind == pods.KindEnvAdd) && form.Has(fieldHostName) {
 		in.EnvHosts = nil
 		for _, row := range postedRows(form) {
 			if line := row.line(); line != "" {

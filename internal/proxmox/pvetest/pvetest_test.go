@@ -121,3 +121,29 @@ func TestClientVerifiesTheFakeWithItsCA(t *testing.T) {
 		t.Fatal("a client without the CA talked to Proxmox")
 	}
 }
+
+// GET /pools shows a pool's comment only with Pool.Audit on it; PUT /pools
+// sets it only with Pool.Allocate, keeping it on another's refusal.
+func TestPoolCommentsFollowPoolPrivileges(t *testing.T) {
+	pve := pvetest.New(t)
+	pve.SetPool("dev-01", "lab [env kilo.alpha]")
+	pve.SetPool("dev-02", "")
+	pve.AddUser("aud@auth.example.org", map[string]map[string]bool{"/pool/dev-01": {"Pool.Audit": true}})
+	pve.AddUser("alloc@auth.example.org", map[string]map[string]bool{"/pool/dev-02": {"Pool.Allocate": true}})
+	aud := pve.Client().As(pve.Ticket("aud@auth.example.org"))
+	alloc := pve.Client().As(pve.Ticket("alloc@auth.example.org"))
+
+	pools, err := aud.Pools(bg)
+	if err != nil || len(pools) != 1 || pools[0] != (proxmox.Pool{ID: "dev-01", Comment: "lab [env kilo.alpha]"}) {
+		t.Fatalf("Pool.Audit on dev-01 lists %+v, %v", pools, err)
+	}
+	if pools, err = alloc.Pools(bg); err != nil || len(pools) != 0 {
+		t.Fatalf("without Pool.Audit: %+v, %v; want no pools", pools, err)
+	}
+	if err := aud.SetPoolComment(bg, "dev-01", "x"); !proxmox.IsForbidden(err) || pve.PoolComment("dev-01") != "lab [env kilo.alpha]" {
+		t.Fatalf("Pool.Audit only: %v, comment %q", err, pve.PoolComment("dev-01"))
+	}
+	if err := alloc.SetPoolComment(bg, "dev-02", "[env lima.alpha]"); err != nil || pve.PoolComment("dev-02") != "[env lima.alpha]" {
+		t.Fatalf("Pool.Allocate: %v, comment %q", err, pve.PoolComment("dev-02"))
+	}
+}

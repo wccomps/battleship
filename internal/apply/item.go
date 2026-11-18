@@ -17,6 +17,9 @@ func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tp
 		e.emit(it.Name, "", EventStarted, "")
 		return e.endItem(ctx, it, "", -1, false, errors.New("no steps planned"))
 	}
+	if it.IsRecord() {
+		return e.runSteps(ctx, kind, it, tpl, start, end, started, false)
+	}
 	vm, exists := e.lookup(it.VMID, it.Name)
 	if !exists && it.Rename != "" {
 		vm, exists = e.lookup(it.VMID, it.Rename)
@@ -48,6 +51,11 @@ func (e *Executor) runItem(ctx context.Context, kind pods.Kind, it pods.Item, tp
 		e.emit(it.Name, "", EventStarted, "")
 		return e.endItem(ctx, it, "", -1, false, fmt.Errorf("VM %s (%d) no longer exists", it.Name, it.VMID))
 	}
+	return e.runSteps(ctx, kind, it, tpl, start, end, started, exists)
+}
+
+// runSteps runs it.Steps[start:end]; exists is whether its VM does.
+func (e *Executor) runSteps(ctx context.Context, kind pods.Kind, it pods.Item, tpl *tplBuild, start, end int, started, exists bool) error {
 	for i := start; i < end; i++ {
 		step := it.Steps[i]
 		if ctx.Err() != nil {
@@ -264,8 +272,33 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 			e.setTornDown(it.Name)
 		}
 		return err == nil, err
+
+	case pods.StepRecord, pods.StepClearRecord:
+		return e.setRecord(ctx, it, step)
 	}
 	return false, fmt.Errorf("unknown step %q", step)
+}
+
+// setRecord writes it.Record's marker into it.Pool's comment, or takes it
+// out (StepClearRecord); Proxmox replaces a comment whole, so it is read first.
+func (e *Executor) setRecord(ctx context.Context, it *pods.Item, step pods.Step) (bool, error) {
+	var pools []proxmox.Pool
+	if err := e.call(ctx, func() (err error) { pools, err = e.api.Pools(ctx); return }); err != nil {
+		return false, err
+	}
+	i := slices.IndexFunc(pools, func(p proxmox.Pool) bool { return p.ID == it.Pool })
+	if i < 0 {
+		return false, fmt.Errorf("pool %s isn't listed: it doesn't exist, or you don't have Pool.Audit on /pool/%s", it.Pool, it.Pool)
+	}
+	was := pools[i].Comment
+	want := pods.WithEnvMarker(was, it.Record)
+	if step == pods.StepClearRecord {
+		want = pods.WithoutEnvMarker(was, it.Record)
+	}
+	if want == was {
+		return false, nil
+	}
+	return true, e.call(ctx, func() error { return e.api.SetPoolComment(ctx, it.Pool, want) })
 }
 
 // checkVMIDFree, for a delete whose VM is no longer listed by name, fails

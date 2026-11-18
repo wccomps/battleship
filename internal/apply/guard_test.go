@@ -253,3 +253,8 @@ func (c *ctxAPI) DeleteVolume(ctx context.Context, node, storage, volid string) 
 	c.see(ctx)
 	return "", nil
 }
+
+func (c *ctxAPI) SetPoolComment(ctx context.Context, pool, comment string) error {
+	c.see(ctx)
+	return nil
+}
