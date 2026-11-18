@@ -91,7 +91,7 @@ func (e *Executor) taskUPID(ctx context.Context, vmid int, start func() (string,
 // vmid, if given, is the locked VM (a clone locks its target).
 func (e *Executor) unfollowable(ctx context.Context, upid string, vmid int, err error) error {
 	u, _ := proxmox.ParseUPID(upid)
-	if vmid == 0 && u.Type != "qmclone" {
+	if vmid == 0 {
 		vmid, _ = strconv.Atoi(u.ID)
 	}
 	node := u.Node
