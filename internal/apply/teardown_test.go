@@ -62,6 +62,10 @@ func TestHalfDeletedVMFailsWithAdvice(t *testing.T) {
 		t.Fatalf("result = %+v, want team01-teak failed", res)
 	}
 	wantHalfDeletedAdvice(t, proxmox.Describe(err))
+	// The round that saw the delete fail says how it failed.
+	if ev := rec.find("team01-teak", EventFailed); len(ev) == 0 || !strings.Contains(ev[0].Message, "the delete failed with: ") || !strings.Contains(ev[0].Message, "got lock request timeout") {
+		t.Errorf("failure events = %+v, want the first to give the delete's error", ev)
+	}
 	if ev := rec.find("team01-teak", EventDone); len(ev) != 1 || ev[0].Step != pods.StepStop {
 		t.Errorf("done events = %+v, want only the stop", ev)
 	}

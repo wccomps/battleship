@@ -298,6 +298,31 @@ func TestLeftoverDisksThatCannotBeFreedFailWithAdvice(t *testing.T) {
 	}
 }
 
+// Frees that report success but leave the disks fail with the advice and
+// no made-up cause.
+func TestLeftoverDisksFreedInVainHaveNoCause(t *testing.T) {
+	f := newCluster()
+	left := teakTeamVM(f)
+	plan := teardownTeam01(t, f)
+	f.DeleteKeepsDisks = map[int]bool{10121: true}
+	f.OnRecord = func(key string) { // runs with f.Mu held
+		if strings.HasPrefix(key, "wait:") && strings.Contains(key, ":imgdel:") {
+			for _, v := range left {
+				f.Vols[v] = 10121 // the free task ended OK, but the disk is still there
+			}
+		}
+	}
+	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Retry.Rounds = 0
+
+	res := ex.Run(context.Background(), plan)
+	err := res.Failed["team01-teak"]
+	wantLeftoverAdvice(t, err, left...)
+	if err != nil && strings.Contains(err.Error(), "freeing failed") {
+		t.Errorf("message %q gives a cause, but every free reported success", err)
+	}
+}
+
 // A retry round frees what the first attempt could not.
 func TestLeftoverDisksAreRetriedNextRound(t *testing.T) {
 	f := newCluster()

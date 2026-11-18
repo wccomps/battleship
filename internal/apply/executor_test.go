@@ -463,18 +463,29 @@ func TestOtherStopsDontWait(t *testing.T) {
 	}
 }
 
+// A run stopped before it starts runs nothing: every item reads not run,
+// saying why the run stopped, and the rounds read as skipped.
 func TestCancelledRunReportsNotRun(t *testing.T) {
-	f := newCluster()
-	plan := deployTeak(t, f, "01")
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	for _, tc := range []struct {
+		cause error
+		want  string
+	}{
+		{nil, "stopped before it started"},
+		{ErrCancelRequested, "cancelled before it started"},
+		{errors.New("lost the job lock"), "stopped (lost the job lock) before it started"},
+	} {
+		f := newCluster()
+		plan := deployTeak(t, f, "01")
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(tc.cause)
 
-	res := testExecutor(f, &recorder{}).Run(ctx, plan)
-	if err := res.Interrupted["team01-teak"]; err == nil || err.Error() != "stopped before it started" || len(res.Failed) != 0 {
-		t.Errorf("result = %+v, want team01-teak interrupted as not run", res)
-	}
-	if len(res.Succeeded) != 0 {
-		t.Errorf("Succeeded = %v, want none", res.Succeeded)
+		res := testExecutor(f, &recorder{}).Run(ctx, plan)
+		if err := res.Interrupted["team01-teak"]; err == nil || err.Error() != tc.want || len(res.Failed) != 0 {
+			t.Errorf("cause %v: result = %+v, want team01-teak interrupted with %q", tc.cause, res, tc.want)
+		}
+		if len(res.Succeeded) != 0 || !res.RoundsSkipped {
+			t.Errorf("cause %v: Succeeded = %v, RoundsSkipped = %v; want none, true", tc.cause, res.Succeeded, res.RoundsSkipped)
+		}
 	}
 }
 
@@ -967,16 +978,19 @@ func TestItemWithoutStepsFails(t *testing.T) {
 	}
 }
 
+// A retry round whose VM listing fails keeps each item's earlier error;
+// an item that never ran fails with the listing's.
 func TestFailedRefreshKeepsEarlierItemError(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
-	denied := &proxmox.APIError{Status: 403, Message: "Permission check failed (/vms/10121, VM.Config.Network)"}
+	// Retried next round, unlike a missing privilege.
+	denied := &proxmox.APIError{Status: 400, Message: "Parameter verification failed."}
 	f.FailOn("setconfig:10121", denied, denied)
 	armed := false
 	f.OnRecord = func(key string) {
 		if key == "setconfig:10121" && !armed {
 			armed = true
-			for i := 0; i < config.Default().Retry.Attempts; i++ {
+			for range config.Default().Retry.Attempts {
 				f.FailOn("cluster", &proxmox.APIError{Status: 500, Message: "pve is down"})
 			}
 		}
@@ -986,6 +1000,21 @@ func TestFailedRefreshKeepsEarlierItemError(t *testing.T) {
 	err := res.Failed["team01-teak"]
 	if err == nil || !strings.Contains(err.Error(), "network") {
 		t.Errorf("error = %v, want the original network step error", err)
+	}
+	if n := f.Called("setconfig:10121"); n != 1 {
+		t.Errorf("setconfig called %d times, want 1 (the retry round's listing failed)", n)
+	}
+
+	f = newCluster()
+	plan = deployTeak(t, f, "01")
+	for range config.Default().Retry.Attempts {
+		f.FailOn("cluster", &proxmox.APIError{Status: 500, Message: "pve is down"})
+	}
+	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Retry.Rounds = 0
+	res = ex.Run(context.Background(), plan)
+	if err := res.Failed["team01-teak"]; err == nil || !strings.HasPrefix(err.Error(), "listing VMs: ") || len(res.Interrupted) != 0 {
+		t.Errorf("never ran: result = %+v, want team01-teak failed listing VMs", res)
 	}
 }
 
@@ -1466,8 +1495,8 @@ func TestFinishedEventOmitsEmptyCleanup(t *testing.T) {
 	testExecutor(f, rec).Run(context.Background(), deployTeak(t, f, "01"))
 	infos := rec.find("", EventInfo)
 	last := infos[len(infos)-1].Message
-	if !strings.HasPrefix(last, "finished: 1 succeeded") || strings.Contains(last, "cleanup") {
-		t.Errorf("last job event = %q, want no cleanup counts when there was nothing to clean up", last)
+	if want := "finished: 1 succeeded, 0 failed, 0 blocked"; last != want {
+		t.Errorf("last job event = %q, want %q: no zero interrupted or cleanup counts", last, want)
 	}
 }
 
@@ -1687,24 +1716,33 @@ func TestRoundsNotSkippedWhenRunCompletes(t *testing.T) {
 		t.Errorf("failing run: RoundsSkipped = %v, failed = %v", res.RoundsSkipped, res.Failed)
 	}
 
-	// A stop that arrives after the last round leaves nothing skipped.
+	// A stop that arrives once no item is left to retry leaves nothing
+	// skipped, though Run is still finishing up.
 	f = newCluster()
 	f.FailOn("setconfig:10121", denied, denied)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ex := testExecutor(f, &recorder{})
 	ex.OnEvent = func(ev Event) {
-		if strings.HasPrefix(ev.Message, "finished:") {
+		if ev.Item == "team01-teak" && ev.Status == EventFailed {
 			cancel()
 		}
 	}
 	plan := deployTeak(t, f, "01")
 	if res := ex.Run(ctx, plan); res.RoundsSkipped {
-		t.Errorf("stop after the run: RoundsSkipped = true")
+		t.Errorf("stop after the last item: RoundsSkipped = true")
 	}
+
+	// A run whose items all succeed at once runs no retry round.
 	f = newCluster()
-	if res := testExecutor(f, &recorder{}).Run(context.Background(), deployTeak(t, f, "01")); res.RoundsSkipped || len(res.Failed) != 0 {
+	rec := &recorder{}
+	if res := testExecutor(f, rec).Run(context.Background(), deployTeak(t, f, "01")); res.RoundsSkipped || len(res.Failed) != 0 {
 		t.Errorf("clean run: %+v", res)
+	}
+	for _, ev := range rec.find("", EventInfo) {
+		if strings.HasPrefix(ev.Message, "retry round") {
+			t.Errorf("clean run: %q", ev.Message)
+		}
 	}
 }
 
@@ -2021,5 +2059,116 @@ func TestRebuildTearsDownExistingTeamVMsBeforeTemplateDelete(t *testing.T) {
 	res = ex.Run(context.Background(), plan)
 	if !slices.Contains(res.Removed, "team02-teak") || f.VMs[10221] != nil {
 		t.Errorf("failed rebuilt clone not removed by cleanup: Removed=%v AlreadyGone=%v VM=%v", res.Removed, res.AlreadyGone, f.VMs[10221])
+	}
+}
+
+// A round whose VM listing fails for good runs nothing; the next round
+// lists again and runs the items.
+func TestFailedListingIsRetriedNextRound(t *testing.T) {
+	f := newCluster()
+	plan := deployTeak(t, f, "01")
+	for range config.Default().Retry.Attempts {
+		f.FailOn("cluster", &proxmox.APIError{Status: 500, Message: "internal error"})
+	}
+	rec := &recorder{}
+
+	res := testExecutor(f, rec).Run(context.Background(), plan)
+	if len(res.Failed) != 0 || len(res.Interrupted) != 0 || !slices.Equal(res.Succeeded, []string{"team01-teak"}) {
+		t.Fatalf("result = %+v, want team01-teak deployed in round 1", res)
+	}
+	if ev := rec.find("", EventFailed); len(ev) != 1 || !strings.HasPrefix(ev[0].Message, "listing VMs: ") {
+		t.Errorf("job failure events = %+v, want the failed listing", ev)
+	}
+	if n := f.Called("clone:10121"); n != 1 {
+		t.Errorf("cloned %d times, want 1", n)
+	}
+}
+
+// A stop while the last round lists VMs cuts that round short: its items
+// read not run and the rounds read as skipped.
+func TestStopDuringLastRoundListingSkipsRounds(t *testing.T) {
+	f := newCluster()
+	plan := deployTeak(t, f, "01")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f.Gate = func(_ context.Context, key string) (func(), error) {
+		if key == "cluster" {
+			cancel()
+			return nil, context.Canceled
+		}
+		return nil, nil
+	}
+	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Retry.Rounds = 0
+
+	res := ex.Run(ctx, plan)
+	if !res.RoundsSkipped {
+		t.Errorf("RoundsSkipped = false, want true; result = %+v", res)
+	}
+	if err := res.Interrupted["team01-teak"]; err == nil || err.Error() != "stopped before it started" {
+		t.Errorf("Interrupted = %v, want team01-teak not run", res.Interrupted)
+	}
+}
+
+// A power item a stop keeps from its retry round reads not run with its
+// config untouched: power steps never change it.
+func TestStopBeforeRetryRoundLeavesPowerItemsUntouched(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "stopped"}, map[string]string{"name": "team01-teak"})
+	f.Add(proxmox.VM{VMID: 10221, Name: "team02-teak", Node: "birch", Status: "stopped"}, map[string]string{"name": "team02-teak"})
+	plan, err := testPlanner(f).Power(context.Background(), []string{"01", "02"}, []string{"teak"}, "start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := &proxmox.APIError{Status: 400, Message: "start: bad request"}
+	f.FailOn("power:10121:start", bad)
+	f.FailOn("power:10221:start", bad)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	listings := 0
+	f.OnRecord = func(key string) {
+		if key == "cluster" {
+			if listings++; listings == 2 { // round 1 lists, then the job is cancelled
+				cancel(ErrCancelRequested)
+			}
+		}
+	}
+
+	res := testExecutor(f, &recorder{}).Run(ctx, plan)
+	if len(res.Failed) != 0 || len(res.Interrupted) != 2 || !res.RoundsSkipped {
+		t.Fatalf("result = %+v, want both interrupted, rounds skipped", res)
+	}
+	for name, err := range res.Interrupted {
+		if err.Error() != "cancelled before it started" || LeftBy(err) != LeftUntouched {
+			t.Errorf("%s: %v (left %s), want cancelled before it started, untouched", name, err, LeftBy(err))
+		}
+	}
+	if n := f.Called("power:"); n != 2 {
+		t.Errorf("start POSTed %d times, want 2 (round 0 only)", n)
+	}
+}
+
+// An item a rebuild tears down first resumes at its clone: it reports
+// started once and its teardown steps once.
+func TestTornDownItemResumesAtItsClone(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	res := testExecutor(f, rec).Run(context.Background(), plan)
+	if len(res.Failed) != 0 || !slices.Equal(res.Succeeded, []string{"team01-teak"}) {
+		t.Fatalf("result = %+v", res)
+	}
+	if ev := rec.find("team01-teak", EventStarted); len(ev) != 1 {
+		t.Errorf("started events = %+v, want one", ev)
+	}
+	for _, ev := range rec.find("team01-teak", EventSkipped) {
+		if ev.Step == pods.StepStop || ev.Step == pods.StepDelete {
+			t.Errorf("teardown step reported again: %+v", ev)
+		}
 	}
 }

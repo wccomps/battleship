@@ -141,3 +141,23 @@ func TestBaselineLostAnswerIsNotResent(t *testing.T) {
 		t.Errorf("baseline POSTed %d times, want 1", n)
 	}
 }
+
+// A request that failed without taking the snapshot is sent again: the
+// check before the resend finds no snapshot.
+func TestTakeSnapshotFailedRequestIsResent(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
+	plan := snapshotPlan(t, f, pods.SnapshotRequest{Name: "before-scoring"})
+	f.FailOn("snapshot:10121", &proxmox.APIError{Status: 500, Message: "Connection timed out"})
+
+	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
+	if len(res.Failed) != 0 || !slices.Equal(res.Succeeded, []string{"team01-teak"}) {
+		t.Fatalf("result = %+v", res)
+	}
+	if n := f.Called("snapshot:"); n != 2 {
+		t.Errorf("snapshot POSTed %d times, want 2", n)
+	}
+	if snaps := f.VMs[10121].Snapshots; !slices.Equal(snaps, []string{"before-scoring"}) {
+		t.Errorf("snapshots = %v", snaps)
+	}
+}
