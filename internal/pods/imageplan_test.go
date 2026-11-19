@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"strings"
@@ -112,6 +113,7 @@ func TestSourceVMID(t *testing.T) {
 		"battleship: source=0150":              0,
 		"battleship: source=+150":              0,
 		"battleship: source=99":                0,
+		"battleship: source=100":               100,
 		"battleship: source=x":                 0,
 		"source=8920":                          0,
 		"":                                     0,
@@ -154,5 +156,51 @@ func TestImageRegisterWarnings(t *testing.T) {
 	want := []string{"gw-build: missing router NIC (needs net0 and net1); net0 has VLAN tag 5; CPU x86-64-v2-AES, expected baseline; guest agent off; CD-ROM attached."}
 	if !slices.Equal(plan.Notices, want) {
 		t.Errorf("Notices = %v, want %v", plan.Notices, want)
+	}
+}
+
+// The last VMID of the images range is handed out when it's the only free one.
+func TestImageRegisterTakesTheRangesLastVMID(t *testing.T) {
+	cfg := envConfig()
+	cfg.Images.VMIDRange = "8000-8001"
+	plan, err := NewPlanner(imageFake(), cfg).ImageRegister(context.Background(), ImageRequest{VMID: 150, Family: "debian-12"})
+	if err != nil || plan.Items[0].VMID != 8001 {
+		t.Fatalf("ImageRegister = %+v, %v; want VMID 8001", plan, err)
+	}
+}
+
+// A source with nothing to warn about gives no notice.
+func TestImageRegisterCleanSourceHasNoNotices(t *testing.T) {
+	f := imageFake()
+	f.Add(proxmox.VM{VMID: 152, Name: "clean-debian", Node: "birch", Status: "stopped"},
+		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:01:52,bridge=vmbr0"})
+	plan, err := NewPlanner(f, envConfig()).ImageRegister(context.Background(), ImageRequest{VMID: 152, Family: "debian-12"})
+	if err != nil || plan.Items[0].Blocked != "" {
+		t.Fatalf("ImageRegister = %+v, %v", plan, err)
+	}
+	if len(plan.Notices) != 0 {
+		t.Errorf("Notices = %q, want none", plan.Notices)
+	}
+}
+
+// SourceDetails reads the VM's notes, and gives none when it can't.
+func TestSourceDetails(t *testing.T) {
+	ctx := context.Background()
+	f := imageFake()
+	f.VMs[150].Config["description"] = "**Details**\n- OS: Debian 12"
+	p := NewPlanner(f, envConfig())
+	if d := p.SourceDetails(ctx, 150); d != (ImageDetails{OS: "Debian 12"}) {
+		t.Errorf("SourceDetails = %+v, want OS Debian 12", d)
+	}
+	if d := p.SourceDetails(ctx, 999); !d.Empty() {
+		t.Errorf("missing VM: %+v", d)
+	}
+	f.FailOn("config:150", errors.New("no access"))
+	if d := p.SourceDetails(ctx, 150); !d.Empty() {
+		t.Errorf("unreadable config: %+v", d)
+	}
+	f.FailOn("cluster", errors.New("down"))
+	if d := p.SourceDetails(ctx, 150); !d.Empty() {
+		t.Errorf("no cluster list: %+v", d)
 	}
 }

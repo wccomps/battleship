@@ -117,3 +117,17 @@ func TestPropBuiltTemplatesAreNotImages(t *testing.T) {
 		}
 	})
 }
+
+// VMs that aren't candidates don't hide the ones listed after them.
+func TestRegisterCandidatesPastSkippedVMs(t *testing.T) {
+	cfg := envConfig()
+	pool := cfg.Images.Pool
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 300, Name: "old-v1", Node: "alder", Pool: pool, Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 301, Name: "teak-build", Node: "alder", Pool: pool, Status: "stopped"}, map[string]string{"agent": "1", "ostype": "l26"})
+	vms, _ := f.ClusterVMs(context.Background())
+	got := NewPlanner(f, cfg).RegisterCandidates(context.Background(), vms, nil)
+	if len(got) != 1 || got[0].VMID != 301 || got[0].Family != "teak" || got[0].Blocked != "" {
+		t.Errorf("RegisterCandidates = %+v, want 301", got)
+	}
+}
