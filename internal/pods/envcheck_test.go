@@ -193,6 +193,19 @@ func TestCheckEnvRouterAfterOtherHosts(t *testing.T) {
 	}
 }
 
+// A Windows host name of exactly MaxWindowsHostname characters is allowed.
+func TestCheckEnvWindowsNameAtMaxLength(t *testing.T) {
+	p := checkFake()
+	envs, vms, err := p.Environments(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := strings.Repeat("w", MaxWindowsHostname)
+	if got := CheckEnv(KindEnvAdd, envs, nil, BaseImages(vms), EnvRequest{Domain: "kilo.alpha", Hosts: []HostSpec{{Host: name, Family: "win2022"}}}); len(got) != 0 {
+		t.Errorf("%q: %+v", name, got)
+	}
+}
+
 // A resumed host keeps the address it has; one without an address yet
 // claims the one it names, before any new host can, and a resumed host
 // doesn't stop later hosts claiming theirs.
