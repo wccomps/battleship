@@ -727,6 +727,12 @@ func TestTypedConfirmation(t *testing.T) {
 					t.Errorf("typed %q: confirm = %d, want 422", wrong, rec.Code)
 				}
 				contains(t, "wrongly typed", rec.Body.String(), "Type the pod range to confirm", "exactly as shown: "+tc.typed)
+				// Nothing typed asks for it; something wrong says what was typed.
+				said := "To confirm, type the pod range exactly as shown: " + tc.typed + "."
+				if wrong != "" {
+					said = "You typed &#34;" + wrong + "&#34;, which isn&#39;t the pod range."
+				}
+				contains(t, "wrongly typed", rec.Body.String(), said)
 				// The page can be confirmed again: same preview.
 				if _, again := confirmOf(t, rec.Body.String()); again.Get("nonce") != form.Get("nonce") {
 					t.Errorf("typed %q: the page has another preview", wrong)
@@ -743,6 +749,27 @@ func TestTypedConfirmation(t *testing.T) {
 				t.Errorf("jobs = %d, want %d", n, before+1)
 			}
 		})
+	}
+}
+
+// The flash after a confirm says what was submitted, naming one pod or
+// several.
+func TestSubmitFlashNamesThePods(t *testing.T) {
+	h := newHarness(t)
+	h.poll()
+	op := h.login(asOperator)
+	for _, tc := range []struct{ teams, want string }{
+		{"1", "force stop on pod 01 (2 VMs)."},
+		{"1-2", "force stop on pods 01, 02 (4 VMs)."},
+	} {
+		action, form, _ := h.preview(&op, "/power", url.Values{"teams": {tc.teams}, "action": {"stop"}})
+		rec := h.post(&op, action, form)
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("teams %s: confirm = %d\n%s", tc.teams, rec.Code, rec.Body)
+		}
+		if f := flashOf(rec); !strings.Contains(f, " submitted: "+tc.want) {
+			t.Errorf("teams %s: flash = %q, want it to say %q", tc.teams, f, tc.want)
+		}
 	}
 }
 
