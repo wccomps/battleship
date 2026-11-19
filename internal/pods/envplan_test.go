@@ -249,6 +249,9 @@ func TestEnvCreateWithABadOpsCAKey(t *testing.T) {
 	cfg := envConfig()
 	cfg.Environments.OpsCAKey = "not a key"
 	plan := create(t, NewPlanner(envFake(), cfg), "teak=debian-12", "oak=win2022")
+	if len(plan.Items) != 3 {
+		t.Fatalf("items = %+v", plan.Items)
+	}
 	if gw := plan.Items[0]; gw.Blocked != "" || len(gw.Steps) == 0 {
 		t.Errorf("router = %+v", gw)
 	}
