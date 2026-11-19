@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -96,7 +97,8 @@ func TestDeployPlanReusesTemplateAndConvergesExistingVM(t *testing.T) {
 		t.Errorf("template not reused: %+v", plan.Templates[0])
 	}
 	it := plan.Items[0]
-	if it.Node != "spruce" || it.Steps[0] == StepClone {
+	// Converging keeps the VM: no stop, delete or clone.
+	if want := []Step{StepNetwork, StepDiskLimits, StepCDROM, StepNotes, StepSetTag, StepStart}; it.Node != "spruce" || !reflect.DeepEqual(it.Steps, want) {
 		t.Errorf("existing VM should converge without cloning: %+v", it)
 	}
 
@@ -132,23 +134,125 @@ func TestDeployPlanRebuildBlockedByClones(t *testing.T) {
 	f := newCluster()
 	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
 	f.Add(proxmox.VM{VMID: 10521, Name: "team05-teak", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 10621, Name: "team06-teak", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "spruce"}, nil)
 
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(plan.Templates[0].Blocked, "team05-teak") {
-		t.Errorf("template Blocked = %q", plan.Templates[0].Blocked)
+	// The first clone found (by VMID) is named.
+	if got, want := plan.Templates[0].Blocked, "pod VMs such as team05-teak still use this template; tear them down first"; got != want {
+		t.Errorf("template Blocked = %q, want %q", got, want)
 	}
-	if !strings.HasPrefix(plan.Items[0].Blocked, "template teak.tango.delta.tpl:") {
-		t.Errorf("item Blocked = %q", plan.Items[0].Blocked)
+	// The pod's own VM is blocked where it is.
+	if it := plan.Items[0]; !strings.HasPrefix(it.Blocked, "template teak.tango.delta.tpl:") || it.Node != "spruce" {
+		t.Errorf("item = %+v", it)
+	}
+}
+
+// A rebuild is held up only by other pods' VMs of the template's host.
+func TestDeployPlanRebuildIgnoresOtherHostsClones(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10225, Name: "team02-oak", Node: "birch"}, nil)
+	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tpl := plan.Templates[0]; tpl.Blocked != "" || !tpl.Rebuild {
+		t.Errorf("template = %+v", tpl)
+	}
+}
+
+// A rebuild whose pod VMs can't be deleted blocks the template, naming the
+// first such VM, past a template that isn't rebuilt.
+func TestDeployPlanRebuildBlockedByUndeletableVMs(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10150, Name: "team01-teak", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 10250, Name: "team02-teak", Node: "cedar"}, nil)
+	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01", "02"}, Rebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oak := plan.Templates[0]; oak.Name != "oak.tango.delta.tpl" || oak.Rebuild || oak.Blocked != "" {
+		t.Fatalf("oak = %+v", oak)
+	}
+	if got, want := plan.Templates[1].Blocked, "pod VMs such as team01-teak still use this template; tear them down first"; got != want {
+		t.Errorf("teak Blocked = %q, want %q", got, want)
+	}
+}
+
+// A pod VM that is converged, not rebuilt, stays on its node even when the
+// pod's other VMs are mostly elsewhere.
+func TestDeployPlanConvergedVMStaysOnItsNode(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "spruce"}, nil)
+	f.Add(proxmox.VM{VMID: 10110, Name: "team01-elm", Node: "birch"}, nil)
+	f.Add(proxmox.VM{VMID: 10111, Name: "team01-ash", Node: "birch"}, nil)
+	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := plan.Items[0]; it.Node != "spruce" || it.Blocked != "" {
+		t.Errorf("item = %+v", it)
+	}
+}
+
+// A template may sit at template_vmid_base itself; a clean master gives no
+// notices.
+func TestDeployPlanTemplateAtVMIDBase(t *testing.T) {
+	f := podstest.New("cedar")
+	f.Add(proxmox.VM{VMID: 100, Name: "edge.x", Node: "cedar", Tags: "dev"}, map[string]string{"net0": "virtio=BC:24:11:00:01:00,bridge=vmbr0", "agent": "1"})
+	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "edge.*", Teams: []string{"01"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tpl := plan.Templates[0]; tpl.VMID != 9000 || tpl.Blocked != "" {
+		t.Errorf("template = %+v", tpl)
+	}
+	if it := plan.Items[0]; it.VMID != 10100 || it.Blocked != "" {
+		t.Errorf("item = %+v", it)
+	}
+	if plan.Notices != nil {
+		t.Errorf("Notices = %q", plan.Notices)
+	}
+}
+
+// New pods are spread by the size of the pod being deployed, which a
+// blocked template's master doesn't add to.
+func TestDeployPlanSpreadsPodsBySizeOfUnblockedTemplates(t *testing.T) {
+	f := podstest.New("cedar", "birch")
+	f.Add(proxmox.VM{VMID: 50, Name: "load", Node: "cedar", Status: "running", MaxMem: 4 << 30}, nil)
+	f.Add(proxmox.VM{VMID: 101, Name: "a.x", Node: "cedar", Tags: "dev", MaxMem: 8 << 30}, nil)
+	f.Add(proxmox.VM{VMID: 102, Name: "b.x", Node: "cedar", Tags: "dev"}, nil)
+	f.Add(proxmox.VM{VMID: 9002, Name: "b.x.tpl", Node: "cedar"}, nil) // not a template: b is blocked
+	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "*.x", Teams: []string{"01", "02", "03"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pods of 8 GiB: birch (0), then cedar (4 GiB), then birch (8 GiB).
+	nodes := map[string]string{}
+	for _, it := range plan.Items {
+		if it.Host == "a" {
+			nodes[it.Team] = it.Node
+		}
+	}
+	if want := map[string]string{"01": "birch", "02": "cedar", "03": "birch"}; !reflect.DeepEqual(nodes, want) {
+		t.Errorf("nodes = %v, want %v", nodes, want)
 	}
 }
 
 func TestDeployPlanExplainsUntaggedMasters(t *testing.T) {
 	_, err := testPlanner(newCluster()).Deploy(context.Background(), DeployRequest{Pattern: "notes.*", Teams: []string{"01"}})
-	if err == nil || !strings.Contains(err.Error(), "lack the tag") {
-		t.Errorf("err = %v", err)
+	if want := `no master VMs match "notes.*" with tag "dev" (1 match but lack the tag, e.g. notes.tango.delta)`; err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %s", err, want)
+	}
+	_, err = testPlanner(newCluster()).Deploy(context.Background(), DeployRequest{Pattern: "pine.*", Teams: []string{"01"}})
+	if want := `no master VMs match "pine.*" with tag "dev"`; err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %s", err, want)
 	}
 }
 
@@ -433,7 +537,7 @@ func TestDuplicateHostAcrossMastersBlocksBothTemplates(t *testing.T) {
 		t.Fatalf("templates = %+v", plan.Templates)
 	}
 	for _, tpl := range plan.Templates {
-		if !strings.Contains(tpl.Blocked, "both map to pod VM names like team01-teak") ||
+		if !strings.HasPrefix(tpl.Blocked, "hosts of ") || !strings.Contains(tpl.Blocked, "both map to pod VM names like team01-teak") ||
 			!strings.Contains(tpl.Blocked, "teak.tango.delta") || !strings.Contains(tpl.Blocked, "teak.kilo.delta") {
 			t.Errorf("%s Blocked = %q", tpl.Name, tpl.Blocked)
 		}
@@ -549,5 +653,172 @@ func TestDeployPlanRebuildReplacesInTeamVMsAndBlocksOnBlockedVM(t *testing.T) {
 	}
 	if !strings.HasPrefix(plan.Items[0].Blocked, "template teak.tango.delta.tpl:") || plan.Items[0].Node != "spruce" {
 		t.Errorf("team01-teak = %+v", plan.Items[0])
+	}
+}
+
+func TestKindFacts(t *testing.T) {
+	for _, k := range Kinds {
+		onEnv := k == KindEnvAdd || k == KindEnvTeardown
+		retryable := !k.Teamless() || k == KindEnvCreate || k == KindEnvAdd || k == KindEnvTeardown
+		if k.OnEnvironment() != onEnv || k.Retryable() != retryable || k.RetriedWhole() != (k == KindEnvTeardown) {
+			t.Errorf("%s: OnEnvironment %v, Retryable %v, RetriedWhole %v", k, k.OnEnvironment(), k.Retryable(), k.RetriedWhole())
+		}
+	}
+}
+
+func TestItemPool(t *testing.T) {
+	n := NewNaming(config.Default().Naming)
+	plan := &Plan{Items: []Item{{Name: "gw", Pool: "dev-02"}, {Name: "dc"}, {Name: "dc", Pool: "dev-01"}}}
+	for _, c := range []struct{ name, team, want string }{
+		{"dc", "", "dev-01"}, // the first item of the name with a pool
+		{"gw", "07", "pool-07"},
+		{"web", "", ""},
+	} {
+		if got := plan.ItemPool(n, c.name, c.team); got != c.want {
+			t.Errorf("ItemPool(%q, %q) = %q, want %q", c.name, c.team, got, c.want)
+		}
+	}
+}
+
+// orphanFake is a one-node cluster with template 9001, whose pod 01 and 02
+// clones (10101, 10201) are gone; vols puts volumes on deploy.storage, each
+// "<owner>/<file>".
+func orphanFake(vols ...string) *podstest.Fake {
+	f := podstest.New("cedar")
+	f.Add(proxmox.VM{VMID: 9001, Name: "dc.kilo.alpha.tpl", Node: "cedar", Template: true}, nil)
+	for _, v := range vols {
+		owner, _, _ := strings.Cut(v, "/")
+		id, err := strconv.Atoi(owner)
+		if err != nil {
+			panic(err)
+		}
+		f.Vols[config.Default().Deploy.Storage+":"+v] = id
+	}
+	return f
+}
+
+func teardownItems(t *testing.T, api Reads) []string {
+	t.Helper()
+	plan, err := NewPlanner(api, config.Default()).Teardown(context.Background(), []string{"01", "02"}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, it := range plan.Items {
+		out = append(out, it.Name+"@"+it.Node)
+	}
+	return out
+}
+
+// Every gone VM's disks are freed, however many disks each left.
+func TestTeardownFreesEveryGoneVMsDisks(t *testing.T) {
+	f := orphanFake("10101/vm-10101-disk-0.qcow2", "10101/vm-10101-disk-1.qcow2", "10201/vm-10201-disk-0.qcow2", "10201/vm-10201-disk-1.qcow2")
+	if got, want := teardownItems(t, f), []string{"team01-disks-10101@cedar", "team02-disks-10201@cedar"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("items = %v, want %v", got, want)
+	}
+}
+
+// Disks at a VMID a VM the user can't see holds are that VM's: not freed.
+func TestTeardownKeepsDisksOfUnseenVM(t *testing.T) {
+	f := orphanFake("10101/vm-10101-disk-0.qcow2", "10201/vm-10201-disk-0.qcow2")
+	f.Unseen = map[int]bool{10101: true}
+	if got, want := teardownItems(t, f), []string{"team02-disks-10201@cedar"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("items = %v, want %v", got, want)
+	}
+	// A disk of 10201's filed under 10101 is still 10201's to free.
+	f = orphanFake("10101/vm-10101-disk-0.qcow2", "10101/vm-10201-disk-0.qcow2")
+	f.Unseen = map[int]bool{10101: true}
+	if got, want := teardownItems(t, f), []string{"team02-disks-10201@cedar"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("filed under 10101: items = %v, want %v", got, want)
+	}
+}
+
+// A teardown that can't tell whether a VMID is free fails rather than
+// freeing its disks.
+func TestTeardownFailsWhenVMIDUseUnknown(t *testing.T) {
+	f := orphanFake("10101/vm-10101-disk-0.qcow2")
+	f.FailOn("vmid-held:10101", errors.New("boom"))
+	_, err := NewPlanner(f, config.Default()).Teardown(context.Background(), []string{"01"}, nil, "")
+	if err == nil || !strings.Contains(err.Error(), "checking whether VMID 10101 is free: boom") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// Disks are looked for where deploy.storage is: on one node if it is shared,
+// else on each node that has it; with no node reporting it, on every node.
+func TestTeardownListsDisksWhereTheStorageIs(t *testing.T) {
+	storage := config.Default().Deploy.Storage
+	for _, c := range []struct {
+		name string
+		res  []proxmox.StorageResource
+		want string
+	}{
+		{"shared", []proxmox.StorageResource{{Storage: "local", Node: "cedar"}, {Storage: storage, Node: "birch", Shared: true}}, "birch"},
+		{"node-local", []proxmox.StorageResource{{Storage: storage, Node: "spruce"}, {Storage: storage, Node: "birch"}}, "birch"},
+		{"unreported", []proxmox.StorageResource{{Storage: "local", Node: "spruce"}}, "cedar"},
+	} {
+		f := orphanFake("10101/vm-10101-disk-0.qcow2")
+		f.Nodes = []string{"cedar", "birch", "spruce"}
+		api := &resourceAPI{Fake: f, res: proxmox.Resources{Storage: c.res}}
+		if got, want := teardownItems(t, api), []string{"team01-disks-10101@" + c.want}; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: items = %v, want %v", c.name, got, want)
+		}
+	}
+}
+
+// VMs sharing a name stay in VMID order.
+func TestTeardownKeepsSameNamedVMsInVMIDOrder(t *testing.T) {
+	f := orphanFake()
+	f.Add(proxmox.VM{VMID: 10102, Name: "team01-dc", Node: "cedar", Pool: "pool-01"}, nil)
+	f.Add(proxmox.VM{VMID: 10101, Name: "team01-dc", Node: "cedar", Pool: "pool-01"}, nil)
+	plan, err := NewPlanner(f, config.Default()).Teardown(context.Background(), []string{"01"}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int
+	for _, it := range plan.Items {
+		ids = append(ids, it.VMID)
+	}
+	if want := []int{10101, 10102}; !reflect.DeepEqual(ids, want) {
+		t.Errorf("VMIDs = %v, want %v", ids, want)
+	}
+}
+
+// Disks are looked for only at the clone VMIDs of templates: .tpl-named
+// templates in template_vmid_base..+99.
+func TestTeardownLooksForDisksOfTemplatesInRange(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		tpl  proxmox.VM
+		want bool
+	}{
+		{"at the base", proxmox.VM{VMID: 9000, Name: "dc.x.tpl", Template: true}, true},
+		{"past the range", proxmox.VM{VMID: 9100, Name: "dc.x.tpl", Template: true}, false},
+		{"not a template", proxmox.VM{VMID: 9000, Name: "dc.x.tpl"}, false},
+		{"not .tpl", proxmox.VM{VMID: 9000, Name: "dc.x", Template: true}, false},
+	} {
+		f := podstest.New("cedar")
+		f.Add(proxmox.VM{VMID: 50, Name: "other", Node: "cedar"}, nil) // listed before the template
+		c.tpl.Node = "cedar"
+		f.Add(c.tpl, nil)
+		f.Vols[config.Default().Deploy.Storage+":10100/vm-10100-disk-0.qcow2"] = 10100
+		got := teardownItems(t, f)
+		if want := []string{"team01-disks-10100@cedar"}; c.want != reflect.DeepEqual(got, want) {
+			t.Errorf("%s: items = %v", c.name, got)
+		}
+	}
+}
+
+// A VM blocked for its pool doesn't stop the VMs after it being checked.
+func TestResetChecksVMsPastABlockedOne(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-ash", Node: "cedar", Pool: "pool-02"}, nil, "initial")
+	f.Add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil)
+	rs, err := testPlanner(f).Reset(context.Background(), []string{"01"}, nil, "initial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(rs.Items[0].Blocked, "is in pool pool-02") || rs.Items[1].Blocked != `no snapshot "initial" (has none)` {
+		t.Errorf("items = %+v", rs.Items)
 	}
 }

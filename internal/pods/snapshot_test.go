@@ -171,3 +171,17 @@ func TestPropSnapshotPlanNeverOverwrites(t *testing.T) {
 		}
 	})
 }
+
+// A VM blocked for its pool doesn't stop the VMs after it being checked.
+func TestSnapshotPlanChecksVMsPastABlockedOne(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-ash", Node: "cedar", Pool: "pool-02"}, nil)
+	f.Add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil, "before-scoring")
+	plan, err := testPlanner(f).Snapshot(context.Background(), SnapshotRequest{Teams: []string{"01"}, Name: "before-scoring"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(plan.Items[0].Blocked, "is in pool pool-02") || plan.Items[1].Blocked != alreadyHas("before-scoring") {
+		t.Errorf("items = %+v", plan.Items)
+	}
+}
