@@ -34,7 +34,7 @@ func SetOfPattern(pattern string) (Set, bool) {
 		return "", false
 	}
 	set, err := ParseSet(rest)
-	return set, err == nil && set != ""
+	return set, err == nil
 }
 
 // SplitMaster splits a master or template name into its host and set:
