@@ -303,9 +303,6 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			envs[si].Hosts = append(envs[si].Hosts, p.buildEnvHost(vm, cfg, envs[si].Slot, p.nodeCPUModels(ctx, cpuByNode, vm.Node)))
 			continue
 		}
-		if vm.Template {
-			continue
-		}
 		for _, b := range nicBridgesAll(cfg) {
 			if si, ok := bridgeSlot[b]; ok && !slices.Contains(envs[si].Users, vm.Name) {
 				envs[si].Users = append(envs[si].Users, vm.Name)
