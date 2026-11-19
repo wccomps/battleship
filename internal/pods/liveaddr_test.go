@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -542,6 +543,66 @@ func TestCheckSSHOutput(t *testing.T) {
 			"sshd=running\n===SSHD===\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\ncert-authority,principals=\"other-team\" " + ca + "\n",
 			ca, "missing ops CA principal",
 		},
+		{
+			"comment before root login disabled",
+			"sshd=running\n===SSHD===\n# sshd_config\npermitrootlogin no\n",
+			ca, "SSH root login off",
+		},
+		{
+			"TrustedUserCAKeys none",
+			"sshd=running\n===SSHD===\ntrustedusercakeys none\nauthorizedprincipalsfile none\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\n",
+			ca, "missing ops CA key",
+		},
+		{
+			"CA key in TrustedUserCAKeys with AuthorizedPrincipalsFile none",
+			"sshd=running\n===SSHD===\ntrustedusercakeys /etc/ssh/vault-ca.pub\nauthorizedprincipalsfile none\n===CA===\n" + ca + "\n===PRINCIPALS===\ncore-infrastructure\n===AUTHKEYS===\n",
+			ca, "missing ops CA principal",
+		},
+		{
+			"comment before the CA key",
+			"sshd=running\n===SSHD===\ntrustedusercakeys /etc/ssh/vault-ca.pub\nauthorizedprincipalsfile /etc/ssh/auth_principals/%u\n===CA===\n# vault\n" + ca + "\n===PRINCIPALS===\ncore-infrastructure\n===AUTHKEYS===\n",
+			ca, "",
+		},
+		{
+			"authorized_keys line of one word",
+			"sshd=running\n===SSHD===\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\ngarbage\n",
+			ca, "missing ops CA key",
+		},
+		{
+			"commented-out cert-authority",
+			"sshd=running\n===SSHD===\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\n#cert-authority " + ca + "\n",
+			ca, "missing ops CA key",
+		},
+		{
+			"comment before cert-authority",
+			"sshd=running\n===SSHD===\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\n# ops CA\ncert-authority " + ca + "\n",
+			ca, "",
+		},
+		{
+			"user key before cert-authority",
+			"sshd=running\n===SSHD===\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\n" + otherKey + " admin\ncert-authority " + ca + "\n",
+			ca, "",
+		},
+		{
+			"cert-authority with another key when ops_ca_key is configured",
+			"sshd=running\n===SSHD===\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\ncert-authority " + otherKey + "\n",
+			ca, "missing ops CA key",
+		},
+		{
+			"cert-authority with any key when ops_ca_key is empty",
+			"sshd=running\n===SSHD===\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\ncert-authority " + otherKey + "\n",
+			"", "",
+		},
+		{
+			"another cert-authority before the ops one",
+			"sshd=running\n===SSHD===\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\ncert-authority " + otherKey + "\ncert-authority " + ca + "\n",
+			ca, "",
+		},
+		{
+			"cert-authority with unreadable principals before one with ops principal",
+			"sshd=running\n===SSHD===\n===CA===\n===PRINCIPALS===\n===AUTHKEYS===\ncert-authority,command=\"principals=\" " + ca + "\ncert-authority,principals=\"core-infrastructure\" " + ca + "\n",
+			ca, "",
+		},
 	} {
 		if got := CheckSSHOutput(c.out, c.key); got != c.want {
 			t.Errorf("%s: CheckSSHOutput = %q, want %q", c.name, got, c.want)
@@ -579,6 +640,137 @@ func TestLiveAddrsSSHWarnings(t *testing.T) {
 	} {
 		if got[vmid].SSHWarning != want {
 			t.Errorf("%d: SSHWarning = %q, want %q", vmid, got[vmid].SSHWarning, want)
+		}
+	}
+}
+
+// sshAgent is a fake whose SSH checks exit with exitCode; it keeps the
+// command each VM's check ran.
+type sshAgent struct {
+	*podstest.Fake
+	exitCode int
+	mu       sync.Mutex
+	cmds     map[int][]string
+}
+
+func (a *sshAgent) AgentRead(ctx context.Context, node string, vmid int, command []string) (int, error) {
+	a.mu.Lock()
+	if a.cmds == nil {
+		a.cmds = map[int][]string{}
+	}
+	a.cmds[vmid] = command
+	a.mu.Unlock()
+	return a.Fake.AgentRead(ctx, node, vmid, command)
+}
+
+func (a *sshAgent) AgentExecStatus(ctx context.Context, node string, vmid, pid int, limit int64) (proxmox.ExecStatus, error) {
+	st, err := a.Fake.AgentExecStatus(ctx, node, vmid, pid, limit)
+	if st.Exited {
+		st.ExitCode = a.exitCode
+	}
+	return st, err
+}
+
+// The SSH check runs the Windows command on a host whose notes say Windows
+// or whose agent reports Windows' loopback interface, and the POSIX one on
+// the rest.
+func TestLiveAddrsSSHCheckCommand(t *testing.T) {
+	f := podstest.New("alder")
+	for vmid, nic := range map[int]string{2110: "eth0", 2111: "Ethernet", 2112: "Loopback Pseudo-Interface 1"} {
+		f.Add(proxmox.VM{VMID: vmid, Name: fmt.Sprint(vmid), Node: "alder", Status: "running"}, nil)
+		f.SetGuest(vmid, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{{Name: nic, MAC: lanMAC, IPs: podstest.IPs("192.168.100.10/24")}}})
+	}
+	host := func(vmid int, os string) EnvHost {
+		return EnvHost{VMID: vmid, Node: "alder", Status: "running", Agent: true, LANMAC: lanMAC, Notes: Notes{OS: os}}
+	}
+	a := &sshAgent{Fake: f}
+	NewPlanner(a, envConfig()).LiveAddrs(context.Background(),
+		[]Environment{{Hosts: []EnvHost{host(2110, ImageLinux), host(2111, ImageWindows), host(2112, "")}}}, 3, time.Second)
+	for vmid, windows := range map[int]bool{2110: false, 2111: true, 2112: true} {
+		if !slices.Equal(a.cmds[vmid], SSHCheckCommand(windows)) {
+			t.Errorf("%d: SSH check %q, want the windows=%v one", vmid, a.cmds[vmid], windows)
+		}
+	}
+}
+
+// A check that exits non-zero with output, as the Windows one does when an
+// authorized_keys file is missing, is still read; and one still running at
+// the first poll is read once it exits.
+func TestLiveAddrsSSHCheckExit(t *testing.T) {
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 2110, Name: "2110", Node: "alder", Status: "running"}, nil)
+	f.SetGuest(2110, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{{MAC: lanMAC, IPs: podstest.IPs("192.168.100.10/24")}},
+		SSHOut: "sshd=stopped\n===SSHD===\n"})
+	envs := []Environment{{Hosts: []EnvHost{{VMID: 2110, Node: "alder", Status: "running", Agent: true, LANMAC: lanMAC}}}}
+	got := NewPlanner(&sshAgent{Fake: f, exitCode: 1}, envConfig()).LiveAddrs(context.Background(), envs, 1, time.Second)
+	if got[2110].SSHWarning != "SSH not running" {
+		t.Errorf("exit 1: SSHWarning = %q, want %q", got[2110].SSHWarning, "SSH not running")
+	}
+	f.ExecRunsFor = func(int) int { return 1 }
+	got = NewPlanner(f, envConfig()).LiveAddrs(context.Background(), envs, 1, time.Second)
+	if got[2110].SSHWarning != "SSH not running" {
+		t.Errorf("polled twice: SSHWarning = %q, want %q", got[2110].SSHWarning, "SSH not running")
+	}
+}
+
+// HostLiveAddrs reads h's agent and, for a host on the router's LAN, the
+// router's, for its external address; it asks an agent exactly when
+// HostAsksAgent says it will, and reads each agent once.
+func TestHostLiveAddrs(t *testing.T) {
+	f := podstest.New("alder")
+	addVM := func(vmid int, nics ...proxmox.GuestNIC) {
+		f.Add(proxmox.VM{VMID: vmid, Name: fmt.Sprint(vmid), Node: "alder", Status: "running"}, nil)
+		f.SetGuest(vmid, podstest.Guest{Up: true, NICs: nics, SSHOut: "sshd=stopped\n===SSHD===\n"})
+	}
+	routerNICs := []proxmox.GuestNIC{{MAC: lanMAC, IPs: podstest.IPs("192.168.100.2/24")}, {MAC: wanMAC, IPs: podstest.IPs("10.50.12.133/24")}}
+	addVM(2100, routerNICs...)
+	addVM(2190, routerNICs...)
+	addVM(2110, proxmox.GuestNIC{MAC: "bc:24:11:00:00:10", IPs: podstest.IPs("192.168.100.30/24")})
+	running := func(h EnvHost) EnvHost { h.Node, h.Status, h.Agent = "alder", "running", true; return h }
+	stopped := func(h EnvHost) EnvHost { h.Node, h.Status, h.Agent = "alder", "stopped", true; return h }
+	gw := running(EnvHost{VMID: 2100, Router: true, WANMAC: wanMAC, LANMAC: lanMAC})
+	gw2 := running(EnvHost{VMID: 2190, Router: true, WANMAC: wanMAC, LANMAC: lanMAC})
+	live := running(EnvHost{VMID: 2110, LANMAC: "bc:24:11:00:00:10"}) // no assigned address
+	assigned := stopped(EnvHost{VMID: 2111, LANMAC: "bc:24:11:00:00:11", Addr: parsedIP("192.168.100.11")})
+	unassigned := stopped(EnvHost{VMID: 2112, LANMAC: "bc:24:11:00:00:12"})
+	env := func(hosts ...EnvHost) Environment {
+		return Environment{Slot: Slots(envConfig().Environments)[0], LAN: kiloLAN, Hosts: hosts}
+	}
+	for _, c := range []struct {
+		name  string
+		env   Environment
+		h     EnvHost
+		want  LiveAddrs
+		reads []string
+	}{
+		{"live host without an address", env(gw, live), live,
+			LiveAddrs{Live: true, LAN: "192.168.100.30", External: "10.50.12.30", SSHWarning: "SSH not running"}, []string{"agent-nics:2100", "agent-nics:2110"}},
+		{"stopped host with an address", env(gw, assigned), assigned,
+			LiveAddrs{External: "10.50.12.11"}, []string{"agent-nics:2100"}},
+		{"stopped host without an address", env(gw, unassigned), unassigned, LiveAddrs{}, nil},
+		{"router", env(gw, live), gw,
+			LiveAddrs{Live: true, LAN: "192.168.100.2", WAN: "10.50.12.133", SSHWarning: "SSH not running"}, []string{"agent-nics:2100"}},
+		{"first router stopped", env(stopped(gw), gw2, assigned), assigned, LiveAddrs{}, nil},
+	} {
+		f.Mu.Lock()
+		f.Calls = nil
+		f.Mu.Unlock()
+		got := NewPlanner(f, envConfig()).HostLiveAddrs(context.Background(), c.env, c.h, time.Second)
+		if got != c.want {
+			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
+		}
+		var reads []string
+		for _, k := range f.Calls {
+			if strings.HasPrefix(k, "agent-nics:") {
+				reads = append(reads, k)
+			}
+		}
+		slices.Sort(reads)
+		if !slices.Equal(reads, c.reads) {
+			t.Errorf("%s: read %q, want %q", c.name, reads, c.reads)
+		}
+		if asks := HostAsksAgent(c.env, c.h); asks != (len(reads) > 0) {
+			t.Errorf("%s: HostAsksAgent = %v, but read %q", c.name, asks, reads)
 		}
 	}
 }
