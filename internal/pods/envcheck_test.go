@@ -207,8 +207,9 @@ func TestCheckEnvWindowsNameAtMaxLength(t *testing.T) {
 }
 
 // A resumed host keeps the address it has; one without an address yet
-// claims the one it names, before any new host can, and a resumed host
-// doesn't stop later hosts claiming theirs.
+// claims the one it names, before any new host can, unless it is taken,
+// and a resumed host doesn't stop later hosts claiming theirs. A router's
+// octet isn't checked as an address.
 func TestCheckEnvResumedHostsAndAddressClaims(t *testing.T) {
 	f := checkFake().API.(*podstest.Fake)
 	f.Add(proxmox.VM{VMID: 2103, Name: "elm.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "stopped"},
@@ -225,6 +226,9 @@ func TestCheckEnvResumedHostsAndAddressClaims(t *testing.T) {
 		{[]HostSpec{{Host: "teak", Family: "debian-12"}, {Host: "web", Family: "debian-12", Octet: 30}}, nil},
 		{[]HostSpec{{Host: "elm", Family: "debian-12", Octet: 30}, {Host: "web", Family: "debian-12", Octet: 30}},
 			[]EnvProblem{{Row: 2, Field: FieldAddress, Why: "address .30 is already taken in kilo.alpha"}}},
+		{[]HostSpec{{Host: "elm", Family: "debian-12", Octet: 10}},
+			[]EnvProblem{{Row: 1, Field: FieldAddress, Why: "address .10 is already taken in kilo.alpha"}}},
+		{[]HostSpec{{Host: "gw", Family: "gw", Octet: 10}}, nil},
 	} {
 		if got := CheckEnv(KindEnvAdd, envs, nil, BaseImages(vms), EnvRequest{Domain: "kilo.alpha", Hosts: c.hosts}); !slices.Equal(got, c.want) {
 			t.Errorf("%+v:\n got %+v\nwant %+v", c.hosts, got, c.want)
