@@ -243,6 +243,31 @@ func TestEnvTeardownRetry(t *testing.T) {
 	}
 }
 
+// A retry that finds only the disks a delete left frees them, and says
+// nothing of deleting VMs.
+func TestEnvTeardownRetryReviewOfOnlyDisks(t *testing.T) {
+	h := newHarness(t)
+	addEnvs(h)
+	sess := h.login(asLead)
+	id := h.submitJob(jobs.Inputs{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"}, byLead)
+	h.start(id)
+	h.api.remove("gw.kilo.alpha", "teak.kilo.alpha", "elm.kilo.alpha", "yew.kilo.alpha")
+	h.api.Mu.Lock()
+	h.api.Vols["competitions:vm-2100-disk-0"] = 2100 // gw's delete left a disk
+	h.api.Mu.Unlock()
+	h.finish(id, store.Outcome{Status: store.StatusCompletedWithFailures, Items: map[string]store.ItemOutcome{
+		"gw.kilo.alpha": {Status: store.ItemFailed, Error: "delete: refused"},
+	}})
+	rec := h.post(&sess, "/logs/"+itoa(id)+"/retry", url.Values{})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("retry = %d\n%s", rec.Code, rec.Body)
+	}
+	body := rec.Body.String()
+	contains(t, "the retry", body, `<span>Frees the disks deleted VMs left at VMID 2100. The slot is free again afterwards.</span>`,
+		`<span class="vm">disks-2100</span>`, "Tear down kilo.alpha</button>")
+	lacks(t, "the retry", body, "Deletes 0 VMs")
+}
+
 // Tear down environment is in the header, red; each environment block
 // collapses and expands as an accordion; the teardown form and review fit
 // a phone and a laptop, light and dark, with its blocked row striped and

@@ -108,16 +108,19 @@ func TestImageReviews(t *testing.T) {
 	}{
 		{"/images/deprecate", url.Values{"image": {"debian-12-v2"}}, []string{
 			`<span class="eyebrow">Review ·</span> Deprecate <span class="vm">debian-12-v2</span></h1>`,
+			`<p class="say"><svg`,
 			`<span><span class="name">debian-12-v2</span> will no longer be offered for new hosts. Hosts made from it keep working.</span>`,
 			`<a class="btn first" href="/images/family/debian-12" data-panel-link>Back</a>`,
 			`<button type="submit" class="btn pri">`, "Deprecate debian-12-v2</button>"}},
 		{"/images/delete", url.Values{"image": {"debian-12-v1"}}, []string{
 			`<span class="eyebrow">Review ·</span> Delete <span class="vm">debian-12-v1</span></h1>`,
+			`<p class="say bad"><svg`,
 			"will be deleted. Hosts made from it keep working: they are full copies. This can&#39;t be undone.",
 			`<a class="btn first" href="/images/family/debian-12" data-panel-link>Back</a>`,
 			`<button type="submit" class="btn pri bad">`, "Delete debian-12-v1</button>"}},
 		{"/images/edit", url.Values{"family": {"gw"}}, []string{
 			`<span class="eyebrow">Review ·</span> Edit <span class="vm">gw</span></h1>`,
+			`<p class="say"><svg`,
 			`<span>Copies <span class="name">gw-v1</span> as <span class="name">gw-edit</span> on the edit network, for you to patch and register as the next version.</span>`,
 			`<a class="btn first" href="/images/family/gw" data-panel-link>Back</a>`,
 			"Copy as gw-edit</button>"}},
@@ -128,15 +131,86 @@ func TestImageReviews(t *testing.T) {
 	}
 
 	// Blocked: the reason in the summary, and nothing to confirm.
-	for path, form := range map[string]url.Values{
-		"/images/deprecate": {"image": {"debian-12-v1"}},
-		"/images/edit":      {"family": {"debian-12"}},
+	for path, c := range map[string]struct {
+		form url.Values
+		why  string
+	}{
+		"/images/deprecate": {url.Values{"image": {"debian-12-v1"}}, "<span>Is already deprecated.</span>"},
+		"/images/edit":      {url.Values{"family": {"debian-12"}}, "already exists: register it as the next version, or delete it in Proxmox, first.</span>"},
 	} {
-		rec := h.post(&sess, path+"/preview", form)
+		rec := h.post(&sess, path+"/preview", c.form)
 		body := rec.Body.String()
-		contains(t, path+" blocked", body, `<p class="say bad">`)
+		contains(t, path+" blocked", body, `<p class="say bad">`, c.why)
 		lacks(t, path+" blocked", body, "/confirm", `class="btn pri`, "<table")
 	}
+}
+
+// A review of more than eight VMs folds them under their count, unless one
+// is blocked: its reason stays in sight.
+func TestReviewFoldsLongVMLists(t *testing.T) {
+	h := newHarness(t)
+	addImages(h)
+	addEnv(h, true) // teak at .10
+	sess := h.login(asLead)
+	oaks := func(n int) []string {
+		var hosts []string
+		for i := 1; i <= n; i++ {
+			hosts = append(hosts, "oak"+itoa(int64(i))+"=debian-12:"+itoa(int64(10+i)))
+		}
+		return hosts
+	}
+	add := func(hosts []string) string {
+		_, _, body := h.preview(&sess, "/environments/kilo.alpha/add", url.Values{"env_hosts": {strings.Join(hosts, "\n")}})
+		return body
+	}
+	const fold = `<summary class="disc"><h2 class="sub">VMs</h2>`
+	body := add(oaks(9))
+	contains(t, "nine VMs", body, fold+`<span class="meta">· 9 VMs</span></summary>`, `<span class="vm">oak9.kilo.alpha</span>`, "Add 9 hosts</button>")
+	body = add(oaks(8))
+	contains(t, "eight VMs", body, `<span class="vm">oak8.kilo.alpha</span>`, "Add 8 hosts</button>")
+	lacks(t, "eight VMs", body, fold)
+	body = add(append(oaks(8), "elm=debian-12:10"))
+	contains(t, "nine VMs, one blocked", body, `<tr class="blk"><td><span class="vm">elm.kilo.alpha</span>`, "Add 8 hosts</button>")
+	lacks(t, "nine VMs, one blocked", body, fold)
+}
+
+// An Add or Create review marks the router, whether its image or the
+// request's router line makes it one, and gives it .2; a blocked host
+// leaves the rows and sentence of the hosts after it; without a Windows
+// or Linux host, nothing is said of the guest agent.
+func TestEnvReviewRoutersBlockedHostsAndGuests(t *testing.T) {
+	h := newHarness(t)
+	addImages(h)
+	addEnv(h, true) // teak at .10
+	sess := h.login(asLead)
+	_, _, body := h.preview(&sess, "/environments/kilo.alpha/add", url.Values{"env_hosts": {"elm=debian-12:10\noak=debian-12:11"}})
+	contains(t, "a blocked host first", body,
+		`<span>Clones oak into <span class="name">dev-01</span> and starts it. Then oak gets its name, address, gateway .2 and DNS (.10) through the guest agent.</span>`,
+		`<tr class="blk"><td><span class="vm">elm.kilo.alpha</span>`,
+		`<tr><td><span class="vm">oak.kilo.alpha</span></td><td class="wide"><code>debian-12-v1</code></td><td class="c2"><code>.11</code></td><td class="r wide meta">2102 · n1</td></tr>`,
+		"Add 1 host</button>")
+
+	// A second router, by its image: blocked, and still the router at .2.
+	body = h.post(&sess, "/environments/kilo.alpha/add/preview", url.Values{"env_hosts": {"gw2=gw"}}).Body.String()
+	contains(t, "a second router", body,
+		`<tr class="blk"><td><span class="vm">gw2.kilo.alpha</span> <span class="chip">router</span></td><td class="wide"><code>gw-v1</code></td><td class="c2"><code>.2</code></td>`,
+		"an environment has one router")
+
+	h = newHarness(t)
+	addFormImages(h)
+	addDNSEnv(h, "router")
+	sess = h.login(asLead)
+	_, _, body = h.preview(&sess, "/environments/kilo.alpha/add", url.Values{"env_hosts": {"app=appliance"}})
+	contains(t, "an other-kind host", body, `<span>Clones app into <span class="name">dev-01</span> and starts it.</span>`,
+		`<tr><td><span class="vm">app.kilo.alpha</span></td><td class="wide"><code>appliance-v2</code></td><td class="c2">—</td>`)
+	lacks(t, "an other-kind host", body, "guest agent")
+
+	// The router line names a host whose image isn't a router: blocked,
+	// and still the router at .2.
+	_, _, body = h.preview(&sess, "/environments/new", url.Values{"domain": {"kilo.bravo"}, "router": {"gw=debian-12"}, "env_hosts": {"web=debian-12"}})
+	contains(t, "a router line on a Linux image", body,
+		`<tr class="blk"><td><span class="vm">gw.kilo.bravo</span> <span class="chip">router</span></td><td class="wide"><code>debian-12-v1</code></td><td class="c2"><code>.2</code></td>`,
+		"the router needs a router image", "Create 1 VM</button>")
 }
 
 // The image and environment reviews fit a phone and a laptop, light and

@@ -167,6 +167,30 @@ func TestTeardownReviewOfASet(t *testing.T) {
 	}
 }
 
+// A pod teardown that finds only the disks gone VMs left frees them and
+// deletes nothing; one narrowed to named VMs lists them, and one that
+// isn't lists none.
+func TestPodTeardownReviewOfDisksAndNamedVMs(t *testing.T) {
+	h := newHarness(t)
+	h.api.remove("team01-dc", "team01-web")
+	h.api.add(proxmox.VM{VMID: 9001, Name: "dc.kilo.alpha.tpl", Node: "n1", Template: true}, nil)
+	h.api.Mu.Lock()
+	h.api.Vols["competitions:vm-10101-disk-0"] = 10101 // team01-dc's delete left a disk
+	h.api.Mu.Unlock()
+	h.poll()
+	lead := h.login(asLead)
+
+	_, _, body := h.preview(&lead, "/teardown", url.Values{"teams": {"1"}, "set": {""}})
+	contains(t, "only disks", body, `<span>Frees the disks deleted VMs left at VMID 10101.</span>`, `<span class="vm">team01-disks-10101</span>`)
+	lacks(t, "only disks", body, "0 VMs", "stopped and deleted")
+
+	_, _, body = h.preview(&lead, "/teardown", url.Values{"teams": {"2"}, "set": {""}, "vms": {"team02-dc"}})
+	contains(t, "named VMs", body, "<dt>Only these VMs</dt><dd>team02-dc</dd>", "Tears down every matching VM in pod 02: 1 VM.")
+	_, _, body = h.preview(&lead, "/teardown", url.Values{"teams": {"2"}, "set": {""}})
+	contains(t, "the whole pod", body, "Tears down everything in pod 02: 2 VMs.")
+	lacks(t, "the whole pod", body, "Only these VMs")
+}
+
 // A VM's page names its set, or says it has none recorded; several set
 // tags or a bare "set-" tag are drift and show "unknown set".
 func TestVMPageShowsItsSet(t *testing.T) {

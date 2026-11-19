@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/wccomps/battleship/internal/pods"
+	"github.com/wccomps/battleship/internal/proxmox"
 	"github.com/wccomps/battleship/internal/status"
 )
 
@@ -177,6 +178,105 @@ func TestEnvHostPowerAndDelete(t *testing.T) {
 	if len(js) != 2 || js[0].Kind != string(pods.KindEnvDeleteHost) || js[1].Kind != string(pods.KindEnvPower) {
 		t.Fatalf("jobs = %+v", js)
 	}
+}
+
+// The Edit host review lists what changes, and its sentence says what
+// confirming does: configure the guest, only eject the CD-ROM, only set the
+// CPU, or update the host; a blocked edit says why.
+func TestEnvEditReview(t *testing.T) {
+	h := newHarness(t)
+	addCatalog(h)
+	addEnvs(h)
+	h.api.CPUModels = []string{"lab-baseline", "lab-baseline-nested"}
+	h.api.VMs[2101].Config["agent"] = "1"
+	h.api.VMs[2101].Config["ide0"] = "local:iso/debian.iso,media=cdrom"
+	h.api.VMs[2102].Config["ide0"] = "local:iso/debian.iso,media=cdrom"
+	h.api.VMs[2103].Config["net0"] = "virtio=BC:24:11:00:21:00,bridge=vmbr0" // off dev-01's bridges
+	sess := h.login(asLead)
+	review := func(form url.Values) string {
+		_, _, body := h.preview(&sess, "/environments/edit", form)
+		return body
+	}
+	elm := func(kv ...string) url.Values {
+		f := url.Values{"vmid": {"2102"}, "env_host": {"elm"}, "image_kind": {"other"}, "image": {"win10-v1"}}
+		for i := 0; i+1 < len(kv); i += 2 {
+			f.Set(kv[i], kv[i+1])
+		}
+		return f
+	}
+
+	body := review(url.Values{"vmid": {"2101"}, "env_host": {"oak"}, "image_kind": {"linux"}, "octet": {"25"}, "image": {"debian-12-v1"},
+		"cpu": {"lab-baseline"}, "eject_cdrom": {"yes"}, "details": {"with-notes"}, "detail_os": {"Debian 12"}, "notes": {"updated notes"}})
+	contains(t, "teak renamed and readdressed", body,
+		`<span>Updates <span class="name">teak.kilo.alpha</span> in <span class="name">dev-01</span> and configures its hostname and address through the guest agent.</span>`,
+		`<dt>Rename</dt><dd><code>teak.kilo.alpha -&gt; oak.kilo.alpha</code> · VMID 2101 · n1</dd>`,
+		`<dt>Kind</dt><dd>linux</dd>`, `<dt>Address</dt><dd><code>.25</code></dd>`, `<dt>Base image</dt><dd><code>debian-12-v1</code></dd>`,
+		`<dt>CD-ROM</dt><dd>ejects attached install media</dd>`, `<dt>CPU</dt><dd><code>lab-baseline</code></dd>`,
+		`<dt>Guest agent</dt><dd>sets hostname oak and address 192.168.100.25 inside the guest</dd>`,
+		`<tr class="chg"><th scope="row">OS <span class="chip">changed</span></th><td>—</td><td>Debian 12</td></tr>`,
+		`<div class="meta">Before</div><div class="notes box">debian / Changeme1!</div>`,
+		`<div class="meta">After</div><div class="notes box">updated notes</div>`)
+	lacks(t, "teak renamed and readdressed", body, "<dt>Host</dt>", "<dt>Network</dt>")
+
+	body = review(elm("eject_cdrom", "yes"))
+	contains(t, "elm's CD-ROM ejected", body,
+		`<span>Ejects the attached <span class="name">CD-ROM</span> from <span class="name">elm.kilo.alpha</span>.</span>`,
+		`<dt>Host</dt><dd><code>elm.kilo.alpha</code> · VMID 2102 · n1</dd>`, `<dt>CD-ROM</dt><dd>ejects attached install media</dd>`)
+	lacks(t, "elm's CD-ROM ejected", body, "<dt>Kind</dt>", "<dt>Address</dt>", "<dt>Guest agent</dt>")
+
+	body = review(elm("cpu", "lab-baseline"))
+	contains(t, "elm's CPU set", body,
+		`<span>Sets the CPU of <span class="name">elm.kilo.alpha</span> to <span class="name">lab-baseline</span>.</span>`,
+		`<dt>CPU</dt><dd><code>lab-baseline</code></dd>`)
+
+	body = review(elm("octet", "30"))
+	contains(t, "elm given an address", body,
+		`<span>Updates <span class="name">elm.kilo.alpha</span> in <span class="name">dev-01</span>.</span>`,
+		`<dt>Kind</dt><dd>other</dd>`, `<dt>Address</dt><dd><code>.30</code></dd>`, `<dt>Base image</dt><dd><code>win10-v1</code></dd>`)
+
+	body = review(elm("env_host", "ash"))
+	contains(t, "elm renamed", body, `<dt>Rename</dt><dd><code>elm.kilo.alpha -&gt; ash.kilo.alpha</code> · VMID 2102 · n1</dd>`,
+		`<dt>Address</dt><dd><code>none</code></dd>`)
+
+	body = review(url.Values{"vmid": {"2100"}, "env_host": {"gw2"}, "image_kind": {"router"}, "image": {"gw-v1"}})
+	contains(t, "the router renamed", body, `<dt>Kind</dt><dd>router</dd>`, `<dt>Address</dt><dd><code>.2</code></dd>`)
+
+	body = review(url.Values{"vmid": {"2103"}, "env_host": {"yew"}, "image_kind": {"linux"}, "octet": {"5"}, "image": {"debian-12-v1"}})
+	contains(t, "yew off its bridges", body, `<dt>Network</dt><dd>moves NICs onto dev-01&#39;s bridges</dd>`,
+		`<span>Updates <span class="name">yew.kilo.alpha</span> in <span class="name">dev-01</span>.</span>`)
+
+	// Renamed onto a name in use: why, and nothing to confirm.
+	body = h.post(&sess, "/environments/edit/preview", url.Values{"vmid": {"2101"}, "env_host": {"elm"}, "image_kind": {"linux"}, "octet": {"10"}, "image": {"debian-12-v2"}}).Body.String()
+	contains(t, "teak renamed onto elm", body, `<p class="say bad">`, `<span>A VM named <span class="name">elm.kilo.alpha</span> already exists.</span>`)
+	lacks(t, "teak renamed onto elm", body, "/confirm", "Updates")
+}
+
+// A host's power and delete reviews say what happens, red when it cuts the
+// power or deletes; a template in the slot can't be either, and says so.
+func TestEnvHostPowerAndDeleteReviews(t *testing.T) {
+	h := newHarness(t)
+	addEnvs(h)
+	h.api.add(proxmox.VM{VMID: 2150, Name: "base.kilo.alpha", Node: "n1", Pool: "dev-01", Template: true}, nil)
+	sess := h.login(asLead)
+
+	_, _, body := h.preview(&sess, "/environments/power", url.Values{"vmid": {"2101"}, "action": {"reboot"}})
+	contains(t, "reboot", body, `<h1 id="pv-title"><span class="eyebrow">Review ·</span> Reboot <span class="vm">teak.kilo.alpha</span></h1>`,
+		`<p class="say"><svg`, "<span>1 VM will be asked to restart by its operating system.</span>")
+	lacks(t, "reboot", body, `<p class="say bad">`)
+	_, _, body = h.preview(&sess, "/environments/power", url.Values{"vmid": {"2101"}, "action": {"stop"}})
+	contains(t, "force stop", body, `<p class="say bad">`, "<span>1 VM loses power at once. Unsaved work is lost.</span>")
+
+	_, _, body = h.preview(&sess, "/environments/delete", url.Values{"vmid": {"2101"}, "env_host": {"teak.kilo.alpha"}})
+	contains(t, "delete", body, `<p class="say bad">`,
+		`<span>Stops and deletes <span class="name">teak.kilo.alpha</span> in <span class="name">dev-01</span> with its disks. The other VMs in <span class="name">dev-01</span> stay as they are. This can&#39;t be undone.</span>`)
+
+	body = h.post(&sess, "/environments/power/preview", url.Values{"vmid": {"2150"}, "action": {"start"}}).Body.String()
+	contains(t, "a template started", body, `<p class="say bad">`, "<span>Is a template.</span>")
+	lacks(t, "a template started", body, "/confirm")
+	body = h.post(&sess, "/environments/delete/preview", url.Values{"vmid": {"2150"}, "env_host": {"base.kilo.alpha"}}).Body.String()
+	contains(t, "a template deleted", body, `<p class="say bad">`,
+		`<span>Is a template, not an environment host; move it out of <span class="name">dev-01</span> first.</span>`)
+	lacks(t, "a template deleted", body, "/confirm", "Stops and deletes")
 }
 
 func TestBrowserEnvHostPanel(t *testing.T) {
