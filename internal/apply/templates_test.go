@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -389,6 +390,47 @@ func TestConcurrentTemplatesFailAndCancel(t *testing.T) {
 		if vm := f.VMs[9000+i]; vm != nil && !vm.Template {
 			t.Errorf("unconverted copy left at %d: %+v", 9000+i, vm)
 		}
+	}
+}
+
+// laggingListing is the fake with a VM listing that misses hidden, like
+// /cluster/resources before it caught up with a new VM.
+type laggingListing struct {
+	*podstest.Fake
+	hidden atomic.Int32 // a VMID
+}
+
+func (l *laggingListing) ClusterVMs(ctx context.Context) ([]proxmox.VM, error) {
+	vms, err := l.Fake.ClusterVMs(ctx)
+	return slices.DeleteFunc(vms, func(vm proxmox.VM) bool { return vm.VMID == int(l.hidden.Load()) }), err
+}
+
+// A copy whose task failed may leave its VM behind, and the next round's
+// listing may not show it yet. The clone's probe then finds it under the
+// expected name; being this run's, it must still not be converted to a
+// template: it is the leftover of a failed copy.
+func TestFailedCopyLeftoverMissingFromTheListingIsNotConverted(t *testing.T) {
+	f := newCluster()
+	plan := deployTeak(t, f, "01")
+	api := &laggingListing{Fake: f}
+	copyTask := podstest.UPID("cedar", "qmclone", 121)
+	f.WaitHook = func(_ context.Context, upid string) error { // runs with f.Mu held
+		if upid != copyTask {
+			return nil
+		}
+		f.WaitHook = nil
+		api.hidden.Store(9021) // the next listing misses the leftover
+		return &proxmox.TaskError{UPID: upid, ExitStatus: "clone failed: storage error"}
+	}
+	ex := testExecutor(f, &recorder{})
+	ex.API = api
+
+	res := ex.Run(context.Background(), plan)
+	if n := f.Called("template:9021"); n != 0 {
+		t.Errorf("the failed copy's leftover was converted to a template (%d conversions)", n)
+	}
+	if err := res.Failed["team01-teak"]; err == nil || !strings.Contains(err.Error(), "leftover of a failed copy") {
+		t.Errorf("error = %v, want the failed copy's leftover refused", err)
 	}
 }
 
