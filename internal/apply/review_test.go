@@ -202,7 +202,20 @@ func TestUnfollowableTaskStillLockedAtStop(t *testing.T) {
 		return forbidden
 	}
 	ex := testExecutor(f, &recorder{})
-	ex.Sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
+	// The stop reaches the step's context asynchronously (stepContext). A
+	// sleep that returned at once until then would let the poll spin through
+	// every locked read first; a real one lasts until the step sees the stop.
+	ex.Sleep = func(sctx context.Context, _ time.Duration) error {
+		if ctx.Err() == nil {
+			return nil
+		}
+		select {
+		case <-sctx.Done():
+			return sctx.Err()
+		case <-time.After(10 * time.Second):
+			return nil
+		}
+	}
 	res := ex.Run(ctx, plan)
 	err = res.Failed["team01-teak"]
 	if err == nil || !strings.Contains(err.Error(), "VM 10121 is still locked (stop), but whether it worked is unknown") {
