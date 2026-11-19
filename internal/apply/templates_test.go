@@ -2,11 +2,13 @@ package apply
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -530,5 +532,204 @@ func TestRetryRoundDoesNotRecheckABuiltTemplate(t *testing.T) {
 	}
 	if want := []string{string(EventDone) + " template created"}; !slices.Equal(got, want) {
 		t.Errorf("template events = %q, want %q", got, want)
+	}
+}
+
+// A stop that cuts off the copy's POST before it answered leaves no task to
+// stop: none is, and cleanup completes the copy it finds intact rather than
+// removing it as failed.
+func TestStopDuringCopyPostDoesNotStopATaskThatNeverStarted(t *testing.T) {
+	f := newCluster()
+	plan := deployTeak(t, f, "01")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f.CloneThenFail = map[int]error{9021: context.Canceled}
+	f.OnRecord = func(key string) {
+		if key == "clone:9021" {
+			cancel()
+		}
+	}
+
+	res := testExecutor(f, &recorder{}).Run(ctx, plan)
+	if n := f.Called("stoptask:"); n != 0 {
+		t.Errorf("%d StopTask calls, want none: no copy task was started", n)
+	}
+	if !slices.Contains(res.Completed, "teak.tango.delta.tpl") || slices.Contains(res.Removed, "teak.tango.delta.tpl") {
+		t.Errorf("Completed %v, Removed %v; want the copy completed", res.Completed, res.Removed)
+	}
+}
+
+// A copy whose task failed, then was re-copied OK in a later round, is no
+// longer the leftover of a failed copy: a round after that finishes it.
+func TestCopyRedoneAfterAFailedCopyIsFinished(t *testing.T) {
+	f := newCluster()
+	plan := deployTeak(t, f, "01")
+	copyTask := podstest.UPID("cedar", "qmclone", 121)
+	failed := false
+	f.WaitHook = func(_ context.Context, upid string) error { // runs with f.Mu held
+		if upid != copyTask || failed {
+			return nil
+		}
+		failed = true
+		delete(f.VMs, 9021) // Proxmox removes a failed copy's target
+		return &proxmox.TaskError{UPID: upid, ExitStatus: "clone failed: storage error"}
+	}
+	f.FailOn("template:9021", &proxmox.APIError{Status: 400, Message: "Parameter verification failed."})
+	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Retry.Rounds = 2
+
+	res := ex.Run(context.Background(), plan)
+	if len(res.Failed) != 0 || !slices.Equal(res.Succeeded, []string{"team01-teak"}) {
+		t.Fatalf("result = %+v", res)
+	}
+	if n := f.Called("clone:9021"); n != 2 {
+		t.Errorf("copied %d times, want 2", n)
+	}
+	if tpl := f.VMs[9021]; tpl == nil || !tpl.Template {
+		t.Errorf("template = %+v", tpl)
+	}
+}
+
+// A master whose stop failed is still running: it is not started again.
+func TestMasterStillRunningAfterAFailedStopIsNotStarted(t *testing.T) {
+	f := newRunningMaster()
+	plan := deployTeak(t, f, "01")
+	f.FailOn("power:121:stop", &proxmox.APIError{Status: 400, Message: "Parameter verification failed."})
+	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Retry.Rounds = 0
+
+	res := ex.Run(context.Background(), plan)
+	if err := res.Failed["team01-teak"]; err == nil || !strings.Contains(err.Error(), "stopping master") {
+		t.Fatalf("result = %+v, want the stop's failure", res)
+	}
+	if n := f.Called("power:121:start"); n != 0 || f.VMs[121].Status != "running" {
+		t.Errorf("master %s, started %d times; want it left running, never started", f.VMs[121].Status, n)
+	}
+}
+
+// A copy a later wait saw finish OK stays OK when the job is then stopped:
+// stopping it says how the stop went, and cleanup completes the copy rather
+// than removing it as cut off.
+func TestCopySeenOKBeforeTheStopIsCompleted(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		stopErr error
+		event   string
+	}{
+		{"stopped", nil, "stopped the copy of teak.tango.delta (the job was stopped)"},
+		{"stop failed", &proxmox.APIError{Status: 500, Message: "no such task"},
+			"stopping the copy of teak.tango.delta: "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRunningMaster()
+			plan := deployTeak(t, f, "01")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			rec := &recorder{}
+			copyTask := podstest.UPID("cedar", "qmclone", 121)
+			var waits int
+			var seenOK atomic.Bool
+			f.WaitHook = func(_ context.Context, upid string) error { // runs with f.Mu held
+				if upid != copyTask {
+					return nil
+				}
+				if waits++; waits == 1 {
+					return errors.New("no answer") // the copy's end is not seen
+				}
+				seenOK.Store(true) // restartMaster's wait sees it end OK
+				return nil
+			}
+			f.StopHook = func(string) error { return tc.stopErr }
+			// Once restartMaster has recorded the copy OK, the job is stopped;
+			// the restart goes on once the stop has stopped the copy.
+			f.Gate = func(_ context.Context, key string) (func(), error) {
+				if key != "config:9021" || !seenOK.CompareAndSwap(true, false) {
+					return nil, nil
+				}
+				cancel()
+				for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+					for _, e := range rec.find("teak.tango.delta.tpl", EventInfo) {
+						if strings.Contains(e.Message, "the copy of teak.tango.delta") {
+							return nil, nil
+						}
+					}
+				}
+				return nil, nil
+			}
+
+			res := testExecutor(f, rec).Run(ctx, plan)
+			if n := f.Called("stoptask:" + copyTask); n != 1 {
+				t.Errorf("copy stopped %d times, want 1", n)
+			}
+			found := false
+			for _, e := range rec.find("teak.tango.delta.tpl", EventInfo) {
+				found = found || strings.HasPrefix(e.Message, tc.event)
+			}
+			if !found {
+				t.Errorf("events = %+v, want %q", rec.find("teak.tango.delta.tpl", EventInfo), tc.event)
+			}
+			if !slices.Contains(res.Completed, "teak.tango.delta.tpl") || slices.Contains(res.Removed, "teak.tango.delta.tpl") {
+				t.Errorf("Completed %v, Removed %v; want the copy completed", res.Completed, res.Removed)
+			}
+			if st := f.VMs[121].Status; st != "running" {
+				t.Errorf("master status = %s, want running", st)
+			}
+		})
+	}
+}
+
+// A rebuild is held back only by team VMs of its own host, and names the
+// lowest-numbered one.
+func TestRebuildHeldBackOnlyByItsHostsTeamVMs(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"02"}, Rebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Add(proxmox.VM{VMID: 10125, Name: "team01-oak", Node: "birch"}, nil)
+
+	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
+	if len(res.Failed) != 0 || !slices.Equal(res.Succeeded, []string{"team02-teak"}) {
+		t.Fatalf("another host's team VM: result = %+v", res)
+	}
+
+	f = newCluster()
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+	plan, err = testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"02"}, Rebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, nil)
+	f.Add(proxmox.VM{VMID: 10321, Name: "team03-teak", Node: "cedar"}, nil)
+	res = testExecutor(f, &recorder{}).Run(context.Background(), plan)
+	if err := res.Failed["team02-teak"]; err == nil || !strings.Contains(err.Error(), "pod VMs such as team01-teak still use") {
+		t.Errorf("error = %v, want it to name team01-teak, the lowest VMID", err)
+	}
+}
+
+// A conversion that ends OK just as the job stops is still checked: a
+// conversion that left a disk unrenamed is not taken for a template.
+func TestConversionEndingAsTheJobStopsIsStillChecked(t *testing.T) {
+	f := newCluster()
+	plan := deployTeak(t, f, "01")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f.ConvertLeavesDisk = map[int]bool{9021: true}
+	convTask := podstest.UPID("cedar", "qmtemplate", 9021)
+	f.WaitHook = func(_ context.Context, upid string) error {
+		if upid == convTask {
+			cancel()
+		}
+		return nil
+	}
+	rec := &recorder{}
+
+	res := testExecutor(f, rec).Run(ctx, plan)
+	if got := rec.find("teak.tango.delta.tpl", EventDone); len(got) != 0 {
+		t.Errorf("done events = %+v, want none: the conversion left a disk", got)
+	}
+	if !slices.Contains(res.Removed, "teak.tango.delta.tpl") || f.VMs[9021] != nil {
+		t.Errorf("Removed %v, template %+v; want the half-converted template removed", res.Removed, f.VMs[9021])
 	}
 }
