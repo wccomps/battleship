@@ -822,3 +822,30 @@ func TestResetChecksVMsPastABlockedOne(t *testing.T) {
 		t.Errorf("items = %+v", rs.Items)
 	}
 }
+
+// A rebuilt pod VM is recloned on its pod's node, not where the old one
+// was; one the rebuild can't delete is reported where it is.
+func TestDeployPlanRebuildPlacesVMOnPodNode(t *testing.T) {
+	for _, tc := range []struct {
+		vmid        int
+		node        string
+		wantBlocked bool
+	}{
+		{10121, "birch", false},
+		{10150, "spruce", true}, // wrong VMID: blocked
+	} {
+		f := newCluster()
+		f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nil)
+		f.Add(proxmox.VM{VMID: tc.vmid, Name: "team01-teak", Node: "spruce"}, nil)
+		f.Add(proxmox.VM{VMID: 10110, Name: "team01-elm", Node: "birch"}, nil)
+		f.Add(proxmox.VM{VMID: 10111, Name: "team01-ash", Node: "birch"}, nil)
+		plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		it := plan.Items[0]
+		if it.Node != tc.node || it.OldNode != "spruce" || (it.Blocked != "") != tc.wantBlocked {
+			t.Errorf("VMID %d: item = %+v, want Node %s", tc.vmid, it, tc.node)
+		}
+	}
+}
