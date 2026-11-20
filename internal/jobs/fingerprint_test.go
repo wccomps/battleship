@@ -22,9 +22,9 @@ var fingerprinted = map[string]map[string]bool{
 	"TemplateSpec": {
 		"Name": true, "VMID": true, "Exists": true, "Rebuild": true, "Blocked": true,
 		"WillStopMaster": true, "MasterVMID": true, "Interfaces": true, "GPU": true,
-		// An approved-set deploy's template as it was submitted; other
-		// deploys leave it empty.
-		"Digest": true,
+		// The re-plan blocks a template changed since the submission
+		// (pods.Plan.BlockChanged), which Blocked covers.
+		"Digest": false,
 		// Derived from Name, or where things run, which may change with load.
 		"Host": false, "MasterName": false, "Node": false, "OldNode": false, "MasterNode": false,
 		// Only decide the privileges needed, which Blocked covers.

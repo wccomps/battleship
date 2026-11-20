@@ -216,8 +216,8 @@ type TemplateSpec struct {
 	// (sourceBridges): the template's NICs when reused, the master's, which
 	// the build copies, when built.
 	Bridges []string `json:"bridges,omitempty"`
-	// Digest is ConfigDigest of the template an ApprovedOnly deploy reuses:
-	// what the session interface lists, and checks against (Digests).
+	// Digest is ConfigDigest of a reused template: what the session interface
+	// lists, and checks a submission against (BlockChanged).
 	Digest string `json:"digest,omitempty"`
 }
 
@@ -465,10 +465,6 @@ type DeployRequest struct {
 	// ("*.<set>", SetOfPattern). The deploy is refused (ErrNotApproved)
 	// unless the set is approved, and it clones only templates already built.
 	ApprovedOnly bool
-	// Digests, with ApprovedOnly, are the TemplateSpec.Digest the requester
-	// listed, by template name: a template whose digest differs, or that has
-	// none here, is blocked. Nil compares nothing, as the listing plans.
-	Digests map[string]string
 }
 
 func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
@@ -565,9 +561,6 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		}
 		if req.ApprovedOnly && spec.Blocked == "" && spec.Builds() {
 			spec.Blocked = "no template is built: a session deploy clones a template a volunteer built and builds none"
-		}
-		if req.Digests != nil && spec.Blocked == "" && spec.Digest != req.Digests[spec.Name] {
-			spec.Blocked = fmt.Sprintf("template %s changed since the set was listed; list the sets again", spec.Name)
 		}
 		spec.WillStopMaster = spec.Blocked == "" && spec.Builds() && m.Status == "running"
 		if len(warnings[i]) > 0 {
@@ -674,6 +667,25 @@ func (p *Plan) BlockUnrebuildable() {
 	}
 }
 
+// BlockChanged blocks each template of an ApprovedOnly deploy whose Digest
+// isn't digests[its name], and its items. It runs after BlockUnpermitted and
+// checks only templates not blocked already, so a template the listing left
+// out keeps the reason it was left out.
+func (p *Plan) BlockChanged(digests map[string]string) {
+	for i := range p.Templates {
+		t := &p.Templates[i]
+		if t.Blocked != "" || t.Digest == digests[t.Name] {
+			continue
+		}
+		t.Blocked = fmt.Sprintf("template %s changed since the set was listed; list the sets again", t.Name)
+		for j := range p.Items {
+			if it := &p.Items[j]; it.Template == t.Name && it.Blocked == "" {
+				it.Blocked, it.Node = "template "+t.Name+": "+t.Blocked, it.OldNode
+			}
+		}
+	}
+}
+
 func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, req DeployRequest,
 	byName map[string][]proxmox.VM, vms []proxmox.VM,
 	slotByPool map[string]Slot, cpuModels []string) (TemplateSpec, []string, error) {
@@ -714,9 +726,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, req DeployReque
 		}
 		spec.Interfaces, spec.GPU = p.describe(tcfg)
 		spec.CPU, spec.CloudInit, spec.Bridges = tcfg["cpu"], HasCloudInit(tcfg), sourceBridges(tcfg)
-		if req.ApprovedOnly {
-			spec.Digest = ConfigDigest(tcfg)
-		}
+		spec.Digest = ConfigDigest(tcfg)
 	case exists && req.Rebuild:
 		// Proxmox refuses to delete a template whose base disk a linked clone still uses.
 		for _, vm := range vms {

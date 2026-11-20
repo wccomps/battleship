@@ -122,6 +122,35 @@ func TestDeployApprovedSetBuildsNoTemplate(t *testing.T) {
 	}
 }
 
+// A submission's digests are checked after its plan's other blocks: a
+// template blocked already keeps its reason, and only an unblocked one whose
+// digest differs is blocked as changed, with its VM.
+func TestBlockChangedChecksOnlyUnblockedTemplates(t *testing.T) {
+	plan, err := approvedDeploy(approvedCluster("dev;approved", "dev;approved", "oak"), config.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasons := func() map[string]string {
+		out := map[string]string{}
+		for _, tpl := range plan.Templates {
+			out[tpl.Host] = tpl.Blocked
+		}
+		for _, it := range plan.Items {
+			out[it.Name] = it.Blocked
+		}
+		return out
+	}
+	oakWhy := reasons()["oak"]
+	plan.BlockChanged(map[string]string{"teak.tango.delta.tpl": "not its digest"})
+	got := reasons()
+	if got["oak"] != oakWhy || !strings.Contains(oakWhy, "builds none") {
+		t.Errorf("oak's template blocked %q, want its own reason %q", got["oak"], oakWhy)
+	}
+	if !strings.Contains(got["teak"], "changed since the set was listed") || !strings.Contains(got["team51-teak"], "changed since the set was listed") {
+		t.Errorf("teak's template and VM blocked %q, %q; want changed", got["teak"], got["team51-teak"])
+	}
+}
+
 // ApprovedSets lists a set only when every one of its masters carries the
 // registered approval tag.
 func TestApprovedSets(t *testing.T) {

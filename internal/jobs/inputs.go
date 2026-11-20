@@ -30,7 +30,7 @@ type Inputs struct {
 	ApprovedOnly bool `json:"approved_only,omitempty"`
 	// Digests, on an ApprovedOnly deploy the session interface submits, are
 	// the template digests (pods.TemplateSpec.Digest) by template name that
-	// the practice app listed (pods.DeployRequest.Digests).
+	// the practice app listed (pods.Plan.BlockChanged).
 	Digests map[string]string `json:"digests,omitempty"`
 	// Set is the template set a teardown takes (pods.ParseSet); empty takes
 	// everything in its pods (among Hosts).
@@ -101,7 +101,7 @@ var requests = map[pods.Kind]request{
 		plan: func(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*pods.Plan, error) {
 			return p.Deploy(ctx, pods.DeployRequest{
 				Pattern: in.Pattern, Teams: teams, Hosts: in.Hosts, Rebuild: in.Rebuild, Snapshot: !in.NoSnapshot,
-				ApprovedOnly: in.ApprovedOnly, Digests: in.Digests,
+				ApprovedOnly: in.ApprovedOnly,
 			})
 		},
 	},
@@ -426,6 +426,9 @@ func BuildPlan(ctx context.Context, p pods.Planner, in Inputs) (*pods.Plan, erro
 	keepVMs(plan, in.VMs)
 	if err := pods.BlockUnpermitted(ctx, plan, p.Access, p.Cfg); err != nil {
 		return nil, err
+	}
+	if in.Digests != nil {
+		plan.BlockChanged(in.Digests)
 	}
 	return plan, nil
 }
