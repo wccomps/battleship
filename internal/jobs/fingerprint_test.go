@@ -22,13 +22,13 @@ var fingerprinted = map[string]map[string]bool{
 	"TemplateSpec": {
 		"Name": true, "VMID": true, "Exists": true, "Rebuild": true, "Blocked": true,
 		"WillStopMaster": true, "MasterVMID": true, "Interfaces": true, "GPU": true,
+		// An approved-set deploy's template as it was submitted; other
+		// deploys leave it empty.
+		"Digest": true,
 		// Derived from Name, or where things run, which may change with load.
 		"Host": false, "MasterName": false, "Node": false, "OldNode": false, "MasterNode": false,
 		// Only decide the privileges needed, which Blocked covers.
 		"CPU": false, "CloudInit": false, "Bridges": false,
-		// What the session interface reports of a reused template; a
-		// volunteer's deploy never read it.
-		"Digest": false,
 	},
 	"Item": {
 		"Name": true, "Rename": true, "VMID": true, "Steps": true, "Blocked": true, "Snapshot": true, "Action": true, "Template": true,

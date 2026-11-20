@@ -38,8 +38,9 @@ import (
 const (
 	// practiceTicketHeader carries the principal's Proxmox ticket.
 	practiceTicketHeader = "X-Proxmox-Ticket"
-	// practiceMaxBody caps a request body; a job request is under 100 bytes.
-	practiceMaxBody = 4 << 10
+	// practiceMaxBody caps a request body: a job request is some 100 bytes,
+	// and each template digest a deploy sends back about 100 more.
+	practiceMaxBody = 16 << 10
 	// practiceSetPlans caps the sets GET /v1/sets plans at once, and
 	// practiceSetTimeout each plan, so a node that hangs fails the sets that
 	// wait on it. Sets unplanned when practiceAnswerMargin is left of the call
@@ -264,7 +265,7 @@ func (s *Server) practiceSet(ctx context.Context, planner pods.Planner, set pods
 	}
 	ctx, cancel := context.WithTimeout(ctx, practiceSetTimeout)
 	defer cancel()
-	plan, err := jobs.BuildPlan(ctx, planner, practiceDeploy(set, pod))
+	plan, err := jobs.BuildPlan(ctx, planner, practiceDeploy(set, pod, nil))
 	if err != nil {
 		return failed(err)
 	}
@@ -334,17 +335,19 @@ func (s *Server) practicePodVMs(w http.ResponseWriter, r *http.Request, cred pro
 }
 
 // practiceJobRequest asks for a deploy of Set to Pods, or a teardown of
-// everything in Pods.
+// everything in Pods. A deploy sends back Digests, the template digests GET
+// /v1/sets listed for the set, by template name.
 type practiceJobRequest struct {
-	Kind string `json:"kind"`
-	Pods string `json:"pods"`
-	Set  string `json:"set"`
+	Kind    string            `json:"kind"`
+	Pods    string            `json:"pods"`
+	Set     string            `json:"set"`
+	Digests map[string]string `json:"digests"`
 }
 
-// practiceDeploy is the deploy of set that the interface submits, and plans
-// to list a set.
-func practiceDeploy(set pods.Set, teams string) jobs.Inputs {
-	return jobs.Inputs{Kind: pods.KindDeploy, Teams: teams, Pattern: set.Pattern(), ApprovedOnly: true}.Normalize()
+// practiceDeploy is the deploy of set that the interface submits, with the
+// digests it was sent, and plans with digests nil to list a set.
+func practiceDeploy(set pods.Set, teams string, digests map[string]string) jobs.Inputs {
+	return jobs.Inputs{Kind: pods.KindDeploy, Teams: teams, Pattern: set.Pattern(), ApprovedOnly: true, Digests: digests}.Normalize()
 }
 
 // practiceInputs is the job the request asks for. ok is false once it has
@@ -357,7 +360,7 @@ func (s *Server) practiceInputs(w http.ResponseWriter, req practiceJobRequest) (
 			practiceRefuse(w, http.StatusUnprocessableEntity, "bad_set", "a deploy names one set, e.g. kilo.alpha")
 			return in, false
 		}
-		in = practiceDeploy(set, req.Pods)
+		in = practiceDeploy(set, req.Pods, req.Digests)
 	case pods.KindTeardown:
 		if req.Set != "" {
 			practiceRefuse(w, http.StatusUnprocessableEntity, "bad_set", "a teardown takes everything in its pods; leave set out")
@@ -369,6 +372,15 @@ func (s *Server) practiceInputs(w http.ResponseWriter, req practiceJobRequest) (
 		return in, false
 	}
 	if _, ok := s.practicePods(w, req.Pods); !ok {
+		return in, false
+	}
+	switch {
+	case in.Kind == pods.KindDeploy && len(req.Digests) == 0:
+		practiceRefuse(w, http.StatusUnprocessableEntity, "bad_digests",
+			`a deploy sends back the digest GET /v1/sets listed for each of the set's templates, as "digests": {"<template name>": "<digest>"}`)
+		return in, false
+	case in.Kind == pods.KindTeardown && req.Digests != nil:
+		practiceRefuse(w, http.StatusUnprocessableEntity, "bad_digests", "a teardown takes no digests; leave digests out")
 		return in, false
 	}
 	if err := in.Validate(); err != nil {
@@ -385,7 +397,8 @@ func (s *Server) practiceSubmit(w http.ResponseWriter, r *http.Request, cred pro
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, practiceMaxBody))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		practiceRefuse(w, http.StatusBadRequest, "bad_json", `send {"kind": "deploy" or "teardown", "pods": "51-53", "set": "kilo.alpha" for a deploy}`)
+		practiceRefuse(w, http.StatusBadRequest, "bad_json",
+			`send {"kind": "deploy" or "teardown", "pods": "51-53", and for a deploy "set": "kilo.alpha", "digests": {"<template name>": "<digest>"}}`)
 		return
 	}
 	if _, err := dec.Token(); err != io.EOF {

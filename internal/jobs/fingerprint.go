@@ -50,6 +50,9 @@ func Fingerprint(plan *pods.Plan) string {
 		MasterVMID     int
 		Interfaces     int
 		GPU            bool
+		// Set only by an approved-set deploy: a template rebuilt in place
+		// since its submission makes the job stale.
+		Digest string `json:",omitempty"`
 	}
 	fp := struct {
 		Kind      pods.Kind
@@ -70,6 +73,7 @@ func Fingerprint(plan *pods.Plan) string {
 			MasterVMID:     t.MasterVMID,
 			Interfaces:     t.Interfaces,
 			GPU:            t.GPU,
+			Digest:         t.Digest,
 		})
 	}
 	for _, it := range plan.Items {

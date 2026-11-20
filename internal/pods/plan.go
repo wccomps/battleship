@@ -216,8 +216,8 @@ type TemplateSpec struct {
 	// Bridges are the template's net0 and net1 bridges, which clones start on
 	// until the network step rewires them.
 	Bridges []string `json:"bridges,omitempty"`
-	// Digest is ConfigDigest of the template a deploy reuses, as the session
-	// interface reports it.
+	// Digest is ConfigDigest of the template an ApprovedOnly deploy reuses:
+	// what the session interface lists, and checks against (Digests).
 	Digest string `json:"digest,omitempty"`
 }
 
@@ -461,6 +461,10 @@ type DeployRequest struct {
 	// ("*.<set>", SetOfPattern). The deploy is refused (ErrNotApproved)
 	// unless the set is approved, and it clones only templates already built.
 	ApprovedOnly bool
+	// Digests, with ApprovedOnly, are the TemplateSpec.Digest the requester
+	// listed, by template name: a template whose digest differs, or that has
+	// none here, is blocked. Nil compares nothing, as the listing plans.
+	Digests map[string]string
 }
 
 func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
@@ -530,7 +534,7 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 	g.SetLimit(batchSize)
 	for i, m := range kept {
 		g.Go(func() error {
-			spec, ws, err := p.templateSpec(ctx, m, req.Rebuild, req.Teams, byName, vms, slotByPool, cpuModels)
+			spec, ws, err := p.templateSpec(ctx, m, req, byName, vms, slotByPool, cpuModels)
 			if err != nil {
 				return err
 			}
@@ -557,6 +561,9 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		}
 		if req.ApprovedOnly && spec.Blocked == "" && spec.Builds() {
 			spec.Blocked = "no template is built: a session deploy clones a template a volunteer built and builds none"
+		}
+		if req.Digests != nil && spec.Blocked == "" && spec.Digest != req.Digests[spec.Name] {
+			spec.Blocked = fmt.Sprintf("template %s changed since the set was listed; list the sets again", spec.Name)
 		}
 		spec.WillStopMaster = spec.Blocked == "" && spec.Builds() && m.Status == "running"
 		if len(warnings[i]) > 0 {
@@ -663,7 +670,7 @@ func (p *Plan) BlockUnrebuildable() {
 	}
 }
 
-func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, teams []string,
+func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, req DeployRequest,
 	byName map[string][]proxmox.VM, vms []proxmox.VM,
 	slotByPool map[string]Slot, cpuModels []string) (TemplateSpec, []string, error) {
 	cfg, err := p.API.VMConfig(ctx, m.Node, m.VMID)
@@ -691,10 +698,10 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, t
 	case len(named) > 1:
 		spec.VMID, spec.Node = existing.VMID, existing.Node
 		spec.Blocked = fmt.Sprintf("several VMs are named %s (VMIDs %s); rename or delete the extras", spec.Name, vmidList(named))
-	case exists && !rebuild && !existing.Template:
+	case exists && !req.Rebuild && !existing.Template:
 		spec.VMID, spec.Node = existing.VMID, existing.Node
 		spec.Blocked = "exists but is not a template (an earlier build may have been interrupted); deploy with rebuild"
-	case exists && !rebuild:
+	case exists && !req.Rebuild:
 		spec.VMID, spec.Node, spec.Exists = existing.VMID, existing.Node, true
 		// Clones copy the template, so it describes the pod, not the master.
 		tcfg, err := p.API.VMConfig(ctx, existing.Node, existing.VMID)
@@ -703,11 +710,13 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, t
 		}
 		spec.Interfaces, spec.GPU = p.describe(tcfg)
 		spec.CPU, spec.CloudInit, spec.Bridges = tcfg["cpu"], HasCloudInit(tcfg), NICBridges(tcfg)
-		spec.Digest = ConfigDigest(tcfg)
-	case exists && rebuild:
+		if req.ApprovedOnly {
+			spec.Digest = ConfigDigest(tcfg)
+		}
+	case exists && req.Rebuild:
 		// Proxmox refuses to delete a template whose base disk a linked clone still uses.
 		for _, vm := range vms {
-			if team, host, ok := p.Naming.TeamVM(vm); ok && host == spec.Host && !slices.Contains(teams, team) {
+			if team, host, ok := p.Naming.TeamVM(vm); ok && host == spec.Host && !slices.Contains(req.Teams, team) {
 				spec.Blocked = fmt.Sprintf("pod VMs such as %s still use this template; tear them down first", vm.Name)
 				break
 			}

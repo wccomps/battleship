@@ -71,3 +71,58 @@ func TestApprovedOnlyInputs(t *testing.T) {
 		}
 	}
 }
+
+// A session deploy carries the template digests the practice app listed: a
+// template rebuilt in place (same name, VMID and template flag) after the
+// submission ends the job stale before anything is cloned.
+func TestWorkerEndsSessionDeployStaleOnATemplateRebuiltInPlace(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(cfg map[string]string) // the template's config, between submission and the run
+		status string
+	}{
+		{name: "unchanged", change: func(map[string]string) {}, status: store.StatusSucceeded},
+		{name: "only its tags and notes changed", change: func(c map[string]string) { c["tags"], c["description"] = "reviewed", "checked" }, status: store.StatusSucceeded},
+		{name: "rebuilt in place", change: func(c map[string]string) { c["smbios1"] = "uuid=5f1c2a9e-0000-4000-8000-000000000002" }, status: store.StatusStale},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := storetest.New(t)
+			f := twoTeams()
+			f.Tags = proxmox.TagAccess{Registered: []string{"approved"}, CaseSensitive: true}
+			f.addVM(proxmox.VM{VMID: 5021, Name: "teak.kilo.alpha", Node: "n1", Status: "stopped", Tags: "dev;approved"})
+			f.addVM(proxmox.VM{VMID: 9021, Name: "teak.kilo.alpha.tpl", Node: "n1", Template: true})
+			in := Inputs{Kind: pods.KindDeploy, Teams: "1", Pattern: "*.kilo.alpha", ApprovedOnly: true}
+			listed, err := BuildPlan(bg, pods.NewPlanner(f, testCfg()), in)
+			if err != nil || len(listed.Templates) != 1 || listed.Templates[0].Digest == "" {
+				t.Fatalf("listing = %+v, %v; want teak's template with a digest", listed, err)
+			}
+			in.Digests = map[string]string{"teak.kilo.alpha.tpl": listed.Templates[0].Digest}
+			id := submit(t, st, f, in)
+			f.Mu.Lock()
+			tc.change(f.VMs[9021].Config)
+			f.Mu.Unlock()
+
+			newWorker(st, f).runJob(bg, claim(t, st))
+
+			j := job(t, st, id)
+			if j.Status != tc.status {
+				t.Fatalf("job = %s (%s), want %s", j.Status, j.Error, tc.status)
+			}
+			if cloned := f.Called("clone:") > 0; cloned != (tc.status == store.StatusSucceeded) {
+				t.Errorf("cloned = %t with the job %s", cloned, j.Status)
+			}
+		})
+	}
+}
+
+// Digests belong to an approved-only deploy.
+func TestDigestsNeedApprovedOnly(t *testing.T) {
+	in := Inputs{Kind: pods.KindDeploy, Teams: "51", Pattern: "*.kilo.alpha", Digests: map[string]string{"dc.kilo.alpha.tpl": "ab"}}
+	if err := in.Normalize().Validate(); err == nil || !strings.Contains(err.Error(), "approved-only") {
+		t.Errorf("digests on a volunteer's deploy: Validate = %v", err)
+	}
+	in.ApprovedOnly = true
+	if err := in.Normalize().Validate(); err != nil {
+		t.Errorf("digests on an approved-only deploy: Validate = %v", err)
+	}
+}

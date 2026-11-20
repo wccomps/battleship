@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,6 +28,10 @@ type Inputs struct {
 	// ApprovedOnly, on a deploy from the session interface, plans only the
 	// approved set Pattern names (pods.DeployRequest.ApprovedOnly).
 	ApprovedOnly bool `json:"approved_only,omitempty"`
+	// Digests, on an ApprovedOnly deploy the session interface submits, are
+	// the template digests (pods.TemplateSpec.Digest) by template name that
+	// the practice app listed (pods.DeployRequest.Digests).
+	Digests map[string]string `json:"digests,omitempty"`
 	// Set is the template set a teardown takes (pods.ParseSet); empty takes
 	// everything in its pods (among Hosts).
 	Set pods.Set `json:"set,omitempty"`
@@ -88,11 +93,15 @@ var requests = map[pods.Kind]request{
 			if _, ok := pods.SetOfPattern(in.Pattern); in.ApprovedOnly && !ok {
 				return []error{fmt.Errorf("an approved-only deploy names one set as *.<set>, not %q", in.Pattern)}
 			}
+			if len(in.Digests) > 0 && !in.ApprovedOnly {
+				return []error{errors.New("template digests apply only to an approved-only deploy")}
+			}
 			return nil
 		},
 		plan: func(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*pods.Plan, error) {
 			return p.Deploy(ctx, pods.DeployRequest{
-				Pattern: in.Pattern, Teams: teams, Hosts: in.Hosts, Rebuild: in.Rebuild, Snapshot: !in.NoSnapshot, ApprovedOnly: in.ApprovedOnly,
+				Pattern: in.Pattern, Teams: teams, Hosts: in.Hosts, Rebuild: in.Rebuild, Snapshot: !in.NoSnapshot,
+				ApprovedOnly: in.ApprovedOnly, Digests: in.Digests,
 			})
 		},
 	},
@@ -365,6 +374,14 @@ func (in Inputs) checkText() error {
 			values []string
 		}{"details", []string{d.OS, d.User, d.Password, d.Built, d.Generalized, d.Installed, d.Licence, d.From}})
 	}
+	var digests []string
+	for _, name := range slices.Sorted(maps.Keys(in.Digests)) {
+		digests = append(digests, name, in.Digests[name])
+	}
+	fields = append(fields, struct {
+		name   string
+		values []string
+	}{"digests", digests})
 	var errs []error
 	refuse := func(name, v string) {
 		// Bounded: the error reaches pages and logs.
@@ -547,6 +564,7 @@ func (in Inputs) Normalize() Inputs {
 		out.Rebuild = in.Rebuild
 		out.NoSnapshot = in.NoSnapshot
 		out.ApprovedOnly = in.ApprovedOnly
+		out.Digests = in.Digests
 	case pods.KindTeardown:
 		out.Set = pods.Set(strings.ToLower(strings.TrimSpace(string(in.Set))))
 	case pods.KindReset:
