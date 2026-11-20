@@ -140,18 +140,19 @@ func (e *Executor) cleanup(ctx context.Context, specs []pods.TemplateSpec, build
 }
 
 // settle finds what is at a recorded VMID right before cleanup acts: its
-// node (from the listing if listOK, else ref.node) and its config once
-// unlocked, or that it is gone. Anything else is an error, never acted on.
+// node (from the listing if listOK and it shows the VM, else ref.node) and
+// its config once unlocked, or that it is gone. A VM missing from the
+// listing is still read, as the listing can lag behind. Anything else is an
+// error, never acted on.
 func (e *Executor) settle(ctx context.Context, ref vmRef, listOK bool) (node string, cfg map[string]string, gone bool, err error) {
 	node = ref.node
 	if listOK {
 		e.mu.Lock()
 		vm, ok := e.present[ref.vmid]
 		e.mu.Unlock()
-		if !ok {
-			return "", nil, true, nil
+		if ok {
+			node = vm.Node
 		}
-		node = vm.Node
 	}
 	cfg, gone, err = e.readVM(ctx, node, ref.vmid)
 	switch {

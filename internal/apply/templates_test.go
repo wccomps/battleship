@@ -471,6 +471,37 @@ func TestCopyIntoAFailedCopysRemovedTargetIsConverted(t *testing.T) {
 	}
 }
 
+// The refusal of a failed copy's leftover promises its removal, so cleanup
+// removes it even when cleanup's own listing misses it.
+func TestFailedCopyLeftoverIsRemovedThoughCleanupsListingMissesIt(t *testing.T) {
+	f := newCluster()
+	plan := deployTeak(t, f, "01")
+	api := &laggingListing{Fake: f}
+	copyTask := podstest.UPID("cedar", "qmclone", 121)
+	f.WaitHook = func(_ context.Context, upid string) error { // runs with f.Mu held
+		if upid != copyTask {
+			return nil
+		}
+		f.WaitHook = nil
+		return &proxmox.TaskError{UPID: upid, ExitStatus: "clone failed: storage error"}
+	}
+	ex := testExecutor(f, &recorder{})
+	ex.API = api
+	ex.OnEvent = func(ev Event) {
+		if strings.Contains(ev.Message, "leftover of a failed copy") {
+			api.hidden.Store(9021) // listings from here on, cleanup's included, miss it
+		}
+	}
+
+	res := ex.Run(context.Background(), plan)
+	if err := res.Failed["team01-teak"]; err == nil || !strings.Contains(err.Error(), "leftover of a failed copy") {
+		t.Errorf("error = %v, want the failed copy's leftover refused", err)
+	}
+	if f.VMs[9021] != nil || !slices.Equal(res.Removed, []string{"teak.tango.delta.tpl"}) {
+		t.Errorf("leftover not removed: Removed = %v, AlreadyGone = %v, CleanupFailed = %v", res.Removed, res.AlreadyGone, res.CleanupFailed)
+	}
+}
+
 // An existing team VM never uses its template, so a failed build of it
 // must not fail the VM.
 func TestExistingTeamVMIgnoresFailedTemplateBuild(t *testing.T) {
