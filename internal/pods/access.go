@@ -230,7 +230,7 @@ func cpuMapping(cpu string) string {
 }
 
 // cloneNeeds is what cloning VM src as vmid into pool needs: SDN.Use on the
-// NICs of from, src's tags and netN values as read (AsRead), which Proxmox's
+// NICs of from, src's config as read (AsRead), which Proxmox's
 // clone checks (sdnUse), and Mapping.Use for cpu, its CPU model.
 func cloneNeeds(cfg config.Config, src, vmid int, pool string, from map[string]string, cpu string) []need {
 	ns := []need{
@@ -384,8 +384,8 @@ type stepEdit struct {
 	cloudInit      bool
 }
 
-// cloneSource is the VM an item's clone step copies: its VMID, its tags and
-// netN values as read, and a template's CPU model.
+// cloneSource is the VM an item's clone step copies: its VMID, its config
+// as read, and a template's CPU model.
 func cloneSource(it Item, tpl *TemplateSpec) (vmid int, asRead map[string]string, cpu string) {
 	switch {
 	case it.Source != nil:
@@ -422,7 +422,7 @@ func stepEdits(it Item, tpl *TemplateSpec, cfg config.Config) []stepEdit {
 			continue
 		}
 		e, was := &out[i], cur["tags"]
-		e.cloudInit = st == StepNetwork && it.NICs == nil && HasCloudInit(cur) // as applyConfig decides
+		e.cloudInit = RegeneratesCloudInit(st, it, cur)
 		for k, v := range change(cur) {
 			switch {
 			case isNetKey(k):

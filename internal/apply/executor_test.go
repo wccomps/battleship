@@ -2474,7 +2474,7 @@ func TestRebuildOfTeamVMGoneSincePlanning(t *testing.T) {
 }
 
 // A network step with neither NICs nor a template fails its item and writes
-// nothing, rather than wiring the VM as if it had no NICs.
+// nothing.
 func TestNetworkStepWithoutNICsOrTemplateFails(t *testing.T) {
 	f := newCluster()
 	plan := &pods.Plan{Kind: pods.KindDeploy, Items: []pods.Item{{

@@ -61,24 +61,6 @@ func forEachNIC(cfg map[string]string, fn func(key, val string)) {
 	}
 }
 
-// asRead is cfg's tags, netN values and cloud-init drive: what stepEdits
-// replays a VM's label, tag-set and network steps on to find the tags and
-// NICs they change and whether the network step regenerates cloud-init
-// (Item.AsRead).
-func asRead(cfg map[string]string) map[string]string {
-	out := map[string]string{}
-	if t := cfg["tags"]; t != "" {
-		out["tags"] = t
-	}
-	forEachNIC(cfg, func(k, v string) { out[k] = v })
-	for k, v := range cfg {
-		if isDriveKey(k) && HasCloudInit(map[string]string{k: v}) {
-			out[k] = v
-		}
-	}
-	return out
-}
-
 func nicBridge(nic string) string {
 	_, opts := splitOptions(nic)
 	return opts["bridge"]
@@ -98,14 +80,24 @@ func CountInterfaces(cfg map[string]string) int {
 // HasCloudInit reports whether any drive is a cloud-init drive.
 func HasCloudInit(cfg map[string]string) bool {
 	for k, v := range cfg {
-		if isDriveKey(k) {
-			head, opts := splitOptions(v)
-			if opts["media"] == "cdrom" && strings.Contains(head, "cloudinit") {
-				return true
-			}
+		if isDriveKey(k) && isCloudInitDrive(v) {
+			return true
 		}
 	}
 	return false
+}
+
+// isCloudInitDrive reports whether drive value v is a cloud-init drive.
+func isCloudInitDrive(v string) bool {
+	head, opts := splitOptions(v)
+	return opts["media"] == "cdrom" && strings.Contains(head, "cloudinit")
+}
+
+// RegeneratesCloudInit reports whether step st of it, run on config cur,
+// regenerates cloud-init: a network step with no NICs of its own on a VM
+// with a cloud-init drive.
+func RegeneratesCloudInit(st Step, it Item, cur map[string]string) bool {
+	return st == StepNetwork && it.NICs == nil && HasCloudInit(cur)
 }
 
 func nicSpec(current, bridge string) string {
@@ -178,8 +170,8 @@ func CDROMChanges(cur map[string]string) map[string]string {
 	want := map[string]string{}
 	for k, v := range cur {
 		if isDriveKey(k) {
-			head, opts := splitOptions(v)
-			if opts["media"] == "cdrom" && !strings.Contains(head, "cloudinit") {
+			_, opts := splitOptions(v)
+			if opts["media"] == "cdrom" && !isCloudInitDrive(v) {
 				want[k] = "none,media=cdrom"
 			}
 		}

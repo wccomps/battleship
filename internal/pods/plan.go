@@ -175,7 +175,7 @@ type Source struct {
 	VMID int    `json:"vmid"`
 	Node string `json:"node"`
 	Name string `json:"name"`
-	// AsRead is its config as read (asRead), which a clone
+	// AsRead is its config as read, which a clone
 	// copies. Plans don't store it: rights are checked on a fresh plan.
 	AsRead map[string]string `json:"-"`
 	// Base, Notes and Unreadable are the source's notes, for its review: the
@@ -212,7 +212,7 @@ type TemplateSpec struct {
 	// CPU (a custom-<name> model needs Mapping.Use to clone) only decides the
 	// privileges a deploy needs.
 	CPU string `json:"-"`
-	// AsRead is the config as read (asRead) a clone of the template starts
+	// AsRead is the config as read a clone of the template starts
 	// with: the template's when reused, the master's, which the build copies,
 	// when built.
 	AsRead map[string]string `json:"-"`
@@ -268,7 +268,7 @@ type Item struct {
 	// DetailsWas is an Edit notes's or Edit host's notes as read, for its
 	// review and fingerprint.
 	DetailsWas *NotesRead `json:"details_was,omitempty"`
-	// AsRead is the config as read (asRead) of a VM the item keeps, which its
+	// AsRead is the config as read of a VM the item keeps, which its
 	// steps start from; under StepClone they start from the clone source's
 	// (cloneSource). It only decides the rights the steps need.
 	AsRead map[string]string `json:"-"`
@@ -613,7 +613,7 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		case cfgs[j] == nil:
 			it.Blocked = "is gone since the listing"
 		default:
-			it.AsRead = asRead(cfgs[j])
+			it.AsRead = cfgs[j]
 		}
 	}
 	plan.BlockUnrebuildable()
@@ -731,7 +731,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, req DeployReque
 		MasterNode: m.Node,
 	}
 	spec.Interfaces, spec.GPU = p.describe(cfg)
-	spec.CPU, spec.AsRead = cfg["cpu"], asRead(cfg)
+	spec.CPU, spec.AsRead = cfg["cpu"], cfg
 	named := byName[spec.Name]
 	var existing proxmox.VM
 	exists := len(named) > 0
@@ -753,7 +753,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, req DeployReque
 			return TemplateSpec{}, nil, fmt.Errorf("reading template %s: %w", spec.Name, err)
 		}
 		spec.Interfaces, spec.GPU = p.describe(tcfg)
-		spec.CPU, spec.AsRead = tcfg["cpu"], asRead(tcfg)
+		spec.CPU, spec.AsRead = tcfg["cpu"], tcfg
 		spec.Digest = ConfigDigest(tcfg)
 	case exists && req.Rebuild:
 		// Proxmox refuses to delete a template whose base disk a linked clone still uses.

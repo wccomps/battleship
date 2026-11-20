@@ -132,7 +132,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		}
 		desc = cfg["description"]
 		var derr error
-		it.Source.AsRead, it.Source.Base = asRead(cfg), baseNote(cfg)
+		it.Source.AsRead, it.Source.Base = cfg, baseNote(cfg)
 		_, it.Source.Notes, derr = ParseDetails(desc)
 		it.Source.Unreadable = derr != nil
 		it.Blocked = agentBlock(src, cfg, kind)
@@ -230,7 +230,7 @@ func (p Planner) ImageEdit(ctx context.Context, req ImageRequest) (*Plan, error)
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", newest.Name, err)
 		}
-		it.Source.AsRead = asRead(cfg)
+		it.Source.AsRead = cfg
 		it.blockLongNotes(cfg["description"])
 		// Every NIC goes on the edit bridge: a router's LAN left on a slot's
 		// bridge would clash with that environment's router.

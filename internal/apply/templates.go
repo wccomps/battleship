@@ -381,7 +381,7 @@ func (e *Executor) teamVMUsing(host string) (proxmox.VM, bool) {
 func (e *Executor) finishTemplate(ctx context.Context, spec *pods.TemplateSpec, node string) error {
 	name := spec.Name
 	tplItem := &pods.Item{Name: name, VMID: spec.VMID, Node: node}
-	if _, err := e.applyConfig(ctx, tplItem, false, always(pods.CDROMChanges)); err != nil {
+	if _, err := e.applyConfig(ctx, tplItem, always(pods.CDROMChanges)); err != nil {
 		return fmt.Errorf("ejecting CD-ROM: %w", err)
 	}
 	e.emit(name, pods.StepClone, EventInfo, "converting to template")

@@ -66,7 +66,7 @@ func TestTemplateSpecReadsNICs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := plan.Templates[0].AsRead; len(got) != 4 || nicBridge(got["net0"]) != "vmbr0" || nicBridge(got["net1"]) != "vmbr1" || got["tags"] == "" || !HasCloudInit(got) {
+	if got := plan.Templates[0].AsRead; nicBridge(got["net0"]) != "vmbr0" || nicBridge(got["net1"]) != "vmbr1" || got["tags"] == "" || !HasCloudInit(got) {
 		t.Fatalf("template as read = %v", got)
 	}
 	if got := plan.Items[0].AsRead; got != nil { // a clone's steps start from its template's

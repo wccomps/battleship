@@ -199,7 +199,7 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 	wantNotes := h.Notes
 	wantNotes.Base = wantBase
 
-	it := Item{Name: h.Name, Host: wantHost, VMID: h.VMID, Node: h.Node, Pool: env.Slot.Pool, DetailsWas: &at.Read, AsRead: asRead(h.Config)}
+	it := Item{Name: h.Name, Host: wantHost, VMID: h.VMID, Node: h.Node, Pool: env.Slot.Pool, DetailsWas: &at.Read, AsRead: h.Config}
 	if vm.Template {
 		it.Blocked = "is a template"
 	}
