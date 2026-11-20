@@ -457,10 +457,10 @@ type DeployRequest struct {
 	Hosts    []string // optional host filter
 	Rebuild  bool
 	Snapshot bool
-	// ApprovedSet, in place of Pattern, takes exactly this set's masters. The
-	// deploy is refused (ErrNotApproved) unless the set is approved, and it
-	// clones only templates already built.
-	ApprovedSet Set
+	// ApprovedOnly takes exactly the masters of the set Pattern names
+	// ("*.<set>", SetOfPattern). The deploy is refused (ErrNotApproved)
+	// unless the set is approved, and it clones only templates already built.
+	ApprovedOnly bool
 }
 
 func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
@@ -494,11 +494,7 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		}
 	}
 	if len(kept) == 0 {
-		of := fmt.Sprintf("match %q", req.Pattern)
-		if req.ApprovedSet != "" {
-			of = fmt.Sprintf("are of set %s", req.ApprovedSet)
-		}
-		msg := fmt.Sprintf("no master VMs %s with tag %q", of, p.Cfg.Deploy.MasterTag)
+		msg := fmt.Sprintf("no master VMs match %q with tag %q", req.Pattern, p.Cfg.Deploy.MasterTag)
 		if len(req.Hosts) > 0 {
 			msg += " and hosts " + strings.Join(req.Hosts, ", ")
 		}
@@ -559,7 +555,7 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		if spec.Blocked == "" && (spec.VMID < base || spec.VMID >= base+100) {
 			spec.Blocked = fmt.Sprintf("template VMID %d is outside %d-%d, so its clone VMIDs could collide with another template's", spec.VMID, base, base+99)
 		}
-		if req.ApprovedSet != "" && spec.Blocked == "" && spec.Builds() {
+		if req.ApprovedOnly && spec.Blocked == "" && spec.Builds() {
 			spec.Blocked = "no template is built: a session deploy clones a template a volunteer built and builds none"
 		}
 		spec.WillStopMaster = spec.Blocked == "" && spec.Builds() && m.Status == "running"
@@ -595,13 +591,14 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 }
 
 // deployMasters is the masters req names: Pattern's matches, with the
-// untagged ones, or ApprovedSet's own once the set is approved.
+// untagged ones, or with ApprovedOnly its set's own once the set is approved.
 func (p Planner) deployMasters(ctx context.Context, req DeployRequest, vms []proxmox.VM) (masters, untagged []proxmox.VM, err error) {
-	if req.ApprovedSet == "" {
+	if !req.ApprovedOnly {
 		return FindMasters(vms, p.Naming, req.Pattern, p.Cfg.Deploy.MasterTag)
 	}
-	if p.Access == nil {
-		return nil, nil, errors.New("planning without the user's privileges")
+	set, ok := SetOfPattern(req.Pattern)
+	if !ok {
+		return nil, nil, fmt.Errorf("an approved-only deploy names one set as *.<set>, not %q", req.Pattern)
 	}
 	tags, err := p.Access.TagAccess(ctx)
 	if err != nil {
@@ -612,8 +609,8 @@ func (p Planner) deployMasters(ctx context.Context, req DeployRequest, vms []pro
 		return nil, nil, err
 	}
 	bySet, _ := mastersBySet(vms, p.Naming, p.Cfg.Deploy.MasterTag)
-	masters = bySet[req.ApprovedSet]
-	return masters, nil, requireApproved(req.ApprovedSet, masters, tag)
+	masters = bySet[set]
+	return masters, nil, requireApproved(set, masters, tag)
 }
 
 // blockDuplicateHosts blocks templates whose hostnames collide: their team

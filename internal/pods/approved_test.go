@@ -32,7 +32,7 @@ func approvedCluster(teakTags, oakTags string, unbuilt ...string) *podstest.Fake
 }
 
 func approvedDeploy(f *podstest.Fake, cfg config.Config, hosts ...string) (*Plan, error) {
-	return NewPlanner(f, cfg).Deploy(context.Background(), DeployRequest{ApprovedSet: "tango.delta", Teams: []string{"51"}, Hosts: hosts})
+	return NewPlanner(f, cfg).Deploy(context.Background(), DeployRequest{Pattern: "*.tango.delta", ApprovedOnly: true, Teams: []string{"51"}, Hosts: hosts})
 }
 
 // A deploy of an approved set plans only while every master of the set
@@ -90,14 +90,14 @@ func TestDeployApprovedSetIsExact(t *testing.T) {
 	f.Add(proxmox.VM{VMID: 131, Name: "elm.delta", Node: "cedar", Tags: "dev;approved"}, map[string]string{"net0": "virtio=BC:24:11:00:01:31,bridge=vmbr0"})
 	f.Add(proxmox.VM{VMID: 9031, Name: "elm.delta.tpl", Node: "cedar", Template: true}, map[string]string{"net0": "virtio=BC:24:11:00:01:31,bridge=vmbr0"})
 	p := NewPlanner(f, config.Default())
-	plan, err := p.Deploy(context.Background(), DeployRequest{ApprovedSet: "delta", Teams: []string{"51"}})
+	plan, err := p.Deploy(context.Background(), DeployRequest{Pattern: "*.delta", ApprovedOnly: true, Teams: []string{"51"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(plan.Items) != 1 || plan.Items[0].Name != "team51-elm" || plan.Items[0].Blocked != "" {
 		t.Errorf("items = %+v, want team51-elm alone", plan.Items)
 	}
-	if _, err := p.Deploy(context.Background(), DeployRequest{ApprovedSet: "no.such", Teams: []string{"51"}}); !errors.Is(err, ErrNotApproved) {
+	if _, err := p.Deploy(context.Background(), DeployRequest{Pattern: "*.no.such", ApprovedOnly: true, Teams: []string{"51"}}); !errors.Is(err, ErrNotApproved) {
 		t.Errorf("a set with no masters: %v, want ErrNotApproved", err)
 	}
 }

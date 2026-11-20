@@ -850,13 +850,13 @@ func TestDeployPlanRebuildPlacesVMOnPodNode(t *testing.T) {
 	}
 }
 
-// A host filter that leaves an approved set no master names the set, which an
-// approved-set deploy has in place of a pattern.
+// A host filter that leaves an approved set no master names the set's
+// pattern.
 func TestDeployApprovedSetNamesItWhenNoHostMatches(t *testing.T) {
 	cfg := config.Default()
 	cfg.Deploy.ApprovedTag = "approved"
 	_, err := approvedDeploy(approvedCluster("dev;approved", "dev;approved"), cfg, "pine")
-	if want := `no master VMs are of set tango.delta with tag "dev" and hosts pine`; err == nil || err.Error() != want {
+	if want := `no master VMs match "*.tango.delta" with tag "dev" and hosts pine`; err == nil || err.Error() != want {
 		t.Errorf("err = %v, want %q", err, want)
 	}
 }

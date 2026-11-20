@@ -24,8 +24,8 @@ type Inputs struct {
 	Pattern    string    `json:"pattern,omitempty"`     // deploy
 	Rebuild    bool      `json:"rebuild,omitempty"`     // deploy
 	NoSnapshot bool      `json:"no_snapshot,omitempty"` // deploy
-	// ApprovedOnly, on a deploy from the session interface, plans the one set
-	// Pattern names ("*.<set>") as pods.DeployRequest.ApprovedSet.
+	// ApprovedOnly, on a deploy from the session interface, plans only the
+	// approved set Pattern names (pods.DeployRequest.ApprovedOnly).
 	ApprovedOnly bool `json:"approved_only,omitempty"`
 	// Set is the template set a teardown takes (pods.ParseSet); empty takes
 	// everything in its pods (among Hosts).
@@ -91,12 +91,9 @@ var requests = map[pods.Kind]request{
 			return nil
 		},
 		plan: func(ctx context.Context, p pods.Planner, in Inputs, teams []string) (*pods.Plan, error) {
-			req := pods.DeployRequest{Pattern: in.Pattern, Teams: teams, Hosts: in.Hosts, Rebuild: in.Rebuild, Snapshot: !in.NoSnapshot}
-			if in.ApprovedOnly {
-				req.Pattern = ""
-				req.ApprovedSet, _ = pods.SetOfPattern(in.Pattern)
-			}
-			return p.Deploy(ctx, req)
+			return p.Deploy(ctx, pods.DeployRequest{
+				Pattern: in.Pattern, Teams: teams, Hosts: in.Hosts, Rebuild: in.Rebuild, Snapshot: !in.NoSnapshot, ApprovedOnly: in.ApprovedOnly,
+			})
 		},
 	},
 	pods.KindTeardown: {
