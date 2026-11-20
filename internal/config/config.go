@@ -411,6 +411,8 @@ func Load(path string) (Config, error) {
 	}
 	// Both https://battleship.example.org and https://battleship.example.org/ mean the site root.
 	cfg.Web.BaseURL = strings.TrimSuffix(cfg.Web.BaseURL, "/")
+	// Tags are compared as Proxmox stores them, without surrounding space.
+	cfg.Deploy.MasterTag, cfg.Deploy.ApprovedTag = strings.TrimSpace(cfg.Deploy.MasterTag), strings.TrimSpace(cfg.Deploy.ApprovedTag)
 	var caErr error
 	if cfg.Proxmox.CAFile != "" {
 		if cfg.Proxmox.RootCAs, caErr = ReadCAFile(cfg.Proxmox.CAFile); caErr != nil {
@@ -511,10 +513,10 @@ func (c Config) Validate() error {
 	if c.Deploy.Storage == "" {
 		errs = append(errs, errors.New("deploy.storage is required"))
 	}
-	if strings.TrimSpace(c.Deploy.MasterTag) == "" {
+	if c.Deploy.MasterTag == "" {
 		errs = append(errs, errors.New("deploy.master_tag is required"))
 	}
-	if a := strings.TrimSpace(c.Deploy.ApprovedTag); a != "" && strings.EqualFold(a, strings.TrimSpace(c.Deploy.MasterTag)) {
+	if c.Deploy.ApprovedTag != "" && strings.EqualFold(c.Deploy.ApprovedTag, c.Deploy.MasterTag) {
 		errs = append(errs, errors.New("deploy.approved_tag must differ from deploy.master_tag, which every master carries"))
 	}
 	if c.Deploy.SnapshotName == "" {

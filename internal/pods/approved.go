@@ -16,7 +16,7 @@ var ErrNotApproved = errors.New("not approved for self-service sessions")
 // approvalTag is deploy.approved_tag, or ErrNotApproved unless it is registered,
 // spelled exactly, and a user without Sys.Modify can't set a case variant.
 func approvalTag(cfg config.Deploy, tags proxmox.TagAccess) (string, error) {
-	tag := strings.TrimSpace(cfg.ApprovedTag)
+	tag := cfg.ApprovedTag
 	switch {
 	case tag == "":
 		return "", fmt.Errorf("every set is %w: deploy.approved_tag is empty", ErrNotApproved)

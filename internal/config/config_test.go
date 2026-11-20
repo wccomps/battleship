@@ -44,6 +44,35 @@ round_pause = "5s"
 	}
 }
 
+// Load trims the deploy tags once, so a padded tag means the tag and a blank
+// master_tag is missing.
+func TestLoadTrimsDeployTags(t *testing.T) {
+	cfg, err := Load(writeFile(t, `
+[proxmox]
+url = "https://pve.example:8006"
+
+[deploy]
+master_tag = " dev "
+approved_tag = " approved "
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Deploy.MasterTag != "dev" || cfg.Deploy.ApprovedTag != "approved" {
+		t.Errorf("tags = %q, %q; want dev, approved", cfg.Deploy.MasterTag, cfg.Deploy.ApprovedTag)
+	}
+	_, err = Load(writeFile(t, `
+[proxmox]
+url = "https://pve.example:8006"
+
+[deploy]
+master_tag = "   "
+`))
+	if err == nil || !strings.Contains(err.Error(), "deploy.master_tag is required") {
+		t.Errorf("blank master_tag: Load = %v", err)
+	}
+}
+
 func TestLoadRejectsMissingFields(t *testing.T) {
 	path := writeFile(t, `
 [naming]
@@ -351,16 +380,9 @@ func TestValidateRanges(t *testing.T) {
 			wantErr: "deploy.master_tag is required",
 		},
 		{
-			name: "master_tag only whitespace",
-			mutate: func(c *Config) {
-				c.Deploy.MasterTag = "   "
-			},
-			wantErr: "deploy.master_tag is required",
-		},
-		{
 			name: "approved_tag same as master_tag",
 			mutate: func(c *Config) {
-				c.Deploy.ApprovedTag = " Dev "
+				c.Deploy.ApprovedTag = "Dev"
 			},
 			wantErr: "deploy.approved_tag must differ from deploy.master_tag",
 		},

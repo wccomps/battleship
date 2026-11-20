@@ -404,7 +404,6 @@ func hostTags(cur, masterTag, approvedTag, oldDomain, domain string, router bool
 		add(ImageRouter)
 	}
 	moved := domain != oldDomain
-	approvedTag = strings.TrimSpace(approvedTag)
 	for _, t := range strings.FieldsFunc(cur, isTagSeparator) {
 		switch {
 		case strings.EqualFold(t, ImageRouter),
