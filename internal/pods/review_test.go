@@ -30,13 +30,14 @@ func TestAccessRemembersAFailedListing(t *testing.T) {
 }
 
 // Rewiring a NIC needs SDN.Use on the vnet it leaves as well as the one it
-// joins: a new clone's template bridges are checked, a team vnet in the
-// teams zone and a plain bridge in zone localnetwork; an existing VM's are
-// left to Proxmox.
+// joins: a new clone's template NICs are checked on a vnet of a zone
+// Battleship knows, and a plain bridge is left to Proxmox, as an existing
+// VM's NICs are.
 func TestNetworkNeedsSDNUseOnTheBridgeLeft(t *testing.T) {
 	cfg := config.Default()
 	tpl := TemplateSpec{Name: "teak.x.tpl", VMID: 9021, Exists: true, Interfaces: 1, Bridges: []string{"int07"}}
-	item := Item{Team: "01", Name: "team01-teak", VMID: 10121, Template: tpl.Name, Steps: []Step{StepClone, StepNetwork}}
+	item := Item{Team: "01", Name: "team01-teak", VMID: 10121, Template: tpl.Name, Steps: []Step{StepClone, StepNetwork},
+		NICsWas: map[string]string{"net0": "virtio,bridge=int07"}}
 	acc := grants{"/vms/9021": {"VM.Clone"}, "/pool/pool-01": {"VM.Allocate", "VM.Config.Network"},
 		"/storage/competitions": {"Datastore.AllocateSpace"}, "/sdn/zones/teams/int01": {"SDN.Use"}}
 	plan := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{tpl}, Items: []Item{item}}
@@ -46,15 +47,15 @@ func TestNetworkNeedsSDNUseOnTheBridgeLeft(t *testing.T) {
 	if b := plan.Items[0].Blocked; b != "you don't have SDN.Use on /sdn/zones/teams/int07" {
 		t.Fatalf("blocked %q", b)
 	}
-	tpl.Bridges = []string{"vmbr0"}
+	tpl.Bridges, item.NICsWas = []string{"vmbr0"}, map[string]string{"net0": "virtio,bridge=vmbr0"}
 	plan = &Plan{Kind: KindDeploy, Templates: []TemplateSpec{tpl}, Items: []Item{item}}
 	_ = BlockUnpermitted(context.Background(), plan, acc, cfg)
-	if b := plan.Items[0].Blocked; b != "you don't have SDN.Use on /sdn/zones/localnetwork/vmbr0" {
+	if b := plan.Items[0].Blocked; b != "" {
 		t.Fatalf("blocked %q for vmbr0", b)
 	}
 }
 
-func TestTemplateSpecReadsBridges(t *testing.T) {
+func TestTemplateSpecReadsNICs(t *testing.T) {
 	f := newCluster()
 	plan, err := testPlanner(f).Deploy(context.Background(), DeployRequest{Pattern: "teak.*", Teams: []string{"01"}})
 	if err != nil {
@@ -62,5 +63,8 @@ func TestTemplateSpecReadsBridges(t *testing.T) {
 	}
 	if got := plan.Templates[0].Bridges; len(got) != 2 || got[0] != "vmbr0" || got[1] != "vmbr1" {
 		t.Fatalf("bridges = %v", got)
+	}
+	if got := plan.Items[0].NICsWas; len(got) != 2 || nicBridge(got["net0"]) != "vmbr0" || nicBridge(got["net1"]) != "vmbr1" {
+		t.Fatalf("item NICsWas = %v", got)
 	}
 }

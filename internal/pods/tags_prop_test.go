@@ -139,7 +139,7 @@ func TestPropBaseImagesMatchModel(t *testing.T) {
 				continue
 			}
 			want = append(want, BaseImage{Name: vm.Name, Family: fam, Version: ver, Kind: kind, VMID: vm.VMID, Node: vm.Node,
-				Deprecated: slices.Contains(tags, "deprecated")})
+				Deprecated: slices.Contains(tags, "deprecated"), Tags: vm.Tags})
 		}
 		got := BaseImages(vms)
 		order := func(a, b BaseImage) int {

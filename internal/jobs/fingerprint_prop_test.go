@@ -44,6 +44,21 @@ func drawStrings(t *rapid.T, label string) []string {
 	return rapid.SliceOfN(rapid.Custom(func(t *rapid.T) string { return drawFPText(t, label) }), 0, 3).Draw(t, label)
 }
 
+// drawNICs is nil, empty, or one to three netN keys mapped to text.
+func drawNICs(t *rapid.T, label string) map[string]string {
+	var out map[string]string
+	switch rapid.IntRange(0, 2).Draw(t, label) {
+	case 1:
+		out = map[string]string{}
+	case 2:
+		out = map[string]string{}
+		for range rapid.IntRange(1, 3).Draw(t, label+" count") {
+			out[rapid.SampledFrom([]string{"net0", "net1", "net2", "net10", ""}).Draw(t, label+" key")] = drawFPText(t, label+" value")
+		}
+	}
+	return out
+}
+
 func drawSource(t *rapid.T, label string) *pods.Source {
 	if rapid.Bool().Draw(t, label+" nil") {
 		return nil
@@ -91,15 +106,7 @@ func drawPlan(t *rapid.T) *pods.Plan {
 		if rapid.Bool().Draw(t, "notes") {
 			it.Notes = &pods.Notes{IP: drawFPAddr(t, "ip"), OS: drawFPText(t, "os"), Base: drawFPText(t, "base"), DNS: drawFPText(t, "dns")}
 		}
-		switch rapid.IntRange(0, 2).Draw(t, "nics") {
-		case 1:
-			it.NICs = map[string]string{}
-		case 2:
-			it.NICs = map[string]string{}
-			for range rapid.IntRange(1, 3).Draw(t, "nic count") {
-				it.NICs[rapid.SampledFrom([]string{"net0", "net1", "net2", "net10", ""}).Draw(t, "nic")] = drawFPText(t, "bridge")
-			}
-		}
+		it.NICs, it.NICsWas = drawNICs(t, "nics"), drawNICs(t, "nics was")
 		if rapid.Bool().Draw(t, "guest") {
 			it.Guest = &pods.Guest{OS: drawFPText(t, "os"), Hostname: drawFPText(t, "hostname"), Domain: drawFPText(t, "domain"), IP: drawFPAddr(t, "gip"),
 				Prefix: rapid.IntRange(0, 32).Draw(t, "prefix"), Gateway: drawFPAddr(t, "gw"), DNS: drawFPAddr(t, "gdns")}

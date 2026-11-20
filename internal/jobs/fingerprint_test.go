@@ -42,8 +42,8 @@ var fingerprinted = map[string]map[string]bool{
 		"Set": false, "Sets": false,
 		// Says why Blocked is set, which Blocked already covers.
 		"Unpermitted": false,
-		// Only decides the privileges needed, which Blocked covers.
-		"TagsChanged": false,
+		// Only decide the privileges needed, which Blocked covers.
+		"TagsChanged": false, "NICsWas": false,
 		// The notes an Edit notes writes over (TestFingerprintCoversNotesReplaced).
 		"DetailsWas": true,
 		"Record":     true,  // the domain a record step writes into its pool's comment
@@ -64,7 +64,7 @@ func TestEveryPlanFieldIsClassified(t *testing.T) {
 		classes := fingerprinted[typ.Name()]
 		for i := range typ.NumField() {
 			f := typ.Field(i)
-			if _, ok := classes[f.Name]; !ok {
+			if _, ok := classes[f.Name]; !ok && f.IsExported() { // plans don't store unexported fields
 				t.Errorf("%s.%s is not classified in fingerprinted", typ.Name(), f.Name)
 			}
 		}

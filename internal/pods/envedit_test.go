@@ -473,3 +473,26 @@ func TestEnvEditDroppingApprovalNeedsSysModify(t *testing.T) {
 		})
 	}
 }
+
+// A volunteer without Sys.Audit on / is shown no registered tags, but
+// approval only works with deploy.approved_tag registered, so moving an
+// approved host still asks Sys.Modify on /.
+func TestEnvEditDroppingApprovalNeedsSysModifyUnseen(t *testing.T) {
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;approved", Status: "running"},
+		map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint01", "agent": "1",
+			"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1"})
+	cfg := envConfig()
+	cfg.Deploy.ApprovedTag = "approved"
+	plan, err := NewPlanner(f, cfg).EnvEdit(context.Background(), HostEditInput{VMID: 2101, Host: "oak.other.env"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acc := NewAccess(&fakePerms{listed: proxmox.Permissions{"/vms/2101": {"VM.Config.Options": false}}, tags: proxmox.TagAccess{Mode: "free"}})
+	if err := BlockUnpermitted(context.Background(), plan, acc, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.Items[0].Blocked; !strings.Contains(got, "you don't have Sys.Modify on /") {
+		t.Errorf("blocked = %q, want Sys.Modify on / asked", got)
+	}
+}

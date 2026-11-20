@@ -40,6 +40,7 @@ type BaseImage struct {
 	VMID       int
 	Node       string
 	Deprecated bool
+	Tags       string // its tag list as read
 	// Notes are its Proxmox notes for people, less their details block
 	// (see ParseDetails), which Details holds; all of them when Unreadable
 	// says the block is.
@@ -118,7 +119,7 @@ func BaseImages(vms []proxmox.VM) []BaseImage {
 			continue
 		}
 		out = append(out, BaseImage{Name: vm.Name, Family: family, Version: version, Kind: kinds[0],
-			VMID: vm.VMID, Node: vm.Node, Deprecated: slices.Contains(tags, DeprecatedTag)})
+			VMID: vm.VMID, Node: vm.Node, Deprecated: slices.Contains(tags, DeprecatedTag), Tags: vm.Tags})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Family != out[j].Family {

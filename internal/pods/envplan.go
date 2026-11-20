@@ -340,9 +340,12 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		}
 		ip.NICs = env.Slot.wantNICs(im.Kind == ImageRouter)
 		ip.Steps = []Step{StepClone, StepLabel, StepNetwork, StepStart}
+		read := cfg // the clone's config until its label and network steps
 		if resumed {
 			ip.Steps = ip.Steps[1:]
+			read = existing.Config
 		}
+		ip.TagsChanged, ip.NICsWas = tagChanges(read["tags"], ip.Tags), nicsOf(read)
 		if im.Kind == ImageWindows || im.Kind == ImageLinux {
 			addr := existing.Notes.IP
 			switch {

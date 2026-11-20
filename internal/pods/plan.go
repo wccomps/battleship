@@ -216,6 +216,11 @@ type TemplateSpec struct {
 	// (sourceBridges): the template's NICs when reused, the master's, which
 	// the build copies, when built.
 	Bridges []string `json:"bridges,omitempty"`
+	// nics and tags are that VM's netN values (nicsOf) and tag list as read,
+	// which a pod clone starts with: deployItem's NICsWas and TagsChanged.
+	// Plans don't store them.
+	nics map[string]string
+	tags string
 	// Digest is ConfigDigest of a reused template: what the session interface
 	// lists, and checks a submission against (BlockChanged).
 	Digest string `json:"digest,omitempty"`
@@ -268,10 +273,13 @@ type Item struct {
 	// DetailsWas is an Edit notes's or Edit host's notes as read, for its
 	// review and fingerprint.
 	DetailsWas *NotesRead `json:"details_was,omitempty"`
-	// TagsChanged are the tags the label step adds to or removes from the
-	// VM's tags as read (tagChanges), where its planner read them; they only
-	// decide the rights the step needs.
-	TagsChanged []string `json:"tags_changed,omitempty"`
+	// TagsChanged are the tags the label or tag-set step adds to or removes
+	// from the VM's tags as read (tagChanges): its own, or for a clone, the
+	// clone source's. NICsWas are the netN values the network step rewrites,
+	// read the same way (nicsOf); a pod VM's are its template's. Both only
+	// decide the rights the steps need.
+	TagsChanged []string          `json:"tags_changed,omitempty"`
+	NICsWas     map[string]string `json:"nics_was,omitempty"`
 	// Record is the domain a record or clear-record step writes into, or
 	// takes out of, Pool's comment.
 	Record string `json:"record,omitempty"`
@@ -669,12 +677,14 @@ func (p *Plan) BlockUnrebuildable() {
 
 // BlockChanged blocks each template of an ApprovedOnly deploy whose Digest
 // isn't digests[its name], and its items. It runs after BlockUnpermitted and
-// checks only templates not blocked already, so a template the listing left
-// out keeps the reason it was left out.
+// checks only templates with an item not blocked already, so a template the
+// listing left out, blocked itself or through every one of its items, keeps
+// its reason.
 func (p *Plan) BlockChanged(digests map[string]string) {
 	for i := range p.Templates {
 		t := &p.Templates[i]
-		if t.Blocked != "" || t.Digest == digests[t.Name] {
+		runs := slices.ContainsFunc(p.Items, func(it Item) bool { return it.Template == t.Name && it.Blocked == "" })
+		if t.Blocked != "" || !runs || t.Digest == digests[t.Name] {
 			continue
 		}
 		t.Blocked = fmt.Sprintf("template %s changed since the set was listed; list the sets again", t.Name)
@@ -704,6 +714,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, req DeployReque
 	}
 	spec.Interfaces, spec.GPU = p.describe(cfg)
 	spec.CPU, spec.CloudInit, spec.Bridges = cfg["cpu"], HasCloudInit(cfg), sourceBridges(cfg)
+	spec.nics, spec.tags = nicsOf(cfg), cfg["tags"]
 	named := byName[spec.Name]
 	var existing proxmox.VM
 	exists := len(named) > 0
@@ -726,6 +737,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, req DeployReque
 		}
 		spec.Interfaces, spec.GPU = p.describe(tcfg)
 		spec.CPU, spec.CloudInit, spec.Bridges = tcfg["cpu"], HasCloudInit(tcfg), sourceBridges(tcfg)
+		spec.nics, spec.tags = nicsOf(tcfg), tcfg["tags"]
 		spec.Digest = ConfigDigest(tcfg)
 	case exists && req.Rebuild:
 		// Proxmox refuses to delete a template whose base disk a linked clone still uses.
@@ -835,6 +847,12 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, rebu
 		it.Steps = append(it.Steps, StepClone)
 	}
 	it.Steps = append(it.Steps, StepNetwork, StepDiskLimits, StepCDROM, StepNotes, StepSetTag)
+	it.NICsWas = tpl.nics
+	tags := tpl.tags // a clone's, before its tag-set step
+	if named := byName[it.Name]; len(named) > 0 && !slices.Contains(it.Steps, StepClone) {
+		tags = named[0].Tags
+	}
+	it.TagsChanged = tagChanges(tags, withSetTag(tags, it.Set))
 	if snapshot {
 		it.Steps = append(it.Steps, StepSnapshot)
 	}

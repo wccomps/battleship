@@ -61,6 +61,18 @@ func forEachNIC(cfg map[string]string, fn func(key, val string)) {
 	}
 }
 
+// nicsOf is cfg's netN values by key, or nil when it has none.
+func nicsOf(cfg map[string]string) map[string]string {
+	var out map[string]string
+	forEachNIC(cfg, func(k, v string) {
+		if out == nil {
+			out = map[string]string{}
+		}
+		out[k] = v
+	})
+	return out
+}
+
 func nicBridge(nic string) string {
 	_, opts := splitOptions(nic)
 	return opts["bridge"]
@@ -333,30 +345,29 @@ func LabelChanges(cur map[string]string, tags string, notes *Notes) map[string]s
 	return out
 }
 
-func sameTags(a, b string) bool {
-	x, y := Tags(a), Tags(b)
-	slices.Sort(x)
-	slices.Sort(y)
-	return slices.Equal(x, y)
-}
+// sameTags reports whether tag lists a and b hold the same tags, as
+// tagChanges compares them.
+func sameTags(a, b string) bool { return len(tagChanges(a, b)) == 0 }
 
-// tagChanges are the tags in one of tag lists a and b and not the other,
-// sorted: what Proxmox checks a tag edit's rights on.
+// tagChanges are the tags whose count differs between tag lists a and b,
+// compared as typed, sorted: what Proxmox's assert_tag_permissions checks a
+// tag edit's rights on.
 func tagChanges(a, b string) []string {
-	x, y := Tags(a), Tags(b)
-	var out []string
-	for _, t := range x {
-		if !slices.Contains(y, t) {
-			out = append(out, t)
-		}
+	count := map[string]int{}
+	for _, t := range strings.FieldsFunc(a, isTagSeparator) {
+		count[t]++
 	}
-	for _, t := range y {
-		if !slices.Contains(x, t) {
+	for _, t := range strings.FieldsFunc(b, isTagSeparator) {
+		count[t]--
+	}
+	var out []string
+	for t, n := range count {
+		if n != 0 {
 			out = append(out, t)
 		}
 	}
 	slices.Sort(out)
-	return slices.Compact(out)
+	return out
 }
 
 // AddTag adds tag to a tag list unless it is there.

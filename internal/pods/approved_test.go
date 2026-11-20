@@ -151,6 +151,33 @@ func TestBlockChangedChecksOnlyUnblockedTemplates(t *testing.T) {
 	}
 }
 
+// A template whose every item is blocked already, as BlockUnpermitted
+// blocks a VM the user may not clone, keeps the item's reason rather than
+// being marked changed.
+func TestBlockChangedSkipsTemplatesWithEveryItemBlocked(t *testing.T) {
+	plan, err := approvedDeploy(approvedCluster("dev;approved", "dev;approved"), config.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const why = "you don't have VM.Clone on /vms/9021"
+	for i := range plan.Items {
+		if plan.Items[i].Name == "team51-teak" {
+			plan.Items[i].Blocked, plan.Items[i].Unpermitted = why, true
+		}
+	}
+	plan.BlockChanged(map[string]string{"teak.tango.delta.tpl": "not its digest", "oak.tango.delta.tpl": "not its digest"})
+	for _, tpl := range plan.Templates {
+		if changed := strings.Contains(tpl.Blocked, "changed since"); changed != (tpl.Host == "oak") {
+			t.Errorf("%s's template blocked %q", tpl.Host, tpl.Blocked)
+		}
+	}
+	for _, it := range plan.Items {
+		if it.Name == "team51-teak" && it.Blocked != why {
+			t.Errorf("team51-teak blocked %q, want %q", it.Blocked, why)
+		}
+	}
+}
+
 // ApprovedSets lists a set only when every one of its masters carries the
 // registered approval tag.
 func TestApprovedSets(t *testing.T) {

@@ -229,31 +229,77 @@ func cpuMapping(cpu string) string {
 	return ""
 }
 
-// cloneNeeds is what cloning VM src as vmid into pool needs; cpu is src's CPU
-// model. For every user but root@pam, Proxmox's clone checks SDN.Use on
-// /sdn/zones/<zone>/<path> for each path in bridges (sourceBridges): a vnet's
-// zone, or localnetwork for a plain bridge. Battleship knows the zones of the
-// slot, edit and team vnets only, and takes any other bridge as plain.
+// cloneNeeds is what cloning VM src as vmid into pool needs; bridges are
+// src's NICs' paths (sourceBridges), which Proxmox's clone checks
+// (sdnUse), and cpu its CPU model.
 func cloneNeeds(cfg config.Config, src, vmid int, pool string, bridges []string, cpu string) []need {
 	ns := []need{
 		one(VMPath(src), "VM.Clone"),
 		on(vmid, pool, "VM.Allocate"),
 		one("/storage/"+cfg.Deploy.Storage, "Datastore.AllocateSpace"),
 	}
-	for _, path := range bridges {
-		b, _, _ := strings.Cut(path, "/")
-		zone := catalogZone(cfg, b)
-		switch {
-		case zone != "":
-		case isTeamBridge(cfg.Network, b):
-			zone = cfg.Proxmox.SDNZone
-		default:
-			zone = "localnetwork"
-		}
-		ns = append(ns, one("/sdn/zones/"+zone+"/"+path, "SDN.Use"))
-	}
+	ns = append(ns, sdnUse(cfg, bridges)...)
 	if m := cpuMapping(cpu); m != "" {
 		ns = append(ns, one(m, "Mapping.Use"))
+	}
+	return ns
+}
+
+// vnetPaths are the paths below /sdn/zones/<zone>/ that pve-guest-common's
+// check_vnet_access checks SDN.Use on for NIC value nic, on a clone or a
+// netN write: <bridge>/<tag> when VLAN-tagged, <bridge>/<vlan> for each VLAN
+// in trunks (a-b ranges expanded), and <bridge> only with neither.
+func vnetPaths(nic string) []string {
+	_, opts := splitOptions(nic)
+	b, tag, trunks := opts["bridge"], opts["tag"], opts["trunks"]
+	switch {
+	case b == "":
+		return nil
+	case tag == "" && trunks == "":
+		return []string{b}
+	}
+	var out []string
+	if tag != "" {
+		out = append(out, b+"/"+tag)
+	}
+	for _, r := range strings.FieldsFunc(trunks, isTagSeparator) {
+		lo, hi, isRange := strings.Cut(r, "-")
+		if !isRange {
+			hi = lo
+		}
+		first, errLo := strconv.Atoi(lo)
+		last, errHi := strconv.Atoi(hi)
+		if errLo != nil || errHi != nil {
+			continue // Proxmox refuses such a config
+		}
+		for v := first; v <= last; v++ {
+			out = append(out, b+"/"+strconv.Itoa(v))
+		}
+	}
+	return out
+}
+
+// sourceBridges are the vnetPaths of every NIC in cfg, distinct and sorted:
+// what a clone of that VM is checked on.
+func sourceBridges(cfg map[string]string) []string {
+	var out []string
+	forEachNIC(cfg, func(_, v string) { out = append(out, vnetPaths(v)...) })
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// sdnUse is SDN.Use on /sdn/zones/<zone>/<path> for each of paths
+// (vnetPaths), as Proxmox asks it of every user but root@pam. Proxmox takes
+// the zone from its SDN config (localnetwork for a bridge that isn't a
+// vnet), which Battleship doesn't read: it asks only bridges whose zone it
+// knows (bridgeZone) and leaves any other to Proxmox when the step runs.
+func sdnUse(cfg config.Config, paths []string) []need {
+	var ns []need
+	for _, path := range paths {
+		b, _, _ := strings.Cut(path, "/")
+		if zone := bridgeZone(cfg, b); zone != "" {
+			ns = append(ns, one("/sdn/zones/"+zone+"/"+path, "SDN.Use"))
+		}
 	}
 	return ns
 }
@@ -297,26 +343,23 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAc
 			}
 			ns = append(ns, cloneNeeds(cfg, src, it.VMID, pool, bridges, cpu)...)
 		case StepNetwork:
+			// Proxmox checks every netN value the step writes, rewritten from
+			// NICsWas.
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Network"))
-			if it.NICs != nil {
-				for _, b := range slices.Sorted(maps.Values(it.NICs)) {
-					if zone := catalogZone(cfg, b); zone != "" {
-						ns = append(ns, one("/sdn/zones/"+zone+"/"+b, "SDN.Use"))
-					}
+			var written map[string]string
+			switch {
+			case it.NICs != nil:
+				written = NICChanges(it.NICsWas, it.NICs)
+			case tpl != nil:
+				if tpl.CloudInit {
+					ns = append(ns, on(it.VMID, pool, "VM.Config.Cloudinit")) // regenerating the drive
 				}
-				continue
+				written = NetworkChanges(cfg.Network, it.NICsWas, it.Team, tpl.Interfaces)
 			}
-			if tpl != nil && tpl.CloudInit {
-				ns = append(ns, on(it.VMID, pool, "VM.Config.Cloudinit")) // regenerating the drive
-			}
-			// Each NIC's bridge is an SDN vnet needing SDN.Use; bridges outside the
-			// zone are left to Proxmox.
-			bridges := []string{cfg.Network.IntBridge}
-			if tpl != nil && tpl.Interfaces >= 2 {
-				bridges = []string{cfg.Network.ExtBridge, cfg.Network.IntBridge}
-			}
-			for _, b := range bridges {
-				ns = append(ns, one("/sdn/zones/"+cfg.Proxmox.SDNZone+"/"+Expand(b, it.Team, ""), "SDN.Use"))
+			for _, k := range slices.Sorted(maps.Keys(written)) {
+				if isNetKey(k) {
+					ns = append(ns, sdnUse(cfg, vnetPaths(written[k]))...)
+				}
 			}
 		case StepDiskLimits:
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Disk"))
@@ -343,18 +386,14 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAc
 		case StepDetails, StepNotes:
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Options"))
 		case StepLabel, StepSetTag:
-			// Proxmox checks VM.Config.Options to edit tags, and for each tag
-			// added or removed that user-tag-access refuses (a registered one
-			// always), Sys.Modify on /.
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Options"))
-			if slices.ContainsFunc(changedTags(it, st), func(t string) bool { return !tags.Allows(t) }) {
-				ns = append(ns, one("/", "Sys.Modify"))
-			}
+			ns = append(ns, tagNeeds(changedTags(it, st), tags, cfg)...)
 		case StepConvert:
 			ns = append(ns, one(VMPath(it.VMID), "VM.Allocate"))
 		case StepRetire:
 			if it.Supersedes != nil {
 				ns = append(ns, one(VMPath(it.Supersedes.VMID), "VM.Config.Options"))
+				ns = append(ns, tagNeeds(changedTags(it, st), tags, cfg)...)
 			}
 		case StepWaitAgent, StepVerify:
 			ns = append(ns, on(it.VMID, pool, "VM.GuestAgent.Audit"))
@@ -368,21 +407,38 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAc
 	return ns
 }
 
-// changedTags are the tags step st of it adds or removes, as far as its plan
-// knows them: the label step's TagsChanged, the tag-set step's set tag.
+// changedTags are the tags step st of it adds to or removes from a VM's tag
+// list: the label and tag-set steps' TagsChanged, and the deprecated tag the
+// retire step adds to the version it supersedes (Newest, so not yet
+// deprecated).
 func changedTags(it Item, st Step) []string {
 	switch {
-	case st == StepLabel:
+	case st == StepLabel, st == StepSetTag:
 		return it.TagsChanged
-	case st == StepSetTag && it.Set != "":
-		return []string{it.Set.Tag()}
+	case st == StepRetire && it.Supersedes != nil:
+		return []string{DeprecatedTag}
 	}
 	return nil
 }
 
-// catalogZone is the SDN zone of a slot or edit bridge, or "" when it isn't
-// a known vnet.
-func catalogZone(cfg config.Config, bridge string) string {
+// tagNeeds is what Proxmox's assert_tag_permissions asks, beyond
+// VM.Config.Options, of a tag edit that adds or removes changed: Sys.Modify
+// on / when user-tag-access refuses one of them, a registered tag always.
+// deploy.approved_tag counts as registered whatever tags shows, since
+// approval only works registered and a reader without Sys.Audit on / is
+// shown no registered tags.
+func tagNeeds(changed []string, tags proxmox.TagAccess, cfg config.Config) []need {
+	approved := cfg.Deploy.ApprovedTag
+	if slices.ContainsFunc(changed, func(t string) bool { return !tags.Allows(t) || approved != "" && t == approved }) {
+		return []need{one("/", "Sys.Modify")}
+	}
+	return nil
+}
+
+// bridgeZone is the SDN zone of a bridge Battleship knows as a vnet: a slot
+// bridge (environments.sdn_zone), the edit bridge (images.edit_zone) or a
+// team bridge (proxmox.sdn_zone); "" for any other.
+func bridgeZone(cfg config.Config, bridge string) string {
 	slotRE := func(p string) *regexp.Regexp {
 		return regexp.MustCompile("^" + strings.ReplaceAll(regexp.QuoteMeta(p), `\{slot\}`, `\d{2}`) + "$")
 	}
@@ -391,14 +447,10 @@ func catalogZone(cfg config.Config, bridge string) string {
 		return cfg.Environments.SDNZone
 	case bridge == cfg.Images.EditBridge:
 		return cfg.Images.EditZone
+	case patternRE(cfg.Network.ExtBridge).MatchString(bridge), patternRE(cfg.Network.IntBridge).MatchString(bridge):
+		return cfg.Proxmox.SDNZone
 	}
 	return ""
-}
-
-// isTeamBridge reports whether bridge is some team's ext or int bridge (a
-// vnet of proxmox.sdn_zone).
-func isTeamBridge(net config.Network, bridge string) bool {
-	return patternRE(net.ExtBridge).MatchString(bridge) || patternRE(net.IntBridge).MatchString(bridge)
 }
 
 // missing says which of ns acc doesn't satisfy, as "you don't have …"
