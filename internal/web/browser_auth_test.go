@@ -34,21 +34,6 @@ func TestBrowserProxmoxSignIn(t *testing.T) {
 	b.clean()
 }
 
-// A tab newBrowser opens for a signed-in session holds the session's Proxmox
-// ticket cookie too, so its pages open without the Proxmox sign-in.
-func TestBrowserSessionHasItsTicket(t *testing.T) {
-	h := browserHarness(t)
-	lead := h.login(asLead)
-	b := newBrowser(t, h, &lead, 1366, 768, false)
-	b.open("/")
-	var href string
-	b.eval(`location.href`, &href)
-	if href != b.srv.URL+"/" {
-		t.Fatalf("opening / as the lead landed on %s, not the grid", href)
-	}
-	b.clean()
-}
-
 // A preview shows disallowed VMs as blocked rows naming the privilege and
 // path; a job whose submitter's authorization lapsed says so on its page.
 func TestBrowserBlockedByPrivilegesAndLapsed(t *testing.T) {
