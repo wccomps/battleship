@@ -61,8 +61,9 @@ func forEachNIC(cfg map[string]string, fn func(key, val string)) {
 	}
 }
 
-// asRead is cfg's tags and netN values, the part of a VM's config its label,
-// tag-set and network steps change (Item.AsRead).
+// asRead is cfg's tags and netN values: what stepEdits replays a VM's label,
+// tag-set and network steps on to find the tags and NICs they change
+// (Item.AsRead).
 func asRead(cfg map[string]string) map[string]string {
 	out := map[string]string{}
 	if t := cfg["tags"]; t != "" {
@@ -342,6 +343,30 @@ func LabelChanges(cur map[string]string, tags string, notes *Notes) map[string]s
 		}
 	}
 	return out
+}
+
+// StepChanges is the config change step makes on its item's VM, for the steps
+// that change tags or NICs (network, label, tag-set, and retire, on the
+// version it supersedes), or nil for any other step: what the executor
+// writes and stepEdits replays. interfaces is its template's NIC count, for
+// a network step without NICs.
+func StepChanges(step Step, it Item, net config.Network, interfaces int) func(cur map[string]string) map[string]string {
+	switch step {
+	case StepNetwork:
+		if it.NICs != nil {
+			return func(cur map[string]string) map[string]string { return NICChanges(cur, it.NICs) }
+		}
+		return func(cur map[string]string) map[string]string { return NetworkChanges(net, cur, it.Team, interfaces) }
+	case StepLabel:
+		return func(cur map[string]string) map[string]string { return LabelChanges(cur, it.Tags, it.Notes) }
+	case StepSetTag:
+		return func(cur map[string]string) map[string]string { return SetTagChanges(cur, it.Set) }
+	case StepRetire:
+		return func(cur map[string]string) map[string]string {
+			return LabelChanges(cur, AddTag(cur["tags"], DeprecatedTag), nil)
+		}
+	}
+	return nil
 }
 
 // sameTags reports whether tag lists a and b hold the same tags, as

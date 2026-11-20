@@ -95,10 +95,9 @@ func TestDeployNeeds(t *testing.T) {
 	cfg := config.Default()
 	cfg.Images.Pool = "images"
 	tpl := TemplateSpec{Name: "teak.x.tpl", Host: "teak", VMID: 9021, MasterVMID: 121, MasterName: "teak.x", Interfaces: 2,
-		CloudInit: true, CPU: "custom-lab-baseline,flags=+aes"}
+		CloudInit: true, CPU: "custom-lab-baseline,flags=+aes", AsRead: map[string]string{"net0": "virtio,bridge=vmbr0", "net1": "virtio,bridge=vmbr1"}}
 	item := Item{Team: "01", Host: "teak", Name: "team01-teak", VMID: 10121, Template: tpl.Name,
-		Steps:  []Step{StepClone, StepNetwork, StepDiskLimits, StepCDROM, StepNotes, StepSnapshot, StepStart},
-		AsRead: map[string]string{"net0": "virtio,bridge=vmbr0", "net1": "virtio,bridge=vmbr1"}}
+		Steps: []Step{StepClone, StepNetwork, StepDiskLimits, StepCDROM, StepNotes, StepSnapshot, StepStart}}
 	plan := &Plan{Kind: KindDeploy, Teams: []string{"01"}, Templates: []TemplateSpec{tpl}, Items: []Item{item}}
 	everything := grants{
 		"/vms/121":                  {"VM.Clone"},
@@ -1034,8 +1033,8 @@ func labelEdit(it Item, cfg config.Config) []string {
 }
 
 // deploy.approved_tag counts as registered only while the reader is shown
-// no registered tags; a cluster that lists its registered tags without it
-// lets the tag change without Sys.Modify.
+// no registered tags; under user-allow free, a cluster that lists its
+// registered tags without it lets the tag change without Sys.Modify.
 func TestApprovedTagCountsRegisteredOnlyWhenNoneShown(t *testing.T) {
 	cfg := config.Default()
 	cfg.Deploy.ApprovedTag = "approved"

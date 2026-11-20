@@ -138,8 +138,8 @@ func (p Planner) envHostFrom(ctx context.Context, vms []proxmox.VM, vmid int) (H
 			inSlot = append(inSlot, v)
 		}
 	}
-	cfgs, err := p.readConfigs(ctx, inSlot)
-	if err != nil {
+	cfgs, errs := p.readConfigs(ctx, inSlot)
+	if err := readErr(inSlot, errs); err != nil {
 		return HostEdit{}, proxmox.VM{}, err
 	}
 	cpuByNode := map[string][]string{}

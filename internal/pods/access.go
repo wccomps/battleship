@@ -316,18 +316,17 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAc
 		switch st {
 		case StepClone:
 			pool = it.TargetPool(NewNaming(cfg.Naming))
-			src, from, cpu := 0, map[string]string(nil), ""
-			if it.Source != nil {
-				src, from = it.Source.VMID, it.Source.AsRead
-			} else if tpl != nil {
-				src, from, cpu = tpl.VMID, tpl.AsRead, tpl.CPU
-			}
+			src, from, cpu := cloneSource(it, tpl)
 			ns = append(ns, cloneNeeds(cfg, src, it.VMID, pool, from, cpu)...)
 		case StepNetwork:
 			// Proxmox checks each netN value the step writes and the value
 			// it replaces.
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Network"))
-			if it.NICs == nil && tpl != nil && tpl.CloudInit {
+			cloudInit := it.CloudInit // a kept VM's own drive
+			if slices.Contains(it.Steps, StepClone) {
+				cloudInit = tpl != nil && tpl.CloudInit
+			}
+			if it.NICs == nil && cloudInit {
 				ns = append(ns, on(it.VMID, pool, "VM.Config.Cloudinit")) // regenerating the drive
 			}
 			e := edits[i]
@@ -387,40 +386,51 @@ type stepEdit struct {
 	tags           []string
 }
 
+// cloneSource is the VM an item's clone step copies: its VMID, its tags and
+// netN values as read, and a template's CPU model.
+func cloneSource(it Item, tpl *TemplateSpec) (vmid int, asRead map[string]string, cpu string) {
+	switch {
+	case it.Source != nil:
+		return it.Source.VMID, it.Source.AsRead, ""
+	case tpl != nil:
+		return tpl.VMID, tpl.AsRead, tpl.CPU
+	}
+	return 0, nil, ""
+}
+
 // stepEdits are the edits of an item's steps, by index into Steps: the
 // network, label and tag-set steps replayed in order with the executor's
-// own change functions on it.AsRead, and the retire step's on the version
-// it supersedes.
+// own change functions (StepChanges) on the clone source's config as read
+// under StepClone, else on it.AsRead.
 func stepEdits(it Item, tpl *TemplateSpec, cfg config.Config) []stepEdit {
-	cur := maps.Clone(it.AsRead)
+	from, interfaces := it.AsRead, 0
+	if slices.Contains(it.Steps, StepClone) {
+		_, from, _ = cloneSource(it, tpl)
+	}
+	if tpl != nil {
+		interfaces = tpl.Interfaces
+	}
+	cur := maps.Clone(from)
 	if cur == nil {
 		cur = map[string]string{}
 	}
 	out := make([]stepEdit, len(it.Steps))
 	for i, st := range it.Steps {
-		var ch map[string]string
-		switch st {
-		case StepNetwork:
-			switch {
-			case it.NICs != nil:
-				ch = NICChanges(cur, it.NICs)
-			case tpl != nil:
-				ch = NetworkChanges(cfg.Network, cur, it.Team, tpl.Interfaces)
-			}
-		case StepLabel:
-			ch = LabelChanges(cur, it.Tags, nil)
-		case StepSetTag:
-			ch = SetTagChanges(cur, it.Set)
-		case StepRetire:
-			if it.Supersedes != nil {
-				was := it.Supersedes.AsRead
-				out[i].tags = tagEdit(was["tags"], LabelChanges(was, AddTag(was["tags"], DeprecatedTag), nil))
-			}
+		switch {
+		case st == StepRetire:
+			// Newest never picks a deprecated version, so retiring it adds
+			// the tag.
+			out[i].tags = []string{DeprecatedTag}
+			continue
+		case st == StepNetwork && it.NICs == nil && tpl == nil:
 			continue
 		}
-		e := &out[i]
-		e.tags = tagEdit(cur["tags"], ch)
-		for k, v := range ch {
+		change := StepChanges(st, it, cfg.Network, interfaces)
+		if change == nil {
+			continue
+		}
+		e, was := &out[i], cur["tags"]
+		for k, v := range change(cur) {
 			switch {
 			case isNetKey(k):
 				if e.nics == nil {
@@ -434,20 +444,9 @@ func stepEdits(it Item, tpl *TemplateSpec, cfg config.Config) []stepEdit {
 				delete(cur, "tags")
 			}
 		}
+		e.tags = tagChanges(was, cur["tags"])
 	}
 	return out
-}
-
-// tagEdit is the tags config change ch adds to or removes from tag list
-// was (tagChanges).
-func tagEdit(was string, ch map[string]string) []string {
-	switch {
-	case ch["delete"] == "tags":
-		return tagChanges(was, "")
-	case ch["tags"] != "":
-		return tagChanges(was, ch["tags"])
-	}
-	return nil
 }
 
 // tagNeeds is what Proxmox's assert_tag_permissions asks, beyond

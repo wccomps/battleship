@@ -2,8 +2,10 @@ package pods
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/wccomps/battleship/internal/config"
@@ -39,7 +41,7 @@ func TestAccessRemembersAFailedListing(t *testing.T) {
 func TestNetworkNeedsSDNUseOnTheBridgeLeft(t *testing.T) {
 	cfg := config.Default()
 	tpl := TemplateSpec{Name: "teak.x.tpl", VMID: 9021, Exists: true, Interfaces: 1, AsRead: map[string]string{"net0": "virtio,bridge=int07"}}
-	item := Item{Team: "01", Name: "team01-teak", VMID: 10121, Template: tpl.Name, Steps: []Step{StepClone, StepNetwork}, AsRead: tpl.AsRead}
+	item := Item{Team: "01", Name: "team01-teak", VMID: 10121, Template: tpl.Name, Steps: []Step{StepClone, StepNetwork}}
 	acc := grants{"/vms/9021": {"VM.Clone"}, "/pool/pool-01": {"VM.Allocate", "VM.Config.Network"},
 		"/storage/competitions": {"Datastore.AllocateSpace"}, "/sdn/zones/teams/int01": {"SDN.Use"}}
 	plan := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{tpl}, Items: []Item{item}}
@@ -50,7 +52,6 @@ func TestNetworkNeedsSDNUseOnTheBridgeLeft(t *testing.T) {
 		t.Fatalf("blocked %q", b)
 	}
 	tpl.AsRead = map[string]string{"net0": "virtio,bridge=vmbr0"}
-	item.AsRead = tpl.AsRead
 	plan = &Plan{Kind: KindDeploy, Templates: []TemplateSpec{tpl}, Items: []Item{item}}
 	_ = BlockUnpermitted(context.Background(), plan, acc, cfg)
 	if b := plan.Items[0].Blocked; b != "" {
@@ -67,7 +68,7 @@ func TestTemplateSpecReadsNICs(t *testing.T) {
 	if got := plan.Templates[0].AsRead; len(got) != 3 || nicBridge(got["net0"]) != "vmbr0" || nicBridge(got["net1"]) != "vmbr1" || got["tags"] == "" {
 		t.Fatalf("template as read = %v", got)
 	}
-	if got := plan.Items[0].AsRead; !maps.Equal(got, plan.Templates[0].AsRead) {
+	if got := plan.Items[0].AsRead; got != nil { // a clone's steps start from its template's
 		t.Fatalf("item as read = %v", got)
 	}
 }
@@ -100,5 +101,78 @@ func TestDeployKeepsAPodVMsOwnNICs(t *testing.T) {
 	}
 	if b := plan.Items[0].Blocked; b != "you don't have SDN.Use on /sdn/zones/teams/ext02" {
 		t.Errorf("blocked %q", b)
+	}
+}
+
+// keptPodCluster is a one-NIC master and template of set tango.delta, and
+// a pod VM of the set in each of teams' pods, all on int<team>.
+func keptPodCluster(n Naming, tplCfg, podCfg map[string]string, teams ...string) *podstest.Fake {
+	f := podstest.New("cedar")
+	f.Add(proxmox.VM{VMID: 121, Name: "teak.tango.delta", Node: "cedar", Tags: "dev"}, map[string]string{"net0": "virtio=BC:24:11:00:01:21,bridge=vmbr0"})
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true, Tags: "dev"}, tplCfg)
+	for _, team := range teams {
+		cfg := maps.Clone(podCfg)
+		cfg["net0"] = "virtio=BC:24:11:00:01:22,bridge=int" + team
+		f.Add(proxmox.VM{VMID: n.CloneVMID(team, 9021), Name: n.VMName(team, "teak"), Node: "cedar", Pool: n.Pool(team), Tags: "set-tango.delta"}, cfg)
+	}
+	return f
+}
+
+// A kept pod VM whose config can't be read blocks only its own item, as
+// does one gone since the listing; the other pods still plan.
+func TestDeployUnreadablePodVMBlocksOnlyItsItem(t *testing.T) {
+	cfg := config.Default()
+	n := NewNaming(cfg.Naming)
+	f := keptPodCluster(n, map[string]string{"net0": "virtio=BC:24:11:00:01:21,bridge=vmbr0"}, map[string]string{}, "01", "02", "03")
+	f.FailOn(fmt.Sprintf("config:%d", n.CloneVMID("01", 9021)), &proxmox.APIError{Status: 500, Message: "got timeout"})
+	f.FailOn(fmt.Sprintf("config:%d", n.CloneVMID("02", 9021)),
+		&proxmox.APIError{Status: 500, Message: fmt.Sprintf("Configuration file 'nodes/cedar/qemu-server/%d.conf' does not exist", n.CloneVMID("02", 9021))})
+	plan, err := NewPlanner(f, cfg).Deploy(context.Background(), DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01", "02", "03"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := plan.Items[0].Blocked; !strings.HasPrefix(b, "can't read its config: ") || !strings.Contains(b, "got timeout") {
+		t.Errorf("team 01 blocked %q", b)
+	}
+	if b := plan.Items[1].Blocked; b != "is gone since the listing" {
+		t.Errorf("team 02 blocked %q", b)
+	}
+	if it := plan.Items[2]; it.Blocked != "" || nicBridge(it.AsRead["net0"]) != "int03" {
+		t.Errorf("team 03 = %+v", it)
+	}
+}
+
+// A kept pod VM's network step asks VM.Config.Cloudinit when that VM has a
+// cloud-init drive, whatever its template has.
+func TestDeployKeptPodVMsOwnCloudInit(t *testing.T) {
+	cfg := config.Default()
+	n := NewNaming(cfg.Naming)
+	ci := func() map[string]string {
+		return map[string]string{"net0": "virtio=BC:24:11:00:01:21,bridge=vmbr0", "ide2": "local:vm-9021-cloudinit,media=cdrom"}
+	}
+	for _, tc := range []struct {
+		name           string
+		tplCfg, podCfg map[string]string
+		want           string
+	}{
+		{"template's drive only", ci(), map[string]string{}, ""},
+		{"pod VM's drive only", map[string]string{"net0": "virtio=BC:24:11:00:01:21,bridge=vmbr0"}, map[string]string{"ide2": "local:vm-10121-cloudinit,media=cdrom"},
+			"you don't have VM.Config.Cloudinit on " + VMPath(n.CloneVMID("01", 9021))},
+	} {
+		f := keptPodCluster(n, tc.tplCfg, tc.podCfg, "01")
+		plan, err := NewPlanner(f, cfg).Deploy(context.Background(), DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if it := plan.Items[0]; it.Blocked != "" || slices.Contains(it.Steps, StepClone) {
+			t.Fatalf("%s: item = %+v", tc.name, it)
+		}
+		acc := grants{VMPath(n.CloneVMID("01", 9021)): {"VM.Config.Network", "VM.Config.Disk", "VM.Config.CDROM", "VM.Config.Options", "VM.PowerMgmt"}}
+		if err := BlockUnpermitted(context.Background(), plan, acc, cfg); err != nil {
+			t.Fatal(err)
+		}
+		if b := plan.Items[0].Blocked; b != tc.want {
+			t.Errorf("%s: blocked %q, want %q", tc.name, b, tc.want)
+		}
 	}
 }

@@ -176,8 +176,8 @@ type Source struct {
 	Node string `json:"node"`
 	Name string `json:"name"`
 	// AsRead is its tags and netN values as read (asRead), which a clone
-	// copies; a superseded version's tags alone.
-	AsRead map[string]string `json:"as_read,omitempty"`
+	// copies. Plans don't store it: rights are checked on a fresh plan.
+	AsRead map[string]string `json:"-"`
 	// Base, Notes and Unreadable are the source's notes, for its review: the
 	// version it edits (ImageEdit), and the user notes the copy keeps, less
 	// their details block (see ParseDetails), or all of them when Unreadable
@@ -215,8 +215,8 @@ type TemplateSpec struct {
 	CloudInit bool   `json:"cloud_init,omitempty"`
 	// AsRead is the tags and netN values (asRead) a clone of the template
 	// starts with: the template's when reused, the master's, which the build
-	// copies, when built.
-	AsRead map[string]string `json:"as_read,omitempty"`
+	// copies, when built. Plans don't store it.
+	AsRead map[string]string `json:"-"`
 	// Digest is ConfigDigest of a reused template: what the session interface
 	// lists, and checks a submission against (BlockChanged).
 	Digest string `json:"digest,omitempty"`
@@ -269,10 +269,13 @@ type Item struct {
 	// DetailsWas is an Edit notes's or Edit host's notes as read, for its
 	// review and fingerprint.
 	DetailsWas *NotesRead `json:"details_was,omitempty"`
-	// AsRead is the tags and netN values (asRead) the VM's steps start from:
-	// the clone source's under StepClone, else the VM's own. It only decides
-	// the rights the steps need (stepEdits).
-	AsRead map[string]string `json:"as_read,omitempty"`
+	// AsRead is the tags and netN values (asRead) of a VM the item keeps,
+	// which its steps start from; under StepClone they start from the clone
+	// source's (cloneSource). CloudInit is whether a pod VM a deploy keeps
+	// has a cloud-init drive, which its network step regenerates. Both only
+	// decide the rights the steps need, and plans don't store them.
+	AsRead    map[string]string `json:"-"`
+	CloudInit bool              `json:"-"`
 	// Record is the domain a record or clear-record step writes into, or
 	// takes out of, Pool's comment.
 	Record string `json:"record,omitempty"`
@@ -591,25 +594,28 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 			plan.Items = append(plan.Items, p.deployItem(team, tpl, assign[team], req.Rebuild, req.Snapshot, byName, used))
 		}
 	}
-	// A pod VM the deploy keeps starts its steps from its own config.
-	var rg errgroup.Group
-	rg.SetLimit(batchSize)
-	for i := range plan.Items {
-		it := &plan.Items[i]
-		if it.Blocked != "" || slices.Contains(it.Steps, StepClone) {
-			continue
+	// A pod VM the deploy keeps starts its steps from its own config. One it
+	// can't read blocks only its own item: jobs' keepVMs narrows the items
+	// only after planning.
+	var keptAt []int
+	var keptVMs []proxmox.VM
+	for i, it := range plan.Items {
+		if it.Blocked == "" && !slices.Contains(it.Steps, StepClone) {
+			keptAt = append(keptAt, i)
+			keptVMs = append(keptVMs, proxmox.VM{VMID: it.VMID, Name: it.Name, Node: it.OldNode})
 		}
-		rg.Go(func() error {
-			cfg, err := p.API.VMConfig(ctx, it.OldNode, it.VMID)
-			if err != nil {
-				return fmt.Errorf("reading pod VM %s: %w", it.Name, err)
-			}
-			it.AsRead = asRead(cfg)
-			return nil
-		})
 	}
-	if err := rg.Wait(); err != nil {
-		return nil, err
+	cfgs, errs := p.readConfigs(ctx, keptVMs)
+	for j, i := range keptAt {
+		it := &plan.Items[i]
+		switch {
+		case errs[j] != nil:
+			it.Blocked = "can't read its config: " + errs[j].Error()
+		case cfgs[j] == nil:
+			it.Blocked = "is gone since the listing"
+		default:
+			it.AsRead, it.CloudInit = asRead(cfgs[j]), HasCloudInit(cfgs[j])
+		}
 	}
 	plan.BlockUnrebuildable()
 	return plan, nil
@@ -843,7 +849,6 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, rebu
 		}
 		if rebuild && slices.ContainsFunc(named, func(v proxmox.VM) bool { _, _, ok := p.Naming.TeamVM(v); return ok }) {
 			it.Steps = append(it.Steps, StepStop, StepDelete, StepClone)
-			it.AsRead = tpl.AsRead
 		}
 		if it.Blocked != "" || !rebuild {
 			it.Node = vm.Node
@@ -857,7 +862,6 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, rebu
 			used[it.VMID] = it.Name
 		}
 		it.Steps = append(it.Steps, StepClone)
-		it.AsRead = tpl.AsRead
 	}
 	it.Steps = append(it.Steps, StepNetwork, StepDiskLimits, StepCDROM, StepNotes, StepSetTag)
 	if snapshot {
