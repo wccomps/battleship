@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/wccomps/battleship/internal/config"
@@ -326,32 +327,30 @@ func TestRebuildFreesOldTemplateDisk(t *testing.T) {
 // A template's base disk found left on the storage is freed under the
 // storage-ops slot, as its destroy would have been.
 func TestFoundLeftoverBaseDiskWaitsForStorageOps(t *testing.T) {
-	f := newCluster()
-	vol := "competitions:9021/base-9021-disk-0.qcow2"
-	f.Vols[vol] = 9021 // its template is gone
-	ex := testExecutor(f, &recorder{})
-	ex.init()
-	ex.present = map[int]proxmox.VM{}
-	holding, release := make(chan struct{}), make(chan struct{})
-	go ex.lim.storageOps.do(context.Background(), true, func() error { close(holding); <-release; return nil })
-	<-holding
+	synctest.Test(t, func(t *testing.T) {
+		f := newCluster()
+		vol := "competitions:9021/base-9021-disk-0.qcow2"
+		f.Vols[vol] = 9021 // its template is gone
+		ex := testExecutor(f, &recorder{})
+		ex.init()
+		ex.present = map[int]proxmox.VM{}
+		holding, release := make(chan struct{}), make(chan struct{})
+		go ex.lim.storageOps.do(context.Background(), true, func() error { close(holding); <-release; return nil })
+		<-holding
 
-	done := make(chan error, 1)
-	go func() { done <- ex.retryLeftovers(context.Background(), 9021, "cedar", "teak.tango.delta.tpl") }()
-	for queued := false; !queued; time.Sleep(time.Millisecond) {
+		done := make(chan error, 1)
+		go func() { done <- ex.retryLeftovers(context.Background(), 9021, "cedar", "teak.tango.delta.tpl") }()
+		synctest.Wait()
 		select {
 		case err := <-done:
 			t.Fatalf("freed while another storage op held the slot (err %v)", err)
 		default:
 		}
-		ex.lim.storageOps.mu.Lock()
-		queued = len(ex.lim.storageOps.lo) == 1
-		ex.lim.storageOps.mu.Unlock()
-	}
-	close(release)
-	if err := <-done; err != nil || len(f.VolumesOf(9021)) != 0 {
-		t.Errorf("err = %v, volumes left %q; want %s freed", err, f.VolumesOf(9021), vol)
-	}
+		close(release)
+		if err := <-done; err != nil || len(f.VolumesOf(9021)) != 0 {
+			t.Errorf("err = %v, volumes left %q; want %s freed", err, f.VolumesOf(9021), vol)
+		}
+	})
 }
 
 func wantLeftoverAdvice(t *testing.T, err error, vols ...string) {

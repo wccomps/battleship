@@ -142,10 +142,12 @@ type Fake struct {
 	Restarts map[int]Restart
 	// Execs are the guest commands run, in order, except setup state reads
 	// and SSH checks.
-	Execs   []ExecCall
-	execs   map[int]proxmox.ExecStatus // by PID
-	polls   map[int]int                // status reads, by PID
-	nextPID int
+	Execs []ExecCall
+	// SSHChecks are the live SSH check commands run, in order.
+	SSHChecks []ExecCall
+	execs     map[int]proxmox.ExecStatus // by PID
+	polls     map[int]int                // status reads, by PID
+	nextPID   int
 	// PoolComments are the pools' comments, by pool. Pools lists these and every
 	// pool a VM is in; SetPoolComment refuses any other pool, as Proxmox
 	// refuses one that doesn't exist.

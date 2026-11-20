@@ -642,22 +642,25 @@ func TestCopySeenOKBeforeTheStopIsCompleted(t *testing.T) {
 			f.StopHook = func(string) error { return tc.stopErr }
 			// Once restartMaster has recorded the copy OK, the job is stopped;
 			// the restart goes on once the stop has stopped the copy.
+			copyStopped := make(chan struct{})
 			f.Gate = func(_ context.Context, key string) (func(), error) {
 				if key != "config:9021" || !seenOK.CompareAndSwap(true, false) {
 					return nil, nil
 				}
 				cancel()
-				for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
-					for _, e := range rec.find("teak.tango.delta.tpl", EventInfo) {
-						if strings.Contains(e.Message, "the copy of teak.tango.delta") {
-							return nil, nil
-						}
-					}
-				}
+				<-copyStopped
 				return nil, nil
 			}
 
-			res := testExecutor(f, rec).Run(ctx, plan)
+			ex := testExecutor(f, rec)
+			var once sync.Once
+			ex.OnEvent = func(e Event) {
+				rec.add(e)
+				if e.Item == "teak.tango.delta.tpl" && e.Status == EventInfo && strings.Contains(e.Message, "the copy of teak.tango.delta") {
+					once.Do(func() { close(copyStopped) })
+				}
+			}
+			res := ex.Run(ctx, plan)
 			if n := f.Called("stoptask:" + copyTask); n != 1 {
 				t.Errorf("copy stopped %d times, want 1", n)
 			}

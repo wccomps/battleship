@@ -644,33 +644,6 @@ func TestLiveAddrsSSHWarnings(t *testing.T) {
 	}
 }
 
-// sshAgent is a fake whose SSH checks exit with exitCode; it keeps the
-// command each VM's check ran.
-type sshAgent struct {
-	*podstest.Fake
-	exitCode int
-	mu       sync.Mutex
-	cmds     map[int][]string
-}
-
-func (a *sshAgent) AgentRead(ctx context.Context, node string, vmid int, command []string) (int, error) {
-	a.mu.Lock()
-	if a.cmds == nil {
-		a.cmds = map[int][]string{}
-	}
-	a.cmds[vmid] = command
-	a.mu.Unlock()
-	return a.Fake.AgentRead(ctx, node, vmid, command)
-}
-
-func (a *sshAgent) AgentExecStatus(ctx context.Context, node string, vmid, pid int, limit int64) (proxmox.ExecStatus, error) {
-	st, err := a.Fake.AgentExecStatus(ctx, node, vmid, pid, limit)
-	if st.Exited {
-		st.ExitCode = a.exitCode
-	}
-	return st, err
-}
-
 // The SSH check runs the Windows command on a host whose notes say Windows
 // or whose agent reports Windows' loopback interface, and the POSIX one on
 // the rest.
@@ -683,12 +656,15 @@ func TestLiveAddrsSSHCheckCommand(t *testing.T) {
 	host := func(vmid int, os string) EnvHost {
 		return EnvHost{VMID: vmid, Node: "alder", Status: "running", Agent: true, LANMAC: lanMAC, Notes: Notes{OS: os}}
 	}
-	a := &sshAgent{Fake: f}
-	NewPlanner(a, envConfig()).LiveAddrs(context.Background(),
+	NewPlanner(f, envConfig()).LiveAddrs(context.Background(),
 		[]Environment{{Hosts: []EnvHost{host(2110, ImageLinux), host(2111, ImageWindows), host(2112, "")}}}, 3, time.Second)
+	cmds := map[int][]string{}
+	for _, c := range f.SSHChecks {
+		cmds[c.VMID] = c.Command
+	}
 	for vmid, windows := range map[int]bool{2110: false, 2111: true, 2112: true} {
-		if !slices.Equal(a.cmds[vmid], SSHCheckCommand(windows)) {
-			t.Errorf("%d: SSH check %q, want the windows=%v one", vmid, a.cmds[vmid], windows)
+		if !slices.Equal(cmds[vmid], SSHCheckCommand(windows)) {
+			t.Errorf("%d: SSH check %q, want the windows=%v one", vmid, cmds[vmid], windows)
 		}
 	}
 }
@@ -700,9 +676,9 @@ func TestLiveAddrsSSHCheckExit(t *testing.T) {
 	f := podstest.New("alder")
 	f.Add(proxmox.VM{VMID: 2110, Name: "2110", Node: "alder", Status: "running"}, nil)
 	f.SetGuest(2110, podstest.Guest{Up: true, NICs: []proxmox.GuestNIC{{MAC: lanMAC, IPs: podstest.IPs("192.168.100.10/24")}},
-		SSHOut: "sshd=stopped\n===SSHD===\n"})
+		SSHOut: "sshd=stopped\n===SSHD===\n", SSHExit: 1})
 	envs := []Environment{{Hosts: []EnvHost{{VMID: 2110, Node: "alder", Status: "running", Agent: true, LANMAC: lanMAC}}}}
-	got := NewPlanner(&sshAgent{Fake: f, exitCode: 1}, envConfig()).LiveAddrs(context.Background(), envs, 1, time.Second)
+	got := NewPlanner(f, envConfig()).LiveAddrs(context.Background(), envs, 1, time.Second)
 	if got[2110].SSHWarning != "SSH not running" {
 		t.Errorf("exit 1: SSHWarning = %q, want %q", got[2110].SSHWarning, "SSH not running")
 	}

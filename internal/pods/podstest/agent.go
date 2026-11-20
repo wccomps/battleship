@@ -29,6 +29,8 @@ type Guest struct {
 	// SSHOut is what the live SSH check command prints; "" prints a running
 	// sshd that trusts DefaultSSHCAKey.
 	SSHOut string
+	// SSHExit is the live SSH check's exit code.
+	SSHExit int
 }
 
 // DefaultSSHCAKey is the synthetic OpenSSH CA public key a fake guest
@@ -154,7 +156,8 @@ func (f *Fake) AgentExec(ctx context.Context, node string, vmid int, command []s
 		st := proxmox.ExecStatus{Exited: true}
 		switch {
 		case isSSHCheck(command):
-			st.Out = g.SSHOut
+			f.SSHChecks = append(f.SSHChecks, ExecCall{VMID: vmid, Command: slices.Clone(command), Input: input})
+			st.ExitCode, st.Out = g.SSHExit, g.SSHOut
 			if st.Out == "" {
 				st.Out = defaultSSHOut
 			}

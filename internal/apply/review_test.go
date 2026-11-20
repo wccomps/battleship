@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/wccomps/battleship/internal/pods/podstest"
@@ -181,46 +182,36 @@ func TestUnfollowableTaskNamingNoVMIsNotPolled(t *testing.T) {
 }
 
 // A stop while waiting for an unfollowable task's VM to unlock reports the
-// lock still held, not the task ended.
+// lock still held, not the task ended. synctest's clock lets the lock poll's
+// real sleeps run until the step sees the stop.
 func TestUnfollowableTaskStillLockedAtStop(t *testing.T) {
-	f := newCluster()
-	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
-	plan, err := testPlanner(f).Power(context.Background(), []string{"01"}, []string{"teak"}, "stop")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	stop := podstest.UPID("cedar", "qmstop", 10121)
-	f.WaitHook = func(_ context.Context, id string) error { // runs with f.Mu held
-		if id != stop {
-			return nil
+	synctest.Test(t, func(t *testing.T) {
+		f := newCluster()
+		f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
+		plan, err := testPlanner(f).Power(context.Background(), []string{"01"}, []string{"teak"}, "stop")
+		if err != nil {
+			t.Fatal(err)
 		}
-		f.WaitHook = nil
-		f.LockConfig, f.LockName = map[int]int{10121: 1000}, "stop" // the task runs on
-		cancel()
-		return forbidden
-	}
-	ex := testExecutor(f, &recorder{})
-	// The stop reaches the step's context asynchronously (stepContext). A
-	// sleep that returned at once until then would let the poll spin through
-	// every locked read first; a real one lasts until the step sees the stop.
-	ex.Sleep = func(sctx context.Context, _ time.Duration) error {
-		if ctx.Err() == nil {
-			return nil
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		stop := podstest.UPID("cedar", "qmstop", 10121)
+		f.WaitHook = func(_ context.Context, id string) error { // runs with f.Mu held
+			if id != stop {
+				return nil
+			}
+			f.WaitHook = nil
+			f.LockConfig, f.LockName = map[int]int{10121: 1000}, "stop" // the task runs on
+			cancel()
+			return forbidden
 		}
-		select {
-		case <-sctx.Done():
-			return sctx.Err()
-		case <-time.After(10 * time.Second):
-			return nil
+		ex := testExecutor(f, &recorder{})
+		ex.Sleep = proxmox.SleepContext
+		res := ex.Run(ctx, plan)
+		err = res.Failed["team01-teak"]
+		if err == nil || !strings.Contains(err.Error(), "VM 10121 is still locked (stop), but whether it worked is unknown") {
+			t.Fatalf("error = %v, want VM 10121 still locked", err)
 		}
-	}
-	res := ex.Run(ctx, plan)
-	err = res.Failed["team01-teak"]
-	if err == nil || !strings.Contains(err.Error(), "VM 10121 is still locked (stop), but whether it worked is unknown") {
-		t.Fatalf("error = %v, want VM 10121 still locked", err)
-	}
+	})
 }
 
 // If authorization lapses mid-build, the stopped master is reported in the

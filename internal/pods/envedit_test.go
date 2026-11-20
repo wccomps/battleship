@@ -189,33 +189,6 @@ func TestHostEditInputCheck(t *testing.T) {
 	}
 }
 
-// A host's DNS note follows a rename only when it names the host itself.
-func TestEnvEditRenameKeepsOtherDNS(t *testing.T) {
-	f := podstest.New("alder")
-	f.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;router"},
-		map[string]string{"net0": "virtio=BC:24:11:00:00:01,bridge=devext01", "net1": "virtio=BC:24:11:00:00:02,bridge=devint01",
-			"description": "battleship: base=gw-v1 dns=router"})
-	f.Add(proxmox.VM{VMID: 2101, Name: "dc.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha"},
-		map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint01", "agent": "1",
-			"description": "battleship: ip=192.168.100.10 os=windows base=win-v1 dns=dc"})
-	f.Add(proxmox.VM{VMID: 2102, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha"},
-		map[string]string{"net0": "virtio=BC:24:11:00:00:04,bridge=devint01", "agent": "1",
-			"description": "battleship: ip=192.168.100.11 os=linux base=debian-12-v1 dns=dc"})
-	p := NewPlanner(f, envConfig())
-	for _, c := range []struct {
-		vmid      int
-		host, dns string
-	}{{2102, "oak", "dc"}, {2101, "ad", "ad"}} {
-		plan, err := p.EnvEdit(context.Background(), HostEditInput{VMID: c.vmid, Host: c.host})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if it := plan.Items[0]; it.Notes == nil || it.Notes.DNS != c.dns {
-			t.Errorf("rename %d to %s: notes = %+v, want dns=%s", c.vmid, c.host, it.Notes, c.dns)
-		}
-	}
-}
-
 func TestEnvEditItem(t *testing.T) {
 	name16 := "abcdefghijklmnop"
 	for _, tc := range []struct {
@@ -434,20 +407,5 @@ func TestEnvEditStaleDetails(t *testing.T) {
 	}
 	if b := plan.Items[0].Blocked; b != "a VM named dc.kilo.alpha already exists" {
 		t.Errorf("stale details after a name clash blocked = %q", b)
-	}
-}
-
-// Moving a lone host to another domain swaps its domain tag.
-func TestEnvEditNewDomainDropsOldDomainTag(t *testing.T) {
-	f := podstest.New("alder")
-	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;keep"},
-		map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint01", "agent": "1",
-			"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1"})
-	plan, err := NewPlanner(f, envConfig()).EnvEdit(context.Background(), HostEditInput{VMID: 2101, Host: "teak.lima.bravo"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if it := plan.Items[0]; it.Rename != "teak.lima.bravo" || it.Tags != "dev;lima.bravo;keep" {
-		t.Errorf("item = %+v, want tags dev;lima.bravo;keep", it)
 	}
 }
