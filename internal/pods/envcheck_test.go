@@ -51,7 +51,7 @@ func TestPropCheckEnvAgreesWithThePlanner(t *testing.T) {
 				Octet:  rapid.SampledFrom([]int{0, 0, 10, 20, 30}).Draw(t, label+" octet"),
 			}
 		}
-		if kind == KindEnvCreate || rapid.Bool().Draw(t, "router") {
+		if rapid.Bool().Draw(t, "router") {
 			req.Router = spec("router")
 		}
 		for i := range rapid.IntRange(0, 4).Draw(t, "hosts") {
