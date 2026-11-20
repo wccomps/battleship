@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +57,23 @@ func TestEnvHostCloneIsRemovedWhenItFails(t *testing.T) {
 	}
 }
 
+// A clone that failed after it was started is stopped, then removed.
+func TestStartedEnvHostCloneIsStoppedAndRemovedWhenItFails(t *testing.T) {
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 8001, Name: "deb-v1", Node: "alder", Template: true}, map[string]string{"net0": "virtio=BC:24:11:00:80:01,bridge=vmbr0"})
+	plan := &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{{
+		Name: "teak.kilo.alpha", Host: "teak", VMID: 2101, Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha",
+		Source: &pods.Source{VMID: 8001, Node: "alder", Name: "deb-v1"}, NICs: map[string]string{"net0": "devint01"},
+		Steps: []pods.Step{pods.StepClone, pods.StepLabel, pods.StepNetwork, pods.StepStart, pods.StepWaitAgent}}}} // no agent answers
+	res := catalogExec(f).Run(context.Background(), plan)
+	if len(res.Failed) != 1 || !slices.Equal(res.Removed, []string{"teak.kilo.alpha"}) || f.VMs[2101] != nil {
+		t.Errorf("result = %+v; the started clone must be removed", res)
+	}
+	if f.Called("power:2101:stop") != 1 {
+		t.Errorf("calls %v, want one stop before the delete", f.Calls)
+	}
+}
+
 func TestEnvHostIsWiredAndLabelled(t *testing.T) {
 	f := podstest.New("alder")
 	f.Add(proxmox.VM{VMID: 8001, Name: "deb-v1", Node: "alder", Template: true}, map[string]string{"tags": "base;linux", "net0": "virtio=BC:24:11:00:80:01,bridge=vmbr0"})
@@ -66,7 +84,7 @@ func TestEnvHostIsWiredAndLabelled(t *testing.T) {
 		Steps: []pods.Step{pods.StepClone, pods.StepLabel, pods.StepNetwork, pods.StepStart}}}}
 	res := catalogExec(f).Run(context.Background(), plan)
 	v := f.VMs[2101]
-	if len(res.Succeeded) != 1 || v.Config["tags"] != "dev;kilo.alpha" || !strings.Contains(v.Config["net0"], "bridge=devint01") ||
+	if len(res.Succeeded) != 1 || v.Name != "teak.kilo.alpha" || v.Config["tags"] != "dev;kilo.alpha" || !strings.Contains(v.Config["net0"], "bridge=devint01") ||
 		v.Config["description"] != "battleship: ip=192.168.100.10 os=linux base=deb-v1 dns=router" || v.Status != "running" {
 		t.Errorf("res %+v vm %+v %v", res, v.VM, v.Config)
 	}
@@ -107,6 +125,29 @@ func TestRegisterKeepsConvertedImageWhenRetireFails(t *testing.T) {
 	}
 	if v := f.VMs[8001]; v == nil || !v.Template {
 		t.Errorf("converted image must survive a failed retire: %+v", v)
+	}
+}
+
+// Retiring finds the previous version on the node it is listed on now, and
+// never tags another VM that took its VMID.
+func TestRetireFindsThePreviousVersionWhereItIs(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		at      string // the VM at 8000, on birch since the plan
+		retired bool
+	}{
+		{"moved", "deb-v1", true},
+		{"replaced", "other", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := registerFake()
+			f.Nodes = append(f.Nodes, "birch")
+			f.VMs[8000].Node, f.VMs[8000].Name = "birch", tc.at
+			res := catalogExec(f).Run(context.Background(), registerPlan(pods.StepClone, pods.StepRetire))
+			if retired := strings.Contains(f.VMs[8000].Config["tags"], "deprecated"); retired != tc.retired || (len(res.Succeeded) == 1) != tc.retired {
+				t.Errorf("result %+v, tags %q; want retired %v", res, f.VMs[8000].Config["tags"], tc.retired)
+			}
+		})
 	}
 }
 

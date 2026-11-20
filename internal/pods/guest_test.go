@@ -308,3 +308,15 @@ func TestLinuxGuestScriptConfiguresSSHCA(t *testing.T) {
 		}
 	}
 }
+
+// Any prefix length from /1 to /32 is taken; 0 and 33 aren't.
+func TestGuestPrefixBounds(t *testing.T) {
+	for prefix, ok := range map[int]bool{0: false, 1: true, 32: true, 33: false} {
+		g := testGuest
+		g.OS = ImageLinux
+		g.Prefix = prefix
+		if err := g.Check(); (err == nil) != ok {
+			t.Errorf("prefix %d: Check = %v", prefix, err)
+		}
+	}
+}

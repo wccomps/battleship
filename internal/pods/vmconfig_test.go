@@ -416,3 +416,33 @@ func TestPropVolumeOwner(t *testing.T) {
 		checkVolumeOwner(t, vol)
 	})
 }
+
+// A drive with only one of its limits off gets both set.
+func TestDiskLimitChangesOneLimitOff(t *testing.T) {
+	cur := map[string]string{
+		"scsi0": "competitions:vm-1-disk-0.qcow2,mbps_rd=100,mbps_wr=300",
+		"scsi1": "competitions:vm-1-disk-1.qcow2,mbps_rd=300,mbps_wr=100",
+	}
+	want := map[string]string{
+		"scsi0": "competitions:vm-1-disk-0.qcow2,mbps_rd=300,mbps_wr=300",
+		"scsi1": "competitions:vm-1-disk-1.qcow2,mbps_rd=300,mbps_wr=300",
+	}
+	if got := DiskLimitChanges(cur, 300, 300); !reflect.DeepEqual(got, want) {
+		t.Errorf("DiskLimitChanges = %v, want %v", got, want)
+	}
+}
+
+func TestCPUChanges(t *testing.T) {
+	for _, c := range []struct {
+		cur, cpu string
+		want     map[string]string
+	}{
+		{"host", "", map[string]string{}}, // no model configured
+		{"custom-lab", "custom-lab", map[string]string{}},
+		{"host", "custom-lab", map[string]string{"cpu": "custom-lab"}},
+	} {
+		if got := CPUChanges(map[string]string{"cpu": c.cur}, c.cpu); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("CPUChanges(%q, %q) = %v, want %v", c.cur, c.cpu, got, c.want)
+		}
+	}
+}

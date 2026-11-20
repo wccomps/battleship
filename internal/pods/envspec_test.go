@@ -31,12 +31,14 @@ func TestParseHostSpec(t *testing.T) {
 }
 
 func TestCheckDomain(t *testing.T) {
-	for _, ok := range []string{"kilo.alpha", "a.b.c", "x-1.y2"} {
+	// The longest domain allowed is 200 characters.
+	long := strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 8)
+	for _, ok := range []string{"kilo.alpha", "a.b.c", "x-1.y2", long} {
 		if err := CheckDomain(ok); err != nil {
 			t.Errorf("CheckDomain(%q) = %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"", "kilo", "Kilo.alpha", "kilo..alpha", ".kilo.alpha", "kilo.alpha.", "ki_lo.alpha"} {
+	for _, bad := range []string{"", "kilo", "Kilo.alpha", "kilo..alpha", ".kilo.alpha", "kilo.alpha.", "ki_lo.alpha", long + "d"} {
 		if CheckDomain(bad) == nil {
 			t.Errorf("CheckDomain(%q) accepted", bad)
 		}
@@ -89,6 +91,12 @@ func TestPickOctetIsStableAndAvoidsUsed(t *testing.T) {
 	for o := FirstHostOctet; o <= LastHostOctet; o++ {
 		used[o] = true
 	}
+	// The last free octet is found, the subnet's last host included.
+	used[LastHostOctet] = false
+	if d, ok := PickOctet("kilo.alpha", "teak", used); !ok || d != LastHostOctet {
+		t.Errorf("PickOctet with only .%d free = %d, %v", LastHostOctet, d, ok)
+	}
+	used[LastHostOctet] = true
 	if _, ok := PickOctet("kilo.alpha", "teak", used); ok {
 		t.Error("PickOctet found an octet in a full subnet")
 	}
@@ -110,6 +118,10 @@ func TestUserNotes(t *testing.T) {
 	long := strings.Repeat("é", maxUserNotes+5)
 	if got := []rune(UserNotes(long)); len(got) != maxUserNotes+1 || got[maxUserNotes] != '…' {
 		t.Errorf("long notes keep %d runes, want %d and an ellipsis", len(got), maxUserNotes+1)
+	}
+	exact := strings.Repeat("é", maxUserNotes)
+	if got := UserNotes(exact); got != exact {
+		t.Errorf("notes of exactly %d runes keep %d runes", maxUserNotes, len([]rune(got)))
 	}
 }
 

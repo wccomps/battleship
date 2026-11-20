@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/wccomps/battleship/internal/config"
@@ -111,6 +112,9 @@ func TestDeployFromScratch(t *testing.T) {
 	if n := f.Called("cloudinit:10121"); n != 1 {
 		t.Errorf("cloud-init regenerated %d times, want 1", n)
 	}
+	if ev := rec.find("team01-teak", EventDone); len(ev) == 0 || ev[0].Step != pods.StepClone {
+		t.Errorf("done events = %+v, want the clone first", ev)
+	}
 }
 
 func TestRerunConvergesWithoutRecloning(t *testing.T) {
@@ -202,6 +206,9 @@ func TestTeardown(t *testing.T) {
 	}
 	if _, ok := f.VMs[10121]; ok || f.Called("power:10121:stop") != 1 {
 		t.Errorf("team01-teak not stopped and deleted: calls=%v", f.Calls)
+	}
+	if ev := rec.find("team01-teak", EventDone); len(ev) != 2 || ev[0].Step != pods.StepStop || ev[1].Step != pods.StepDelete {
+		t.Errorf("teak done events = %+v, want the stop and the delete", ev)
 	}
 	if ev := rec.find("team01-oak", EventSkipped); len(ev) != 1 || ev[0].Message != "already deleted" {
 		t.Errorf("oak events = %+v", ev)
@@ -309,6 +316,20 @@ func TestCancelCutsAStepOffAfterTheGrace(t *testing.T) {
 	}
 	if len(rec.find("team01-teak", EventFailed)) != 0 {
 		t.Errorf("failed events after a cancel: %+v", rec.find("team01-teak", EventFailed))
+	}
+}
+
+// A step under way at cancel that then fails is reported failed, not
+// interrupted: the failure is its outcome.
+func TestStepFailingAfterCancelIsFailed(t *testing.T) {
+	_, rec, res := cancelTeardownDuringStop(t, time.Hour, ErrCancelRequested, func(context.Context) error {
+		return &proxmox.TaskError{UPID: podstest.UPID("cedar", "qmstop", 10121), ExitStatus: "can't lock file"}
+	})
+	if err := res.Failed["team01-teak"]; err == nil || !strings.Contains(err.Error(), "can't lock file") || len(res.Interrupted) != 0 {
+		t.Errorf("result = %+v, want team01-teak failed on the stop", res)
+	}
+	if ev := rec.find("team01-teak", EventFailed); len(ev) != 1 || ev[0].Step != pods.StepStop {
+		t.Errorf("failed events = %+v", ev)
 	}
 }
 
@@ -463,18 +484,29 @@ func TestOtherStopsDontWait(t *testing.T) {
 	}
 }
 
+// A run stopped before it starts runs nothing: every item reads not run,
+// saying why the run stopped, and the rounds read as skipped.
 func TestCancelledRunReportsNotRun(t *testing.T) {
-	f := newCluster()
-	plan := deployTeak(t, f, "01")
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	for _, tc := range []struct {
+		cause error
+		want  string
+	}{
+		{nil, "stopped before it started"},
+		{ErrCancelRequested, "cancelled before it started"},
+		{errors.New("lost the job lock"), "stopped (lost the job lock) before it started"},
+	} {
+		f := newCluster()
+		plan := deployTeak(t, f, "01")
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(tc.cause)
 
-	res := testExecutor(f, &recorder{}).Run(ctx, plan)
-	if err := res.Interrupted["team01-teak"]; err == nil || err.Error() != "stopped before it started" || len(res.Failed) != 0 {
-		t.Errorf("result = %+v, want team01-teak interrupted as not run", res)
-	}
-	if len(res.Succeeded) != 0 {
-		t.Errorf("Succeeded = %v, want none", res.Succeeded)
+		res := testExecutor(f, &recorder{}).Run(ctx, plan)
+		if err := res.Interrupted["team01-teak"]; err == nil || err.Error() != tc.want || len(res.Failed) != 0 {
+			t.Errorf("cause %v: result = %+v, want team01-teak interrupted with %q", tc.cause, res, tc.want)
+		}
+		if len(res.Succeeded) != 0 || !res.RoundsSkipped {
+			t.Errorf("cause %v: Succeeded = %v, RoundsSkipped = %v; want none, true", tc.cause, res.Succeeded, res.RoundsSkipped)
+		}
 	}
 }
 
@@ -500,6 +532,25 @@ func TestRebuildDeletesOldTemplateOnItsNode(t *testing.T) {
 	}
 	if n := f.Called("volume:"); n != 0 {
 		t.Errorf("%d blind volume deletes, want 0", n)
+	}
+}
+
+// An old template moved since planning is deleted on the node it is on now.
+func TestRebuildDeletesOldTemplateWhereItMoved(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.VMs[9021].Node = "birch" // migrated
+
+	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
+	if len(res.Failed) != 0 || f.Called("delete:9021") != 1 {
+		t.Fatalf("result = %+v, calls %v; want the old template deleted on birch", res, f.Calls)
+	}
+	if tpl := f.VMs[9021]; tpl == nil || !tpl.Template || tpl.Node != "cedar" {
+		t.Errorf("rebuilt template = %+v", tpl)
 	}
 }
 
@@ -678,6 +729,54 @@ func TestMasterRestartWaitsForCloneTask(t *testing.T) {
 	}
 	if st := f.VMs[121].Status; st != "running" {
 		t.Errorf("master status = %s, want running", st)
+	}
+}
+
+// A stopped build gives the copy it cut off up to copyStopWait to end
+// before restarting the master: a copy that ends within it lets the master
+// start; one still running leaves the master stopped. synctest's clock runs
+// the minutes at once.
+func TestStoppedBuildWaitsForItsCopyBeforeRestartingTheMaster(t *testing.T) {
+	for _, tc := range []struct {
+		copyEnds time.Duration // after the stop
+		master   string
+	}{
+		{time.Minute, "running"},
+		{3 * time.Minute, "stopped"},
+	} {
+		t.Run(tc.copyEnds.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := newCluster()
+				f.VMs[121].Status = "running"
+				plan := deployTeak(t, f, "01")
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				var waits atomic.Int32
+				f.WaitGate = func(wctx context.Context, upid string) error {
+					if !strings.Contains(upid, ":qmclone:121:") {
+						return nil
+					}
+					if waits.Add(1) == 1 {
+						cancel()
+						return context.Canceled
+					}
+					select {
+					case <-time.After(tc.copyEnds):
+						return nil
+					case <-wctx.Done():
+						return wctx.Err()
+					}
+				}
+				ex := testExecutor(f, &recorder{})
+				ex.Sleep = proxmox.SleepContext
+
+				res := ex.Run(ctx, plan)
+				_, reported := res.CleanupFailed["teak.tango.delta"]
+				if st := f.VMs[121].Status; st != tc.master || reported != (tc.master == "stopped") {
+					t.Errorf("master %s, CleanupFailed %v; want it %s", st, res.CleanupFailed, tc.master)
+				}
+			})
+		})
 	}
 }
 
@@ -967,16 +1066,19 @@ func TestItemWithoutStepsFails(t *testing.T) {
 	}
 }
 
+// A retry round whose VM listing fails keeps each item's earlier error;
+// an item that never ran fails with the listing's.
 func TestFailedRefreshKeepsEarlierItemError(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
-	denied := &proxmox.APIError{Status: 403, Message: "Permission check failed (/vms/10121, VM.Config.Network)"}
+	// Retried next round, unlike a missing privilege.
+	denied := &proxmox.APIError{Status: 400, Message: "Parameter verification failed."}
 	f.FailOn("setconfig:10121", denied, denied)
 	armed := false
 	f.OnRecord = func(key string) {
 		if key == "setconfig:10121" && !armed {
 			armed = true
-			for i := 0; i < config.Default().Retry.Attempts; i++ {
+			for range config.Default().Retry.Attempts {
 				f.FailOn("cluster", &proxmox.APIError{Status: 500, Message: "pve is down"})
 			}
 		}
@@ -986,6 +1088,21 @@ func TestFailedRefreshKeepsEarlierItemError(t *testing.T) {
 	err := res.Failed["team01-teak"]
 	if err == nil || !strings.Contains(err.Error(), "network") {
 		t.Errorf("error = %v, want the original network step error", err)
+	}
+	if n := f.Called("setconfig:10121"); n != 1 {
+		t.Errorf("setconfig called %d times, want 1 (the retry round's listing failed)", n)
+	}
+
+	f = newCluster()
+	plan = deployTeak(t, f, "01")
+	for range config.Default().Retry.Attempts {
+		f.FailOn("cluster", &proxmox.APIError{Status: 500, Message: "pve is down"})
+	}
+	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Retry.Rounds = 0
+	res = ex.Run(context.Background(), plan)
+	if err := res.Failed["team01-teak"]; err == nil || !strings.HasPrefix(err.Error(), "listing VMs: ") || len(res.Interrupted) != 0 {
+		t.Errorf("never ran: result = %+v, want team01-teak failed listing VMs", res)
 	}
 }
 
@@ -1203,6 +1320,119 @@ func TestTemplateThatCannotBeConvertedIsRemoved(t *testing.T) {
 	}
 }
 
+// Cleanup settles each template copy it can't complete one way: gone,
+// failed or removed. Either way it goes on to complete the next.
+func TestCleanupSettlesEachTemplateCopyOnce(t *testing.T) {
+	denied := &proxmox.APIError{Status: 400, Message: "Parameter verification failed."}
+	for _, tc := range []struct {
+		name string
+		// spoil makes the first copy's conversion fail and leaves it as cleanup finds it.
+		spoil                 func(f *podstest.Fake, vmid int)
+		gone, failed, removed bool
+	}{
+		{"gone", func(f *podstest.Fake, vmid int) {
+			f.FailOn(fmt.Sprintf("template:%d", vmid), denied)
+			f.OnRecord = func(key string) {
+				if key == fmt.Sprintf("template:%d", vmid) {
+					delete(f.VMs, vmid)
+				}
+			}
+		}, true, false, false},
+		{"renamed", func(f *podstest.Fake, vmid int) {
+			f.FailOn(fmt.Sprintf("template:%d", vmid), denied)
+			f.OnRecord = func(key string) {
+				if key == fmt.Sprintf("template:%d", vmid) {
+					f.VMs[vmid].Name, f.VMs[vmid].Config["name"] = "other", "other"
+				}
+			}
+		}, false, true, false},
+		{"unconvertible", func(f *podstest.Fake, vmid int) {
+			f.FailOn(fmt.Sprintf("template:%d", vmid), denied, denied)
+		}, false, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := sevenMasters()
+			plan := deploySeven(t, f, "h1", "h2")
+			first, second := plan.Templates[0], plan.Templates[1]
+			tc.spoil(f, first.VMID)
+			f.FailOn(fmt.Sprintf("template:%d", second.VMID), denied) // fails in the run, converts in cleanup
+			ex := testExecutor(f, &recorder{})
+			ex.Cfg.Retry.Rounds = 0
+
+			res := ex.Run(context.Background(), plan)
+			_, failed := res.CleanupFailed[first.Name]
+			if gone := slices.Equal(res.AlreadyGone, []string{first.Name}); gone != tc.gone || len(res.AlreadyGone) > 1 ||
+				failed != tc.failed || len(res.CleanupFailed) > 1 || slices.Equal(res.Removed, []string{first.Name}) != tc.removed {
+				t.Errorf("AlreadyGone = %v, CleanupFailed = %v, Removed = %v; want %s only %s", res.AlreadyGone, res.CleanupFailed, res.Removed, first.Name, tc.name)
+			}
+			if !slices.Equal(res.Completed, []string{second.Name}) {
+				t.Errorf("Completed = %v, want %s; result %+v", res.Completed, second.Name, res)
+			}
+			if tpl := f.VMs[second.VMID]; tpl == nil || !tpl.Template {
+				t.Errorf("%s = %+v, want it converted", second.Name, tpl)
+			}
+		})
+	}
+}
+
+// Once the cleanup budget runs out, every VM cleanup has not reached yet is
+// reported, not just the next. The first VM's check outlasts the budget
+// (synctest's clock lets 10 minutes pass at once).
+func TestCleanupBudgetReportsEveryVMLeft(t *testing.T) {
+	denied := &proxmox.APIError{Status: 400, Message: "Parameter verification failed."}
+	for _, tc := range []struct {
+		name  string
+		base  int    // host h<i>'s VM cleanup acts on is base+i
+		fail  string // the call failed for each, so the run leaves it to cleanup
+		named string // the VM's name, by i
+	}{
+		{"team VMs", 10100, "setconfig:%d", "team01-h%d"},
+		{"template copies", 9000, "template:%d", "h%d.kilo.alpha.tpl"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := sevenMasters()
+				plan := deploySeven(t, f, "h1", "h2", "h3")
+				for i := 1; i <= 3; i++ {
+					f.FailOn(fmt.Sprintf(tc.fail, tc.base+i), denied)
+				}
+				var cleaning atomic.Bool
+				listings := 0
+				f.OnRecord = func(key string) {
+					if key == "cluster" {
+						listings++
+						cleaning.Store(listings == 2) // Run's listing, then cleanup's
+					}
+				}
+				var first atomic.Int64 // the VM cleanup checks first, whatever its order
+				f.Gate = func(ctx context.Context, key string) (func(), error) {
+					if !cleaning.Load() {
+						return nil, nil
+					}
+					for i := int64(1); i <= 3; i++ {
+						if key == fmt.Sprintf("config:%d", int64(tc.base)+i) && (first.CompareAndSwap(0, i) || first.Load() == i) {
+							<-ctx.Done()
+							return nil, ctx.Err()
+						}
+					}
+					return nil, nil
+				}
+				ex := testExecutor(f, &recorder{})
+				ex.Cfg.Retry.Rounds = 0
+
+				res := ex.Run(context.Background(), plan)
+				for i := 1; i <= 3; i++ {
+					name := fmt.Sprintf(tc.named, i)
+					err := res.CleanupFailed[name]
+					if err == nil || int64(i) != first.Load() && !strings.Contains(err.Error(), "cleanup time budget ran out") {
+						t.Errorf("%s: cleanup error %v, want it reported as not checked in time", name, err)
+					}
+				}
+			})
+		})
+	}
+}
+
 func TestLockedVMIsNotForceRemoved(t *testing.T) {
 	f, plan := newlyBuiltTeamVMFails(t)
 	denied := &proxmox.APIError{Status: 400, Message: "Parameter verification failed."}
@@ -1301,6 +1531,21 @@ func TestPrecheckFindingSameNameVMNeverClaimsIt(t *testing.T) {
 	}
 	if f.VMs[10121] == nil || len(res.Removed) != 0 || f.Called("delete:10121") != 0 {
 		t.Errorf("VM this run did not create was removed: %v", f.Calls)
+	}
+}
+
+// A team VM already at the target under its name (an earlier POST took
+// effect) is the clone: the item goes on to configure it.
+func TestPrecheckFindingSameNameVMSkipsTheClone(t *testing.T) {
+	f := newCluster()
+	plan := deployTeak(t, f, "01")
+	appearAfterListing(f, plan.Items[0].Node, foreignConfig(), "stopped")
+	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Retry.Rounds = 0 // a retry round would find it listed
+
+	res := ex.Run(context.Background(), plan)
+	if !reflect.DeepEqual(res.Succeeded, []string{"team01-teak"}) || f.Called("clone:10121") != 0 {
+		t.Errorf("result = %+v, calls %v; want the item done without a clone", res, f.Calls)
 	}
 }
 
@@ -1466,8 +1711,8 @@ func TestFinishedEventOmitsEmptyCleanup(t *testing.T) {
 	testExecutor(f, rec).Run(context.Background(), deployTeak(t, f, "01"))
 	infos := rec.find("", EventInfo)
 	last := infos[len(infos)-1].Message
-	if !strings.HasPrefix(last, "finished: 1 succeeded") || strings.Contains(last, "cleanup") {
-		t.Errorf("last job event = %q, want no cleanup counts when there was nothing to clean up", last)
+	if want := "finished: 1 succeeded, 0 failed, 0 blocked"; last != want {
+		t.Errorf("last job event = %q, want %q: no zero interrupted or cleanup counts", last, want)
 	}
 }
 
@@ -1547,6 +1792,38 @@ func TestVMWithAnotherNameAtTheTargetIsLeftAlone(t *testing.T) {
 	}
 	if f.VMs[10121] == nil || f.Called("delete:10121") != 0 || len(res.Removed) != 0 {
 		t.Errorf("another VM was removed: %v", f.Calls)
+	}
+}
+
+// A locked VM with another name at the target is still another VM: the
+// clone fails at once rather than wait for its lock.
+func TestLockedVMWithAnotherNameAtTheTargetFailsTheClone(t *testing.T) {
+	f, plan := newlyBuiltTeamVMFails(t)
+	appearAfterListing(f, plan.Items[0].Node, map[string]string{"name": "someone-else"}, "running")
+	f.LockConfig = map[int]int{10121: 1000}
+	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Retry.Rounds = 0
+
+	res := ex.Run(context.Background(), plan)
+	if err := res.Failed["team01-teak"]; err == nil || !strings.Contains(err.Error(), `used by "someone-else"`) || f.Called("clone:10121") != 0 {
+		t.Errorf("result = %+v, calls %v; want the clone refused", res, f.Calls)
+	}
+}
+
+// A clone POST that timed out leaves its VM locked and nameless for a
+// while; the resent clone waits for it rather than call it another VM.
+func TestNamelessLockedCloneTargetIsWaitedOut(t *testing.T) {
+	f := newCluster()
+	plan := deployTeak(t, f, "01")
+	f.CloneThenFail = map[int]error{10121: &proxmox.APIError{Status: 500, Message: "Connection timed out"}}
+	f.LockConfig = map[int]int{10121: 2}
+	f.LockHidesName = true
+	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Retry.Rounds = 0
+
+	res := ex.Run(context.Background(), plan)
+	if len(res.Failed) != 0 || f.Called("clone:10121") != 1 {
+		t.Errorf("result = %+v, %d clone POSTs; want one clone and success", res, f.Called("clone:10121"))
 	}
 }
 
@@ -1687,24 +1964,33 @@ func TestRoundsNotSkippedWhenRunCompletes(t *testing.T) {
 		t.Errorf("failing run: RoundsSkipped = %v, failed = %v", res.RoundsSkipped, res.Failed)
 	}
 
-	// A stop that arrives after the last round leaves nothing skipped.
+	// A stop that arrives once no item is left to retry leaves nothing
+	// skipped, though Run is still finishing up.
 	f = newCluster()
 	f.FailOn("setconfig:10121", denied, denied)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ex := testExecutor(f, &recorder{})
 	ex.OnEvent = func(ev Event) {
-		if strings.HasPrefix(ev.Message, "finished:") {
+		if ev.Item == "team01-teak" && ev.Status == EventFailed {
 			cancel()
 		}
 	}
 	plan := deployTeak(t, f, "01")
 	if res := ex.Run(ctx, plan); res.RoundsSkipped {
-		t.Errorf("stop after the run: RoundsSkipped = true")
+		t.Errorf("stop after the last item: RoundsSkipped = true")
 	}
+
+	// A run whose items all succeed at once runs no retry round.
 	f = newCluster()
-	if res := testExecutor(f, &recorder{}).Run(context.Background(), deployTeak(t, f, "01")); res.RoundsSkipped || len(res.Failed) != 0 {
+	rec := &recorder{}
+	if res := testExecutor(f, rec).Run(context.Background(), deployTeak(t, f, "01")); res.RoundsSkipped || len(res.Failed) != 0 {
 		t.Errorf("clean run: %+v", res)
+	}
+	for _, ev := range rec.find("", EventInfo) {
+		if strings.HasPrefix(ev.Message, "retry round") {
+			t.Errorf("clean run: %q", ev.Message)
+		}
 	}
 }
 
@@ -2021,5 +2307,168 @@ func TestRebuildTearsDownExistingTeamVMsBeforeTemplateDelete(t *testing.T) {
 	res = ex.Run(context.Background(), plan)
 	if !slices.Contains(res.Removed, "team02-teak") || f.VMs[10221] != nil {
 		t.Errorf("failed rebuilt clone not removed by cleanup: Removed=%v AlreadyGone=%v VM=%v", res.Removed, res.AlreadyGone, f.VMs[10221])
+	}
+}
+
+// A round whose VM listing fails for good runs nothing; the next round
+// lists again and runs the items.
+func TestFailedListingIsRetriedNextRound(t *testing.T) {
+	f := newCluster()
+	plan := deployTeak(t, f, "01")
+	for range config.Default().Retry.Attempts {
+		f.FailOn("cluster", &proxmox.APIError{Status: 500, Message: "internal error"})
+	}
+	rec := &recorder{}
+
+	res := testExecutor(f, rec).Run(context.Background(), plan)
+	if len(res.Failed) != 0 || len(res.Interrupted) != 0 || !slices.Equal(res.Succeeded, []string{"team01-teak"}) {
+		t.Fatalf("result = %+v, want team01-teak deployed in round 1", res)
+	}
+	if ev := rec.find("", EventFailed); len(ev) != 1 || !strings.HasPrefix(ev[0].Message, "listing VMs: ") {
+		t.Errorf("job failure events = %+v, want the failed listing", ev)
+	}
+	if n := f.Called("clone:10121"); n != 1 {
+		t.Errorf("cloned %d times, want 1", n)
+	}
+}
+
+// A stop while the last round lists VMs cuts that round short: its items
+// read not run and the rounds read as skipped.
+func TestStopDuringLastRoundListingSkipsRounds(t *testing.T) {
+	f := newCluster()
+	plan := deployTeak(t, f, "01")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f.Gate = func(_ context.Context, key string) (func(), error) {
+		if key == "cluster" {
+			cancel()
+			return nil, context.Canceled
+		}
+		return nil, nil
+	}
+	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Retry.Rounds = 0
+
+	res := ex.Run(ctx, plan)
+	if !res.RoundsSkipped {
+		t.Errorf("RoundsSkipped = false, want true; result = %+v", res)
+	}
+	if err := res.Interrupted["team01-teak"]; err == nil || err.Error() != "stopped before it started" {
+		t.Errorf("Interrupted = %v, want team01-teak not run", res.Interrupted)
+	}
+}
+
+// A power item a stop keeps from its retry round reads not run with its
+// config untouched: power steps never change it.
+func TestStopBeforeRetryRoundLeavesPowerItemsUntouched(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "stopped"}, map[string]string{"name": "team01-teak"})
+	f.Add(proxmox.VM{VMID: 10221, Name: "team02-teak", Node: "birch", Status: "stopped"}, map[string]string{"name": "team02-teak"})
+	plan, err := testPlanner(f).Power(context.Background(), []string{"01", "02"}, []string{"teak"}, "start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := &proxmox.APIError{Status: 400, Message: "start: bad request"}
+	f.FailOn("power:10121:start", bad)
+	f.FailOn("power:10221:start", bad)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	listings := 0
+	f.OnRecord = func(key string) {
+		if key == "cluster" {
+			if listings++; listings == 2 { // round 1 lists, then the job is cancelled
+				cancel(ErrCancelRequested)
+			}
+		}
+	}
+
+	res := testExecutor(f, &recorder{}).Run(ctx, plan)
+	if len(res.Failed) != 0 || len(res.Interrupted) != 2 || !res.RoundsSkipped {
+		t.Fatalf("result = %+v, want both interrupted, rounds skipped", res)
+	}
+	for name, err := range res.Interrupted {
+		if err.Error() != "cancelled before it started" || LeftBy(err) != LeftUntouched {
+			t.Errorf("%s: %v (left %s), want cancelled before it started, untouched", name, err, LeftBy(err))
+		}
+	}
+	if n := f.Called("power:"); n != 2 {
+		t.Errorf("start POSTed %d times, want 2 (round 0 only)", n)
+	}
+}
+
+// An item a rebuild tears down first resumes at its clone: it reports
+// started once and its teardown steps once.
+func TestTornDownItemResumesAtItsClone(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
+	plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	res := testExecutor(f, rec).Run(context.Background(), plan)
+	if len(res.Failed) != 0 || !slices.Equal(res.Succeeded, []string{"team01-teak"}) {
+		t.Fatalf("result = %+v", res)
+	}
+	if ev := rec.find("team01-teak", EventStarted); len(ev) != 1 {
+		t.Errorf("started events = %+v, want one", ev)
+	}
+	for _, ev := range rec.find("team01-teak", EventSkipped) {
+		if ev.Step == pods.StepStop || ev.Step == pods.StepDelete {
+			t.Errorf("teardown step reported again: %+v", ev)
+		}
+	}
+}
+
+// A rebuild's team VM deleted by hand since planning needs no stop or
+// delete, but the disks it left are freed before it is cloned again; if
+// the storage can't be checked, it isn't.
+func TestRebuildOfTeamVMGoneSincePlanning(t *testing.T) {
+	const vol = "competitions:10121/vm-10121-disk-0.qcow2"
+	for _, tc := range []struct {
+		name   string
+		left   bool  // the VM left vol on the storage
+		listed error // the storage listing's error
+	}{
+		{"no disks left", false, nil},
+		{"disks left", true, nil},
+		{"storage unreadable", true, &proxmox.APIError{Status: 400, Message: "storage 'competitions' is not online"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCluster()
+			f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "spruce", Template: true}, nil)
+			f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, nil)
+			plan, err := testPlanner(f).Deploy(context.Background(), pods.DeployRequest{Pattern: "teak.*", Teams: []string{"01"}, Rebuild: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			delete(f.VMs, 10121)
+			if tc.left {
+				f.Vols[vol] = 10121
+			}
+			if tc.listed != nil {
+				f.FailOn("content:competitions:10121", tc.listed)
+			}
+			ex := testExecutor(f, &recorder{})
+			ex.Cfg.Retry.Rounds = 0
+
+			res := ex.Run(context.Background(), plan)
+			if f.Called("power:10121:stop") != 0 || f.Called("delete:10121") != 0 {
+				t.Errorf("calls %v, want no stop or delete of the gone VM", f.Calls)
+			}
+			if tc.listed != nil {
+				if err := res.Failed["team01-teak"]; err == nil || !strings.Contains(err.Error(), "not online") || f.Called("clone:10121") != 0 {
+					t.Errorf("result = %+v, want team01-teak failed before its clone", res)
+				}
+				return
+			}
+			if !reflect.DeepEqual(res.Succeeded, []string{"team01-teak"}) || f.VMs[10121] == nil {
+				t.Fatalf("result = %+v, VM = %+v", res, f.VMs[10121])
+			}
+			if vols := f.VolumesOf(10121); slices.Contains(vols, vol) {
+				t.Errorf("volumes %q, want the gone VM's %s freed", vols, vol)
+			}
+		})
 	}
 }

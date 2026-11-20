@@ -129,6 +129,7 @@ func TestCloneVMIDPanicsOnBadTeam(t *testing.T) {
 		{"negative", "-1", true},
 		{"out of range", "100", true},
 		{"valid", "05", false},
+		{"top of range", "99", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -289,4 +290,14 @@ func blockVMIDs(cfg config.Naming, team string) []int {
 	start := cfg.CloneVMIDBase + t*cfg.CloneVMIDTeamStride
 	return []int{start, start + 1, start + 50, start + 99, start + 100, start - 1, start + cfg.CloneVMIDTeamStride,
 		start - cfg.CloneVMIDTeamStride, 100, 8000, cfg.CloneVMIDBase - 1}
+}
+
+func TestTeamOfCloneVMID(t *testing.T) {
+	n := NewNaming(config.Default().Naming)
+	for vmid, want := range map[int]string{10000: "00", 10105: "01", 19999: "99", 9999: "", 9901: "", 10150: "01", 10199: "01", 20000: ""} {
+		team, ok := n.TeamOfCloneVMID(vmid)
+		if team != want || ok != (want != "") {
+			t.Errorf("TeamOfCloneVMID(%d) = %q, %v, want %q", vmid, team, ok, want)
+		}
+	}
 }

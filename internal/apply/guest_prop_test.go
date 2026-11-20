@@ -65,7 +65,7 @@ func checkShown(t interface{ Fatalf(string, ...any) }, got, want string) {
 // one line, quoted and bounded.
 func TestPropGuestTail(t *testing.T) {
 	for _, s := range []string{"", "\n", " \n \n", "a", "a\n", "\na\n\nb\n\n", "a\r\nb\r\n", " a \n b ", "a\n\n\n\nb\nc\nd\ne\nf\ng", "a\rb", "a\r\rb\r",
-		"\x00\x1b[2J", strings.Repeat("é", maxGuestShown), "a" + strings.Repeat("é", maxGuestShown), "a" + strings.Repeat("\x80", 2*maxGuestShown), strings.Repeat("x", 3*maxGuestShown)} {
+		"\x00\x1b[2J", strings.Repeat("é", maxGuestShown), strings.Repeat("x", maxGuestShown), "a" + strings.Repeat("é", maxGuestShown), "a" + strings.Repeat("\x80", 2*maxGuestShown), strings.Repeat("x", 3*maxGuestShown)} {
 		for n := -2; n < 8; n++ {
 			checkShown(t, guestTail(s, n), tailLines(s, n))
 		}

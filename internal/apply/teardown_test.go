@@ -6,7 +6,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/wccomps/battleship/internal/config"
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
@@ -62,6 +64,10 @@ func TestHalfDeletedVMFailsWithAdvice(t *testing.T) {
 		t.Fatalf("result = %+v, want team01-teak failed", res)
 	}
 	wantHalfDeletedAdvice(t, proxmox.Describe(err))
+	// The round that saw the delete fail says how it failed.
+	if ev := rec.find("team01-teak", EventFailed); len(ev) == 0 || !strings.Contains(ev[0].Message, "the delete failed with: ") || !strings.Contains(ev[0].Message, "got lock request timeout") {
+		t.Errorf("failure events = %+v, want the first to give the delete's error", ev)
+	}
 	if ev := rec.find("team01-teak", EventDone); len(ev) != 1 || ev[0].Step != pods.StepStop {
 		t.Errorf("done events = %+v, want only the stop", ev)
 	}
@@ -283,6 +289,7 @@ func TestResentDeleteWaitsForItsOwnDestroy(t *testing.T) {
 	f.DestroyReads = 3
 	ex := testExecutor(f, &recorder{})
 	ex.Cfg.Retry.Rounds = 0
+	ex.Sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() } // polls end with their wait's deadline
 
 	res := ex.Run(context.Background(), plan)
 	if len(res.Succeeded) != 1 || f.VMs[10121] != nil {
@@ -367,5 +374,79 @@ func TestEnvTeardownEmptiesTheSlot(t *testing.T) {
 	delete(f.VMs, 150)
 	if envs, _, err = p.Environments(context.Background()); err != nil || !envs[2].Free() {
 		t.Errorf("dev-03 = %+v, %v; want free", envs[2], err)
+	}
+}
+
+// A refused delete of a VM that is still there fails with Proxmox's answer.
+func TestRefusedDeleteFailsWithTheRefusal(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
+	plan := teardownTeam01(t, f)
+	f.FailOn("delete:10121", &proxmox.APIError{Method: "DELETE", Path: "/nodes/cedar/qemu/10121", Status: 400, Message: "VM is protected"})
+	ex := testExecutor(f, &recorder{})
+	ex.Cfg.Retry.Rounds = 0
+
+	res := ex.Run(context.Background(), plan)
+	if err := res.Failed["team01-teak"]; err == nil || err.Error() != "delete: DELETE /nodes/cedar/qemu/10121: 400 VM is protected" {
+		t.Errorf("failed = %v, want the refusal", err)
+	}
+}
+
+// A delete whose task ended OK as the job was stopped is not called done
+// before the VM is seen gone.
+func TestDeleteEndingAsTheJobStopsIsNotDone(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
+	plan := teardownTeam01(t, f)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f.WaitGate = func(sctx context.Context, upid string) error {
+		if strings.Contains(upid, ":qmdestroy:") {
+			cancel()
+			<-sctx.Done() // the stop reaches the step as its task ends OK
+		}
+		return nil
+	}
+
+	res := testExecutor(f, &recorder{}).Run(ctx, plan)
+	if err := res.Interrupted["team01-teak"]; err == nil || len(res.Succeeded) != 0 {
+		t.Errorf("result = %+v, want team01-teak interrupted", res)
+	}
+}
+
+// A delete whose outcome can't be read back fails: with the delete's own
+// error if it failed, else saying the VM may still be there.
+func TestDeleteThatCannotBeConfirmedFails(t *testing.T) {
+	refused := &proxmox.APIError{Method: "DELETE", Path: "/nodes/cedar/qemu/10121", Status: 400, Message: "VM is protected"}
+	for _, tc := range []struct {
+		name   string
+		delete error
+		want   string
+	}{
+		{"delete refused", refused, "delete: DELETE /nodes/cedar/qemu/10121: 400 VM is protected"},
+		{"delete ran", nil, "could not confirm VM 10121 is gone"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCluster()
+			f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar"}, map[string]string{"name": "team01-teak"})
+			plan := teardownTeam01(t, f)
+			if tc.delete != nil {
+				f.FailOn("delete:10121", tc.delete)
+			}
+			f.OnRecord = func(key string) {
+				if key == "delete:10121" { // every read after it fails
+					for range config.Default().Retry.Attempts {
+						f.FailOn("config:10121", &proxmox.APIError{Status: 500, Message: "pve is down"})
+					}
+				}
+			}
+			ex := testExecutor(f, &recorder{})
+			ex.Cfg.Retry.Rounds = 0
+
+			res := ex.Run(context.Background(), plan)
+			if err := res.Failed["team01-teak"]; err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("failed = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }

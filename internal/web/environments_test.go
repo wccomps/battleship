@@ -199,6 +199,26 @@ func TestEnvironmentRoutes(t *testing.T) {
 	}
 }
 
+// A confirm at another environment's Add hosts path is refused: the preview
+// was of adding hosts to kilo.alpha, not oscar.lima.
+func TestEnvAddConfirmAtAnotherEnvironment(t *testing.T) {
+	h := newHarness(t)
+	h.poll()
+	addImages(h)
+	addEnvs(h)
+	sess := h.login(asLead)
+	action, form, _ := h.preview(&sess, "/environments/kilo.alpha/add", url.Values{"env_hosts": {"oak=debian-12"}})
+	rec := h.post(&sess, "/environments/oscar.lima/add/confirm", form)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("kilo.alpha's preview confirmed at oscar.lima = %d, want 400", rec.Code)
+	}
+	contains(t, "confirm at another environment", rec.Body.String(), "Confirm refused")
+	h.noJobs("after a confirm at another environment")
+	if rec := h.post(&sess, action, form); rec.Code != http.StatusSeeOther {
+		t.Errorf("confirm at its own environment = %d, want 303", rec.Code)
+	}
+}
+
 // The old addresses, with the environment in a domain field, lead to its
 // path, keeping the rest of the query, or of a posted body; without a
 // domain, back to Environments.

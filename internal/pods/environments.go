@@ -255,10 +255,10 @@ func (e Environment) DNS() string {
 }
 
 // Environments reads every slot: the VMs in its pool with their notes, the
-// other VMs on its bridges, and its half-deleted VMs. Templates never run,
-// so they hold no slot; team VMs (see Classify) are on team bridges, so
-// they aren't read, but a VM only named like one may be anywhere. It also
-// returns the VM listing it read.
+// other VMs on its bridges, and its half-deleted VMs. Templates outside a
+// slot's pool never run, so their NICs hold no slot; team VMs (see
+// Classify) are on team bridges, so they aren't read, but a VM only named
+// like one may be anywhere. It also returns the VM listing it read.
 func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM, error) {
 	vms, err := p.API.ClusterVMs(ctx)
 	if err != nil {
@@ -301,9 +301,6 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 		}
 		if si, ok := byPool[vm.Pool]; ok {
 			envs[si].Hosts = append(envs[si].Hosts, p.buildEnvHost(vm, cfg, envs[si].Slot, p.nodeCPUModels(ctx, cpuByNode, vm.Node)))
-			continue
-		}
-		if vm.Template {
 			continue
 		}
 		for _, b := range nicBridgesAll(cfg) {

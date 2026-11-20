@@ -1128,3 +1128,32 @@ func TestCancelRefusedWhenPrivilegesCantBeRead(t *testing.T) {
 		t.Errorf("after lead's cancel: %+v", j)
 	}
 }
+
+// A job with no VMs leaves no privilege to hold on them: only whoever
+// started it may cancel it, not a lead who holds every privilege.
+func TestCancelOfAJobWithNoVMs(t *testing.T) {
+	h := newHarness(t)
+	h.poll()
+	id, err := h.st.CreateJob(context.Background(), store.NewJob{
+		Kind: string(pods.KindPower), Inputs: json.RawMessage(`{"kind":"power","teams":"1","action":"start"}`),
+		Plan: json.RawMessage(`{"kind":"power"}`), Fingerprint: "fp", LockKeys: []string{"team:01"},
+		CreatedBy: "test-operator@example.org",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lead := h.login(asLead)
+	if rec := h.post(&lead, "/logs/"+itoa(id)+"/cancel", url.Values{}); rec.Code != http.StatusForbidden {
+		t.Errorf("lead's cancel of another's job with no VMs = %d, want 403", rec.Code)
+	}
+	if j, _ := h.st.Job(context.Background(), id); j.CancelRequested {
+		t.Fatalf("cancelled by someone who didn't start it: %+v", j)
+	}
+	op := h.login(asOperator)
+	if rec := h.post(&op, "/logs/"+itoa(id)+"/cancel", url.Values{}); rec.Code != http.StatusSeeOther {
+		t.Errorf("starter's cancel = %d, want 303", rec.Code)
+	}
+	if j, _ := h.st.Job(context.Background(), id); j.Status != store.StatusCancelled {
+		t.Errorf("job after its starter's cancel = %s, want cancelled", j.Status)
+	}
+}

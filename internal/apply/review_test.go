@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/wccomps/battleship/internal/pods/podstest"
@@ -139,6 +140,80 @@ func TestUnfollowableStopsOnRefusedReads(t *testing.T) {
 	}
 }
 
+// shortUPIDs answers power calls with a UPID cut short, naming the node
+// but no VM.
+type shortUPIDs struct{ *podstest.Fake }
+
+const shortUPID = "UPID:cedar:0:0"
+
+func (s shortUPIDs) Power(ctx context.Context, node string, vmid int, action string) (string, error) {
+	if _, err := s.Fake.Power(ctx, node, vmid, action); err != nil {
+		return "", err
+	}
+	return shortUPID, nil
+}
+
+// An unfollowable task whose UPID names no VM fails as outcome unknown
+// without polling any VM.
+func TestUnfollowableTaskNamingNoVMIsNotPolled(t *testing.T) {
+	f := newCluster()
+	f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
+	plan, err := testPlanner(f).Power(context.Background(), []string{"01"}, []string{"teak"}, "stop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WaitHook = func(_ context.Context, id string) error {
+		if id == shortUPID {
+			return forbidden
+		}
+		return nil
+	}
+	ex := testExecutor(f, &recorder{})
+	ex.API = shortUPIDs{f}
+	ex.Cfg.Retry.Rounds = 0
+	res := ex.Run(context.Background(), plan)
+	err = res.Failed["team01-teak"]
+	if err == nil || !strings.Contains(err.Error(), "its VM couldn't be checked, but whether it worked is unknown") {
+		t.Fatalf("error = %v, want the outcome unknown, VM unchecked", err)
+	}
+	if n := f.Called("config:0"); n != 0 {
+		t.Errorf("read VMID 0 %d times", n)
+	}
+}
+
+// A stop while waiting for an unfollowable task's VM to unlock reports the
+// lock still held, not the task ended. synctest's clock lets the lock poll's
+// real sleeps run until the step sees the stop.
+func TestUnfollowableTaskStillLockedAtStop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newCluster()
+		f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
+		plan, err := testPlanner(f).Power(context.Background(), []string{"01"}, []string{"teak"}, "stop")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		stop := podstest.UPID("cedar", "qmstop", 10121)
+		f.WaitHook = func(_ context.Context, id string) error { // runs with f.Mu held
+			if id != stop {
+				return nil
+			}
+			f.WaitHook = nil
+			f.LockConfig, f.LockName = map[int]int{10121: 1000}, "stop" // the task runs on
+			cancel()
+			return forbidden
+		}
+		ex := testExecutor(f, &recorder{})
+		ex.Sleep = proxmox.SleepContext
+		res := ex.Run(ctx, plan)
+		err = res.Failed["team01-teak"]
+		if err == nil || !strings.Contains(err.Error(), "VM 10121 is still locked (stop), but whether it worked is unknown") {
+			t.Fatalf("error = %v, want VM 10121 still locked", err)
+		}
+	})
+}
+
 // If authorization lapses mid-build, the stopped master is reported in the
 // result, doomed waits are skipped, and a never-started clone isn't called
 // possibly running.
@@ -162,6 +237,11 @@ func TestLapseDuringBuildReportsStoppedMaster(t *testing.T) {
 	}
 	if n := f.Called("wait:" + stop); n != 1 {
 		t.Errorf("waited on the stop task %d times after the lapse, want 1", n)
+	}
+	// The job's last line counts the stopped master, the only cleanup entry.
+	infos := rec.find("", EventInfo)
+	if last := infos[len(infos)-1].Message; !strings.HasSuffix(last, "; cleanup: 0 completed, 0 removed, 1 failed") {
+		t.Errorf("last job event = %q, want the cleanup failure counted", last)
 	}
 	for _, ev := range rec.events {
 		if strings.Contains(ev.Message, "clone task may still be running") {

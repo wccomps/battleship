@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -188,4 +189,48 @@ func TestPropImageRegisterPlansAParsableName(t *testing.T) {
 		deprecated := rapid.SliceOfN(rapid.Bool(), len(versions), len(versions)).Draw(t, "deprecated")
 		checkRegister(t, fam, versions, deprecated)
 	})
+}
+
+// Families lists each family once, at its newest usable version.
+func TestFamiliesListsEachNewestVersion(t *testing.T) {
+	images := BaseImages([]proxmox.VM{
+		{VMID: 8001, Name: "debian-12-v1", Node: "alder", Template: true, Tags: "base;linux"},
+		{VMID: 8002, Name: "debian-12-v2", Node: "alder", Template: true, Tags: "base;linux"},
+		{VMID: 8003, Name: "gw-v1", Node: "alder", Template: true, Tags: "base;router"},
+	})
+	fs := Families(images, "")
+	if len(fs) != 2 || fs[0].Name != "debian-12-v2" || fs[1].Name != "gw-v1" {
+		t.Errorf("Families = %+v, want debian-12-v2 and gw-v1", fs)
+	}
+}
+
+// ReadNotes fills in each image's details, notes and source; an unreadable
+// details block is flagged, and an image whose config can't be read keeps none.
+func TestReadNotes(t *testing.T) {
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 8001, Name: "debian-12-v1", Node: "alder", Template: true, Tags: "base;linux"},
+		map[string]string{"description": "**Details**\n- OS: Debian 12\n\nHello.\n\nbattleship: source=150"})
+	f.Add(proxmox.VM{VMID: 8002, Name: "win-v1", Node: "alder", Template: true, Tags: "base;windows"},
+		map[string]string{"description": "**Details**\n- Colour: blue"})
+	f.Add(proxmox.VM{VMID: 8003, Name: "gw-v1", Node: "alder", Template: true, Tags: "base;router"},
+		map[string]string{"description": "**Details**\n- OS: pfSense\n\nbattleship: source=160"})
+	f.FailOn("config:8003", errors.New("no access"))
+	vms, _ := f.ClusterVMs(context.Background())
+	got := NewPlanner(f, envConfig()).ReadNotes(context.Background(), BaseImages(vms))
+	if len(got) != 3 {
+		t.Fatalf("ReadNotes = %+v", got)
+	}
+	byName := map[string]BaseImage{}
+	for _, im := range got {
+		byName[im.Name] = im
+	}
+	if im := byName["debian-12-v1"]; im.Details.OS != "Debian 12" || im.Notes != "Hello." || im.Source != 150 || im.Unreadable {
+		t.Errorf("debian-12-v1 = %+v", im)
+	}
+	if im := byName["win-v1"]; !im.Unreadable || !im.Details.Empty() {
+		t.Errorf("win-v1 = %+v, want unreadable", im)
+	}
+	if im := byName["gw-v1"]; !im.Details.Empty() || im.Notes != "" || im.Source != 0 || im.Unreadable {
+		t.Errorf("gw-v1 = %+v, want nothing read", im)
+	}
 }

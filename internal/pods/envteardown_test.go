@@ -117,8 +117,8 @@ func TestEnvTeardownRefuses(t *testing.T) {
 
 // What a failed teardown leaves is planned again in its slot: a VM left
 // half-deleted (in its pool, or out of it) is listed blocked with how to
-// finish it, and disks a gone VM left in the slot's VMIDs are freed. Disks
-// at a VMID outside the slot are not its.
+// finish it, and disks a gone VM left in the slot's VMIDs, its last one
+// included, are freed. Disks at a VMID outside the slot are not its.
 func TestEnvTeardownPlansWhatAFailedOneLeft(t *testing.T) {
 	f := teardownFake()
 	for _, id := range []int{2100, 2101, 2102} {
@@ -128,15 +128,16 @@ func TestEnvTeardownPlansWhatAFailedOneLeft(t *testing.T) {
 	f.Add(proxmox.VM{VMID: 2103, Name: "VM 2103", Node: "birch", Pool: "dev-01"}, map[string]string{"lock": "destroyed"})
 	f.Add(proxmox.VM{VMID: 2104, Name: "VM 2104", Node: "alder"}, map[string]string{"lock": "destroyed"})
 	f.Vols["competitions:vm-2105-disk-0"] = 2105
+	f.Vols["competitions:vm-2199-disk-0"] = 2199
 	f.Vols["competitions:vm-2405-disk-0"] = 2405
 	plan := envTeardown(t, f, EnvRequest{Domain: "kilo.alpha", Slot: 1})
-	if got := itemNames(plan); !slices.Equal(got, []string{"disks-2105", "half-deleted-2103", "half-deleted-2104"}) {
+	if got := itemNames(plan); !slices.Equal(got, []string{"disks-2105", "disks-2199", "half-deleted-2103", "half-deleted-2104"}) {
 		t.Fatalf("items = %q", got)
 	}
 	if it := plan.Items[0]; it.Blocked != "" || !slices.Equal(it.Steps, []Step{StepFreeDisks}) || it.VMID != 2105 {
 		t.Errorf("disks = %+v", it)
 	}
-	for _, it := range plan.Items[1:] {
+	for _, it := range plan.Items[2:] {
 		if !strings.Contains(it.Blocked, "half-deleted") || !strings.Contains(it.Blocked, "qm destroy") {
 			t.Errorf("%s = %+v", it.Name, it)
 		}

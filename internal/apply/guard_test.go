@@ -130,6 +130,41 @@ func TestHeldBoundsEveryChange(t *testing.T) {
 	}
 }
 
+// A change Held refuses fails its item with Held's error, unless the run
+// was stopped by then: then the item reads interrupted, the change not sent.
+func TestHeldRefusalInAStep(t *testing.T) {
+	errGone := errors.New("claim uncertain")
+	for _, stopFirst := range []bool{false, true} {
+		f := newCluster()
+		f.Add(proxmox.VM{VMID: 10121, Name: "team01-teak", Node: "cedar", Status: "running"}, map[string]string{"name": "team01-teak"})
+		plan, err := testPlanner(f).Power(context.Background(), []string{"01"}, []string{"teak"}, "stop")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		ex := testExecutor(f, &recorder{})
+		ex.Cfg.Retry.Rounds = 0
+		ex.Held = func() (time.Time, error) {
+			if stopFirst {
+				cancel()
+			}
+			return time.Time{}, errGone
+		}
+		res := ex.Run(ctx, plan)
+		cancel()
+		if stopFirst {
+			if err := res.Interrupted["team01-teak"]; err == nil || len(res.Failed) != 0 {
+				t.Errorf("stopped run: result = %+v, want team01-teak interrupted", res)
+			}
+		} else if err := res.Failed["team01-teak"]; !errors.Is(err, errGone) || len(res.Interrupted) != 0 {
+			t.Errorf("running run: result = %+v, want team01-teak failed with Held's error", res)
+		}
+		if n := f.Called("power:"); n != 0 {
+			t.Errorf("stopFirst %v: %d power calls reached Proxmox", stopFirst, n)
+		}
+	}
+}
+
 // The executor calls Proxmox through e.api, the guarded API, never e.API.
 func TestExecutorUsesTheGuardedAPI(t *testing.T) {
 	files, err := filepath.Glob("*.go")

@@ -313,3 +313,149 @@ func TestCapacityRebuildCrossNodeLocalStorage(t *testing.T) {
 		t.Errorf("usage = %+v, want %+v", c.Usage, want)
 	}
 }
+
+// Needing exactly what is free isn't over, and leaving exactly 10% isn't
+// near full; a usage without a total is never near full.
+func TestCapacityUsageBoundaries(t *testing.T) {
+	for _, c := range []struct {
+		u          Usage
+		over, near bool
+	}{
+		{Usage{Used: 50, Total: 100, Needed: 50}, false, true},
+		{Usage{Used: 50, Total: 100, Needed: 51}, true, true},
+		{Usage{Used: 80, Total: 100, Needed: 10}, false, false},
+		{Usage{Used: 80, Total: 100, Needed: 11}, false, true},
+		{Usage{Total: 0, Needed: 5}, true, false},
+	} {
+		if got := c.u.Over(); got != c.over {
+			t.Errorf("%+v: over = %v, want %v", c.u, got, c.over)
+		}
+		if got := c.u.Near(); got != c.near {
+			t.Errorf("%+v: near = %v, want %v", c.u, got, c.near)
+		}
+	}
+}
+
+// A blocked or reused template before a built one doesn't hide the build's
+// copy of its master, nor what its clones need.
+func TestCapacityCountsEveryTemplate(t *testing.T) {
+	res := capCluster()
+	res.VMs = append(res.VMs, proxmox.VM{VMID: 122, Name: "oak.x", Node: "birch", Status: "stopped", MaxMem: 2 * gib, MaxDisk: 16 * gib})
+	p := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{
+		{Name: "elm.x.tpl", VMID: 9023, MasterVMID: 123, MasterNode: "cedar", Blocked: "no master"},
+		{Name: "teak.x.tpl", VMID: 9021, Exists: true, MasterVMID: 121, MasterNode: "cedar"},
+		{Name: "oak.x.tpl", VMID: 9022, MasterVMID: 122, MasterNode: "birch"},
+	}}
+	oak := deployItemOn("01", "birch", 10122, true)
+	oak.Host, oak.Name, oak.Template = "oak", "team01-oak", "oak.x.tpl"
+	p.Items = []Item{oak}
+	c := EstimateCapacity(p, res, deployCfg(false))
+	want := []Usage{
+		{Kind: UsageMemory, Node: "birch", Used: 32 * gib, Total: 256 * gib, Needed: 2 * gib},
+		{Kind: UsageStorage, Node: "birch", Storage: "competitions", Used: 100 * gib, Total: 1000 * gib, Needed: 32 * gib},
+	}
+	if !reflect.DeepEqual(c.Usage, want) {
+		t.Errorf("usage =\n %+v\nwant\n %+v", c.Usage, want)
+	}
+}
+
+// A deploy that only starts an existing VM needs its memory if it is
+// stopped, and nothing if it already runs.
+func TestCapacityDeployStartCountsStoppedVMsOnly(t *testing.T) {
+	start := func(team string, vmid int) Item {
+		return Item{Team: team, Host: "teak", Name: "team" + team + "-teak", VMID: vmid, Node: "birch", Steps: []Step{StepStart}}
+	}
+	stopped := EstimateCapacity(&Plan{Kind: KindDeploy, Items: []Item{start("03", 10321)}}, capCluster(), deployCfg(true))
+	if want := []Usage{{Kind: UsageMemory, Node: "birch", Used: 32 * gib, Total: 256 * gib, Needed: 4 * gib}}; !reflect.DeepEqual(stopped.Usage, want) {
+		t.Errorf("starting a stopped VM: usage = %+v, want %+v", stopped.Usage, want)
+	}
+	running := EstimateCapacity(&Plan{Kind: KindDeploy, Items: []Item{start("04", 10421)}}, capCluster(), deployCfg(true))
+	if len(running.Usage) != 0 {
+		t.Errorf("starting a running VM: usage = %+v, want none", running.Usage)
+	}
+}
+
+// Replacing a VM with a clone of the same size needs nothing more on its
+// node, which gets no row; other nodes are still checked.
+func TestCapacityReplacementNetsOut(t *testing.T) {
+	res := capCluster()
+	res.VMs[1].MaxMem, res.VMs[1].MaxDisk = 4*gib, 32*gib // the template is team04-teak's size
+	p := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{{Name: "teak.x.tpl", VMID: 9021, Exists: true, MasterVMID: 121, MasterNode: "cedar"}}}
+	replace := deployItemOn("04", "birch", 10421, true)
+	replace.Steps = append([]Step{StepStop, StepDelete}, replace.Steps...)
+	p.Items = []Item{replace, deployItemOn("05", "cedar", 10521, true)}
+	c := EstimateCapacity(p, res, deployCfg(false))
+	want := []Usage{
+		{Kind: UsageMemory, Node: "cedar", Used: 216 * gib, Total: 256 * gib, Needed: 4 * gib},
+		{Kind: UsageStorage, Node: "cedar", Storage: "competitions", Used: 900 * gib, Total: 1000 * gib, Needed: 32 * gib},
+	}
+	if !reflect.DeepEqual(c.Usage, want) || len(c.Notes) != 0 {
+		t.Errorf("usage =\n %+v\nwant\n %+v\nnotes %q", c.Usage, want, c.Notes)
+	}
+}
+
+// Nodes that can't be checked, sorting before one that can, don't stop it
+// being checked.
+func TestCapacityChecksNodesAfterUncheckedOnes(t *testing.T) {
+	res := capCluster()
+	res.Nodes = []proxmox.NodeResource{
+		{Node: "alder", Status: "offline"},
+		{Node: "birch", Status: "online"},
+		{Node: "cedar", Status: "online", Mem: 216 * gib, MaxMem: 256 * gib},
+	}
+	p := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{{Name: "teak.x.tpl", VMID: 9021, Exists: true, MasterVMID: 121, MasterNode: "cedar"}},
+		Items: []Item{deployItemOn("01", "alder", 10121, true), deployItemOn("02", "birch", 10221, true), deployItemOn("03", "cedar", 10321, true)}}
+	c := EstimateCapacity(p, res, deployCfg(true))
+	if want := []Usage{{Kind: UsageMemory, Node: "cedar", Used: 216 * gib, Total: 256 * gib, Needed: 6 * gib}}; !reflect.DeepEqual(c.Usage, want) {
+		t.Errorf("usage = %+v, want %+v", c.Usage, want)
+	}
+	want := []string{
+		"Memory on birch is unknown: you don't have Sys.Audit on /nodes there, so Proxmox shows no memory figures. Nothing is blocked for it.",
+		"alder reports no memory (it may be offline), so its 6 GiB can't be checked.",
+	}
+	if !reflect.DeepEqual(c.Notes, want) {
+		t.Errorf("notes =\n %q\nwant\n %q", c.Notes, want)
+	}
+}
+
+// Linked clones copy nothing, so shared storage gets no row.
+func TestCapacityLinkedClonesNeedNoSharedStorage(t *testing.T) {
+	res := capCluster()
+	res.Storage = []proxmox.StorageResource{{Storage: "competitions", Node: "cedar", Shared: true, Disk: 100 * gib, MaxDisk: 1000 * gib}}
+	p := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{{Name: "teak.x.tpl", VMID: 9021, Exists: true, MasterVMID: 121, MasterNode: "cedar"}},
+		Items: []Item{deployItemOn("01", "birch", 10121, true)}}
+	for _, u := range EstimateCapacity(p, res, deployCfg(true)).Usage {
+		if u.Kind == UsageStorage {
+			t.Errorf("storage row %+v for linked clones", u)
+		}
+	}
+}
+
+// Node-local storage is the configured storage on that node: not another
+// storage there, nor the storage elsewhere, nor one without figures.
+func TestCapacityLocalStorageIsTheNodesOwn(t *testing.T) {
+	p := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{{Name: "teak.x.tpl", VMID: 9021, Exists: true, MasterVMID: 121, MasterNode: "cedar"}},
+		Items: []Item{deployItemOn("01", "cedar", 10121, true)}}
+	res := capCluster()
+	res.Storage = []proxmox.StorageResource{
+		{Storage: "local", Node: "cedar", Disk: 0, MaxDisk: 100 * gib},
+		{Storage: "competitions", Node: "birch", Disk: 100 * gib, MaxDisk: 1000 * gib},
+		{Storage: "competitions", Node: "cedar", Disk: 900 * gib, MaxDisk: 1000 * gib},
+	}
+	c := EstimateCapacity(p, res, deployCfg(false))
+	want := Usage{Kind: UsageStorage, Node: "cedar", Storage: "competitions", Used: 900 * gib, Total: 1000 * gib, Needed: 20 * gib}
+	if n := len(c.Usage); n == 0 || c.Usage[n-1] != want {
+		t.Errorf("usage = %+v, want it to end with %+v", c.Usage, want)
+	}
+
+	res.Storage = []proxmox.StorageResource{{Storage: "competitions", Node: "cedar"}} // no Datastore.Audit
+	c = EstimateCapacity(p, res, deployCfg(false))
+	for _, u := range c.Usage {
+		if u.Kind == UsageStorage {
+			t.Errorf("storage row %+v without figures", u)
+		}
+	}
+	if want := []string{"cedar reports no storage competitions, so the 20 GiB copied there can't be checked."}; !reflect.DeepEqual(c.Notes, want) {
+		t.Errorf("notes = %q, want %q", c.Notes, want)
+	}
+}

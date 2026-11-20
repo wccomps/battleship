@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wccomps/battleship/internal/pods"
 	"github.com/wccomps/battleship/internal/pods/podstest"
@@ -148,5 +149,69 @@ func TestGuestWithABadValueFailsTheItem(t *testing.T) {
 func TestGuestLockWaitIsUnderTheExecLimit(t *testing.T) {
 	if pods.GuestLockWait >= execLimit {
 		t.Errorf("guest lock wait %v isn't under the exec limit %v", pods.GuestLockWait, execLimit)
+	}
+}
+
+// A guest whose agent doesn't come back after the rename's restart fails
+// the step.
+func TestGuestNotBackAfterRenameRestartFails(t *testing.T) {
+	f := guestFake(t)
+	f.ExecHook = applied(f, pods.RebootMarker+"\n")
+	f.PowerHook = func(vmid int, action string) {
+		if action == "start" {
+			f.Guests[vmid].Up = false
+		}
+	}
+	it := guestItem(pods.ImageWindows)
+	it.Steps = []pods.Step{pods.StepGuest}
+	res := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{it}})
+	if err := res.Failed["oak.kilo.alpha"]; err == nil || !strings.Contains(err.Error(), "guest agent didn't answer") {
+		t.Errorf("result = %+v, want the step failed on the agent", res)
+	}
+}
+
+// The wait for the agent lasts environments.agent_timeout, no longer.
+func TestWaitAgentWaitsTheAgentTimeout(t *testing.T) {
+	f := guestFake(t)
+	f.Guests[2101].Up = false
+	it := guestItem(pods.ImageLinux)
+	it.Steps = []pods.Step{pods.StepWaitAgent}
+	e := catalogExec(f)
+	var waited time.Duration
+	e.Sleep = func(ctx context.Context, d time.Duration) error { waited += d; return ctx.Err() }
+	res := e.Run(context.Background(), &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{it}})
+	if res.Failed["oak.kilo.alpha"] == nil {
+		t.Fatalf("result = %+v", res)
+	}
+	if want := e.Cfg.Environments.AgentTimeout; waited != want {
+		t.Errorf("waited %s for the agent, want %s", waited, want)
+	}
+}
+
+// A failed verification says what the guest last reported.
+func TestVerifyFailureSaysWhatTheGuestReported(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(f *podstest.Fake)
+		want  string
+	}{
+		{"no address on net0", func(f *podstest.Fake) { f.Guests[2101].NICs[0].IPs = nil }, `the guest reports host name "WIN-123" with no address;`},
+		{"another address", func(*podstest.Fake) {}, `the guest reports host name "WIN-123" with "169.254.1.1/16";`},
+		{"interfaces unreadable", func(f *podstest.Fake) {
+			for range verifyTries {
+				f.FailOn("agent-nics:2101", &proxmox.APIError{Method: "GET", Path: "/agent/network-get-interfaces", Status: 500, Message: "agent busy"})
+			}
+		}, "the guest reports an error: GET /agent/network-get-interfaces: 500 agent busy;"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := guestFake(t)
+			tc.setup(f)
+			it := guestItem(pods.ImageLinux)
+			it.Steps = []pods.Step{pods.StepVerify}
+			err := catalogExec(f).Run(context.Background(), &pods.Plan{Kind: pods.KindEnvCreate, Items: []pods.Item{it}}).Failed["oak.kilo.alpha"]
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("failed = %v, want it to contain %q", err, tc.want)
+			}
+		})
 	}
 }

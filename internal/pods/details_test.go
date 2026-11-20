@@ -149,6 +149,39 @@ func TestCheckDetails(t *testing.T) {
 	}
 }
 
+// A value of exactly MaxDetail characters is allowed.
+func TestCheckDetailsAtMaxLength(t *testing.T) {
+	if err := CheckDetails(ImageDetails{OS: strings.Repeat("é", MaxDetail)}); err != nil {
+		t.Error(err)
+	}
+}
+
+// The login is checked as the line it is written as: a user and password
+// each short enough can still make it too long. A login already refused
+// for its user isn't refused again.
+func TestCheckDetailsLogin(t *testing.T) {
+	long := ImageDetails{User: strings.Repeat("u", 150), Password: strings.Repeat("p", 100)}
+	if err := CheckDetails(long); err == nil || err.Error() != "the login is too long: at most 200 characters" {
+		t.Errorf("a 253-character login: %v", err)
+	}
+	tab := ImageDetails{User: "a\tb", Password: "c"}
+	if err := CheckDetails(tab); err == nil || err.Error() != "the login's user must be printable text on one line" {
+		t.Errorf("a user with a tab: %v", err)
+	}
+}
+
+// Notes that already say what they would be written as are no change.
+func TestDetailsChangesNothingWhenWritten(t *testing.T) {
+	n := ImageNotes{ImageDetails: winDetails}
+	desc, err := n.apply("Patched monthly.\nbattleship: source=150")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ch, err := n.Changes(map[string]string{"description": desc}); ch != nil || err != nil {
+		t.Errorf("changes = %q, %v; want none", ch, err)
+	}
+}
+
 // Register keeps a source's block, and from notes written as prose takes
 // the login, build and OS, which are plainly said; an unreadable block
 // gives none.
