@@ -2,6 +2,7 @@ package pods
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -65,7 +66,7 @@ func TestTemplateSpecReadsNICs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := plan.Templates[0].AsRead; len(got) != 3 || nicBridge(got["net0"]) != "vmbr0" || nicBridge(got["net1"]) != "vmbr1" || got["tags"] == "" {
+	if got := plan.Templates[0].AsRead; len(got) != 4 || nicBridge(got["net0"]) != "vmbr0" || nicBridge(got["net1"]) != "vmbr1" || got["tags"] == "" || !HasCloudInit(got) {
 		t.Fatalf("template as read = %v", got)
 	}
 	if got := plan.Items[0].AsRead; got != nil { // a clone's steps start from its template's
@@ -174,5 +175,25 @@ func TestDeployKeptPodVMsOwnCloudInit(t *testing.T) {
 		if b := plan.Items[0].Blocked; b != tc.want {
 			t.Errorf("%s: blocked %q, want %q", tc.name, b, tc.want)
 		}
+	}
+}
+
+// A deploy cancelled while it reads the kept pod VMs fails with the
+// cancellation instead of blocking every kept item on it.
+func TestDeployCancelledReadingKeptVMs(t *testing.T) {
+	cfg := config.Default()
+	n := NewNaming(cfg.Naming)
+	f := keptPodCluster(n, map[string]string{"net0": "virtio=BC:24:11:00:01:21,bridge=vmbr0"}, map[string]string{}, "01")
+	ctx, cancel := context.WithCancel(context.Background())
+	f.Gate = func(_ context.Context, key string) (func(), error) {
+		if key == fmt.Sprintf("config:%d", n.CloneVMID("01", 9021)) {
+			cancel()
+			return nil, context.Canceled
+		}
+		return nil, nil
+	}
+	plan, err := NewPlanner(f, cfg).Deploy(ctx, DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01"}})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, plan = %+v; want context.Canceled", err, plan)
 	}
 }

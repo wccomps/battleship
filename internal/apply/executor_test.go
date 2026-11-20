@@ -2472,3 +2472,18 @@ func TestRebuildOfTeamVMGoneSincePlanning(t *testing.T) {
 		})
 	}
 }
+
+// A network step with neither NICs nor a template fails its item and writes
+// nothing, rather than wiring the VM as if it had no NICs.
+func TestNetworkStepWithoutNICsOrTemplateFails(t *testing.T) {
+	f := newCluster()
+	plan := &pods.Plan{Kind: pods.KindDeploy, Items: []pods.Item{{
+		Name: "teak.tango.delta", Team: "01", VMID: 121, Node: "cedar", Steps: []pods.Step{pods.StepNetwork}}}}
+	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
+	if err, failed := res.Failed["teak.tango.delta"]; !failed || !strings.Contains(err.Error(), "neither NICs") {
+		t.Errorf("result = %+v", res)
+	}
+	if n := f.Called("setconfig:121"); n != 0 {
+		t.Errorf("config written %d times, want 0", n)
+	}
+}

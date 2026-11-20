@@ -28,7 +28,7 @@ var fingerprinted = map[string]map[string]bool{
 		// Derived from Name, or where things run, which may change with load.
 		"Host": false, "MasterName": false, "Node": false, "OldNode": false, "MasterNode": false,
 		// Only decide the privileges needed, which Blocked covers.
-		"CPU": false, "CloudInit": false, "AsRead": false,
+		"CPU": false, "AsRead": false,
 	},
 	"Item": {
 		"Name": true, "Rename": true, "VMID": true, "Steps": true, "Blocked": true, "Snapshot": true, "Action": true, "Template": true,
@@ -43,7 +43,7 @@ var fingerprinted = map[string]map[string]bool{
 		// Says why Blocked is set, which Blocked already covers.
 		"Unpermitted": false,
 		// Only decide the privileges needed, which Blocked covers.
-		"AsRead": false, "CloudInit": false,
+		"AsRead": false,
 		// The notes an Edit notes writes over (TestFingerprintCoversNotesReplaced).
 		"DetailsWas": true,
 		"Record":     true,  // the domain a record step writes into its pool's comment

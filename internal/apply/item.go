@@ -150,11 +150,15 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		return e.cloneVM(ctx, it, req)
 
 	case pods.StepNetwork:
-		interfaces := 0
+		var spec *pods.TemplateSpec
 		if tpl != nil {
-			interfaces = tpl.spec.Interfaces
+			spec = tpl.spec
 		}
-		return e.applyConfig(ctx, it, it.NICs == nil, always(pods.StepChanges(step, *it, e.Cfg.Network, interfaces)))
+		change := pods.StepChanges(step, *it, e.Cfg.Network, spec)
+		if change == nil {
+			return false, errors.New("it has neither NICs to set nor a template to take its NIC count from, so its network can't be wired")
+		}
+		return e.applyConfig(ctx, it, it.NICs == nil, always(change))
 	case pods.StepDiskLimits:
 		return e.applyConfig(ctx, it, false, always(func(cur map[string]string) map[string]string {
 			return pods.DiskLimitChanges(cur, e.Cfg.Deploy.DiskMBpsRead, e.Cfg.Deploy.DiskMBpsWrite)
@@ -168,7 +172,7 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 	case pods.StepNotes:
 		return e.applyConfig(ctx, it, false, always(pods.NotesChanges))
 	case pods.StepSetTag:
-		return e.applyConfig(ctx, it, false, always(pods.StepChanges(step, *it, e.Cfg.Network, 0)))
+		return e.applyConfig(ctx, it, false, always(pods.StepChanges(step, *it, e.Cfg.Network, nil)))
 
 	case pods.StepSnapshot:
 		if kind == pods.KindSnapshot {
@@ -191,7 +195,7 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 		return true, e.createSnapshot(ctx, it.Node, it.VMID, proxmox.SnapshotRequest{Name: e.Cfg.Deploy.SnapshotName, Description: "baseline from battleship deploy"})
 
 	case pods.StepLabel:
-		label := pods.StepChanges(step, *it, e.Cfg.Network, 0)
+		label := pods.StepChanges(step, *it, e.Cfg.Network, nil)
 		changed, err := e.applyConfig(ctx, it, false, always(func(cur map[string]string) map[string]string {
 			ch := label(cur)
 			if it.Rename != "" && cur["name"] != it.Rename {
@@ -225,7 +229,9 @@ func (e *Executor) runStep(ctx context.Context, kind pods.Kind, it *pods.Item, s
 			prev.Node = vm.Node
 		}
 		e.mu.Unlock()
-		changed, err := e.applyConfig(ctx, &prev, false, always(pods.StepChanges(step, *it, e.Cfg.Network, 0)))
+		changed, err := e.applyConfig(ctx, &prev, false, always(func(cur map[string]string) map[string]string {
+			return pods.LabelChanges(cur, pods.AddTag(cur["tags"], pods.DeprecatedTag), nil)
+		}))
 		if err != nil {
 			err = fmt.Errorf("%s is registered as a template but the previous version %s (%d) was not marked deprecated: %w", it.Name, prev.Name, prev.VMID, err)
 		}

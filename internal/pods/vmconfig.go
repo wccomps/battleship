@@ -61,8 +61,9 @@ func forEachNIC(cfg map[string]string, fn func(key, val string)) {
 	}
 }
 
-// asRead is cfg's tags and netN values: what stepEdits replays a VM's label,
-// tag-set and network steps on to find the tags and NICs they change
+// asRead is cfg's tags, netN values and cloud-init drive: what stepEdits
+// replays a VM's label, tag-set and network steps on to find the tags and
+// NICs they change and whether the network step regenerates cloud-init
 // (Item.AsRead).
 func asRead(cfg map[string]string) map[string]string {
 	out := map[string]string{}
@@ -70,6 +71,11 @@ func asRead(cfg map[string]string) map[string]string {
 		out["tags"] = t
 	}
 	forEachNIC(cfg, func(k, v string) { out[k] = v })
+	for k, v := range cfg {
+		if isDriveKey(k) && HasCloudInit(map[string]string{k: v}) {
+			out[k] = v
+		}
+	}
 	return out
 }
 
@@ -345,26 +351,27 @@ func LabelChanges(cur map[string]string, tags string, notes *Notes) map[string]s
 	return out
 }
 
-// StepChanges is the config change step makes on its item's VM, for the steps
-// that change tags or NICs (network, label, tag-set, and retire, on the
-// version it supersedes), or nil for any other step: what the executor
-// writes and stepEdits replays. interfaces is its template's NIC count, for
-// a network step without NICs.
-func StepChanges(step Step, it Item, net config.Network, interfaces int) func(cur map[string]string) map[string]string {
+// StepChanges is the config change step makes on its item's VM, for the
+// network, label and tag-set steps, or nil for any other step: what the
+// executor writes (runStep adds a label step's rename) and stepEdits replays.
+// tpl is the item's template, whose NIC count a network step without NICs
+// wires; with neither it returns nil, which the executor refuses.
+func StepChanges(step Step, it Item, net config.Network, tpl *TemplateSpec) func(cur map[string]string) map[string]string {
 	switch step {
 	case StepNetwork:
 		if it.NICs != nil {
 			return func(cur map[string]string) map[string]string { return NICChanges(cur, it.NICs) }
 		}
-		return func(cur map[string]string) map[string]string { return NetworkChanges(net, cur, it.Team, interfaces) }
+		if tpl == nil {
+			return nil
+		}
+		return func(cur map[string]string) map[string]string {
+			return NetworkChanges(net, cur, it.Team, tpl.Interfaces)
+		}
 	case StepLabel:
 		return func(cur map[string]string) map[string]string { return LabelChanges(cur, it.Tags, it.Notes) }
 	case StepSetTag:
 		return func(cur map[string]string) map[string]string { return SetTagChanges(cur, it.Set) }
-	case StepRetire:
-		return func(cur map[string]string) map[string]string {
-			return LabelChanges(cur, AddTag(cur["tags"], DeprecatedTag), nil)
-		}
 	}
 	return nil
 }

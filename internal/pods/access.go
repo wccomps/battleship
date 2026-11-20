@@ -322,11 +322,7 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAc
 			// Proxmox checks each netN value the step writes and the value
 			// it replaces.
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Network"))
-			cloudInit := it.CloudInit // a kept VM's own drive
-			if slices.Contains(it.Steps, StepClone) {
-				cloudInit = tpl != nil && tpl.CloudInit
-			}
-			if it.NICs == nil && cloudInit {
+			if edits[i].cloudInit {
 				ns = append(ns, on(it.VMID, pool, "VM.Config.Cloudinit")) // regenerating the drive
 			}
 			e := edits[i]
@@ -380,10 +376,12 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAc
 }
 
 // stepEdit is what one step changes on a VM: the netN values it writes and
-// the values those replace, and the tags it adds or removes.
+// the values those replace, the tags it adds or removes, and for a network
+// step whether it regenerates cloud-init.
 type stepEdit struct {
 	nics, replaced map[string]string
 	tags           []string
+	cloudInit      bool
 }
 
 // cloneSource is the VM an item's clone step copies: its VMID, its tags and
@@ -403,12 +401,9 @@ func cloneSource(it Item, tpl *TemplateSpec) (vmid int, asRead map[string]string
 // own change functions (StepChanges) on the clone source's config as read
 // under StepClone, else on it.AsRead.
 func stepEdits(it Item, tpl *TemplateSpec, cfg config.Config) []stepEdit {
-	from, interfaces := it.AsRead, 0
+	from := it.AsRead
 	if slices.Contains(it.Steps, StepClone) {
 		_, from, _ = cloneSource(it, tpl)
-	}
-	if tpl != nil {
-		interfaces = tpl.Interfaces
 	}
 	cur := maps.Clone(from)
 	if cur == nil {
@@ -416,20 +411,18 @@ func stepEdits(it Item, tpl *TemplateSpec, cfg config.Config) []stepEdit {
 	}
 	out := make([]stepEdit, len(it.Steps))
 	for i, st := range it.Steps {
-		switch {
-		case st == StepRetire:
+		if st == StepRetire {
 			// Newest never picks a deprecated version, so retiring it adds
 			// the tag.
 			out[i].tags = []string{DeprecatedTag}
 			continue
-		case st == StepNetwork && it.NICs == nil && tpl == nil:
-			continue
 		}
-		change := StepChanges(st, it, cfg.Network, interfaces)
+		change := StepChanges(st, it, cfg.Network, tpl)
 		if change == nil {
 			continue
 		}
 		e, was := &out[i], cur["tags"]
+		e.cloudInit = st == StepNetwork && it.NICs == nil && HasCloudInit(cur) // as applyConfig decides
 		for k, v := range change(cur) {
 			switch {
 			case isNetKey(k):

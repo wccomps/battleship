@@ -83,7 +83,7 @@ func drawPlan(t *rapid.T) *pods.Plan {
 			Exists: rapid.Bool().Draw(t, "exists"), Rebuild: rapid.Bool().Draw(t, "rebuild"), OldNode: drawFPText(t, "old node"),
 			MasterName: drawFPText(t, "master"), MasterVMID: rapid.IntRange(0, 99999).Draw(t, "master vmid"), MasterNode: drawFPText(t, "master node"),
 			Interfaces: rapid.IntRange(0, 8).Draw(t, "ifaces"), GPU: rapid.Bool().Draw(t, "gpu"), Blocked: drawFPText(t, "blocked"),
-			WillStopMaster: rapid.Bool().Draw(t, "stop"), CPU: drawFPText(t, "cpu"), CloudInit: rapid.Bool().Draw(t, "ci"), AsRead: drawConfig(t, "tpl as read"),
+			WillStopMaster: rapid.Bool().Draw(t, "stop"), CPU: drawFPText(t, "cpu"), AsRead: drawConfig(t, "tpl as read"),
 		})
 	}
 	if rapid.Bool().Draw(t, "items?") {

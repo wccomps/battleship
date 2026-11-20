@@ -175,7 +175,7 @@ type Source struct {
 	VMID int    `json:"vmid"`
 	Node string `json:"node"`
 	Name string `json:"name"`
-	// AsRead is its tags and netN values as read (asRead), which a clone
+	// AsRead is its config as read (asRead), which a clone
 	// copies. Plans don't store it: rights are checked on a fresh plan.
 	AsRead map[string]string `json:"-"`
 	// Base, Notes and Unreadable are the source's notes, for its review: the
@@ -209,13 +209,12 @@ type TemplateSpec struct {
 	// WillStopMaster: building the template stops the master, which is
 	// running, until the clone finishes.
 	WillStopMaster bool `json:"will_stop_master"`
-	// CPU (a custom-<name> model needs Mapping.Use to clone) and CloudInit
-	// (clones regenerate the drive) only decide the privileges a deploy needs.
-	CPU       string `json:"cpu,omitempty"`
-	CloudInit bool   `json:"cloud_init,omitempty"`
-	// AsRead is the tags and netN values (asRead) a clone of the template
-	// starts with: the template's when reused, the master's, which the build
-	// copies, when built. Plans don't store it.
+	// CPU (a custom-<name> model needs Mapping.Use to clone) only decides the
+	// privileges a deploy needs.
+	CPU string `json:"-"`
+	// AsRead is the config as read (asRead) a clone of the template starts
+	// with: the template's when reused, the master's, which the build copies,
+	// when built.
 	AsRead map[string]string `json:"-"`
 	// Digest is ConfigDigest of a reused template: what the session interface
 	// lists, and checks a submission against (BlockChanged).
@@ -269,13 +268,10 @@ type Item struct {
 	// DetailsWas is an Edit notes's or Edit host's notes as read, for its
 	// review and fingerprint.
 	DetailsWas *NotesRead `json:"details_was,omitempty"`
-	// AsRead is the tags and netN values (asRead) of a VM the item keeps,
-	// which its steps start from; under StepClone they start from the clone
-	// source's (cloneSource). CloudInit is whether a pod VM a deploy keeps
-	// has a cloud-init drive, which its network step regenerates. Both only
-	// decide the rights the steps need, and plans don't store them.
-	AsRead    map[string]string `json:"-"`
-	CloudInit bool              `json:"-"`
+	// AsRead is the config as read (asRead) of a VM the item keeps, which its
+	// steps start from; under StepClone they start from the clone source's
+	// (cloneSource). It only decides the rights the steps need.
+	AsRead map[string]string `json:"-"`
 	// Record is the domain a record or clear-record step writes into, or
 	// takes out of, Pool's comment.
 	Record string `json:"record,omitempty"`
@@ -606,6 +602,9 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		}
 	}
 	cfgs, errs := p.readConfigs(ctx, keptVMs)
+	if err := ctx.Err(); err != nil {
+		return nil, err // a cancelled read is not the VM's fault
+	}
 	for j, i := range keptAt {
 		it := &plan.Items[i]
 		switch {
@@ -614,7 +613,7 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		case cfgs[j] == nil:
 			it.Blocked = "is gone since the listing"
 		default:
-			it.AsRead, it.CloudInit = asRead(cfgs[j]), HasCloudInit(cfgs[j])
+			it.AsRead = asRead(cfgs[j])
 		}
 	}
 	plan.BlockUnrebuildable()
@@ -732,7 +731,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, req DeployReque
 		MasterNode: m.Node,
 	}
 	spec.Interfaces, spec.GPU = p.describe(cfg)
-	spec.CPU, spec.CloudInit, spec.AsRead = cfg["cpu"], HasCloudInit(cfg), asRead(cfg)
+	spec.CPU, spec.AsRead = cfg["cpu"], asRead(cfg)
 	named := byName[spec.Name]
 	var existing proxmox.VM
 	exists := len(named) > 0
@@ -754,7 +753,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, req DeployReque
 			return TemplateSpec{}, nil, fmt.Errorf("reading template %s: %w", spec.Name, err)
 		}
 		spec.Interfaces, spec.GPU = p.describe(tcfg)
-		spec.CPU, spec.CloudInit, spec.AsRead = tcfg["cpu"], HasCloudInit(tcfg), asRead(tcfg)
+		spec.CPU, spec.AsRead = tcfg["cpu"], asRead(tcfg)
 		spec.Digest = ConfigDigest(tcfg)
 	case exists && req.Rebuild:
 		// Proxmox refuses to delete a template whose base disk a linked clone still uses.
