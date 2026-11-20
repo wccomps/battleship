@@ -151,12 +151,12 @@ func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *
 					if vm.Status == "running" {
 						mem[vm.Node] -= vm.MaxMem
 					}
-					disk[vm.Node] -= cloneDisk(vm, deploy)
+					disk[vm.Node] -= CloneDisk(vm, deploy)
 				}
 			}
 			src := sources[it.Template]
 			mem[it.Node] += src.MaxMem
-			disk[it.Node] += cloneDisk(src, deploy)
+			disk[it.Node] += CloneDisk(src, deploy)
 		case slices.Contains(it.Steps, StepStart):
 			if vm, ok := vms[it.VMID]; ok && vm.Status != "running" {
 				mem[it.Node] += vm.MaxMem
@@ -192,35 +192,14 @@ func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *
 	return c
 }
 
-// cloneDisk is the disk a pod clone of vm's size holds on its node: a full
+// CloneDisk is the disk a pod clone of vm's size holds on its node: a full
 // clone copies the boot disk; a linked clone (deploy.linked) shares its
 // template's and is counted as nothing.
-func cloneDisk(vm proxmox.VM, deploy config.Deploy) int64 {
+func CloneDisk(vm proxmox.VM, deploy config.Deploy) int64 {
 	if deploy.Linked {
 		return 0
 	}
 	return vm.MaxDisk
-}
-
-// Footprint is what one pod's clones take: memory and processors, and boot
-// disk as EstimateCapacity counts it (cloneDisk). Sizes are bytes.
-type Footprint struct {
-	MemoryBytes int64
-	CPUs        int
-	DiskBytes   int64
-}
-
-// PodFootprint is what one pod's clones of the reused templates take, each
-// template as vms (by VMID) lists it.
-func PodFootprint(templates []TemplateSpec, vms map[int]proxmox.VM, deploy config.Deploy) Footprint {
-	var f Footprint
-	for _, t := range templates {
-		vm := vms[t.VMID]
-		f.MemoryBytes += vm.MaxMem
-		f.CPUs += vm.MaxCPU
-		f.DiskBytes += cloneDisk(vm, deploy)
-	}
-	return f
 }
 
 func storageUsage(c *Capacity, all []proxmox.StorageResource, storage string, disk map[string]int64) []Usage {
