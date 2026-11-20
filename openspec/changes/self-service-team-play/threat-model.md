@@ -57,15 +57,15 @@ Residual, accepted: Battleship's "all teams" means every pod with VMs, so a volu
 
 Battleship takes login tickets only, so unattended work means a stored password. It sits in practice.
 
-Controls: the rights in `design.md` decision 5, which name the session pools, the session networks and individual approved templates. No rights on official pods, the images pool, masters beyond read, or `Datastore.Allocate`. During official events an admin disables the user in Proxmox, which holds even if practice is compromised.
+Controls: the rights in `design.md` decision 5, which name the session pools, the session networks, the networks the approved templates' NICs sit on, and individual approved templates. No rights on official pods, the images pool, masters beyond read, or `Datastore.Allocate`. During official events an admin disables the user in Proxmox, which holds even if practice is compromised.
 
-What a compromise of practice yields through it: destroy and redeploy session pods, clone approved templates, switch session users on and off. It cannot reach official pods or unapproved templates.
+What a compromise of practice yields through it: destroy and redeploy session pods, clone approved templates, switch session users on and off, and attach a session VM to a staff dev or edit network. Proxmox checks `SDN.Use` on a clone source's networks, and an approved template keeps its master's NICs on a dev-slot network, so the principal holds `SDN.Use` there; with `VM.Config.Network` on the session pools it can move a session VM's NIC onto one. Accepted for now; task 2.11 keeps templates off dev-slot networks. It cannot reach official pods or unapproved templates.
 
 The list of rights is read from code. Task 1.5 runs a real deploy with it and proves both that it is enough and that the refusals hold.
 
 ### S-03 Battleship gains a route outside its two invariants — High, In spec
 
-- Accepts only tickets of the configured session user. Without this a stolen volunteer ticket plus the key would run jobs with no Authentik session behind it. Battleship does not judge the ticket itself: it asks Proxmox to renew it as the session user, which Proxmox does only for a ticket it issued to that user.
+- Accepts only tickets of the configured session user. Without this a stolen volunteer ticket plus the key would run jobs with no Authentik session behind it. Battleship does not judge the ticket itself: it asks Proxmox to renew it as the session user, which Proxmox does only for a ticket it issued to that user or to `root@pam`, whose ticket Proxmox accepts as any user's password; `root@pam` already holds every right.
 - The key is checked first. A call without it sends nothing to Proxmox.
 - Own listener, off the public address.
 - No human confirm. In its place: deploy and teardown only, pods inside a configured range checked in Battleship, approved sets only, and a deploy refused whole if any VM in it is blocked.

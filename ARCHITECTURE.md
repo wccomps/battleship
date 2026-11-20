@@ -78,13 +78,14 @@ credential. Its jobs enter the same queue at step 2, skipping the preview,
 and are marked with their origin (`store.OriginSession`). The interface's
 own checks stand in for the preview: pods inside `practice.pods`, deploy or
 teardown only, an approved set, nothing blocked in a deploy. A session
-deploy carries `approved_only`: the planner takes exactly the named set's
-masters, only while the set is approved, and clones built templates without
-building any (`pods.DeployRequest.ApprovedSet`), and blocks a template whose
-digest differs from the one the request carries; the job's fingerprint covers
-the digests, and the worker's re-plan
-(step 4) checks both again. `internal/web/testdata/practice` holds an example of
-each call, for the practice app's client to be tested against.
+deploy carries `approved_only`: the planner takes exactly the set its pattern
+names (`pods.SetOfPattern`), only while the set is approved, and clones built
+templates without building any (`pods.DeployRequest.ApprovedOnly`). After the
+privilege checks, `pods.Plan.BlockChanged` blocks a template whose digest
+differs from the one the request carries. The worker's re-plan (step 4)
+checks both again, so a template changed while the job waits is blocked and
+the job ends stale. `internal/web/testdata/practice` holds an example of each
+call, for the practice app's client to be tested against.
 
 ## Packages
 

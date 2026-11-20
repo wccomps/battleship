@@ -97,7 +97,8 @@ func (s *Server) practice(next practiceCall) http.Handler {
 		ctx, cancel := context.WithTimeout(r.Context(), PracticeCallTimeout)
 		defer cancel()
 		// Renewing as the principal proves the ticket: Proxmox takes a ticket
-		// as the password of the user it was issued to, and of no other.
+		// as the password of the user it was issued to and of no other, except
+		// that a root@pam ticket passes as any user's.
 		now := s.now()
 		cred, err := s.tickets.RenewTicket(ctx, proxmox.Credential{User: principal, Ticket: ticket, LoginAt: now}, now)
 		switch {

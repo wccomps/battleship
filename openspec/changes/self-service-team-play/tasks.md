@@ -27,6 +27,7 @@
 - [x] 2.8 Report the memory, processors and disk one pod of each approved set takes; verify with a test against templates of known size
 - [ ] 2.9 Let practice list the session interface's active jobs, so a submission whose answer was lost can still be found and cancelled; verify with a test that the list holds only jobs the interface submitted
 - [x] 2.10 Take the template digests `GET /v1/sets` listed with each session deploy, and refuse a deploy whose templates changed since, at submission and at the worker's claim; verify with tests that a missing digest is refused, a changed template blocks the submission, and a template rebuilt in place before the claim ends the job stale
+- [ ] 2.11 Keep approved templates off dev-slot networks (rewire a template's NICs to a neutral bridge at build time) so the session principal needs no `SDN.Use` on staff networks.
 
 ## 3. The practice app: foundation, and the portal's one endpoint
 
