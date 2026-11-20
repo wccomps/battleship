@@ -299,10 +299,10 @@ func (e *Executor) status(ctx context.Context, it *pods.Item) (string, error) {
 // startClone starts a clone into req.NewVMID on req.TargetNode and returns
 // its UPID. A timed-out POST may still have created the VM, so the target is
 // probed first; a VM with the expected name there means "" is returned (for
-// a template copy it must be this run's, and not the leftover of a copy whose
-// task failed). Only a VM seen absent becomes this run's, and stays so from
-// the POST on even if the request times out. A POST into a VMID this run
-// already owns starts its state afresh, unless told the VM exists.
+// a template copy, only if mayConvert allows it). Only a VM seen absent
+// becomes this run's, and stays so from the POST on even if the request
+// times out. A POST into a VMID this run already owns starts its state
+// afresh, unless told the VM exists.
 func (e *Executor) startClone(ctx context.Context, template bool, req proxmox.CloneRequest) (string, error) {
 	p, err := e.probeClone(ctx, req.TargetNode, req.NewVMID, req.Name)
 	if err != nil {
@@ -310,7 +310,6 @@ func (e *Executor) startClone(ctx context.Context, template bool, req proxmox.Cl
 	}
 	e.mu.Lock()
 	o, ours := e.owned[req.NewVMID]
-	failed := ours && o.state == cloneTaskFailed
 	claimed := false
 	if p == probeAbsent && !ours {
 		e.owned[req.NewVMID] = &ownedVM{name: req.Name, node: req.TargetNode, template: template}
@@ -318,11 +317,8 @@ func (e *Executor) startClone(ctx context.Context, template bool, req proxmox.Cl
 	}
 	e.mu.Unlock()
 	if p == probeSame {
-		switch {
-		case template && !ours:
-			return "", fmt.Errorf("VMID %d appeared as %s while cloning; not converting a VM this run did not create", req.NewVMID, req.Name)
-		case template && failed:
-			return "", fmt.Errorf("%s is the leftover of a failed copy; it will be removed, then re-run", req.Name)
+		if template {
+			return "", e.mayConvert(req.NewVMID, req.Name)
 		}
 		return "", nil
 	}
