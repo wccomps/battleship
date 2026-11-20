@@ -195,11 +195,11 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 	default:
 		wantBase = req.Image
 	}
-	wantTags := hostTags(h.Tags, p.Cfg.Deploy.MasterTag, p.Cfg.Deploy.ApprovedTag, Domain(h.Name), domain, wantKind == ImageRouter)
+	wantTags := respellTags(h.Tags, hostTags(h.Tags, p.Cfg.Deploy.MasterTag, p.Cfg.Deploy.ApprovedTag, Domain(h.Name), domain, wantKind == ImageRouter))
 	wantNotes := h.Notes
 	wantNotes.Base = wantBase
 
-	it := Item{Name: h.Name, Host: wantHost, VMID: h.VMID, Node: h.Node, Pool: env.Slot.Pool, DetailsWas: &at.Read}
+	it := Item{Name: h.Name, Host: wantHost, VMID: h.VMID, Node: h.Node, Pool: env.Slot.Pool, DetailsWas: &at.Read, AsRead: asRead(h.Config)}
 	if vm.Template {
 		it.Blocked = "is a template"
 	}
@@ -280,7 +280,7 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 		it.Rename = wantName
 	}
 	if it.Rename != "" || !sameTags(h.Tags, wantTags) || WithNotes(h.desc(), wantNotes) != h.desc() {
-		it.Tags, it.TagsChanged = wantTags, tagChanges(h.Tags, wantTags)
+		it.Tags = wantTags
 		it.Notes = &wantNotes
 		it.Steps = append(it.Steps, StepLabel)
 	}
@@ -301,7 +301,7 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 
 	wantNICs := env.Slot.wantNICs(wantKind == ImageRouter)
 	if len(NICChanges(h.Config, wantNICs)) > 0 {
-		it.NICs, it.NICsWas = wantNICs, nicsOf(h.Config)
+		it.NICs = wantNICs
 		it.Steps = append(it.Steps, StepNetwork)
 	}
 
@@ -386,17 +386,13 @@ func resolveHostName(env Environment, h EnvHost, input string) (full, host, doma
 }
 
 // hostTags updates a slot VM's tag list with masterTag, domain and router,
-// keeping any other tags on the VM in order and every tag in the spelling it
-// has there, so an unchanged list compares the same (sameTags). A move into
-// another domain drops approvedTag, so a rename never carries approval into
-// another set.
+// keeping any other tags on the VM in order, each tag once whatever its
+// case. A move into another domain drops approvedTag, so a rename never
+// carries approval into another set.
 func hostTags(cur, masterTag, approvedTag, oldDomain, domain string, router bool) string {
 	curTags := strings.FieldsFunc(cur, isTagSeparator)
 	var out []string
 	add := func(t string) {
-		if i := slices.IndexFunc(curTags, func(c string) bool { return strings.EqualFold(c, t) }); i >= 0 {
-			t = curTags[i]
-		}
 		if t != "" && !slices.ContainsFunc(out, func(o string) bool { return strings.EqualFold(o, t) }) {
 			out = append(out, t)
 		}

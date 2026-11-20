@@ -175,8 +175,9 @@ type Source struct {
 	VMID int    `json:"vmid"`
 	Node string `json:"node"`
 	Name string `json:"name"`
-	// Bridges are what a clone of it asks SDN.Use on (sourceBridges).
-	Bridges []string `json:"bridges,omitempty"`
+	// AsRead is its tags and netN values as read (asRead), which a clone
+	// copies; a superseded version's tags alone.
+	AsRead map[string]string `json:"as_read,omitempty"`
 	// Base, Notes and Unreadable are the source's notes, for its review: the
 	// version it edits (ImageEdit), and the user notes the copy keeps, less
 	// their details block (see ParseDetails), or all of them when Unreadable
@@ -212,15 +213,10 @@ type TemplateSpec struct {
 	// (clones regenerate the drive) only decide the privileges a deploy needs.
 	CPU       string `json:"cpu,omitempty"`
 	CloudInit bool   `json:"cloud_init,omitempty"`
-	// Bridges are what a clone of the template asks SDN.Use on
-	// (sourceBridges): the template's NICs when reused, the master's, which
-	// the build copies, when built.
-	Bridges []string `json:"bridges,omitempty"`
-	// nics and tags are that VM's netN values (nicsOf) and tag list as read,
-	// which a pod clone starts with: deployItem's NICsWas and TagsChanged.
-	// Plans don't store them.
-	nics map[string]string
-	tags string
+	// AsRead is the tags and netN values (asRead) a clone of the template
+	// starts with: the template's when reused, the master's, which the build
+	// copies, when built.
+	AsRead map[string]string `json:"as_read,omitempty"`
 	// Digest is ConfigDigest of a reused template: what the session interface
 	// lists, and checks a submission against (BlockChanged).
 	Digest string `json:"digest,omitempty"`
@@ -273,13 +269,10 @@ type Item struct {
 	// DetailsWas is an Edit notes's or Edit host's notes as read, for its
 	// review and fingerprint.
 	DetailsWas *NotesRead `json:"details_was,omitempty"`
-	// TagsChanged are the tags the label or tag-set step adds to or removes
-	// from the VM's tags as read (tagChanges): its own, or for a clone, the
-	// clone source's. NICsWas are the netN values the network step rewrites,
-	// read the same way (nicsOf); a pod VM's are its template's. Both only
-	// decide the rights the steps need.
-	TagsChanged []string          `json:"tags_changed,omitempty"`
-	NICsWas     map[string]string `json:"nics_was,omitempty"`
+	// AsRead is the tags and netN values (asRead) the VM's steps start from:
+	// the clone source's under StepClone, else the VM's own. It only decides
+	// the rights the steps need (stepEdits).
+	AsRead map[string]string `json:"as_read,omitempty"`
 	// Record is the domain a record or clear-record step writes into, or
 	// takes out of, Pool's comment.
 	Record string `json:"record,omitempty"`
@@ -598,6 +591,26 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 			plan.Items = append(plan.Items, p.deployItem(team, tpl, assign[team], req.Rebuild, req.Snapshot, byName, used))
 		}
 	}
+	// A pod VM the deploy keeps starts its steps from its own config.
+	var rg errgroup.Group
+	rg.SetLimit(batchSize)
+	for i := range plan.Items {
+		it := &plan.Items[i]
+		if it.Blocked != "" || slices.Contains(it.Steps, StepClone) {
+			continue
+		}
+		rg.Go(func() error {
+			cfg, err := p.API.VMConfig(ctx, it.OldNode, it.VMID)
+			if err != nil {
+				return fmt.Errorf("reading pod VM %s: %w", it.Name, err)
+			}
+			it.AsRead = asRead(cfg)
+			return nil
+		})
+	}
+	if err := rg.Wait(); err != nil {
+		return nil, err
+	}
 	plan.BlockUnrebuildable()
 	return plan, nil
 }
@@ -713,8 +726,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, req DeployReque
 		MasterNode: m.Node,
 	}
 	spec.Interfaces, spec.GPU = p.describe(cfg)
-	spec.CPU, spec.CloudInit, spec.Bridges = cfg["cpu"], HasCloudInit(cfg), sourceBridges(cfg)
-	spec.nics, spec.tags = nicsOf(cfg), cfg["tags"]
+	spec.CPU, spec.CloudInit, spec.AsRead = cfg["cpu"], HasCloudInit(cfg), asRead(cfg)
 	named := byName[spec.Name]
 	var existing proxmox.VM
 	exists := len(named) > 0
@@ -736,8 +748,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, req DeployReque
 			return TemplateSpec{}, nil, fmt.Errorf("reading template %s: %w", spec.Name, err)
 		}
 		spec.Interfaces, spec.GPU = p.describe(tcfg)
-		spec.CPU, spec.CloudInit, spec.Bridges = tcfg["cpu"], HasCloudInit(tcfg), sourceBridges(tcfg)
-		spec.nics, spec.tags = nicsOf(tcfg), tcfg["tags"]
+		spec.CPU, spec.CloudInit, spec.AsRead = tcfg["cpu"], HasCloudInit(tcfg), asRead(tcfg)
 		spec.Digest = ConfigDigest(tcfg)
 	case exists && req.Rebuild:
 		// Proxmox refuses to delete a template whose base disk a linked clone still uses.
@@ -832,6 +843,7 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, rebu
 		}
 		if rebuild && slices.ContainsFunc(named, func(v proxmox.VM) bool { _, _, ok := p.Naming.TeamVM(v); return ok }) {
 			it.Steps = append(it.Steps, StepStop, StepDelete, StepClone)
+			it.AsRead = tpl.AsRead
 		}
 		if it.Blocked != "" || !rebuild {
 			it.Node = vm.Node
@@ -845,14 +857,9 @@ func (p Planner) deployItem(team string, tpl TemplateSpec, assigned string, rebu
 			used[it.VMID] = it.Name
 		}
 		it.Steps = append(it.Steps, StepClone)
+		it.AsRead = tpl.AsRead
 	}
 	it.Steps = append(it.Steps, StepNetwork, StepDiskLimits, StepCDROM, StepNotes, StepSetTag)
-	it.NICsWas = tpl.nics
-	tags := tpl.tags // a clone's, before its tag-set step
-	if named := byName[it.Name]; len(named) > 0 && !slices.Contains(it.Steps, StepClone) {
-		tags = named[0].Tags
-	}
-	it.TagsChanged = tagChanges(tags, withSetTag(tags, it.Set))
 	if snapshot {
 		it.Steps = append(it.Steps, StepSnapshot)
 	}

@@ -61,15 +61,14 @@ func forEachNIC(cfg map[string]string, fn func(key, val string)) {
 	}
 }
 
-// nicsOf is cfg's netN values by key, or nil when it has none.
-func nicsOf(cfg map[string]string) map[string]string {
-	var out map[string]string
-	forEachNIC(cfg, func(k, v string) {
-		if out == nil {
-			out = map[string]string{}
-		}
-		out[k] = v
-	})
+// asRead is cfg's tags and netN values, the part of a VM's config its label,
+// tag-set and network steps change (Item.AsRead).
+func asRead(cfg map[string]string) map[string]string {
+	out := map[string]string{}
+	if t := cfg["tags"]; t != "" {
+		out["tags"] = t
+	}
+	forEachNIC(cfg, func(k, v string) { out[k] = v })
 	return out
 }
 
@@ -368,6 +367,21 @@ func tagChanges(a, b string) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// respellTags is tag list want with each tag spelled as a tag of cur that
+// differs from it only in case, if any: Proxmox stores tags lower-cased
+// unless tag-style is case-sensitive, so a planner re-spells the tags it
+// wants before LabelChanges compares them to the VM's.
+func respellTags(cur, want string) string {
+	have := strings.FieldsFunc(cur, isTagSeparator)
+	out := strings.FieldsFunc(want, isTagSeparator)
+	for i, t := range out {
+		if j := slices.IndexFunc(have, func(c string) bool { return strings.EqualFold(c, t) }); j >= 0 {
+			out[i] = have[j]
+		}
+	}
+	return strings.Join(out, ";")
 }
 
 // AddTag adds tag to a tag list unless it is there.

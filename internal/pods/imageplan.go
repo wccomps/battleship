@@ -111,9 +111,8 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 	it := Item{Name: ImageName(req.Family, version), VMID: vmid, Node: src.Node, Pool: p.Cfg.Images.Pool,
 		Source: &Source{VMID: src.VMID, Node: src.Node, Name: src.Name}, Tags: ImageTags(kind, false),
 		Notes: &Notes{Source: strconv.Itoa(src.VMID)}, Steps: []Step{StepClone, StepLabel, StepCDROM, StepConvert}}
-	it.TagsChanged = tagChanges(src.Tags, it.Tags) // the clone's tags are src's until the label step
 	if newest, ok := Newest(images, req.Family); ok {
-		it.Supersedes = &Source{VMID: newest.VMID, Node: newest.Node, Name: newest.Name}
+		it.Supersedes = &Source{VMID: newest.VMID, Node: newest.Node, Name: newest.Name, AsRead: map[string]string{"tags": newest.Tags}}
 		it.Steps = append(it.Steps, StepRetire)
 	}
 	switch {
@@ -133,7 +132,8 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		}
 		desc = cfg["description"]
 		var derr error
-		it.Source.Bridges, it.Source.Base = sourceBridges(cfg), baseNote(cfg)
+		it.Source.AsRead, it.Source.Base = asRead(cfg), baseNote(cfg)
+		it.AsRead = it.Source.AsRead // the clone's until its label step
 		_, it.Source.Notes, derr = ParseDetails(desc)
 		it.Source.Unreadable = derr != nil
 		it.Blocked = agentBlock(src, cfg, kind)
@@ -231,8 +231,8 @@ func (p Planner) ImageEdit(ctx context.Context, req ImageRequest) (*Plan, error)
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", newest.Name, err)
 		}
-		it.Source.Bridges, it.NICsWas = sourceBridges(cfg), nicsOf(cfg)
-		it.TagsChanged = tagChanges(cfg["tags"], it.Tags)
+		it.Source.AsRead = asRead(cfg)
+		it.AsRead = it.Source.AsRead // the clone's until its label and network steps
 		it.blockLongNotes(cfg["description"])
 		// Every NIC goes on the edit bridge: a router's LAN left on a slot's
 		// bridge would clash with that environment's router.
@@ -264,7 +264,7 @@ func (p Planner) ImageDeprecate(ctx context.Context, req ImageRequest) (*Plan, e
 		return nil, err
 	}
 	it := Item{Name: im.Name, VMID: im.VMID, Node: im.Node, Tags: ImageTags(im.Kind, true), Steps: []Step{StepLabel}}
-	it.TagsChanged = tagChanges(im.Tags, it.Tags)
+	it.AsRead = map[string]string{"tags": im.Tags}
 	if im.Deprecated {
 		it.Blocked = "is already deprecated"
 	}

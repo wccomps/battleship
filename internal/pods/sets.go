@@ -67,14 +67,8 @@ func isTagSeparator(r rune) bool { return r == ';' || r == ',' || unicode.IsSpac
 // SetTagChanges sets the set tags in cur's tag list to set's alone (none
 // for ""), keeping every other tag.
 func SetTagChanges(cur map[string]string, set Set) map[string]string {
-	return LabelChanges(cur, withSetTag(cur["tags"], set), nil)
-}
-
-// withSetTag is tag list tags with its set tags replaced by set's (none for
-// "").
-func withSetTag(tags string, set Set) string {
 	var keep []string
-	for _, t := range strings.FieldsFunc(tags, isTagSeparator) {
+	for _, t := range strings.FieldsFunc(cur["tags"], isTagSeparator) {
 		if !strings.HasPrefix(strings.ToLower(t), setTagPrefix) {
 			keep = append(keep, t)
 		}
@@ -82,7 +76,7 @@ func withSetTag(tags string, set Set) string {
 	if set != "" {
 		keep = append(keep, set.Tag())
 	}
-	return strings.Join(keep, ";")
+	return LabelChanges(cur, strings.Join(keep, ";"), nil)
 }
 
 // SetRecord are the sets a pod VM's set tags name, sorted, each once

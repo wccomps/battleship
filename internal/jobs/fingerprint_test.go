@@ -28,7 +28,7 @@ var fingerprinted = map[string]map[string]bool{
 		// Derived from Name, or where things run, which may change with load.
 		"Host": false, "MasterName": false, "Node": false, "OldNode": false, "MasterNode": false,
 		// Only decide the privileges needed, which Blocked covers.
-		"CPU": false, "CloudInit": false, "Bridges": false,
+		"CPU": false, "CloudInit": false, "AsRead": false,
 	},
 	"Item": {
 		"Name": true, "Rename": true, "VMID": true, "Steps": true, "Blocked": true, "Snapshot": true, "Action": true, "Template": true,
@@ -42,8 +42,8 @@ var fingerprinted = map[string]map[string]bool{
 		"Set": false, "Sets": false,
 		// Says why Blocked is set, which Blocked already covers.
 		"Unpermitted": false,
-		// Only decide the privileges needed, which Blocked covers.
-		"TagsChanged": false, "NICsWas": false,
+		// Only decides the privileges needed, which Blocked covers.
+		"AsRead": false,
 		// The notes an Edit notes writes over (TestFingerprintCoversNotesReplaced).
 		"DetailsWas": true,
 		"Record":     true,  // the domain a record step writes into its pool's comment
@@ -51,8 +51,8 @@ var fingerprinted = map[string]map[string]bool{
 	},
 	"Source": {
 		"VMID": true, "Node": true, "Name": true,
-		// Only decide the privileges needed, as TemplateSpec.Bridges.
-		"Bridges": false,
+		// Only decides the privileges needed, as TemplateSpec.AsRead.
+		"AsRead": false,
 		// What a register's review shows; the clone copies the notes as they
 		// are then.
 		"Base": false, "Notes": false, "Unreadable": false,
@@ -64,7 +64,7 @@ func TestEveryPlanFieldIsClassified(t *testing.T) {
 		classes := fingerprinted[typ.Name()]
 		for i := range typ.NumField() {
 			f := typ.Field(i)
-			if _, ok := classes[f.Name]; !ok && f.IsExported() { // plans don't store unexported fields
+			if _, ok := classes[f.Name]; !ok {
 				t.Errorf("%s.%s is not classified in fingerprinted", typ.Name(), f.Name)
 			}
 		}
@@ -140,7 +140,7 @@ func TestFingerprintFollowsClassification(t *testing.T) {
 		})
 	}
 	withSource := func(p *pods.Plan) *pods.Source {
-		p.Items[0].Source = &pods.Source{VMID: 8001, Node: "n1", Name: "debian-12-v1", Bridges: []string{"vmbr0"}}
+		p.Items[0].Source = &pods.Source{VMID: 8001, Node: "n1", Name: "debian-12-v1", AsRead: map[string]string{"net0": "virtio,bridge=vmbr0"}}
 		return p.Items[0].Source
 	}
 	fpSrc := func() string { p := base(); withSource(p); return Fingerprint(p) }()

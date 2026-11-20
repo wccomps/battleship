@@ -496,3 +496,29 @@ func TestEnvEditDroppingApprovalNeedsSysModifyUnseen(t *testing.T) {
 		t.Errorf("blocked = %q, want Sys.Modify on / asked", got)
 	}
 }
+
+// Proxmox checks SDN.Use on the netN value a write replaces as well as the
+// one it writes, so moving a NIC off another slot's vnet asks SDN.Use on
+// the vnet it leaves.
+func TestEnvEditNICMoveNeedsSDNUseOnTheVnetLeft(t *testing.T) {
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "running"},
+		map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint02", "agent": "1",
+			"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1 dns=teak"})
+	cfg := envConfig()
+	plan, err := NewPlanner(f, cfg).EnvEdit(context.Background(), HostEditInput{VMID: 2101})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := plan.Items[0]; it.Blocked != "" || !slices.Contains(it.Steps, StepNetwork) {
+		t.Fatalf("item = %+v", it)
+	}
+	zone := "/sdn/zones/" + cfg.Environments.SDNZone
+	g := grants{"/vms/2101": {"VM.Config.Network", "VM.Config.Options"}, zone + "/devint01": {"SDN.Use"}}
+	if err := BlockUnpermitted(context.Background(), plan, g, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.Items[0].Blocked; got != "you don't have SDN.Use on "+zone+"/devint02" {
+		t.Errorf("blocked = %q", got)
+	}
+}

@@ -44,8 +44,8 @@ func drawStrings(t *rapid.T, label string) []string {
 	return rapid.SliceOfN(rapid.Custom(func(t *rapid.T) string { return drawFPText(t, label) }), 0, 3).Draw(t, label)
 }
 
-// drawNICs is nil, empty, or one to three netN keys mapped to text.
-func drawNICs(t *rapid.T, label string) map[string]string {
+// drawConfig is nil, empty, or one to three config keys mapped to text.
+func drawConfig(t *rapid.T, label string) map[string]string {
 	var out map[string]string
 	switch rapid.IntRange(0, 2).Draw(t, label) {
 	case 1:
@@ -53,7 +53,7 @@ func drawNICs(t *rapid.T, label string) map[string]string {
 	case 2:
 		out = map[string]string{}
 		for range rapid.IntRange(1, 3).Draw(t, label+" count") {
-			out[rapid.SampledFrom([]string{"net0", "net1", "net2", "net10", ""}).Draw(t, label+" key")] = drawFPText(t, label+" value")
+			out[rapid.SampledFrom([]string{"net0", "net1", "net2", "net10", "tags", ""}).Draw(t, label+" key")] = drawFPText(t, label+" value")
 		}
 	}
 	return out
@@ -64,7 +64,7 @@ func drawSource(t *rapid.T, label string) *pods.Source {
 		return nil
 	}
 	return &pods.Source{VMID: rapid.IntRange(0, 99999).Draw(t, label+" vmid"), Node: drawFPText(t, label+" node"), Name: drawFPText(t, label+" name"),
-		Bridges: drawStrings(t, label+" bridges")}
+		AsRead: drawConfig(t, label+" as read")}
 }
 
 func drawPlan(t *rapid.T) *pods.Plan {
@@ -83,7 +83,7 @@ func drawPlan(t *rapid.T) *pods.Plan {
 			Exists: rapid.Bool().Draw(t, "exists"), Rebuild: rapid.Bool().Draw(t, "rebuild"), OldNode: drawFPText(t, "old node"),
 			MasterName: drawFPText(t, "master"), MasterVMID: rapid.IntRange(0, 99999).Draw(t, "master vmid"), MasterNode: drawFPText(t, "master node"),
 			Interfaces: rapid.IntRange(0, 8).Draw(t, "ifaces"), GPU: rapid.Bool().Draw(t, "gpu"), Blocked: drawFPText(t, "blocked"),
-			WillStopMaster: rapid.Bool().Draw(t, "stop"), CPU: drawFPText(t, "cpu"), CloudInit: rapid.Bool().Draw(t, "ci"), Bridges: drawStrings(t, "bridges"),
+			WillStopMaster: rapid.Bool().Draw(t, "stop"), CPU: drawFPText(t, "cpu"), CloudInit: rapid.Bool().Draw(t, "ci"), AsRead: drawConfig(t, "tpl as read"),
 		})
 	}
 	if rapid.Bool().Draw(t, "items?") {
@@ -106,7 +106,7 @@ func drawPlan(t *rapid.T) *pods.Plan {
 		if rapid.Bool().Draw(t, "notes") {
 			it.Notes = &pods.Notes{IP: drawFPAddr(t, "ip"), OS: drawFPText(t, "os"), Base: drawFPText(t, "base"), DNS: drawFPText(t, "dns")}
 		}
-		it.NICs, it.NICsWas = drawNICs(t, "nics"), drawNICs(t, "nics was")
+		it.NICs, it.AsRead = drawConfig(t, "nics"), drawConfig(t, "as read")
 		if rapid.Bool().Draw(t, "guest") {
 			it.Guest = &pods.Guest{OS: drawFPText(t, "os"), Hostname: drawFPText(t, "hostname"), Domain: drawFPText(t, "domain"), IP: drawFPAddr(t, "gip"),
 				Prefix: rapid.IntRange(0, 32).Draw(t, "prefix"), Gateway: drawFPAddr(t, "gw"), DNS: drawFPAddr(t, "gdns")}

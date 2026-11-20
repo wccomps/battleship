@@ -321,7 +321,7 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		if err != nil {
 			return nil, err
 		}
-		ip.Source.Bridges = sourceBridges(cfg)
+		ip.Source.AsRead = asRead(cfg)
 		notes := Notes{Base: im.Name, DNS: dnsChoice}
 		if resumed {
 			notes.Base = cmp.Or(existing.Notes.Base, im.Name)
@@ -345,7 +345,7 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 			ip.Steps = ip.Steps[1:]
 			read = existing.Config
 		}
-		ip.TagsChanged, ip.NICsWas = tagChanges(read["tags"], ip.Tags), nicsOf(read)
+		ip.Tags, ip.AsRead = respellTags(read["tags"], ip.Tags), asRead(read)
 		if im.Kind == ImageWindows || im.Kind == ImageLinux {
 			addr := existing.Notes.IP
 			switch {

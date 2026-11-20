@@ -229,73 +229,53 @@ func cpuMapping(cpu string) string {
 	return ""
 }
 
-// cloneNeeds is what cloning VM src as vmid into pool needs; bridges are
-// src's NICs' paths (sourceBridges), which Proxmox's clone checks
-// (sdnUse), and cpu its CPU model.
-func cloneNeeds(cfg config.Config, src, vmid int, pool string, bridges []string, cpu string) []need {
+// cloneNeeds is what cloning VM src as vmid into pool needs: SDN.Use on the
+// NICs of from, src's tags and netN values as read (AsRead), which Proxmox's
+// clone checks (sdnUse), and Mapping.Use for cpu, its CPU model.
+func cloneNeeds(cfg config.Config, src, vmid int, pool string, from map[string]string, cpu string) []need {
 	ns := []need{
 		one(VMPath(src), "VM.Clone"),
 		on(vmid, pool, "VM.Allocate"),
 		one("/storage/"+cfg.Deploy.Storage, "Datastore.AllocateSpace"),
 	}
-	ns = append(ns, sdnUse(cfg, bridges)...)
+	forEachNIC(from, func(_, v string) { ns = append(ns, sdnUse(cfg, v)...) })
 	if m := cpuMapping(cpu); m != "" {
 		ns = append(ns, one(m, "Mapping.Use"))
 	}
 	return ns
 }
 
-// vnetPaths are the paths below /sdn/zones/<zone>/ that pve-guest-common's
-// check_vnet_access checks SDN.Use on for NIC value nic, on a clone or a
-// netN write: <bridge>/<tag> when VLAN-tagged, <bridge>/<vlan> for each VLAN
-// in trunks (a-b ranges expanded), and <bridge> only with neither.
-func vnetPaths(nic string) []string {
+// vnetPath is the path below /sdn/zones/<zone>/ that Battleship asks
+// SDN.Use on for NIC value nic, of those pve-guest-common's check_vnet_access
+// checks on a clone or a netN write: <bridge>/<tag> when VLAN-tagged, and
+// <bridge> with neither a tag nor trunks. Each trunk VLAN is a path of its
+// own, which Battleship leaves to Proxmox when the step runs, so an untagged
+// trunked NIC gives "".
+func vnetPath(nic string) string {
 	_, opts := splitOptions(nic)
-	b, tag, trunks := opts["bridge"], opts["tag"], opts["trunks"]
-	switch {
+	switch b, tag := opts["bridge"], opts["tag"]; {
 	case b == "":
-		return nil
-	case tag == "" && trunks == "":
-		return []string{b}
+		return ""
+	case tag != "":
+		return b + "/" + tag
+	case opts["trunks"] == "":
+		return b
 	}
-	var out []string
-	if tag != "" {
-		out = append(out, b+"/"+tag)
-	}
-	for _, r := range strings.FieldsFunc(trunks, isTagSeparator) {
-		lo, hi, isRange := strings.Cut(r, "-")
-		if !isRange {
-			hi = lo
-		}
-		first, errLo := strconv.Atoi(lo)
-		last, errHi := strconv.Atoi(hi)
-		if errLo != nil || errHi != nil {
-			continue // Proxmox refuses such a config
-		}
-		for v := first; v <= last; v++ {
-			out = append(out, b+"/"+strconv.Itoa(v))
-		}
-	}
-	return out
+	return ""
 }
 
-// sourceBridges are the vnetPaths of every NIC in cfg, distinct and sorted:
-// what a clone of that VM is checked on.
-func sourceBridges(cfg map[string]string) []string {
-	var out []string
-	forEachNIC(cfg, func(_, v string) { out = append(out, vnetPaths(v)...) })
-	slices.Sort(out)
-	return slices.Compact(out)
-}
-
-// sdnUse is SDN.Use on /sdn/zones/<zone>/<path> for each of paths
-// (vnetPaths), as Proxmox asks it of every user but root@pam. Proxmox takes
-// the zone from its SDN config (localnetwork for a bridge that isn't a
-// vnet), which Battleship doesn't read: it asks only bridges whose zone it
-// knows (bridgeZone) and leaves any other to Proxmox when the step runs.
-func sdnUse(cfg config.Config, paths []string) []need {
+// sdnUse is SDN.Use on /sdn/zones/<zone>/<vnetPath> for each NIC value of
+// nics, as Proxmox asks it of every user but root@pam. Proxmox takes the
+// zone from its SDN config (localnetwork for a bridge that isn't a vnet),
+// which Battleship doesn't read: it asks only bridges whose zone it knows
+// (bridgeZone) and leaves any other to Proxmox when the step runs.
+func sdnUse(cfg config.Config, nics ...string) []need {
 	var ns []need
-	for _, path := range paths {
+	for _, nic := range nics {
+		path := vnetPath(nic)
+		if path == "" {
+			continue
+		}
 		b, _, _ := strings.Cut(path, "/")
 		if zone := bridgeZone(cfg, b); zone != "" {
 			ns = append(ns, one("/sdn/zones/"+zone+"/"+path, "SDN.Use"))
@@ -309,7 +289,7 @@ func sdnUse(cfg config.Config, paths []string) []need {
 // holds a clone.
 func Uncloneable(ctx context.Context, acc Access, cfg config.Config, tpl TemplateSpec, team string) (string, error) {
 	n := NewNaming(cfg.Naming)
-	return missing(ctx, acc, cloneNeeds(cfg, tpl.VMID, n.CloneVMID(team, tpl.VMID), n.Pool(team), tpl.Bridges, tpl.CPU))
+	return missing(ctx, acc, cloneNeeds(cfg, tpl.VMID, n.CloneVMID(team, tpl.VMID), n.Pool(team), tpl.AsRead, tpl.CPU))
 }
 
 // templateNeeds is what building t needs, a clone of its master into the
@@ -318,7 +298,7 @@ func templateNeeds(t TemplateSpec, cfg config.Config) []need {
 	if !t.Builds() {
 		return nil
 	}
-	ns := cloneNeeds(cfg, t.MasterVMID, t.VMID, cfg.Images.Pool, t.Bridges, t.CPU)
+	ns := cloneNeeds(cfg, t.MasterVMID, t.VMID, cfg.Images.Pool, t.AsRead, t.CPU)
 	if t.Rebuild {
 		ns = append(ns, one(VMPath(t.VMID), "VM.Allocate")) // deleting the old template, wherever it is
 	}
@@ -331,35 +311,28 @@ func templateNeeds(t TemplateSpec, cfg config.Config) []need {
 func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAccess) []need {
 	pool := ""
 	var ns []need
-	for _, st := range it.Steps {
+	edits := stepEdits(it, tpl, cfg)
+	for i, st := range it.Steps {
 		switch st {
 		case StepClone:
 			pool = it.TargetPool(NewNaming(cfg.Naming))
-			src, bridges, cpu := 0, []string(nil), ""
+			src, from, cpu := 0, map[string]string(nil), ""
 			if it.Source != nil {
-				src, bridges = it.Source.VMID, it.Source.Bridges
+				src, from = it.Source.VMID, it.Source.AsRead
 			} else if tpl != nil {
-				src, bridges, cpu = tpl.VMID, tpl.Bridges, tpl.CPU
+				src, from, cpu = tpl.VMID, tpl.AsRead, tpl.CPU
 			}
-			ns = append(ns, cloneNeeds(cfg, src, it.VMID, pool, bridges, cpu)...)
+			ns = append(ns, cloneNeeds(cfg, src, it.VMID, pool, from, cpu)...)
 		case StepNetwork:
-			// Proxmox checks every netN value the step writes, rewritten from
-			// NICsWas.
+			// Proxmox checks each netN value the step writes and the value
+			// it replaces.
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Network"))
-			var written map[string]string
-			switch {
-			case it.NICs != nil:
-				written = NICChanges(it.NICsWas, it.NICs)
-			case tpl != nil:
-				if tpl.CloudInit {
-					ns = append(ns, on(it.VMID, pool, "VM.Config.Cloudinit")) // regenerating the drive
-				}
-				written = NetworkChanges(cfg.Network, it.NICsWas, it.Team, tpl.Interfaces)
+			if it.NICs == nil && tpl != nil && tpl.CloudInit {
+				ns = append(ns, on(it.VMID, pool, "VM.Config.Cloudinit")) // regenerating the drive
 			}
-			for _, k := range slices.Sorted(maps.Keys(written)) {
-				if isNetKey(k) {
-					ns = append(ns, sdnUse(cfg, vnetPaths(written[k]))...)
-				}
+			e := edits[i]
+			for _, k := range slices.Sorted(maps.Keys(e.nics)) {
+				ns = append(ns, sdnUse(cfg, e.nics[k], e.replaced[k])...)
 			}
 		case StepDiskLimits:
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Disk"))
@@ -387,13 +360,13 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAc
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Options"))
 		case StepLabel, StepSetTag:
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Options"))
-			ns = append(ns, tagNeeds(changedTags(it, st), tags, cfg)...)
+			ns = append(ns, tagNeeds(edits[i].tags, tags, cfg)...)
 		case StepConvert:
 			ns = append(ns, one(VMPath(it.VMID), "VM.Allocate"))
 		case StepRetire:
 			if it.Supersedes != nil {
 				ns = append(ns, one(VMPath(it.Supersedes.VMID), "VM.Config.Options"))
-				ns = append(ns, tagNeeds(changedTags(it, st), tags, cfg)...)
+				ns = append(ns, tagNeeds(edits[i].tags, tags, cfg)...)
 			}
 		case StepWaitAgent, StepVerify:
 			ns = append(ns, on(it.VMID, pool, "VM.GuestAgent.Audit"))
@@ -407,29 +380,85 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAc
 	return ns
 }
 
-// changedTags are the tags step st of it adds to or removes from a VM's tag
-// list: the label and tag-set steps' TagsChanged, and the deprecated tag the
-// retire step adds to the version it supersedes (Newest, so not yet
-// deprecated).
-func changedTags(it Item, st Step) []string {
+// stepEdit is what one step changes on a VM: the netN values it writes and
+// the values those replace, and the tags it adds or removes.
+type stepEdit struct {
+	nics, replaced map[string]string
+	tags           []string
+}
+
+// stepEdits are the edits of an item's steps, by index into Steps: the
+// network, label and tag-set steps replayed in order with the executor's
+// own change functions on it.AsRead, and the retire step's on the version
+// it supersedes.
+func stepEdits(it Item, tpl *TemplateSpec, cfg config.Config) []stepEdit {
+	cur := maps.Clone(it.AsRead)
+	if cur == nil {
+		cur = map[string]string{}
+	}
+	out := make([]stepEdit, len(it.Steps))
+	for i, st := range it.Steps {
+		var ch map[string]string
+		switch st {
+		case StepNetwork:
+			switch {
+			case it.NICs != nil:
+				ch = NICChanges(cur, it.NICs)
+			case tpl != nil:
+				ch = NetworkChanges(cfg.Network, cur, it.Team, tpl.Interfaces)
+			}
+		case StepLabel:
+			ch = LabelChanges(cur, it.Tags, nil)
+		case StepSetTag:
+			ch = SetTagChanges(cur, it.Set)
+		case StepRetire:
+			if it.Supersedes != nil {
+				was := it.Supersedes.AsRead
+				out[i].tags = tagEdit(was["tags"], LabelChanges(was, AddTag(was["tags"], DeprecatedTag), nil))
+			}
+			continue
+		}
+		e := &out[i]
+		e.tags = tagEdit(cur["tags"], ch)
+		for k, v := range ch {
+			switch {
+			case isNetKey(k):
+				if e.nics == nil {
+					e.nics, e.replaced = map[string]string{}, map[string]string{}
+				}
+				e.nics[k], e.replaced[k] = v, cur[k]
+				cur[k] = v
+			case k == "tags":
+				cur[k] = v
+			case k == "delete" && v == "tags":
+				delete(cur, "tags")
+			}
+		}
+	}
+	return out
+}
+
+// tagEdit is the tags config change ch adds to or removes from tag list
+// was (tagChanges).
+func tagEdit(was string, ch map[string]string) []string {
 	switch {
-	case st == StepLabel, st == StepSetTag:
-		return it.TagsChanged
-	case st == StepRetire && it.Supersedes != nil:
-		return []string{DeprecatedTag}
+	case ch["delete"] == "tags":
+		return tagChanges(was, "")
+	case ch["tags"] != "":
+		return tagChanges(was, ch["tags"])
 	}
 	return nil
 }
 
 // tagNeeds is what Proxmox's assert_tag_permissions asks, beyond
 // VM.Config.Options, of a tag edit that adds or removes changed: Sys.Modify
-// on / when user-tag-access refuses one of them, a registered tag always.
-// deploy.approved_tag counts as registered whatever tags shows, since
-// approval only works registered and a reader without Sys.Audit on / is
-// shown no registered tags.
+// on / when user-tag-access refuses one of them, a registered tag always. A
+// reader without Sys.Audit on / is shown no registered tags, so with none
+// shown deploy.approved_tag counts as registered: approval only works while
+// it is.
 func tagNeeds(changed []string, tags proxmox.TagAccess, cfg config.Config) []need {
-	approved := cfg.Deploy.ApprovedTag
-	if slices.ContainsFunc(changed, func(t string) bool { return !tags.Allows(t) || approved != "" && t == approved }) {
+	unseen := len(tags.Registered) == 0
+	if slices.ContainsFunc(changed, func(t string) bool { return !tags.Allows(t) || unseen && t == cfg.Deploy.ApprovedTag }) {
 		return []need{one("/", "Sys.Modify")}
 	}
 	return nil
@@ -510,7 +539,7 @@ func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Co
 	}
 	var tags proxmox.TagAccess
 	for _, it := range plan.Items {
-		if it.Blocked == "" && slices.ContainsFunc(it.Steps, func(st Step) bool { return len(changedTags(it, st)) > 0 }) {
+		if it.Blocked == "" && slices.ContainsFunc(stepEdits(it, templates[it.Template], cfg), func(e stepEdit) bool { return len(e.tags) > 0 }) {
 			var err error
 			tags, err = acc.TagAccess(ctx)
 			if err != nil {

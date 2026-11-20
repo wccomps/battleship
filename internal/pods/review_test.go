@@ -2,9 +2,12 @@ package pods
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -35,9 +38,8 @@ func TestAccessRemembersAFailedListing(t *testing.T) {
 // VM's NICs are.
 func TestNetworkNeedsSDNUseOnTheBridgeLeft(t *testing.T) {
 	cfg := config.Default()
-	tpl := TemplateSpec{Name: "teak.x.tpl", VMID: 9021, Exists: true, Interfaces: 1, Bridges: []string{"int07"}}
-	item := Item{Team: "01", Name: "team01-teak", VMID: 10121, Template: tpl.Name, Steps: []Step{StepClone, StepNetwork},
-		NICsWas: map[string]string{"net0": "virtio,bridge=int07"}}
+	tpl := TemplateSpec{Name: "teak.x.tpl", VMID: 9021, Exists: true, Interfaces: 1, AsRead: map[string]string{"net0": "virtio,bridge=int07"}}
+	item := Item{Team: "01", Name: "team01-teak", VMID: 10121, Template: tpl.Name, Steps: []Step{StepClone, StepNetwork}, AsRead: tpl.AsRead}
 	acc := grants{"/vms/9021": {"VM.Clone"}, "/pool/pool-01": {"VM.Allocate", "VM.Config.Network"},
 		"/storage/competitions": {"Datastore.AllocateSpace"}, "/sdn/zones/teams/int01": {"SDN.Use"}}
 	plan := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{tpl}, Items: []Item{item}}
@@ -47,7 +49,8 @@ func TestNetworkNeedsSDNUseOnTheBridgeLeft(t *testing.T) {
 	if b := plan.Items[0].Blocked; b != "you don't have SDN.Use on /sdn/zones/teams/int07" {
 		t.Fatalf("blocked %q", b)
 	}
-	tpl.Bridges, item.NICsWas = []string{"vmbr0"}, map[string]string{"net0": "virtio,bridge=vmbr0"}
+	tpl.AsRead = map[string]string{"net0": "virtio,bridge=vmbr0"}
+	item.AsRead = tpl.AsRead
 	plan = &Plan{Kind: KindDeploy, Templates: []TemplateSpec{tpl}, Items: []Item{item}}
 	_ = BlockUnpermitted(context.Background(), plan, acc, cfg)
 	if b := plan.Items[0].Blocked; b != "" {
@@ -61,10 +64,41 @@ func TestTemplateSpecReadsNICs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := plan.Templates[0].Bridges; len(got) != 2 || got[0] != "vmbr0" || got[1] != "vmbr1" {
-		t.Fatalf("bridges = %v", got)
+	if got := plan.Templates[0].AsRead; len(got) != 3 || nicBridge(got["net0"]) != "vmbr0" || nicBridge(got["net1"]) != "vmbr1" || got["tags"] == "" {
+		t.Fatalf("template as read = %v", got)
 	}
-	if got := plan.Items[0].NICsWas; len(got) != 2 || nicBridge(got["net0"]) != "vmbr0" || nicBridge(got["net1"]) != "vmbr1" {
-		t.Fatalf("item NICsWas = %v", got)
+	if got := plan.Items[0].AsRead; !maps.Equal(got, plan.Templates[0].AsRead) {
+		t.Fatalf("item as read = %v", got)
+	}
+}
+
+// A pod VM a deploy keeps starts its steps from its own NICs and tags, not
+// its template's, so the network step asks SDN.Use on the team vnet the VM
+// leaves.
+func TestDeployKeepsAPodVMsOwnNICs(t *testing.T) {
+	cfg := config.Default()
+	n := NewNaming(cfg.Naming)
+	f := podstest.New("cedar")
+	nic := func() map[string]string { return map[string]string{"net0": "virtio=BC:24:11:00:01:21,bridge=vmbr0"} }
+	f.Add(proxmox.VM{VMID: 121, Name: "teak.tango.delta", Node: "cedar", Tags: "dev"}, nic())
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true, Tags: "dev"}, nic())
+	vmid := n.CloneVMID("01", 9021)
+	f.Add(proxmox.VM{VMID: vmid, Name: n.VMName("01", "teak"), Node: "cedar", Pool: n.Pool("01"), Tags: "set-tango.delta"},
+		map[string]string{"net0": "virtio=BC:24:11:00:01:22,bridge=ext02"})
+	plan, err := NewPlanner(f, cfg).Deploy(context.Background(), DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	it := plan.Items[0]
+	if it.Blocked != "" || slices.Contains(it.Steps, StepClone) || nicBridge(it.AsRead["net0"]) != "ext02" || it.AsRead["tags"] != "set-tango.delta" {
+		t.Fatalf("item = %+v", it)
+	}
+	acc := grants{VMPath(vmid): {"VM.Config.Network", "VM.Config.Disk", "VM.Config.CDROM", "VM.Config.Options", "VM.PowerMgmt"},
+		"/sdn/zones/teams/int01": {"SDN.Use"}}
+	if err := BlockUnpermitted(context.Background(), plan, acc, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if b := plan.Items[0].Blocked; b != "you don't have SDN.Use on /sdn/zones/teams/ext02" {
+		t.Errorf("blocked %q", b)
 	}
 }
