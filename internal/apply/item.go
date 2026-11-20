@@ -317,8 +317,11 @@ func (e *Executor) startClone(ctx context.Context, template bool, req proxmox.Cl
 	}
 	e.mu.Unlock()
 	if p == probeSame {
-		if template {
-			return "", e.mayConvert(req.NewVMID, req.Name, isTemplate)
+		switch {
+		case template && isTemplate && !ours: // a later listing shows it as the template
+			return "", fmt.Errorf("template %s (%d) appeared while this run was creating it; re-run to use it", req.Name, req.NewVMID)
+		case template:
+			return "", e.mayConvert(req.NewVMID, req.Name)
 		}
 		return "", nil
 	}
