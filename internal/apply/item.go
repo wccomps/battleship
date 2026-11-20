@@ -301,7 +301,8 @@ func (e *Executor) status(ctx context.Context, it *pods.Item) (string, error) {
 // probed first; a VM with the expected name there means "" is returned (for
 // a template copy it must be this run's, and not the leftover of a copy whose
 // task failed). Only a VM seen absent becomes this run's, and stays so from
-// the POST on even if the request times out.
+// the POST on even if the request times out. A POST into a VMID this run
+// already owns starts its state afresh, unless told the VM exists.
 func (e *Executor) startClone(ctx context.Context, template bool, req proxmox.CloneRequest) (string, error) {
 	p, err := e.probeClone(ctx, req.TargetNode, req.NewVMID, req.Name)
 	if err != nil {
@@ -326,11 +327,16 @@ func (e *Executor) startClone(ctx context.Context, template bool, req proxmox.Cl
 		return "", nil
 	}
 	upid, err := e.api.Clone(ctx, req)
-	if err != nil && claimed && e.classifier.Classify(err) == proxmox.Exists {
-		e.mu.Lock() // somebody else got there first
+	exists := err != nil && e.classifier.Classify(err) == proxmox.Exists
+	e.mu.Lock()
+	switch {
+	case claimed && exists: // somebody else got there first
 		delete(e.owned, req.NewVMID)
-		e.mu.Unlock()
+	case ours && !exists:
+		// What an earlier copy left is gone, so a VM there now is this POST's.
+		o.state = cloneUnknown
 	}
+	e.mu.Unlock()
 	return upid, err
 }
 

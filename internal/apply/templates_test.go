@@ -3,6 +3,7 @@ package apply
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -407,30 +408,66 @@ func (l *laggingListing) ClusterVMs(ctx context.Context) ([]proxmox.VM, error) {
 
 // A copy whose task failed may leave its VM behind, and the next round's
 // listing may not show it yet. The clone's probe then finds it under the
-// expected name; being this run's, it must still not be converted to a
-// template: it is the leftover of a failed copy.
+// expected name, or misses it too and the POST is told it exists. Either
+// way, though this run's, it must not be converted to a template: it is the
+// leftover of a failed copy.
 func TestFailedCopyLeftoverMissingFromTheListingIsNotConverted(t *testing.T) {
+	for _, probeMisses := range []bool{false, true} {
+		t.Run(fmt.Sprintf("probeMisses=%v", probeMisses), func(t *testing.T) {
+			f := newCluster()
+			plan := deployTeak(t, f, "01")
+			api := &laggingListing{Fake: f}
+			copyTask := podstest.UPID("cedar", "qmclone", 121)
+			f.WaitHook = func(_ context.Context, upid string) error { // runs with f.Mu held
+				if upid != copyTask {
+					return nil
+				}
+				f.WaitHook = nil
+				api.hidden.Store(9021) // the next listing misses the leftover
+				if probeMisses {
+					f.FailOn("config:9021", notExist(9021)) // and so does the next probe
+				}
+				return &proxmox.TaskError{UPID: upid, ExitStatus: "clone failed: storage error"}
+			}
+			ex := testExecutor(f, &recorder{})
+			ex.API = api
+
+			res := ex.Run(context.Background(), plan)
+			if n := f.Called("template:9021"); n != 0 {
+				t.Errorf("the failed copy's leftover was converted to a template (%d conversions)", n)
+			}
+			if err := res.Failed["team01-teak"]; err == nil || !strings.Contains(err.Error(), "leftover of a failed copy") {
+				t.Errorf("error = %v, want the failed copy's leftover refused", err)
+			}
+		})
+	}
+}
+
+// A copy whose task failed is not a leftover once Proxmox has removed its
+// target. The next round's copy into that VMID is this run's afresh: its POST
+// fails after creating the VM, and the retry's probe finds the new copy,
+// which is converted.
+func TestCopyIntoAFailedCopysRemovedTargetIsConverted(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
-	api := &laggingListing{Fake: f}
 	copyTask := podstest.UPID("cedar", "qmclone", 121)
 	f.WaitHook = func(_ context.Context, upid string) error { // runs with f.Mu held
 		if upid != copyTask {
 			return nil
 		}
 		f.WaitHook = nil
-		api.hidden.Store(9021) // the next listing misses the leftover
+		delete(f.VMs, 9021) // Proxmox removes a failed clone's target
+		maps.DeleteFunc(f.Vols, func(_ string, owner int) bool { return owner == 9021 })
+		f.CloneThenFail = map[int]error{9021: &proxmox.APIError{Status: 502, Message: "Bad Gateway"}} // the next round's POST
 		return &proxmox.TaskError{UPID: upid, ExitStatus: "clone failed: storage error"}
 	}
-	ex := testExecutor(f, &recorder{})
-	ex.API = api
 
-	res := ex.Run(context.Background(), plan)
-	if n := f.Called("template:9021"); n != 0 {
-		t.Errorf("the failed copy's leftover was converted to a template (%d conversions)", n)
+	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
+	if !slices.Contains(res.Succeeded, "team01-teak") {
+		t.Errorf("result = %+v, want team01-teak succeeded", res)
 	}
-	if err := res.Failed["team01-teak"]; err == nil || !strings.Contains(err.Error(), "leftover of a failed copy") {
-		t.Errorf("error = %v, want the failed copy's leftover refused", err)
+	if vm := f.VMs[9021]; vm == nil || !vm.Template {
+		t.Errorf("9021 = %+v, want the new copy converted to a template", vm)
 	}
 }
 
