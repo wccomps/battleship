@@ -229,9 +229,36 @@ func cpuMapping(cpu string) string {
 	return ""
 }
 
-// Unclonable is why acc may not clone VM vmid, or "" when it may.
-func Unclonable(ctx context.Context, acc Access, vmid int) (string, error) {
-	return missing(ctx, acc, []need{one(VMPath(vmid), "VM.Clone")})
+// cloneNeeds is what cloning VM src as vmid into pool needs. bridges are
+// src's NIC bridges, on which Proxmox checks SDN.Use when they are vnets,
+// and cpu its CPU model.
+func cloneNeeds(cfg config.Config, src, vmid int, pool string, bridges []string, cpu string) []need {
+	ns := []need{
+		one(VMPath(src), "VM.Clone"),
+		on(vmid, pool, "VM.Allocate"),
+		one("/storage/"+cfg.Deploy.Storage, "Datastore.AllocateSpace"),
+	}
+	for _, b := range bridges {
+		zone := catalogZone(cfg, b)
+		if zone == "" && isTeamBridge(cfg.Network, b) {
+			zone = cfg.Proxmox.SDNZone
+		}
+		if zone != "" {
+			ns = append(ns, one("/sdn/zones/"+zone+"/"+b, "SDN.Use"))
+		}
+	}
+	if m := cpuMapping(cpu); m != "" {
+		ns = append(ns, one(m, "Mapping.Use"))
+	}
+	return ns
+}
+
+// Uncloneable is why acc may not clone tpl into team's pod, or "" when it
+// may: what a deploy's clone step asks, whether or not the pod already
+// holds a clone.
+func Uncloneable(ctx context.Context, acc Access, cfg config.Config, tpl TemplateSpec, team string) (string, error) {
+	n := NewNaming(cfg.Naming)
+	return missing(ctx, acc, cloneNeeds(cfg, tpl.VMID, n.CloneVMID(team, tpl.VMID), n.Pool(team), tpl.Bridges, tpl.CPU))
 }
 
 // templateNeeds is what building t needs; nothing when it is reused.
@@ -263,33 +290,13 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAc
 		switch st {
 		case StepClone:
 			pool = it.TargetPool(NewNaming(cfg.Naming))
-			src := 0
+			src, bridges, cpu := 0, []string(nil), ""
 			if it.Source != nil {
-				src = it.Source.VMID
+				src, bridges = it.Source.VMID, it.Source.Bridges
 			} else if tpl != nil {
-				src = tpl.VMID
+				src, bridges, cpu = tpl.VMID, tpl.Bridges, tpl.CPU
 			}
-			ns = append(ns,
-				one(VMPath(src), "VM.Clone"),
-				on(it.VMID, pool, "VM.Allocate"),
-				one("/storage/"+cfg.Deploy.Storage, "Datastore.AllocateSpace"))
-			// Proxmox checks SDN.Use on the source's bridges, as for a template's.
-			if it.Source != nil {
-				for _, b := range it.Source.Bridges {
-					zone := catalogZone(cfg, b)
-					if zone == "" && isTeamBridge(cfg.Network, b) {
-						zone = cfg.Proxmox.SDNZone
-					}
-					if zone != "" {
-						ns = append(ns, one("/sdn/zones/"+zone+"/"+b, "SDN.Use"))
-					}
-				}
-			}
-			if tpl != nil {
-				if m := cpuMapping(tpl.CPU); m != "" {
-					ns = append(ns, one(m, "Mapping.Use"))
-				}
-			}
+			ns = append(ns, cloneNeeds(cfg, src, it.VMID, pool, bridges, cpu)...)
 		case StepNetwork:
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Network"))
 			if it.NICs != nil {
@@ -309,19 +316,8 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAc
 			if tpl != nil && tpl.Interfaces >= 2 {
 				bridges = []string{cfg.Network.ExtBridge, cfg.Network.IntBridge}
 			}
-			var joins []string
 			for _, b := range bridges {
-				joins = append(joins, Expand(b, it.Team, ""))
 				ns = append(ns, one("/sdn/zones/"+cfg.Proxmox.SDNZone+"/"+Expand(b, it.Team, ""), "SDN.Use"))
-			}
-			// A new clone's NICs start on its template's bridges, so SDN.Use is checked
-			// on those too when they are team vnets.
-			if pool != "" && tpl != nil {
-				for _, b := range tpl.Bridges {
-					if isTeamBridge(cfg.Network, b) && !slices.Contains(joins, b) {
-						ns = append(ns, one("/sdn/zones/"+cfg.Proxmox.SDNZone+"/"+b, "SDN.Use"))
-					}
-				}
 			}
 		case StepDiskLimits:
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Disk"))

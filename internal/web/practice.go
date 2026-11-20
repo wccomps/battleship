@@ -180,11 +180,11 @@ type practiceSet struct {
 	Name  string   `json:"name"`
 	Hosts []string `json:"hosts"`
 	// Templates are the set's built templates the planner would use and the
-	// principal may clone.
+	// principal may clone into the first session pod.
 	Templates []practiceTemplate `json:"templates"`
 	// Blocked are the templates the planner refuses, whose deploy to the
 	// first session pod lacks one of the principal's rights, or which it may
-	// not clone, and why.
+	// not clone into that pod (pods.Uncloneable), and why.
 	Blocked []practiceBlocked `json:"blocked"`
 	// Pod is what one pod of the set takes: the sum over Templates.
 	Pod practiceSize `json:"pod"`
@@ -282,8 +282,8 @@ func (s *Server) practiceSet(ctx context.Context, planner pods.Planner, set pods
 		why := cmp.Or(t.Blocked, unpermitted[t.Name])
 		if why == "" {
 			// A pod that already holds the set clones nothing, so its plan
-			// asks no clone right; it is asked of the template here.
-			if why, err = pods.Unclonable(ctx, planner.Access, t.VMID); err != nil {
+			// asks no clone right; it is asked here.
+			if why, err = pods.Uncloneable(ctx, planner.Access, s.cfg, t, pod); err != nil {
 				return failed(err)
 			}
 		}
