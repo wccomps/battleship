@@ -246,10 +246,7 @@ func (c *Client) TagAccess(ctx context.Context) (TagAccess, error) {
 		t.Mode = raw.UserTagAccess.UserAllow
 	}
 	if raw.TagStyle != nil {
-		switch strings.Trim(string(raw.TagStyle.CaseSensitive), `"`) {
-		case "1", "true":
-			t.CaseSensitive = true
-		}
+		t.CaseSensitive = boolOf(raw.TagStyle.CaseSensitive)
 	}
 	return t, nil
 }
