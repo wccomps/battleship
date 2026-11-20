@@ -195,7 +195,7 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 	default:
 		wantBase = req.Image
 	}
-	wantTags := hostTags(h.Tags, p.Cfg.Deploy.MasterTag, Domain(h.Name), domain, wantKind == ImageRouter)
+	wantTags := hostTags(h.Tags, p.Cfg.Deploy.MasterTag, p.Cfg.Deploy.ApprovedTag, Domain(h.Name), domain, wantKind == ImageRouter)
 	wantNotes := h.Notes
 	wantNotes.Base = wantBase
 
@@ -386,11 +386,13 @@ func resolveHostName(env Environment, h EnvHost, input string) (full, host, doma
 }
 
 // hostTags updates a slot VM's tag list with masterTag, domain and router,
-// keeping any other tags on the VM in order.
-func hostTags(cur, masterTag, oldDomain, domain string, router bool) string {
+// keeping any other tags on the VM in order and in their own spelling. A move
+// into another domain drops approvedTag, so a rename never carries approval
+// into another set.
+func hostTags(cur, masterTag, approvedTag, oldDomain, domain string, router bool) string {
 	var out []string
 	add := func(t string) {
-		if t != "" && !slices.Contains(out, t) {
+		if t != "" && !slices.ContainsFunc(out, func(o string) bool { return strings.EqualFold(o, t) }) {
 			out = append(out, t)
 		}
 	}
@@ -401,8 +403,13 @@ func hostTags(cur, masterTag, oldDomain, domain string, router bool) string {
 	if router {
 		add(ImageRouter)
 	}
-	for _, t := range Tags(cur) {
-		if t == ImageRouter || (oldDomain != "" && t == oldDomain && domain != oldDomain) {
+	moved := domain != oldDomain
+	approvedTag = strings.TrimSpace(approvedTag)
+	for _, t := range strings.FieldsFunc(cur, isTagSeparator) {
+		switch {
+		case strings.EqualFold(t, ImageRouter),
+			moved && oldDomain != "" && strings.EqualFold(t, oldDomain),
+			moved && approvedTag != "" && strings.EqualFold(t, approvedTag):
 			continue
 		}
 		add(t)

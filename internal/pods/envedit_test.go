@@ -409,3 +409,29 @@ func TestEnvEditStaleDetails(t *testing.T) {
 		t.Errorf("stale details after a name clash blocked = %q", b)
 	}
 }
+
+func TestEnvEditRenameIntoOtherDomainDropsApproval(t *testing.T) {
+	for _, tc := range []struct {
+		name, host, want string
+	}{
+		{"other domain", "oak.other.env", "dev;other.env;Keep"},
+		{"same domain", "oak", "dev;kilo.alpha;Keep;approved"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := podstest.New("alder")
+			f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;Keep;approved", Status: "running"},
+				map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint01", "agent": "1",
+					"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1"})
+			cfg := envConfig()
+			cfg.Deploy.ApprovedTag = "approved"
+			p := NewPlanner(f, cfg)
+			plan, err := p.EnvEdit(context.Background(), HostEditInput{VMID: 2101, Host: tc.host})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := plan.Items[0].Tags; got != tc.want {
+				t.Errorf("tags = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
