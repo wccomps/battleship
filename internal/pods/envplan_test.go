@@ -24,7 +24,6 @@ func envFake() *podstest.Fake {
 	return f
 }
 
-// hostSpecs parses each spec as ParseHostSpec does.
 func hostSpecs(t *testing.T, specs ...string) []HostSpec {
 	t.Helper()
 	var hosts []HostSpec
