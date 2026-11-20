@@ -43,6 +43,17 @@ A session SHALL deploy the environment's templates as they were when it was publ
 - **WHEN** the Battleship environment behind a published environment is torn down
 - **THEN** it is no longer offered and staff are alerted
 
+### Requirement: A deploy carries the template digests it was listed with
+Every deploy the system asks Battleship for SHALL carry, for each template of the set, the config digest Battleship listed for it. Battleship SHALL refuse a deploy without them, and SHALL refuse a deploy whose templates' digests differ from them, both when the deploy is submitted and again when Battleship's worker takes up the job.
+
+#### Scenario: Template changed since it was listed
+- **WHEN** a template of the environment is rebuilt after the system listed the sets, before the deploy is submitted or while it waits to run
+- **THEN** Battleship refuses the deploy and clones nothing from the changed template
+
+#### Scenario: Deploy without digests
+- **WHEN** the system asks Battleship for a deploy that carries no digests
+- **THEN** Battleship refuses it
+
 ### Requirement: Start deploys the environment to the booking's pods
 The system SHALL, when the host presses Start inside the booked window, deploy the chosen environment to every pod of the booking, take each VM's baseline, and start the VMs. Start SHALL be refused outside the window.
 

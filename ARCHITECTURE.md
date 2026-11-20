@@ -51,7 +51,8 @@ form ──> preview ──> confirm ──> stored job ──> worker claims it
    exists.
 
 Every Proxmox call is made with the credential of the person acting (for a
-job, its submitter); battleship holds none of its own (see
+job, its submitter), or of `practice.principal` for the session interface and
+its jobs; battleship holds none of its own (see
 [`THREAT_MODEL.md`](THREAT_MODEL.md)). Postgres
 LISTEN/NOTIFY wakes idle workers, cancels jobs at once, and pushes changes to
 open pages.
@@ -67,7 +68,7 @@ serves `web.Server.PracticeHandler` and none of the pages:
 |---|---|
 | `GET /v1/sets` | The approved sets: their hosts, their built templates with a digest of each one's config, and what one pod takes |
 | `GET /v1/pods/{pod}/vms` | One session pod's VMs |
-| `POST /v1/jobs` | Submits a deploy of an approved set to pods, or a teardown of pods |
+| `POST /v1/jobs` | Submits a deploy of an approved set to pods, carrying the digests `GET /v1/sets` listed for its templates, or a teardown of pods |
 | `GET /v1/jobs/{id}`, `POST /v1/jobs/{id}/cancel` | Reads or cancels a job the interface submitted |
 
 Each call carries `practice.key` and a Proxmox ticket of `practice.principal`,
@@ -79,8 +80,10 @@ own checks stand in for the preview: pods inside `practice.pods`, deploy or
 teardown only, an approved set, nothing blocked in a deploy. A session
 deploy carries `approved_only`: the planner takes exactly the named set's
 masters, only while the set is approved, and clones built templates without
-building any (`pods.DeployRequest.ApprovedSet`), so the worker's re-plan
-(step 4) asks again. `internal/web/testdata/practice` holds an example of
+building any (`pods.DeployRequest.ApprovedSet`), and blocks a template whose
+digest differs from the one the request carries; the job's fingerprint covers
+the digests, and the worker's re-plan
+(step 4) checks both again. `internal/web/testdata/practice` holds an example of
 each call, for the practice app's client to be tested against.
 
 ## Packages

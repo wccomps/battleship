@@ -2,8 +2,6 @@
 
 Scope: the six capability specs and `design.md` in this change. It extends `THREAT_MODEL.md` in `wccomps/battleship` and `wccomps/wccomps-portal`; "§" refers to Battleship's file. The practice app's own `THREAT_MODEL.md` is written from this one (task 3.6).
 
-History: the first version modelled a design where the portal hosted every team page and sessions shared pods 1 to 50 with official events. The second moved sessions to their own pods, accounts and scoring but kept the code in the portal. This version moves it to a separate app and moves the AI add-on to the `practice-ai-addon` change. Section 7 says what happened to each earlier finding.
-
 Status of each finding: **In spec** (a requirement or design decision covers it), **to test** (covered on paper, rests on an assumption listed in `design.md`), **Open** (not covered), **Accepted**.
 
 ## 1. What is new
@@ -72,10 +70,10 @@ The list of rights is read from code. Task 1.5 runs a real deploy with it and pr
 - Own listener, off the public address.
 - No human confirm. In its place: deploy and teardown only, pods inside a configured range checked in Battleship, approved sets only, and a deploy refused whole if any VM in it is blocked.
 - Reads and cancels only jobs it created. Each job records where it came from, and only the interface writes its own mark. Volunteers' jobs hold lab logins (§8).
-- Session job inputs are a kind, a pod range and a set name. They carry no booking reference and no customer details, since every volunteer can read them.
+- Session job inputs are a kind, a pod range, a set name and, for a deploy, the template digests the listing showed. They carry no booking reference and no customer details, since every volunteer can read them.
 - The key alone does nothing: Battleship still holds no credential.
 - Approval is read as the session user sees the cluster. A master it cannot see is not counted, so it needs `VM.Audit` on whole sets, and practice records an environment's templates at publishing (S-04).
-- Approval counts only if the tag is one of Proxmox's registered tags, in the exact spelling. Proxmox stores tags lower-cased unless `tag-style` is case-sensitive, and by default lets anyone set any unregistered tag, including `Approved`; so Battleship also requires `tag-style` case-sensitive, a tag with no letters, a `user-allow` of none, or a `user-allow` of list whose list holds no unregistered case variant. Free and existing are always refused: under existing each user may also set the tags on guests it can audit, which no single reader sees whole. It checks this on every listing and every session deploy, and approves nothing otherwise. To see the registered tags the session user needs `Sys.Audit` on `/`, a read-only right over the whole cluster, granted with propagation off; a clone copies its source's tags unchecked, so `VM.Clone` on approved masters and templates goes to trusted people only (task 1.6).
+- Approval counts only if the tag is one of Proxmox's registered tags, in the exact spelling. Proxmox stores tags lower-cased unless `tag-style` is case-sensitive, and by default lets anyone set any unregistered tag, including `Approved`; so Battleship also requires `tag-style` case-sensitive, a tag with no letters, a `user-allow` of none, or a `user-allow` of list whose list holds no unregistered case variant. So for a tag with letters under case-insensitive tags, free and existing are refused: under existing each user may also set the tags on guests it can audit, which no single reader sees whole. It checks this on every listing and every session deploy, and approves nothing otherwise. To see the registered tags the session user needs `Sys.Audit` on `/`, a read-only right over the whole cluster, granted with propagation off; a clone copies its source's tags unchecked, and a rename keeps them (Battleship's own env-edit drops the approval tag on a domain change, a rename in Proxmox doesn't), so `VM.Clone` on approved masters and templates and `VM.Config.Options` on tagged VMs go to trusted people only, and the session user's per-template `VM.Clone` is what finally stops a forged set (task 1.6).
 - A session deploy clones built templates and never builds one from a master, so the session user needs no clone right on any master.
 - The interface's listener is plain HTTP. The key and the session user's ticket cross it unencrypted, so only practice may be able to reach it, over a network nobody else can read.
 
@@ -172,7 +170,7 @@ aweful-dns runs on the scoring VM and forwards each pod's names to that pod's ow
 ### S-17 What an environment releases — Medium, In spec
 
 - VM logins shown to teams are entered at publishing, not read from the masters' notes, which hold staff logins. Deploys already clear notes from pod VMs (`StepNotes`).
-- Sessions get templates as built, never a master mid-edit: a deploy reuses existing templates and the session principal cannot rebuild them. Publishing records each template's config digest, so a template rebuilt without publishing again is noticed and withdrawn rather than sold unreviewed.
+- Sessions get templates as built, never a master mid-edit: a deploy reuses existing templates and the session principal cannot rebuild them. Publishing records each template's config digest, so a template rebuilt without publishing again is noticed and withdrawn rather than sold unreviewed. A deploy carries the digests practice listed, and Battleship refuses it if a template changed since, at submission and again when the worker claims the job.
 - Sign-ins and VM logins appear only on the pod page after Start, never in email.
 
 ### S-18 Who may book — High, In spec
@@ -247,25 +245,7 @@ Accepted: a compromised portal can cost the org a round of refund fees before st
 | 8 | Practice's Authentik role works as designed: two permissions on nine accounts, and a password change ends open sign-ins (S-22) | Task 1.12 |
 | 9 | Terms of use, and software licences for paying customers (S-18) | The org |
 
-## 7. What became of earlier findings
-
-| Finding | Earlier | Now |
-|---|---|---|
-| TM-01 shared `team{NN}` namespace | High, gap | Removed by dedicated pods and accounts (S-01) |
-| TM-02 portal holds a Proxmox password | High, partial | Held by practice, with narrow rights and no reset or power (S-02) |
-| TM-03 Battleship machine route | High, partial | Narrowed to deploy and teardown (S-03) |
-| TM-04 approval is one tag | High, partial | Three keys (S-04) |
-| TM-05 network and capacity | High, gap | Network is a requirement, to test (S-05); capacity has a budget |
-| TM-06 window end | High, partial | Fixed order, blocks the next session (S-06) |
-| TM-07 host identity and join tokens | Medium, gap | Emailed links (S-09) |
-| TM-08 payment | Medium, partial | S-08 |
-| TM-09 AI grading, TM-10 AI red team | Medium and High | Moved to `practice-ai-addon` |
-| TM-11 reset and power as a lever | Medium, partial | Teams do not submit Battleship jobs (S-14) |
-| TM-12 audit | Low, gap | S-15 |
-| Public webhook beside the portal's Authentik admin token | Medium | Removed by the separate app (S-08, S-22) |
-| Play worker inside the portal | Medium | Replaced by practice's own worker (S-22) |
-
-## 8. Not verified
+## 7. Not verified
 
 Read from the repositories and from Proxmox's, Quotient's and Authentik's sources and documentation. Nothing was run against a cluster.
 
