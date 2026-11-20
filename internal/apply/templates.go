@@ -143,7 +143,7 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 		e.emit(name, pods.StepClone, EventSkipped, "template exists")
 		return nil
 	case found:
-		if err := e.mayConvert(spec.VMID, name); err != nil {
+		if err := e.mayConvert(spec.VMID, name, false); err != nil {
 			return err
 		}
 		b.node = cur.Node
@@ -348,13 +348,16 @@ func (e *Executor) settleCopy(vmid int, err error) {
 
 // mayConvert decides whether the template copy found at vmid under its
 // expected name may be converted: only one this run created whose task did
-// not fail. Cleanup removes a failed copy's leftover.
-func (e *Executor) mayConvert(vmid int, name string) error {
+// not fail. Cleanup removes a failed copy's leftover. isTemplate says the VM
+// found is already a template.
+func (e *Executor) mayConvert(vmid int, name string, isTemplate bool) error {
 	e.mu.Lock()
 	o := e.owned[vmid]
 	failed := o != nil && o.state == cloneTaskFailed
 	e.mu.Unlock()
 	switch {
+	case o == nil && isTemplate: // a later listing shows it as the template
+		return fmt.Errorf("template %s (%d) appeared while this run was creating it; re-run to use it", name, vmid)
 	case o == nil:
 		return fmt.Errorf("%s (%d) exists but is not a template and wasn't created by this run; re-plan with rebuild", name, vmid)
 	case failed:

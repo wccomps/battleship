@@ -304,7 +304,7 @@ func (e *Executor) status(ctx context.Context, it *pods.Item) (string, error) {
 // times out. A POST into a VMID this run already owns starts its state
 // afresh, unless told the VM exists.
 func (e *Executor) startClone(ctx context.Context, template bool, req proxmox.CloneRequest) (string, error) {
-	p, err := e.probeClone(ctx, req.TargetNode, req.NewVMID, req.Name)
+	p, isTemplate, err := e.probeClone(ctx, req.TargetNode, req.NewVMID, req.Name)
 	if err != nil {
 		return "", err
 	}
@@ -318,7 +318,7 @@ func (e *Executor) startClone(ctx context.Context, template bool, req proxmox.Cl
 	e.mu.Unlock()
 	if p == probeSame {
 		if template {
-			return "", e.mayConvert(req.NewVMID, req.Name)
+			return "", e.mayConvert(req.NewVMID, req.Name, isTemplate)
 		}
 		return "", nil
 	}
@@ -345,31 +345,31 @@ const (
 	probeOther               // some other VM: the POST would fail with "already exists"
 )
 
-// probeClone looks at vmid before a clone. Only "does not exist" counts as
-// absent; other read errors are returned rather than claim a VM it may not
-// have created. A locked VM is reported as proxmox.ErrLocked so the caller
-// backs off.
-func (e *Executor) probeClone(ctx context.Context, node string, vmid int, name string) (probe, error) {
+// probeClone looks at vmid before a clone and reports whether the VM there
+// is a template. Only "does not exist" counts as absent; other read errors
+// are returned rather than claim a VM it may not have created. A locked VM
+// is reported as proxmox.ErrLocked so the caller backs off.
+func (e *Executor) probeClone(ctx context.Context, node string, vmid int, name string) (probe, bool, error) {
 	cfg, err := e.api.VMConfig(ctx, node, vmid)
 	if err != nil {
 		if proxmox.IsNotFound(err) {
-			return probeAbsent, nil
+			return probeAbsent, false, nil
 		}
-		return probeOther, err
+		return probeOther, false, err
 	}
-	lock := cfg["lock"]
+	lock, isTemplate := cfg["lock"], cfg["template"] == "1"
 	if cfg["name"] != name {
 		if cfg["name"] == "" && lock != "" {
-			return probeOther, fmt.Errorf("VM %d is locked (%s) and has no name yet: %w", vmid, lock, proxmox.ErrLocked)
+			return probeOther, isTemplate, fmt.Errorf("VM %d is locked (%s) and has no name yet: %w", vmid, lock, proxmox.ErrLocked)
 		}
-		return probeOther, fmt.Errorf("VMID %d is used by %q; not cloning over it", vmid, cfg["name"])
+		return probeOther, isTemplate, fmt.Errorf("VMID %d is used by %q; not cloning over it", vmid, cfg["name"])
 	}
 	if lock != "" {
 		err := fmt.Errorf("VM %d is locked (%s): %w", vmid, lock, proxmox.ErrLocked)
 		e.emit(name, pods.StepClone, EventInfo, "waiting: "+err.Error())
-		return probeSame, err
+		return probeSame, isTemplate, err
 	}
-	return probeSame, nil
+	return probeSame, isTemplate, nil
 }
 
 // applyConfig applies the VM's config changes and reports whether any were

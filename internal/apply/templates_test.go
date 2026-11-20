@@ -471,6 +471,28 @@ func TestCopyIntoAFailedCopysRemovedTargetIsConverted(t *testing.T) {
 	}
 }
 
+// A finished template that appears at the target after the listing, under
+// the expected name, is refused without advice to rebuild it.
+func TestTemplateAppearingAtTheCopysTargetIsNotCalledANonTemplate(t *testing.T) {
+	f := newCluster()
+	plan := deployTeak(t, f, "01")
+	api := &laggingListing{Fake: f}
+	api.hidden.Store(9021)
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true},
+		map[string]string{"name": "teak.tango.delta.tpl"})
+	ex := testExecutor(f, &recorder{})
+	ex.API = api
+
+	res := ex.Run(context.Background(), plan)
+	if n := f.Called("clone:9021"); n != 0 {
+		t.Errorf("cloned over the template %d times", n)
+	}
+	err := res.Failed["team01-teak"]
+	if err == nil || strings.Contains(err.Error(), "not a template") || strings.Contains(err.Error(), "rebuild") {
+		t.Errorf("error = %v, want the template refused without advice to rebuild it", err)
+	}
+}
+
 // The refusal of a failed copy's leftover promises its removal, so cleanup
 // removes it even when cleanup's own listing misses it.
 func TestFailedCopyLeftoverIsRemovedThoughCleanupsListingMissesIt(t *testing.T) {
