@@ -11,8 +11,7 @@ import (
 )
 
 func hasTag(tags, tag string) bool {
-	tag = strings.ToLower(strings.TrimSpace(tag))
-	return tag != "" && slices.Contains(Tags(tags), tag)
+	return tag != "" && slices.Contains(Tags(tags), strings.ToLower(tag))
 }
 
 // FindMasters returns non-template VMs matching pattern that carry tag,

@@ -322,11 +322,12 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			envs[si].Hosts = append(envs[si].Hosts, p.buildEnvHost(vm, cfg, envs[si].Slot, p.nodeCPUModels(ctx, cpuByNode, vm.Node)))
 			continue
 		}
-		for _, b := range nicBridgesAll(cfg) {
-			if si, ok := bridgeSlot[b]; ok && !slices.Contains(envs[si].Users, vm.Name) {
+		forEachNIC(cfg, func(_, v string) {
+			b := nicBridge(v)
+			if si, ok := bridgeSlot[b]; ok && b != "" && !slices.Contains(envs[si].Users, vm.Name) {
 				envs[si].Users = append(envs[si].Users, vm.Name)
 			}
-		}
+		})
 	}
 	for i := range envs {
 		e := &envs[i]
@@ -431,17 +432,6 @@ func routerMACs(cfg map[string]string, s Slot) (wan, lan string) {
 		lan, _ = NICMAC(cfg["net1"])
 	}
 	return wan, lan
-}
-
-// nicBridgesAll lists the bridge of every NIC (net0 to net31).
-func nicBridgesAll(cfg map[string]string) []string {
-	var out []string
-	forEachNIC(cfg, func(_, v string) {
-		if b := nicBridge(v); b != "" {
-			out = append(out, b)
-		}
-	})
-	return out
 }
 
 // CPUType is a VM config's CPU model ("cputype=…", or the head before ',').
