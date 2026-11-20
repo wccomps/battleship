@@ -1,0 +1,16 @@
+schema: spec-driven
+created: 2026-11-12
+goal: Paid self-service practice sessions run with no volunteer present, sold
+  and run by a separate practice app, on dedicated pods and a per-session
+  scoring instance, managed by the host through an emailed link
+affected_areas:
+  - practice
+  - battleship/config
+  - battleship/pods
+  - battleship/jobs
+  - battleship/web
+  - wccomps-portal/events-endpoint
+  - quotient/practice-instance
+  - proxmox/access-and-pools
+  - authentik/session-accounts
+  - network/session-pods

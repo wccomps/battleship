@@ -100,6 +100,16 @@ func int64Of(n json.Number) int64 {
 	return 0
 }
 
+// boolOf reads a boolean Proxmox sent as 0/1 or false/true, bare or quoted;
+// anything else is false.
+func boolOf(raw json.RawMessage) bool {
+	switch strings.Trim(string(raw), `"`) {
+	case "1", "true":
+		return true
+	}
+	return false
+}
+
 // ClusterVMs lists the cluster's VMs, named (see nameNewVMs), from one
 // read of /cluster/resources.
 func (c *Client) ClusterVMs(ctx context.Context) ([]VM, error) {

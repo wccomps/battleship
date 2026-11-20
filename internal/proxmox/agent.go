@@ -88,8 +88,7 @@ func (c *Client) AgentExecStatus(ctx context.Context, node string, vmid, pid int
 	if err := c.agent(ctx, limit, http.MethodGet, node, vmid, "exec-status", params, &raw); err != nil {
 		return ExecStatus{}, err
 	}
-	exited := strings.TrimSpace(string(raw.Exited))
-	return ExecStatus{Exited: exited == "1" || exited == "true", ExitCode: int(int64Of(raw.ExitCode)), Out: raw.Out, Err: raw.Err}, nil
+	return ExecStatus{Exited: boolOf(raw.Exited), ExitCode: int(int64Of(raw.ExitCode)), Out: raw.Out, Err: raw.Err}, nil
 }
 
 // maxNICsAnswer bounds an answer to AgentInterfaces: 1 MiB is some 2,000

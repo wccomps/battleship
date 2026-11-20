@@ -1,6 +1,8 @@
 package pods
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"regexp"
@@ -75,29 +77,26 @@ func CountInterfaces(cfg map[string]string) int {
 	return n
 }
 
-// NICBridges lists the bridges of net0 and net1, the NICs a deploy
-// rewires, in that order, skipping a missing NIC.
-func NICBridges(cfg map[string]string) []string {
-	var out []string
-	for _, k := range []string{"net0", "net1"} {
-		if b := nicBridge(cfg[k]); b != "" {
-			out = append(out, b)
-		}
-	}
-	return out
-}
-
 // HasCloudInit reports whether any drive is a cloud-init drive.
 func HasCloudInit(cfg map[string]string) bool {
 	for k, v := range cfg {
-		if isDriveKey(k) {
-			head, opts := splitOptions(v)
-			if opts["media"] == "cdrom" && strings.Contains(head, "cloudinit") {
-				return true
-			}
+		if isDriveKey(k) && isCloudInitDrive(v) {
+			return true
 		}
 	}
 	return false
+}
+
+func isCloudInitDrive(v string) bool {
+	head, opts := splitOptions(v)
+	return opts["media"] == "cdrom" && strings.Contains(head, "cloudinit")
+}
+
+// RegeneratesCloudInit reports whether step st of it, run on config cur,
+// regenerates cloud-init: a network step with no NICs of its own on a VM
+// with a cloud-init drive.
+func RegeneratesCloudInit(st Step, it Item, cur map[string]string) bool {
+	return st == StepNetwork && it.NICs == nil && HasCloudInit(cur)
 }
 
 func nicSpec(current, bridge string) string {
@@ -170,8 +169,8 @@ func CDROMChanges(cur map[string]string) map[string]string {
 	want := map[string]string{}
 	for k, v := range cur {
 		if isDriveKey(k) {
-			head, opts := splitOptions(v)
-			if opts["media"] == "cdrom" && !strings.Contains(head, "cloudinit") {
+			_, opts := splitOptions(v)
+			if opts["media"] == "cdrom" && !isCloudInitDrive(v) {
 				want[k] = "none,media=cdrom"
 			}
 		}
@@ -238,6 +237,21 @@ func DiskVolumes(cfg map[string]string) map[string]string {
 		out[k] = head
 	}
 	return out
+}
+
+// ConfigDigest is a SHA-256 of a VM's config, for telling whether a template
+// is still the one it was. It leaves out what changes while the VM stays the
+// same machine: Proxmox's own digest, a task's lock, tags and notes.
+func ConfigDigest(cfg map[string]string) string {
+	h := sha256.New()
+	for _, k := range slices.Sorted(maps.Keys(cfg)) {
+		switch k {
+		case "digest", "lock", "tags", "description":
+			continue
+		}
+		fmt.Fprintf(h, "%q=%q\n", k, cfg[k])
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // VolumeFile is a volume's last path segment, e.g. "vm-10105-disk-0.qcow2"
@@ -328,11 +342,69 @@ func LabelChanges(cur map[string]string, tags string, notes *Notes) map[string]s
 	return out
 }
 
-func sameTags(a, b string) bool {
-	x, y := Tags(a), Tags(b)
-	slices.Sort(x)
-	slices.Sort(y)
-	return slices.Equal(x, y)
+// StepChanges is the config change step makes on its item's VM, for the
+// network, label and tag-set steps, or nil for any other step: what the
+// executor writes (runStep adds a label step's rename) and stepEdits replays.
+// tpl is the item's template, whose NIC count a network step without NICs
+// wires; with neither it returns nil, which the executor refuses.
+func StepChanges(step Step, it Item, net config.Network, tpl *TemplateSpec) func(cur map[string]string) map[string]string {
+	switch step {
+	case StepNetwork:
+		if it.NICs != nil {
+			return func(cur map[string]string) map[string]string { return NICChanges(cur, it.NICs) }
+		}
+		if tpl == nil {
+			return nil
+		}
+		return func(cur map[string]string) map[string]string {
+			return NetworkChanges(net, cur, it.Team, tpl.Interfaces)
+		}
+	case StepLabel:
+		return func(cur map[string]string) map[string]string { return LabelChanges(cur, it.Tags, it.Notes) }
+	case StepSetTag:
+		return func(cur map[string]string) map[string]string { return SetTagChanges(cur, it.Set) }
+	}
+	return nil
+}
+
+// sameTags reports whether tag lists a and b hold the same tags, as
+// tagChanges compares them.
+func sameTags(a, b string) bool { return len(tagChanges(a, b)) == 0 }
+
+// tagChanges are the tags whose count differs between tag lists a and b,
+// compared as typed, sorted: what Proxmox's assert_tag_permissions checks a
+// tag edit's rights on.
+func tagChanges(a, b string) []string {
+	count := map[string]int{}
+	for _, t := range strings.FieldsFunc(a, isTagSeparator) {
+		count[t]++
+	}
+	for _, t := range strings.FieldsFunc(b, isTagSeparator) {
+		count[t]--
+	}
+	var out []string
+	for t, n := range count {
+		if n != 0 {
+			out = append(out, t)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// respellTags is tag list want with each tag spelled as a tag of cur that
+// differs from it only in case, if any: Proxmox stores tags lower-cased
+// unless tag-style is case-sensitive, so a planner re-spells the tags it
+// wants before LabelChanges compares them to the VM's.
+func respellTags(cur, want string) string {
+	have := strings.FieldsFunc(cur, isTagSeparator)
+	out := strings.FieldsFunc(want, isTagSeparator)
+	for i, t := range out {
+		if j := slices.IndexFunc(have, func(c string) bool { return strings.EqualFold(c, t) }); j >= 0 {
+			out[i] = have[j]
+		}
+	}
+	return strings.Join(out, ";")
 }
 
 // AddTag adds tag to a tag list unless it is there.

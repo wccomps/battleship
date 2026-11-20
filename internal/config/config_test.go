@@ -44,6 +44,35 @@ round_pause = "5s"
 	}
 }
 
+// Load trims the deploy tags once, so a padded tag means the tag and a blank
+// master_tag is missing.
+func TestLoadTrimsDeployTags(t *testing.T) {
+	cfg, err := Load(writeFile(t, `
+[proxmox]
+url = "https://pve.example:8006"
+
+[deploy]
+master_tag = " dev "
+approved_tag = " approved "
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Deploy.MasterTag != "dev" || cfg.Deploy.ApprovedTag != "approved" {
+		t.Errorf("tags = %q, %q; want dev, approved", cfg.Deploy.MasterTag, cfg.Deploy.ApprovedTag)
+	}
+	_, err = Load(writeFile(t, `
+[proxmox]
+url = "https://pve.example:8006"
+
+[deploy]
+master_tag = "   "
+`))
+	if err == nil || !strings.Contains(err.Error(), "deploy.master_tag is required") {
+		t.Errorf("blank master_tag: Load = %v", err)
+	}
+}
+
 func TestLoadRejectsMissingFields(t *testing.T) {
 	path := writeFile(t, `
 [naming]
@@ -86,7 +115,7 @@ func TestExampleConfigLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, section := range []string{"[proxmox]", "[naming]", "[network]", "[deploy]", "[images]", "[environments]", "[concurrency]", "[retry]", "[database]", "[jobs]", "[web]", "[oidc]"} {
+	for _, section := range []string{"[proxmox]", "[naming]", "[network]", "[deploy]", "[images]", "[environments]", "[concurrency]", "[retry]", "[database]", "[jobs]", "[web]", "[oidc]", "[practice]"} {
 		if !strings.Contains(string(raw), section) {
 			t.Errorf("battleship.example.toml missing section %s", section)
 		}
@@ -351,11 +380,17 @@ func TestValidateRanges(t *testing.T) {
 			wantErr: "deploy.master_tag is required",
 		},
 		{
-			name: "master_tag only whitespace",
+			name: "approved_tag same as master_tag",
 			mutate: func(c *Config) {
-				c.Deploy.MasterTag = "   "
+				c.Deploy.ApprovedTag = "Dev"
 			},
-			wantErr: "deploy.master_tag is required",
+			wantErr: "deploy.approved_tag must differ from deploy.master_tag",
+		},
+		{
+			name: "approved_tag empty is accepted",
+			mutate: func(c *Config) {
+				c.Deploy.ApprovedTag = ""
+			},
 		},
 	}
 

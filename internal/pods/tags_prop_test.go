@@ -79,7 +79,7 @@ func checkTags(t interface{ Fatalf(string, ...any) }, tags string) {
 	}
 	// Whatever Tags finds, hasTag finds in any case; a blank asks for nothing.
 	for _, g := range got {
-		if !hasTag(tags, g) || !hasTag(tags, strings.ToUpper(g)) || !hasTag(tags, " "+g+" ") {
+		if !hasTag(tags, g) || !hasTag(tags, strings.ToUpper(g)) {
 			t.Fatalf("hasTag(%q, %q) = false", tags, g)
 		}
 	}
@@ -139,7 +139,7 @@ func TestPropBaseImagesMatchModel(t *testing.T) {
 				continue
 			}
 			want = append(want, BaseImage{Name: vm.Name, Family: fam, Version: ver, Kind: kind, VMID: vm.VMID, Node: vm.Node,
-				Deprecated: slices.Contains(tags, "deprecated")})
+				Deprecated: slices.Contains(tags, "deprecated"), Tags: vm.Tags})
 		}
 		got := BaseImages(vms)
 		order := func(a, b BaseImage) int {

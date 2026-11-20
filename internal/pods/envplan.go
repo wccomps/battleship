@@ -321,7 +321,7 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		if err != nil {
 			return nil, err
 		}
-		ip.Source.Bridges = sourceBridges(cfg)
+		ip.Source.AsRead = cfg
 		notes := Notes{Base: im.Name, DNS: dnsChoice}
 		if resumed {
 			notes.Base = cmp.Or(existing.Notes.Base, im.Name)
@@ -340,9 +340,13 @@ func (p Planner) envPlan(ctx context.Context, kind Kind, env Environment, hosts 
 		}
 		ip.NICs = env.Slot.wantNICs(im.Kind == ImageRouter)
 		ip.Steps = []Step{StepClone, StepLabel, StepNetwork, StepStart}
+		read := cfg // the clone's tags until its label step
 		if resumed {
 			ip.Steps = ip.Steps[1:]
+			read = existing.Config
+			ip.AsRead = read
 		}
+		ip.Tags = respellTags(read["tags"], ip.Tags)
 		if im.Kind == ImageWindows || im.Kind == ImageLinux {
 			addr := existing.Notes.IP
 			switch {

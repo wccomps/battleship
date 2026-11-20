@@ -308,8 +308,8 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			read = append(read, vm)
 		}
 	}
-	cfgs, err := p.readConfigs(ctx, read)
-	if err != nil {
+	cfgs, errs := p.readConfigs(ctx, read)
+	if err := readErr(read, errs); err != nil {
 		return nil, nil, err
 	}
 	cpuByNode := map[string][]string{}
@@ -322,11 +322,12 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 			envs[si].Hosts = append(envs[si].Hosts, p.buildEnvHost(vm, cfg, envs[si].Slot, p.nodeCPUModels(ctx, cpuByNode, vm.Node)))
 			continue
 		}
-		for _, b := range nicBridgesAll(cfg) {
-			if si, ok := bridgeSlot[b]; ok && !slices.Contains(envs[si].Users, vm.Name) {
+		forEachNIC(cfg, func(_, v string) {
+			b := nicBridge(v)
+			if si, ok := bridgeSlot[b]; ok && b != "" && !slices.Contains(envs[si].Users, vm.Name) {
 				envs[si].Users = append(envs[si].Users, vm.Name)
 			}
-		}
+		})
 	}
 	for i := range envs {
 		e := &envs[i]
@@ -337,24 +338,33 @@ func (p Planner) Environments(ctx context.Context) ([]Environment, []proxmox.VM,
 	return envs, vms, nil
 }
 
-func (p Planner) readConfigs(ctx context.Context, vms []proxmox.VM) ([]map[string]string, error) {
-	cfgs := make([]map[string]string, len(vms))
+// readConfigs reads vms' configs in batches: cfgs[i] is vms[i]'s, nil when
+// it is gone since the listing, and errs[i] why it can't be read.
+func (p Planner) readConfigs(ctx context.Context, vms []proxmox.VM) (cfgs []map[string]string, errs []error) {
+	cfgs, errs = make([]map[string]string, len(vms)), make([]error, len(vms))
 	var g errgroup.Group
 	g.SetLimit(batchSize)
 	for i, vm := range vms {
 		g.Go(func() error {
 			cfg, err := p.API.VMConfig(ctx, vm.Node, vm.VMID)
-			switch {
-			case proxmox.IsNotFound(err):
-				return nil // gone since the listing
-			case err != nil:
-				return fmt.Errorf("reading %s (%d): %w", vm.Name, vm.VMID, err)
+			if !proxmox.IsNotFound(err) { // else gone since the listing
+				cfgs[i], errs[i] = cfg, err
 			}
-			cfgs[i] = cfg
 			return nil
 		})
 	}
-	return cfgs, g.Wait()
+	_ = g.Wait()
+	return cfgs, errs
+}
+
+// readErr is the first of readConfigs' errors, naming its VM.
+func readErr(vms []proxmox.VM, errs []error) error {
+	for i, err := range errs {
+		if err != nil {
+			return fmt.Errorf("reading %s (%d): %w", vms[i].Name, vms[i].VMID, err)
+		}
+	}
+	return nil
 }
 
 func (p Planner) nodeCPUModels(ctx context.Context, cache map[string][]string, node string) []string {
@@ -431,17 +441,6 @@ func routerMACs(cfg map[string]string, s Slot) (wan, lan string) {
 		lan, _ = NICMAC(cfg["net1"])
 	}
 	return wan, lan
-}
-
-// nicBridgesAll lists the bridge of every NIC (net0 to net31).
-func nicBridgesAll(cfg map[string]string) []string {
-	var out []string
-	forEachNIC(cfg, func(_, v string) {
-		if b := nicBridge(v); b != "" {
-			out = append(out, b)
-		}
-	})
-	return out
 }
 
 // CPUType is a VM config's CPU model ("cputype=…", or the head before ',').

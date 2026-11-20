@@ -409,3 +409,116 @@ func TestEnvEditStaleDetails(t *testing.T) {
 		t.Errorf("stale details after a name clash blocked = %q", b)
 	}
 }
+
+func TestEnvEditRenameIntoOtherDomainDropsApproval(t *testing.T) {
+	for _, tc := range []struct {
+		name, host, want string
+	}{
+		{"other domain", "oak.other.env", "dev;other.env;Keep"},
+		{"same domain", "oak", "dev;kilo.alpha;Keep;approved"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := podstest.New("alder")
+			f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;Keep;approved", Status: "running"},
+				map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint01", "agent": "1",
+					"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1"})
+			cfg := envConfig()
+			cfg.Deploy.ApprovedTag = "approved"
+			p := NewPlanner(f, cfg)
+			plan, err := p.EnvEdit(context.Background(), HostEditInput{VMID: 2101, Host: tc.host})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := plan.Items[0].Tags; got != tc.want {
+				t.Errorf("tags = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Moving an approved host to another domain removes the registered approval
+// tag, which Proxmox lets only Sys.Modify on / do; the plan asks it then.
+func TestEnvEditDroppingApprovalNeedsSysModify(t *testing.T) {
+	for _, tc := range []struct {
+		name, host string
+		sysModify  bool
+		asked      bool // the item is blocked for Sys.Modify on /
+	}{
+		{"other domain", "oak.other.env", false, true},
+		{"other domain, with Sys.Modify", "oak.other.env", true, false},
+		{"same domain", "oak", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := podstest.New("alder")
+			f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;approved", Status: "running"},
+				map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint01", "agent": "1",
+					"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1"})
+			cfg := envConfig()
+			cfg.Deploy.ApprovedTag = "approved"
+			plan, err := NewPlanner(f, cfg).EnvEdit(context.Background(), HostEditInput{VMID: 2101, Host: tc.host})
+			if err != nil {
+				t.Fatal(err)
+			}
+			listed := proxmox.Permissions{"/vms/2101": {"VM.Config.Options": false}}
+			if tc.sysModify {
+				listed["/"] = map[string]bool{"Sys.Modify": false}
+			}
+			acc := NewAccess(&fakePerms{listed: listed, tags: proxmox.TagAccess{Registered: []string{"approved"}, CaseSensitive: true}})
+			if err := BlockUnpermitted(context.Background(), plan, acc, cfg); err != nil {
+				t.Fatal(err)
+			}
+			if got := plan.Items[0].Blocked; strings.Contains(got, "Sys.Modify on /") != tc.asked {
+				t.Errorf("blocked = %q, want Sys.Modify on / asked: %t", got, tc.asked)
+			}
+		})
+	}
+}
+
+// A volunteer without Sys.Audit on / is shown no registered tags, but
+// approval only works with deploy.approved_tag registered, so moving an
+// approved host still asks Sys.Modify on /.
+func TestEnvEditDroppingApprovalNeedsSysModifyUnseen(t *testing.T) {
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;approved", Status: "running"},
+		map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint01", "agent": "1",
+			"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1"})
+	cfg := envConfig()
+	cfg.Deploy.ApprovedTag = "approved"
+	plan, err := NewPlanner(f, cfg).EnvEdit(context.Background(), HostEditInput{VMID: 2101, Host: "oak.other.env"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acc := NewAccess(&fakePerms{listed: proxmox.Permissions{"/vms/2101": {"VM.Config.Options": false}}, tags: proxmox.TagAccess{Mode: "free"}})
+	if err := BlockUnpermitted(context.Background(), plan, acc, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.Items[0].Blocked; !strings.Contains(got, "you don't have Sys.Modify on /") {
+		t.Errorf("blocked = %q, want Sys.Modify on / asked", got)
+	}
+}
+
+// Proxmox checks SDN.Use on the netN value a write replaces as well as the
+// one it writes, so moving a NIC off another slot's vnet asks SDN.Use on
+// the vnet it leaves.
+func TestEnvEditNICMoveNeedsSDNUseOnTheVnetLeft(t *testing.T) {
+	f := podstest.New("alder")
+	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha", Status: "running"},
+		map[string]string{"net0": "virtio=BC:24:11:00:00:03,bridge=devint02", "agent": "1",
+			"description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1 dns=teak"})
+	cfg := envConfig()
+	plan, err := NewPlanner(f, cfg).EnvEdit(context.Background(), HostEditInput{VMID: 2101})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := plan.Items[0]; it.Blocked != "" || !slices.Contains(it.Steps, StepNetwork) {
+		t.Fatalf("item = %+v", it)
+	}
+	zone := "/sdn/zones/" + cfg.Environments.SDNZone
+	g := grants{"/vms/2101": {"VM.Config.Network", "VM.Config.Options"}, zone + "/devint01": {"SDN.Use"}}
+	if err := BlockUnpermitted(context.Background(), plan, g, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.Items[0].Blocked; got != "you don't have SDN.Use on "+zone+"/devint02" {
+		t.Errorf("blocked = %q", got)
+	}
+}

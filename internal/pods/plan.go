@@ -175,9 +175,9 @@ type Source struct {
 	VMID int    `json:"vmid"`
 	Node string `json:"node"`
 	Name string `json:"name"`
-	// Bridges are its NICs' bridges: Proxmox checks SDN.Use on them for a
-	// clone.
-	Bridges []string `json:"bridges,omitempty"`
+	// AsRead is its config as read, which a clone
+	// copies. Plans don't store it: rights are checked on a fresh plan.
+	AsRead map[string]string `json:"-"`
 	// Base, Notes and Unreadable are the source's notes, for its review: the
 	// version it edits (ImageEdit), and the user notes the copy keeps, less
 	// their details block (see ParseDetails), or all of them when Unreadable
@@ -209,13 +209,16 @@ type TemplateSpec struct {
 	// WillStopMaster: building the template stops the master, which is
 	// running, until the clone finishes.
 	WillStopMaster bool `json:"will_stop_master"`
-	// CPU (a custom-<name> model needs Mapping.Use to clone) and CloudInit
-	// (clones regenerate the drive) only decide the privileges a deploy needs.
-	CPU       string `json:"cpu,omitempty"`
-	CloudInit bool   `json:"cloud_init,omitempty"`
-	// Bridges are the template's net0 and net1 bridges, which clones start on
-	// until the network step rewires them.
-	Bridges []string `json:"bridges,omitempty"`
+	// CPU (a custom-<name> model needs Mapping.Use to clone) only decides the
+	// privileges a deploy needs.
+	CPU string `json:"-"`
+	// AsRead is the config as read a clone of the template starts
+	// with: the template's when reused, the master's, which the build copies,
+	// when built.
+	AsRead map[string]string `json:"-"`
+	// Digest is ConfigDigest of a reused template: what the session interface
+	// lists, and checks a submission against (BlockChanged).
+	Digest string `json:"digest,omitempty"`
 }
 
 type Item struct {
@@ -265,6 +268,11 @@ type Item struct {
 	// DetailsWas is an Edit notes's or Edit host's notes as read, for its
 	// review and fingerprint.
 	DetailsWas *NotesRead `json:"details_was,omitempty"`
+	// AsRead is the config as read of a VM the item keeps (an image
+	// deprecate's holds only its listed tags), which its steps start from;
+	// under StepClone they start from the clone source's (cloneSource). It
+	// only decides the rights the steps need.
+	AsRead map[string]string `json:"-"`
 	// Record is the domain a record or clear-record step writes into, or
 	// takes out of, Pool's comment.
 	Record string `json:"record,omitempty"`
@@ -454,6 +462,10 @@ type DeployRequest struct {
 	Hosts    []string // optional host filter
 	Rebuild  bool
 	Snapshot bool
+	// ApprovedOnly takes exactly the masters of the set Pattern names
+	// ("*.<set>", SetOfPattern). The deploy is refused (ErrNotApproved)
+	// unless the set is approved, and it clones only templates already built.
+	ApprovedOnly bool
 }
 
 func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
@@ -476,7 +488,7 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 	if len(nodes) == 0 {
 		return nil, fmt.Errorf("no online Proxmox nodes")
 	}
-	masters, untagged, err := FindMasters(vms, p.Naming, req.Pattern, p.Cfg.Deploy.MasterTag)
+	masters, untagged, err := p.deployMasters(ctx, req, vms)
 	if err != nil {
 		return nil, err
 	}
@@ -489,7 +501,7 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 	if len(kept) == 0 {
 		msg := fmt.Sprintf("no master VMs match %q with tag %q", req.Pattern, p.Cfg.Deploy.MasterTag)
 		if len(req.Hosts) > 0 {
-			msg = fmt.Sprintf("no master VMs match %q with tag %q and hosts %s", req.Pattern, p.Cfg.Deploy.MasterTag, strings.Join(req.Hosts, ", "))
+			msg += " and hosts " + strings.Join(req.Hosts, ", ")
 		}
 		if len(untagged) > 0 {
 			msg += fmt.Sprintf(" (%d match but lack the tag, e.g. %s)", len(untagged), untagged[0].Name)
@@ -523,7 +535,7 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 	g.SetLimit(batchSize)
 	for i, m := range kept {
 		g.Go(func() error {
-			spec, ws, err := p.templateSpec(ctx, m, req.Rebuild, req.Teams, byName, vms, slotByPool, cpuModels)
+			spec, ws, err := p.templateSpec(ctx, m, req, byName, vms, slotByPool, cpuModels)
 			if err != nil {
 				return err
 			}
@@ -547,6 +559,9 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 		}
 		if spec.Blocked == "" && (spec.VMID < base || spec.VMID >= base+100) {
 			spec.Blocked = fmt.Sprintf("template VMID %d is outside %d-%d, so its clone VMIDs could collide with another template's", spec.VMID, base, base+99)
+		}
+		if req.ApprovedOnly && spec.Blocked == "" && spec.Builds() {
+			spec.Blocked = "no template is built: a session deploy clones a template a volunteer built and builds none"
 		}
 		spec.WillStopMaster = spec.Blocked == "" && spec.Builds() && m.Status == "running"
 		if len(warnings[i]) > 0 {
@@ -576,8 +591,57 @@ func (p Planner) Deploy(ctx context.Context, req DeployRequest) (*Plan, error) {
 			plan.Items = append(plan.Items, p.deployItem(team, tpl, assign[team], req.Rebuild, req.Snapshot, byName, used))
 		}
 	}
+	// A pod VM the deploy keeps starts its steps from its own config. One it
+	// can't read blocks only its own item: jobs' keepVMs narrows the items
+	// only after planning.
+	var keptAt []int
+	var keptVMs []proxmox.VM
+	for i, it := range plan.Items {
+		if it.Blocked == "" && !slices.Contains(it.Steps, StepClone) {
+			keptAt = append(keptAt, i)
+			keptVMs = append(keptVMs, proxmox.VM{VMID: it.VMID, Name: it.Name, Node: it.OldNode})
+		}
+	}
+	cfgs, errs := p.readConfigs(ctx, keptVMs)
+	if err := ctx.Err(); err != nil {
+		return nil, err // a cancelled read is not the VM's fault
+	}
+	for j, i := range keptAt {
+		it := &plan.Items[i]
+		switch {
+		case errs[j] != nil:
+			it.Blocked = "can't read its config: " + errs[j].Error()
+		case cfgs[j] == nil:
+			it.Blocked = "is gone since the listing"
+		default:
+			it.AsRead = cfgs[j]
+		}
+	}
 	plan.BlockUnrebuildable()
 	return plan, nil
+}
+
+// deployMasters is the masters req names: Pattern's matches, with the
+// untagged ones, or with ApprovedOnly its set's own once the set is approved.
+func (p Planner) deployMasters(ctx context.Context, req DeployRequest, vms []proxmox.VM) (masters, untagged []proxmox.VM, err error) {
+	if !req.ApprovedOnly {
+		return FindMasters(vms, p.Naming, req.Pattern, p.Cfg.Deploy.MasterTag)
+	}
+	set, ok := SetOfPattern(req.Pattern)
+	if !ok {
+		return nil, nil, fmt.Errorf("an approved-only deploy names one set as *.<set>, not %q", req.Pattern)
+	}
+	tags, err := p.Access.TagAccess(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	tag, err := approvalTag(p.Cfg.Deploy, tags)
+	if err != nil {
+		return nil, nil, err
+	}
+	bySet, _ := mastersBySet(vms, p.Naming, p.Cfg.Deploy.MasterTag)
+	masters = bySet[set]
+	return masters, nil, requireApproved(set, masters, tag)
 }
 
 // blockDuplicateHosts blocks templates whose hostnames collide: their team
@@ -630,7 +694,28 @@ func (p *Plan) BlockUnrebuildable() {
 	}
 }
 
-func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, teams []string,
+// BlockChanged blocks each template of an ApprovedOnly deploy whose Digest
+// isn't digests[its name], and its items. It runs after BlockUnpermitted and
+// checks only templates with an item not blocked already, so a template the
+// listing left out, blocked itself or through every one of its items, keeps
+// its reason.
+func (p *Plan) BlockChanged(digests map[string]string) {
+	for i := range p.Templates {
+		t := &p.Templates[i]
+		runs := slices.ContainsFunc(p.Items, func(it Item) bool { return it.Template == t.Name && it.Blocked == "" })
+		if t.Blocked != "" || !runs || t.Digest == digests[t.Name] {
+			continue
+		}
+		t.Blocked = fmt.Sprintf("template %s changed since the set was listed; list the sets again", t.Name)
+		for j := range p.Items {
+			if it := &p.Items[j]; it.Template == t.Name && it.Blocked == "" {
+				it.Blocked, it.Node = "template "+t.Name+": "+t.Blocked, it.OldNode
+			}
+		}
+	}
+}
+
+func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, req DeployRequest,
 	byName map[string][]proxmox.VM, vms []proxmox.VM,
 	slotByPool map[string]Slot, cpuModels []string) (TemplateSpec, []string, error) {
 	cfg, err := p.API.VMConfig(ctx, m.Node, m.VMID)
@@ -647,7 +732,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, t
 		MasterNode: m.Node,
 	}
 	spec.Interfaces, spec.GPU = p.describe(cfg)
-	spec.CPU, spec.CloudInit, spec.Bridges = cfg["cpu"], HasCloudInit(cfg), NICBridges(cfg)
+	spec.CPU, spec.AsRead = cfg["cpu"], cfg
 	named := byName[spec.Name]
 	var existing proxmox.VM
 	exists := len(named) > 0
@@ -658,10 +743,10 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, t
 	case len(named) > 1:
 		spec.VMID, spec.Node = existing.VMID, existing.Node
 		spec.Blocked = fmt.Sprintf("several VMs are named %s (VMIDs %s); rename or delete the extras", spec.Name, vmidList(named))
-	case exists && !rebuild && !existing.Template:
+	case exists && !req.Rebuild && !existing.Template:
 		spec.VMID, spec.Node = existing.VMID, existing.Node
 		spec.Blocked = "exists but is not a template (an earlier build may have been interrupted); deploy with rebuild"
-	case exists && !rebuild:
+	case exists && !req.Rebuild:
 		spec.VMID, spec.Node, spec.Exists = existing.VMID, existing.Node, true
 		// Clones copy the template, so it describes the pod, not the master.
 		tcfg, err := p.API.VMConfig(ctx, existing.Node, existing.VMID)
@@ -669,11 +754,12 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, rebuild bool, t
 			return TemplateSpec{}, nil, fmt.Errorf("reading template %s: %w", spec.Name, err)
 		}
 		spec.Interfaces, spec.GPU = p.describe(tcfg)
-		spec.CPU, spec.CloudInit, spec.Bridges = tcfg["cpu"], HasCloudInit(tcfg), NICBridges(tcfg)
-	case exists && rebuild:
+		spec.CPU, spec.AsRead = tcfg["cpu"], tcfg
+		spec.Digest = ConfigDigest(tcfg)
+	case exists && req.Rebuild:
 		// Proxmox refuses to delete a template whose base disk a linked clone still uses.
 		for _, vm := range vms {
-			if team, host, ok := p.Naming.TeamVM(vm); ok && host == spec.Host && !slices.Contains(teams, team) {
+			if team, host, ok := p.Naming.TeamVM(vm); ok && host == spec.Host && !slices.Contains(req.Teams, team) {
 				spec.Blocked = fmt.Sprintf("pod VMs such as %s still use this template; tear them down first", vm.Name)
 				break
 			}

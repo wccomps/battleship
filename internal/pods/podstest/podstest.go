@@ -50,6 +50,9 @@ type Fake struct {
 	Calls []string
 	// Deleted are the VMIDs DeleteVM took off the cluster, in order.
 	Deleted []int
+	// Tags is the cluster's tag policy (TagAccess); the zero value is
+	// Proxmox's default.
+	Tags proxmox.TagAccess
 	// Gate, if set, runs at the start of every call, without Mu held, with
 	// the call's key ("cluster", "nodes", "status:<vmid>" or the key the
 	// call records). A non-nil error fails the call before it reaches the

@@ -397,15 +397,25 @@ func (s *Server) SetTagAccess(t proxmox.TagAccess) {
 	s.tagAccess = t
 }
 
+// options answers /cluster/options. As Proxmox does, it shows the registered
+// tags and the user-tag-access mode only to a caller with Sys.Audit on /, and
+// tag-style (case-sensitive, from TagAccess.CaseSensitive) to anyone.
 func (s *Server) options(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.caller(w, r) == "" {
+	name := s.caller(w, r)
+	if name == "" {
 		return
 	}
-	out := map[string]any{"allowed-tags": s.tagAccess.Allowed, "registered-tags": s.tagAccess.Registered}
-	if s.tagAccess.Mode != "" {
-		out["user-tag-access"] = map[string]string{"user-allow": s.tagAccess.Mode}
+	out := map[string]any{"allowed-tags": s.tagAccess.Allowed}
+	if s.tagAccess.CaseSensitive {
+		out["tag-style"] = map[string]int{"case-sensitive": 1}
+	}
+	if _, audits := s.effective(name, "/")["Sys.Audit"]; audits {
+		out["registered-tags"] = s.tagAccess.Registered
+		if s.tagAccess.Mode != "" {
+			out["user-tag-access"] = map[string]string{"user-allow": s.tagAccess.Mode}
+		}
 	}
 	reply(w, out)
 }

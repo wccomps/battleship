@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/jobs",
+    "headers": {
+      "Authorization": "Bearer <practice.key>",
+      "X-Proxmox-Ticket": "<a Proxmox ticket of practice.principal>"
+    },
+    "body": {
+      "kind": "teardown",
+      "pods": "51-52"
+    }
+  },
+  "status": 201,
+  "answer": {
+    "blocked": [],
+    "id": 1
+  }
+}

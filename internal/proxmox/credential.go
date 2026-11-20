@@ -2,6 +2,7 @@ package proxmox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -190,35 +191,62 @@ func (c *Client) PermissionsAt(ctx context.Context, path string) (map[string]boo
 type TagAccess struct {
 	// Mode is user-tag-access's user-allow setting: "" or "free" (the
 	// default), "existing", "list" or "none".
-	Mode       string
+	Mode string
+	// Allowed is allowed-tags as Proxmox works it out for the reader:
+	// user-allow-list unless Mode is none, and under free or existing the
+	// tags on guests the reader may audit.
 	Allowed    []string
 	Registered []string
+	// CaseSensitive is tag-style's case-sensitive; without it Proxmox stores
+	// tags lower-cased after checking them as typed.
+	CaseSensitive bool
 }
 
-// Allows reports whether a user without Sys.Modify on / may set tag.
+// Allows reports whether a user without Sys.Modify on / may set tag. Like
+// Proxmox, it looks the tag up as typed.
 func (t TagAccess) Allows(tag string) bool {
-	if slices.ContainsFunc(t.Registered, func(r string) bool { return strings.EqualFold(r, tag) }) {
+	if slices.Contains(t.Registered, tag) {
 		return false
 	}
-	return t.Mode == "" || t.Mode == "free" ||
-		slices.ContainsFunc(t.Allowed, func(a string) bool { return strings.EqualFold(a, tag) })
+	return t.Mode == "" || t.Mode == "free" || slices.Contains(t.Allowed, tag)
+}
+
+// AllowsVariantOf reports whether a user without Sys.Modify on / may set a
+// case variant of tag; without CaseSensitive Proxmox stores it lower-cased.
+// Under existing each user may also set the tags on guests it audits, which
+// no one reader sees whole, so existing counts as allowing one.
+func (t TagAccess) AllowsVariantOf(tag string) bool {
+	switch {
+	case t.CaseSensitive || strings.ToLower(tag) == strings.ToUpper(tag):
+		return false
+	case t.Mode == "list":
+		return slices.ContainsFunc(t.Allowed, func(a string) bool { return a != tag && strings.EqualFold(a, tag) && t.Allows(a) })
+	}
+	return t.Mode != "none"
 }
 
 // TagAccess reads the cluster's tag policy for the caller from /cluster/options.
+// tag-style comes as an object with case-sensitive 0 or 1, shown to any caller.
 func (c *Client) TagAccess(ctx context.Context) (TagAccess, error) {
 	var raw struct {
 		UserTagAccess *struct {
 			UserAllow string `json:"user-allow"`
 		} `json:"user-tag-access"`
+		TagStyle *struct {
+			CaseSensitive json.RawMessage `json:"case-sensitive"`
+		} `json:"tag-style"`
 		Allowed    []string `json:"allowed-tags"`
 		Registered []string `json:"registered-tags"`
 	}
 	if err := c.do(ctx, http.MethodGet, "/cluster/options", nil, &raw); err != nil {
 		return TagAccess{}, err
 	}
-	var mode string
+	t := TagAccess{Allowed: raw.Allowed, Registered: raw.Registered}
 	if raw.UserTagAccess != nil {
-		mode = raw.UserTagAccess.UserAllow
+		t.Mode = raw.UserTagAccess.UserAllow
 	}
-	return TagAccess{Mode: mode, Allowed: raw.Allowed, Registered: raw.Registered}, nil
+	if raw.TagStyle != nil {
+		t.CaseSensitive = boolOf(raw.TagStyle.CaseSensitive)
+	}
+	return t, nil
 }

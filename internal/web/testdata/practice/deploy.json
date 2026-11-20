@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/jobs",
+    "headers": {
+      "Authorization": "Bearer <practice.key>",
+      "X-Proxmox-Ticket": "<a Proxmox ticket of practice.principal>"
+    },
+    "body": {
+      "kind": "deploy",
+      "pods": "51-52",
+      "set": "kilo.alpha",
+      "digests": {
+        "dc.kilo.alpha.tpl": "bb3b84add0f82f6dd08fd9305f45e45b553411c0a5cbb67fad30ad705b761f13",
+        "web.kilo.alpha.tpl": "9a9525af894d72477fb0c91b273f9945df26b25cb0c00680b8278850df7f7765"
+      }
+    }
+  },
+  "status": 201,
+  "answer": {
+    "blocked": [],
+    "id": 1
+  }
+}

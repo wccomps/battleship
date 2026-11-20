@@ -151,16 +151,12 @@ func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *
 					if vm.Status == "running" {
 						mem[vm.Node] -= vm.MaxMem
 					}
-					if !deploy.Linked {
-						disk[vm.Node] -= vm.MaxDisk
-					}
+					disk[vm.Node] -= CloneDisk(vm, deploy)
 				}
 			}
 			src := sources[it.Template]
 			mem[it.Node] += src.MaxMem
-			if !deploy.Linked {
-				disk[it.Node] += src.MaxDisk
-			}
+			disk[it.Node] += CloneDisk(src, deploy)
 		case slices.Contains(it.Steps, StepStart):
 			if vm, ok := vms[it.VMID]; ok && vm.Status != "running" {
 				mem[it.Node] += vm.MaxMem
@@ -194,6 +190,16 @@ func EstimateCapacity(plan *Plan, res proxmox.Resources, deploy config.Deploy) *
 	c.Notes = append(c.Notes, offline...)
 	c.Usage = append(c.Usage, storageUsage(c, res.Storage, deploy.Storage, disk)...)
 	return c
+}
+
+// CloneDisk is the disk a pod clone of vm's size holds on its node: a full
+// clone copies the boot disk; a linked clone (deploy.linked) shares its
+// template's and is counted as nothing.
+func CloneDisk(vm proxmox.VM, deploy config.Deploy) int64 {
+	if deploy.Linked {
+		return 0
+	}
+	return vm.MaxDisk
 }
 
 func storageUsage(c *Capacity, all []proxmox.StorageResource, storage string, disk map[string]int64) []Usage {

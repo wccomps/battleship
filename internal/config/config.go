@@ -34,6 +34,7 @@ type Config struct {
 	Jobs         Jobs         `toml:"jobs"`
 	Web          Web          `toml:"web"`
 	OIDC         OIDC         `toml:"oidc"`
+	Practice     Practice     `toml:"practice"`
 }
 
 type Proxmox struct {
@@ -79,6 +80,7 @@ type Deploy struct {
 	Storage       string `toml:"storage"`
 	Linked        bool   `toml:"linked"`
 	MasterTag     string `toml:"master_tag"`
+	ApprovedTag   string `toml:"approved_tag"` // masters approved for self-service sessions carry it too; a Proxmox registered tag, or empty to approve none
 	DiskMBpsRead  int    `toml:"disk_mbps_rd"`
 	DiskMBpsWrite int    `toml:"disk_mbps_wr"`
 	SnapshotName  string `toml:"snapshot_name"` // the baseline a deploy takes
@@ -266,6 +268,7 @@ func Default() Config {
 			Storage:       "competitions",
 			Linked:        true,
 			MasterTag:     "dev",
+			ApprovedTag:   "approved",
 			DiskMBpsRead:  300,
 			DiskMBpsWrite: 300,
 			SnapshotName:  "initial",
@@ -403,8 +406,13 @@ func Load(path string) (Config, error) {
 	if s := os.Getenv("BATTLESHIP_OIDC_CLIENT_SECRET"); s != "" {
 		cfg.OIDC.ClientSecret = s
 	}
+	if s := os.Getenv("BATTLESHIP_PRACTICE_KEY"); s != "" {
+		cfg.Practice.Key = s
+	}
 	// Both https://battleship.example.org and https://battleship.example.org/ mean the site root.
 	cfg.Web.BaseURL = strings.TrimSuffix(cfg.Web.BaseURL, "/")
+	// Tags are compared as Proxmox stores them, without surrounding space.
+	cfg.Deploy.MasterTag, cfg.Deploy.ApprovedTag = strings.TrimSpace(cfg.Deploy.MasterTag), strings.TrimSpace(cfg.Deploy.ApprovedTag)
 	var caErr error
 	if cfg.Proxmox.CAFile != "" {
 		if cfg.Proxmox.RootCAs, caErr = ReadCAFile(cfg.Proxmox.CAFile); caErr != nil {
@@ -505,8 +513,11 @@ func (c Config) Validate() error {
 	if c.Deploy.Storage == "" {
 		errs = append(errs, errors.New("deploy.storage is required"))
 	}
-	if strings.TrimSpace(c.Deploy.MasterTag) == "" {
+	if c.Deploy.MasterTag == "" {
 		errs = append(errs, errors.New("deploy.master_tag is required"))
+	}
+	if c.Deploy.ApprovedTag != "" && strings.EqualFold(c.Deploy.ApprovedTag, c.Deploy.MasterTag) {
+		errs = append(errs, errors.New("deploy.approved_tag must differ from deploy.master_tag, which every master carries"))
 	}
 	if c.Deploy.SnapshotName == "" {
 		errs = append(errs, errors.New("deploy.snapshot_name is required"))
@@ -579,6 +590,7 @@ func (c Config) Validate() error {
 
 	errs = append(errs, c.validateCatalog()...)
 	errs = append(errs, c.validateWeb()...)
+	errs = append(errs, c.validatePractice()...)
 	return errors.Join(errs...)
 }
 

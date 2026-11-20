@@ -16,7 +16,9 @@ var ErrNothingToRun = errors.New("nothing to run: the plan has no runnable VMs")
 
 // Submitter is who submits a job, as the job records it.
 type Submitter struct {
-	User string // who: an email address or subject from the web
+	User string // who: an email address or subject from the web, or the session interface's Proxmox user
+	// Origin is what submits: store.OriginWeb or store.OriginSession.
+	Origin string
 	// Preview, from the web app, is the confirmed preview; the job consumes
 	// it (see store.NewJob.Preview).
 	Preview *store.PreviewClaim
@@ -58,6 +60,7 @@ func Submit(ctx context.Context, st *store.Store, in Inputs, plan *pods.Plan, by
 		LockKeys:    storedLockKeys(writes, reads),
 		CreatedBy:   by.User,
 		CreatedAs:   by.Credential.User,
+		Origin:      by.Origin,
 		Items:       items,
 		Preview:     by.Preview,
 		Credential:  by.Seal.Seal(by.Credential),

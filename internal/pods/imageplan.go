@@ -69,11 +69,6 @@ func vmsNamed(vms []proxmox.VM, name string) []proxmox.VM {
 	return out
 }
 
-// sourceBridges are the distinct bridges of a clone source's NICs.
-func sourceBridges(cfg map[string]string) []string {
-	return slices.Compact(slices.Sorted(slices.Values(nicBridgesAll(cfg))))
-}
-
 // ImageRegister plans copying a VM in as its family's next version.
 func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, error) {
 	if err := CheckFamily(req.Family); err != nil {
@@ -137,7 +132,7 @@ func (p Planner) ImageRegister(ctx context.Context, req ImageRequest) (*Plan, er
 		}
 		desc = cfg["description"]
 		var derr error
-		it.Source.Bridges, it.Source.Base = sourceBridges(cfg), baseNote(cfg)
+		it.Source.AsRead, it.Source.Base = cfg, baseNote(cfg)
 		_, it.Source.Notes, derr = ParseDetails(desc)
 		it.Source.Unreadable = derr != nil
 		it.Blocked = agentBlock(src, cfg, kind)
@@ -235,7 +230,7 @@ func (p Planner) ImageEdit(ctx context.Context, req ImageRequest) (*Plan, error)
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", newest.Name, err)
 		}
-		it.Source.Bridges = sourceBridges(cfg)
+		it.Source.AsRead = cfg
 		it.blockLongNotes(cfg["description"])
 		// Every NIC goes on the edit bridge: a router's LAN left on a slot's
 		// bridge would clash with that environment's router.
@@ -267,6 +262,7 @@ func (p Planner) ImageDeprecate(ctx context.Context, req ImageRequest) (*Plan, e
 		return nil, err
 	}
 	it := Item{Name: im.Name, VMID: im.VMID, Node: im.Node, Tags: ImageTags(im.Kind, true), Steps: []Step{StepLabel}}
+	it.AsRead = map[string]string{"tags": im.Tags}
 	if im.Deprecated {
 		it.Blocked = "is already deprecated"
 	}

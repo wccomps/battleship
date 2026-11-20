@@ -706,7 +706,8 @@ func TestTagAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ta.Allows("SET-KILO.ALPHA") || ta.Allows("set-kilo.bravo") || ta.Allows("set-tango.delta") {
+	// Proxmox looks a tag up as typed, so another case is neither allowed nor registered.
+	if !ta.Allows("set-kilo.alpha") || ta.Allows("SET-KILO.ALPHA") || ta.Allows("set-kilo.bravo") || ta.Allows("set-tango.delta") || ta.CaseSensitive {
 		t.Errorf("existing options: %+v", ta)
 	}
 
@@ -715,8 +716,21 @@ func TestTagAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ta.Allows("set-kilo.bravo") || ta.Allows("set-tango.delta") {
+	if !ta.Allows("set-kilo.bravo") || ta.Allows("set-tango.delta") || !ta.Allows("SET-TANGO.DELTA") {
 		t.Errorf("free with registered: %+v", ta)
+	}
+
+	for body, want := range map[string]bool{
+		`{"tag-style":{"case-sensitive":1}}`:         true,
+		`{"tag-style":{"case-sensitive":"1"}}`:       true,
+		`{"tag-style":{"case-sensitive":0}}`:         false,
+		`{"tag-style":{"shape":"circle"}}`:           false,
+		`{"tag-style":{"case-sensitive":1,"x":"y"}}`: true,
+	} {
+		f.routes["GET /cluster/options"] = jsonData(body)
+		if ta, err = c.TagAccess(context.Background()); err != nil || ta.CaseSensitive != want {
+			t.Errorf("%s: CaseSensitive %v, %v; want %v", body, ta.CaseSensitive, err, want)
+		}
 	}
 }
 

@@ -34,7 +34,7 @@ func TestImageRegisterNewVersionRetiresPrevious(t *testing.T) {
 	it := plan.Items[0]
 	want := []Step{StepClone, StepLabel, StepCDROM, StepConvert, StepRetire}
 	if it.Name != "debian-12-v2" || it.VMID != 8001 || it.Blocked != "" || !slices.Equal(it.Steps, want) ||
-		it.Source.VMID != 150 || !slices.Equal(it.Source.Bridges, []string{"vmbr0"}) || it.Pool != "dev-templates" || it.Tags != "base;linux" || it.Supersedes.VMID != 8000 ||
+		it.Source.VMID != 150 || nicBridge(it.Source.AsRead["net0"]) != "vmbr0" || it.Pool != "dev-templates" || it.Tags != "base;linux" || it.Supersedes.VMID != 8000 ||
 		it.Notes == nil || it.Notes.Source != "150" {
 		t.Errorf("item = %+v", it)
 	}
@@ -82,7 +82,7 @@ func TestImageEditMakesWorkingCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	it := plan.Items[0]
-	if it.Name != "debian-12-edit" || it.Tags != "" || it.NICs["net0"] != "vmbr0" || it.Source.VMID != 8000 || !slices.Equal(it.Source.Bridges, []string{"vmbr1"}) ||
+	if it.Name != "debian-12-edit" || it.Tags != "" || it.NICs["net0"] != "vmbr0" || it.Source.VMID != 8000 || nicBridge(it.Source.AsRead["net0"]) != "vmbr1" ||
 		!slices.Equal(it.Steps, []Step{StepClone, StepLabel, StepNetwork}) {
 		t.Errorf("item = %+v", it)
 	}

@@ -570,7 +570,7 @@ func buildHarness(t *testing.T, listen bool, mut ...func(*config.Config)) *harne
 	}
 	h.srv, err = New(Deps{
 		Config: cfg, Store: h.st, As: h.as, Credentials: h.creds, Auth: svc, Views: h.views, Hub: h.hub,
-		Clock: h.clock, Logf: h.logs.Logf,
+		Clock: h.clock, Logf: h.logs.Logf, Tickets: h.pve.Client(),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

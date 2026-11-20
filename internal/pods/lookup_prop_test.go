@@ -151,9 +151,10 @@ func slotModel(pattern, bridge string) bool {
 	return rest == ""
 }
 
-// catalogZone knows the bridges the slot patterns make and the edit
-// bridge, and nothing else, whatever characters the patterns hold.
-func TestPropCatalogZone(t *testing.T) {
+// bridgeZone knows the bridges the slot patterns make and the edit bridge,
+// and nothing else (team bridges, which no drawn bridge matches, aside),
+// whatever characters the patterns hold.
+func TestPropBridgeZone(t *testing.T) {
 	lits := []string{"", "dev", "int", "ext", "-", ".", "*", "(", ")", "[", "\\", "$", "^", "+", "?", "|", "{", "}", "{x}", "7"}
 	drawPattern := func(t *rapid.T, label string) string {
 		l := rapid.SampledFrom(lits)
@@ -167,6 +168,7 @@ func TestPropCatalogZone(t *testing.T) {
 		cfg := config.Default()
 		cfg.Environments.IntBridge, cfg.Environments.ExtBridge = drawPattern(t, "int"), drawPattern(t, "ext")
 		cfg.Environments.SDNZone, cfg.Images.EditBridge, cfg.Images.EditZone = "envzone", "editbr", "editzone"
+		cfg.Network.ExtBridge, cfg.Network.IntBridge = "tx{team}", "ti{team}"
 		var bridge string
 		switch rapid.IntRange(0, 2).Draw(t, "source") {
 		case 0, 1:
@@ -196,8 +198,8 @@ func TestPropCatalogZone(t *testing.T) {
 		case bridge == "editbr":
 			want = "editzone"
 		}
-		if got := catalogZone(cfg, bridge); got != want {
-			t.Fatalf("catalogZone(%q) with %q, %q = %q, want %q", bridge, cfg.Environments.IntBridge, cfg.Environments.ExtBridge, got, want)
+		if got := bridgeZone(cfg, bridge); got != want {
+			t.Fatalf("bridgeZone(%q) with %q, %q = %q, want %q", bridge, cfg.Environments.IntBridge, cfg.Environments.ExtBridge, got, want)
 		}
 	})
 }

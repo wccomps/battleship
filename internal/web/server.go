@@ -10,6 +10,7 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log"
@@ -34,8 +35,8 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// Deps are what the web app runs on. All but Clock, Logf and AccessLog are
-// required.
+// Deps are what the web app runs on. All but Clock, Logf, AccessLog and,
+// without [practice], Tickets are required.
 type Deps struct {
 	Config config.Config
 	Store  *store.Store
@@ -61,6 +62,9 @@ type Deps struct {
 	// the query string (the login callback's code) or cookies. Without it, Logf
 	// gets a line per non-GET/HEAD request and per server error.
 	AccessLog *slog.Logger
+	// Tickets proves the session interface's tickets with Proxmox; required
+	// when [practice] is set.
+	Tickets jobs.TicketRenewer
 }
 
 // Server is the web app. Handler serves it.
@@ -75,6 +79,10 @@ type Server struct {
 	clock  status.Clock
 	logf   func(format string, args ...any)
 	access *slog.Logger // nil: request lines go to logf
+	// tickets and practiceKey (the SHA-256 of practice.key) are the session
+	// interface's (practice.go).
+	tickets     jobs.TicketRenewer
+	practiceKey [sha256.Size]byte
 	// secureCookies: web.base_url is https, so the flash cookie is Secure.
 	secureCookies bool
 	naming        pods.Naming
@@ -150,6 +158,9 @@ func New(d Deps) (*Server, error) {
 	if d.Hub == nil {
 		errs = append(errs, errors.New("a hub"))
 	}
+	if d.Config.Practice.Enabled() && d.Tickets == nil {
+		errs = append(errs, errors.New("a ticket renewer for the session interface"))
+	}
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("web: missing %w", errors.Join(errs...))
 	}
@@ -172,6 +183,9 @@ func New(d Deps) (*Server, error) {
 		clock:  d.Clock,
 		logf:   d.Logf,
 		access: d.AccessLog,
+
+		tickets:     d.Tickets,
+		practiceKey: sha256.Sum256([]byte(d.Config.Practice.Key)),
 
 		secureCookies: auth.SecureBaseURL(d.Config.Web.BaseURL),
 		naming:        pods.NewNaming(d.Config.Naming),

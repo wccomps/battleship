@@ -138,8 +138,8 @@ func (p Planner) envHostFrom(ctx context.Context, vms []proxmox.VM, vmid int) (H
 			inSlot = append(inSlot, v)
 		}
 	}
-	cfgs, err := p.readConfigs(ctx, inSlot)
-	if err != nil {
+	cfgs, errs := p.readConfigs(ctx, inSlot)
+	if err := readErr(inSlot, errs); err != nil {
 		return HostEdit{}, proxmox.VM{}, err
 	}
 	cpuByNode := map[string][]string{}
@@ -195,11 +195,11 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 	default:
 		wantBase = req.Image
 	}
-	wantTags := hostTags(h.Tags, p.Cfg.Deploy.MasterTag, Domain(h.Name), domain, wantKind == ImageRouter)
+	wantTags := respellTags(h.Tags, hostTags(h.Tags, p.Cfg.Deploy.MasterTag, p.Cfg.Deploy.ApprovedTag, Domain(h.Name), domain, wantKind == ImageRouter))
 	wantNotes := h.Notes
 	wantNotes.Base = wantBase
 
-	it := Item{Name: h.Name, Host: wantHost, VMID: h.VMID, Node: h.Node, Pool: env.Slot.Pool, DetailsWas: &at.Read}
+	it := Item{Name: h.Name, Host: wantHost, VMID: h.VMID, Node: h.Node, Pool: env.Slot.Pool, DetailsWas: &at.Read, AsRead: h.Config}
 	if vm.Template {
 		it.Blocked = "is a template"
 	}
@@ -386,11 +386,14 @@ func resolveHostName(env Environment, h EnvHost, input string) (full, host, doma
 }
 
 // hostTags updates a slot VM's tag list with masterTag, domain and router,
-// keeping any other tags on the VM in order.
-func hostTags(cur, masterTag, oldDomain, domain string, router bool) string {
+// keeping any other tags on the VM in order, each tag once whatever its
+// case. A move into another domain drops approvedTag, so a rename never
+// carries approval into another set.
+func hostTags(cur, masterTag, approvedTag, oldDomain, domain string, router bool) string {
+	curTags := strings.FieldsFunc(cur, isTagSeparator)
 	var out []string
 	add := func(t string) {
-		if t != "" && !slices.Contains(out, t) {
+		if t != "" && !slices.ContainsFunc(out, func(o string) bool { return strings.EqualFold(o, t) }) {
 			out = append(out, t)
 		}
 	}
@@ -401,8 +404,12 @@ func hostTags(cur, masterTag, oldDomain, domain string, router bool) string {
 	if router {
 		add(ImageRouter)
 	}
-	for _, t := range Tags(cur) {
-		if t == ImageRouter || (oldDomain != "" && t == oldDomain && domain != oldDomain) {
+	moved := domain != oldDomain
+	for _, t := range curTags {
+		switch {
+		case strings.EqualFold(t, ImageRouter),
+			moved && oldDomain != "" && strings.EqualFold(t, oldDomain),
+			moved && approvedTag != "" && strings.EqualFold(t, approvedTag):
 			continue
 		}
 		add(t)

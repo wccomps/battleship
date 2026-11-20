@@ -61,6 +61,21 @@ for the event streams.
 - **No service token.** `battleship serve` refuses to start with
   `BATTLESHIP_PROXMOX_TOKEN_ID` set; users act with their own Proxmox
   permissions.
+- **Session interface.** Off unless `[practice]` is set. To turn it on for
+  the practice app: set `[practice]` in `battleship.toml`; give the
+  container `BATTLESHIP_PRACTICE_KEY` from a Secret and a second
+  `containerPort` for `practice.listen`; add a Service for that port; and
+  allow ingress to it in the NetworkPolicy from the practice app's pods
+  only. Never route the Ingress to it: it speaks plain HTTP and carries a
+  Proxmox ticket. `deploy.approved_tag` must be one of Proxmox's registered
+  tags (Datacenter → Options), spelled the same, and the practice app's
+  Proxmox user needs `Sys.Audit` on `/`, granted with propagation off, to
+  see that it is; otherwise no set is approved. Set Datacenter → Options →
+  Tag Style to case-sensitive (simplest), or User Tag Access to none, or to
+  list with no case variant of the tag in it (existing and free work only
+  for a tag with no letters); otherwise no set is approved, since
+  anyone could set the tag in another case and Proxmox stores it lower-cased.
+  A volunteer who retries a session deploy needs `Sys.Audit` on `/` too.
 
 | Symptom | Likely cause |
 |---|---|

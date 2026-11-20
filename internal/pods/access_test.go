@@ -10,6 +10,7 @@ import (
 	"testing/synctest"
 
 	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -94,7 +95,7 @@ func TestDeployNeeds(t *testing.T) {
 	cfg := config.Default()
 	cfg.Images.Pool = "images"
 	tpl := TemplateSpec{Name: "teak.x.tpl", Host: "teak", VMID: 9021, MasterVMID: 121, MasterName: "teak.x", Interfaces: 2,
-		CloudInit: true, CPU: "custom-lab-baseline,flags=+aes"}
+		CPU: "custom-lab-baseline,flags=+aes", AsRead: map[string]string{"net0": "virtio,bridge=vmbr0", "net1": "virtio,bridge=vmbr1", "ide2": "local:vm-9021-cloudinit,media=cdrom"}}
 	item := Item{Team: "01", Host: "teak", Name: "team01-teak", VMID: 10121, Template: tpl.Name,
 		Steps: []Step{StepClone, StepNetwork, StepDiskLimits, StepCDROM, StepNotes, StepSnapshot, StepStart}}
 	plan := &Plan{Kind: KindDeploy, Teams: []string{"01"}, Templates: []TemplateSpec{tpl}, Items: []Item{item}}
@@ -407,14 +408,14 @@ func TestApproxUsesListedPathsOnly(t *testing.T) {
 	}
 }
 
-func TestIsTeamBridge(t *testing.T) {
-	net := config.Default().Network // ext{team}, int{team}
-	for bridge, want := range map[string]bool{
-		"ext01": true, "int99": true,
-		"ext1": false, "ext011": false, "extab": false, "vmbr0": false, "xext01": false, "ext01x": false,
+func TestBridgeZoneKnowsTeamBridges(t *testing.T) {
+	cfg := config.Default() // ext{team}, int{team} in zone teams
+	for bridge, want := range map[string]string{
+		"ext01": "teams", "int99": "teams", "devint03": "devnet",
+		"ext1": "", "ext011": "", "extab": "", "vmbr0": "", "xext01": "", "ext01x": "",
 	} {
-		if got := isTeamBridge(net, bridge); got != want {
-			t.Errorf("isTeamBridge(%q) = %v, want %v", bridge, got, want)
+		if got := bridgeZone(cfg, bridge); got != want {
+			t.Errorf("bridgeZone(%q) = %q, want %q", bridge, got, want)
 		}
 	}
 }
@@ -476,7 +477,7 @@ func TestCloneNeedsSDNUseOnSourceBridges(t *testing.T) {
 		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:80:04,bridge=devedit"})
 	plan := create(t, NewPlanner(f, cfg), "teak=debian-13")
 	teak := plan.Items[1]
-	if !slices.Equal(teak.Source.Bridges, []string{"devedit"}) {
+	if nicBridge(teak.Source.AsRead["net0"]) != "devedit" {
 		t.Fatalf("source = %+v", teak.Source)
 	}
 	g := grants{
@@ -616,39 +617,129 @@ func TestCPUNeedsMappingOnlyForCustomModels(t *testing.T) {
 	}
 }
 
-// A clone source's team bridges need SDN.Use in the teams zone; a bridge
-// that is no vnet is left to Proxmox.
-func TestCloneNeedsSDNUseOnSourceTeamBridges(t *testing.T) {
+// A clone source's NICs need SDN.Use on a team vnet in the teams zone; a
+// plain bridge, whose zone Battleship doesn't know, is left to Proxmox.
+func TestCloneNeedsSDNUseOnlyOnKnownZoneBridges(t *testing.T) {
 	cfg := config.Default()
+	vnet := "/sdn/zones/teams/ext01"
 	g := grants{
 		"/vms/8002":                      {"VM.Clone"},
 		"/pool/pool-01":                  {"VM.Allocate"},
 		"/storage/" + cfg.Deploy.Storage: {"Datastore.AllocateSpace"},
-		"/sdn/zones/teams/ext01":         {"SDN.Use"},
+		vnet:                             {"SDN.Use"},
 	}
 	plan := func() *Plan {
 		return &Plan{Kind: KindDeploy, Items: []Item{{Team: "01", Name: "team01-teak", VMID: 10121,
-			Source: &Source{VMID: 8002, Bridges: []string{"ext01", "vmbr0"}}, Steps: []Step{StepClone}}}}
+			Source: &Source{VMID: 8002, AsRead: map[string]string{"net0": "virtio,bridge=ext01", "net1": "virtio,bridge=vmbr0"}}, Steps: []Step{StepClone}}}}
 	}
 	p := plan()
 	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "" {
-		t.Errorf("with SDN.Use on ext01: blocked %q, %v", p.Items[0].Blocked, err)
+		t.Errorf("with SDN.Use on ext01 alone: blocked %q, %v", p.Items[0].Blocked, err)
 	}
-	delete(g, "/sdn/zones/teams/ext01")
+	delete(g, vnet)
 	p = plan()
-	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "you don't have SDN.Use on /sdn/zones/teams/ext01" {
+	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "you don't have SDN.Use on "+vnet {
 		t.Errorf("without SDN.Use on ext01: blocked %q, %v", p.Items[0].Blocked, err)
 	}
 }
 
-// An environment host's NICs need SDN.Use only on catalog vnets.
-func TestNICsNeedSDNUseOnlyOnCatalogVnets(t *testing.T) {
+// A clone asks SDN.Use on every NIC of its template whose zone Battleship
+// knows, as Proxmox does: net2 as well as net0, and a VLAN-tagged NIC on its
+// tag; a plain bridge is left to Proxmox.
+func TestCloneNeedsSDNUseOnEveryTemplateNIC(t *testing.T) {
+	ctx := context.Background()
+	cfg := envConfig()
+	f := podstest.New("cedar")
+	nics := map[string]string{
+		"net0": "virtio=BC:24:11:00:01:21,bridge=ext01",
+		"net2": "virtio=BC:24:11:00:01:22,bridge=devint01",
+		"net3": "e1000=BC:24:11:00:01:23,bridge=devint02,tag=20",
+		"net4": "e1000=BC:24:11:00:01:24,bridge=vmbr0",
+	}
+	f.Add(proxmox.VM{VMID: 121, Name: "teak.tango.delta", Node: "cedar", Tags: "dev"}, nics)
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nics)
+	plan, err := NewPlanner(f, cfg).Deploy(ctx, DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01"}})
+	if err != nil || len(plan.Templates) != 1 {
+		t.Fatalf("plan = %+v, %v", plan, err)
+	}
+	zone := "/sdn/zones/" + cfg.Environments.SDNZone
+	vnets := []string{"/sdn/zones/" + cfg.Proxmox.SDNZone + "/ext01", zone + "/devint01", zone + "/devint02/20"}
+	g := grants{
+		"/vms/9021":                      {"VM.Clone"},
+		"/pool/pool-01":                  {"VM.Allocate"},
+		"/storage/" + cfg.Deploy.Storage: {"Datastore.AllocateSpace"},
+	}
+	for _, v := range vnets {
+		g[v] = []string{"SDN.Use"}
+	}
+	if why, err := Uncloneable(ctx, g, cfg, plan.Templates[0], "01"); err != nil || why != "" {
+		t.Fatalf("with SDN.Use on every known-zone NIC: %q, %v", why, err)
+	}
+	for _, v := range vnets {
+		delete(g, v)
+		if why, err := Uncloneable(ctx, g, cfg, plan.Templates[0], "01"); err != nil || why != "you don't have SDN.Use on "+v {
+			t.Errorf("without SDN.Use on %s: %q, %v", v, why, err)
+		}
+		g[v] = []string{"SDN.Use"}
+	}
+}
+
+// sdnUse follows check_vnet_access for a tag and for a plain vnet, and
+// leaves trunk VLANs to Proxmox: a NIC asks at most one path, however many
+// VLANs its trunks hold.
+func TestSDNUseAsksAtMostOnePathPerNIC(t *testing.T) {
+	cfg := envConfig()
+	z := "/sdn/zones/" + cfg.Environments.SDNZone + "/devint01"
+	for nic, want := range map[string][]string{
+		"virtio,bridge=devint01":                       {z},
+		"virtio,bridge=devint01,tag=5":                 {z + "/5"},
+		"virtio,bridge=devint01,trunks=1-4094":         nil,
+		"virtio,bridge=devint01,trunks=10-5":           nil,
+		"virtio,bridge=devint01,tag=5,trunks=1-4094":   {z + "/5"},
+		"virtio,bridge=vmbr0,tag=5,trunks=7":           nil,
+		"virtio,bridge=other-zone-vnet,trunks=100-101": nil,
+	} {
+		var got []string
+		for _, n := range sdnUse(cfg, nic) {
+			if len(n) != 1 || n[0].priv != "SDN.Use" {
+				t.Fatalf("%s: need %v", nic, n)
+			}
+			got = append(got, n[0].path)
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("sdnUse(%q) = %v, want %v", nic, got, want)
+		}
+	}
+}
+
+// Building a template clones its master, so it asks SDN.Use on the master's
+// bridges as a pod clone does on the template's.
+func TestTemplateBuildNeedsSDNUseOnMasterBridges(t *testing.T) {
+	cfg := envConfig()
+	vnet := "/sdn/zones/" + cfg.Environments.SDNZone + "/devint01"
+	plan := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{{Name: "teak.x.tpl", VMID: 9021, MasterVMID: 121, Interfaces: 1,
+		AsRead: map[string]string{"net0": "virtio,bridge=devint01"}}}}
+	g := grants{
+		"/vms/121":                       {"VM.Clone"},
+		"/pool/" + cfg.Images.Pool:       {"VM.Allocate"},
+		"/storage/" + cfg.Deploy.Storage: {"Datastore.AllocateSpace"},
+	}
+	if err := BlockUnpermitted(context.Background(), plan, g, cfg); err != nil || plan.Templates[0].Blocked != "you don't have SDN.Use on "+vnet {
+		t.Errorf("without SDN.Use on devint01: blocked %q, %v", plan.Templates[0].Blocked, err)
+	}
+}
+
+// An environment host's NICs need SDN.Use only on known-zone vnets, on the
+// values the network step writes (the tag dropped) and those they replace;
+// trunk VLANs are left to Proxmox.
+func TestNICsNeedSDNUseOnlyOnKnownZoneVnets(t *testing.T) {
 	cfg := envConfig()
 	vnet := "/sdn/zones/" + cfg.Environments.SDNZone + "/devint01"
 	g := grants{"/vms/2101": {"VM.Config.Network"}, vnet: {"SDN.Use"}}
+	was := map[string]string{"net0": "virtio=BC:24:11:00:21:01,bridge=vmbr5,tag=9", "net1": "virtio=BC:24:11:00:21:02,bridge=vmbr5"}
 	plan := func() *Plan {
 		return &Plan{Kind: KindEnvAdd, Items: []Item{{Name: "oak.kilo.alpha", VMID: 2101,
-			NICs: map[string]string{"net0": "devint01", "net1": "vmbr0"}, Steps: []Step{StepNetwork}}}}
+			NICs: map[string]string{"net0": "devint01", "net1": "vmbr0"}, AsRead: was, Steps: []Step{StepNetwork}}}}
 	}
 	p := plan()
 	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "" {
@@ -659,15 +750,41 @@ func TestNICsNeedSDNUseOnlyOnCatalogVnets(t *testing.T) {
 	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "you don't have SDN.Use on "+vnet {
 		t.Errorf("without SDN.Use on devint01: blocked %q, %v", p.Items[0].Blocked, err)
 	}
+	was["net0"] += ",trunks=30"
+	p = plan()
+	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "" {
+		t.Errorf("trunked, without SDN.Use on devint01: blocked %q, %v", p.Items[0].Blocked, err)
+	}
 }
 
 // Reconfiguring an existing VM's network doesn't touch its template's
 // bridges, so it needs no SDN.Use there.
 func TestExistingVMNeedsNoSDNUseOnTemplateBridges(t *testing.T) {
-	tpl := TemplateSpec{Name: "teak.x.tpl", VMID: 9021, MasterVMID: 121, Exists: true, Interfaces: 1, Bridges: []string{"ext01"}}
+	tpl := TemplateSpec{Name: "teak.x.tpl", VMID: 9021, MasterVMID: 121, Exists: true, Interfaces: 1,
+		AsRead: map[string]string{"net0": "virtio,bridge=ext01"}}
 	plan := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{tpl},
-		Items: []Item{{Team: "01", Name: "team01-teak", VMID: 10121, Template: tpl.Name, Steps: []Step{StepNetwork}}}}
+		Items: []Item{{Team: "01", Name: "team01-teak", VMID: 10121, Template: tpl.Name, Steps: []Step{StepNetwork},
+			AsRead: map[string]string{"net0": "virtio,bridge=vmbr0"}}}}
 	acc := grants{"/vms/10121": {"VM.Config.Network"}, "/sdn/zones/teams/int01": {"SDN.Use"}}
+	if err := BlockUnpermitted(context.Background(), plan, acc, config.Default()); err != nil || plan.Items[0].Blocked != "" {
+		t.Errorf("blocked %q, %v", plan.Items[0].Blocked, err)
+	}
+	delete(acc, "/sdn/zones/teams/int01")
+	plan.Items[0].Blocked = ""
+	if err := BlockUnpermitted(context.Background(), plan, acc, config.Default()); err != nil ||
+		plan.Items[0].Blocked != "you don't have SDN.Use on /sdn/zones/teams/int01" {
+		t.Errorf("without SDN.Use on int01: blocked %q, %v", plan.Items[0].Blocked, err)
+	}
+}
+
+// The team network step keeps a NIC's trunks and drops its tag; the trunk
+// VLANs on the team vnet are left to Proxmox.
+func TestTeamNetworkLeavesTrunkVLANsToProxmox(t *testing.T) {
+	tpl := TemplateSpec{Name: "teak.x.tpl", VMID: 9021, MasterVMID: 121, Exists: true, Interfaces: 1}
+	plan := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{tpl},
+		Items: []Item{{Team: "01", Name: "team01-teak", VMID: 10121, Template: tpl.Name, Steps: []Step{StepNetwork},
+			AsRead: map[string]string{"net0": "virtio,bridge=vmbr0,tag=4,trunks=40;41"}}}}
+	acc := grants{"/vms/10121": {"VM.Config.Network"}}
 	if err := BlockUnpermitted(context.Background(), plan, acc, config.Default()); err != nil || plan.Items[0].Blocked != "" {
 		t.Errorf("blocked %q, %v", plan.Items[0].Blocked, err)
 	}
@@ -788,5 +905,169 @@ func TestRetireNeedsOptionsOnTheSupersededVersion(t *testing.T) {
 	}
 	if got := blocked(plan); len(got) != 1 || got["debian-12-v2"] != "you don't have VM.Config.Options on /vms/8001" {
 		t.Errorf("blocked = %v", got)
+	}
+}
+
+// Retiring a version adds the deprecated tag, so where user-tag-access
+// refuses that tag Proxmox asks Sys.Modify on / as well.
+func TestRetireNeedsSysModifyWhereDeprecatedIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tags proxmox.TagAccess
+		want bool
+	}{
+		{"free", proxmox.TagAccess{Mode: "free"}, false},
+		{"listed", proxmox.TagAccess{Mode: "list", Allowed: []string{DeprecatedTag}}, false},
+		{"not listed", proxmox.TagAccess{Mode: "list", Allowed: []string{"base"}}, true},
+	} {
+		acc := NewAccess(&fakePerms{listed: proxmox.Permissions{"/vms/8001": {"VM.Config.Options": false}}, tags: tc.tags})
+		plan := &Plan{Kind: KindImageRegister, Items: []Item{{Name: "debian-12-v2", VMID: 8002, Supersedes: &Source{VMID: 8001}, Steps: []Step{StepRetire}}}}
+		if err := BlockUnpermitted(context.Background(), plan, acc, envConfig()); err != nil {
+			t.Fatal(err)
+		}
+		if got := plan.Items[0].Blocked; (got == "you don't have Sys.Modify on /") != tc.want || (!tc.want && got != "") {
+			t.Errorf("%s: blocked %q, want Sys.Modify asked: %t", tc.name, got, tc.want)
+		}
+	}
+}
+
+// Registering an approved master copies its tags, registered approval tag
+// included, and the label step replaces them, so it asks Sys.Modify on /.
+func TestImageRegisterFromApprovedMasterNeedsSysModify(t *testing.T) {
+	f := imageFake()
+	f.Add(proxmox.VM{VMID: 152, Name: "teak.tango.delta", Node: "birch", Tags: "dev;approved"},
+		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:01:52,bridge=vmbr0"})
+	cfg := envConfig()
+	plan, err := NewPlanner(f, cfg).ImageRegister(context.Background(), ImageRequest{VMID: 152, Family: "teak", ImageKind: ImageLinux})
+	if err != nil || plan.Items[0].Blocked != "" {
+		t.Fatalf("plan = %+v, %v", plan, err)
+	}
+	if got := labelEdit(plan.Items[0], cfg); !slices.Equal(got, []string{"approved", "base", "dev", "linux"}) {
+		t.Errorf("tags changed = %v", got)
+	}
+	for _, sysModify := range []bool{false, true} {
+		listed := proxmox.Permissions{}
+		if sysModify {
+			listed["/"] = map[string]bool{"Sys.Modify": false}
+		}
+		acc := NewAccess(&fakePerms{listed: listed, tags: proxmox.TagAccess{Registered: []string{"approved"}, CaseSensitive: true}})
+		p := &Plan{Kind: plan.Kind, Items: slices.Clone(plan.Items)}
+		if err := BlockUnpermitted(context.Background(), p, acc, cfg); err != nil {
+			t.Fatal(err)
+		}
+		if asked := strings.Contains(p.Items[0].Blocked, "Sys.Modify on /"); asked == sysModify {
+			t.Errorf("with Sys.Modify %t: blocked %q", sysModify, p.Items[0].Blocked)
+		}
+	}
+}
+
+// The tag-set step changes only set tags: none on a pod VM that already
+// records its set, so nothing beyond VM.Config.Options is asked; another
+// set's tag it removes as well as the one it adds.
+func TestSetTagChangesAreTheTagsAsRead(t *testing.T) {
+	cfg := config.Default()
+	n := NewNaming(cfg.Naming)
+	for _, tc := range []struct {
+		vmTags string
+		want   []string
+	}{
+		{"dev;set-tango.delta", nil},
+		{"dev;set-other.set", []string{"set-other.set", "set-tango.delta"}},
+		{"dev", []string{"set-tango.delta"}},
+	} {
+		f := podstest.New("cedar")
+		nic := func() map[string]string { return map[string]string{"net0": "virtio=BC:24:11:00:01:21,bridge=vmbr0"} }
+		f.Add(proxmox.VM{VMID: 121, Name: "teak.tango.delta", Node: "cedar", Tags: "dev"}, nic())
+		f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true, Tags: "dev"}, nic())
+		f.Add(proxmox.VM{VMID: n.CloneVMID("01", 9021), Name: n.VMName("01", "teak"), Node: "cedar", Pool: n.Pool("01"), Tags: tc.vmTags}, nic())
+		plan, err := NewPlanner(f, cfg).Deploy(context.Background(), DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		it := plan.Items[0]
+		got := labelEdit(it, cfg)
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%q: tags changed = %v, want %v", tc.vmTags, got, tc.want)
+		}
+		if asked := tagNeeds(got, proxmox.TagAccess{Mode: "none"}, cfg) != nil; asked != (tc.want != nil) {
+			t.Errorf("%q: Sys.Modify asked %t", tc.vmTags, asked)
+		}
+	}
+}
+
+// Tag edits are compared as typed, as Proxmox's assert_tag_permissions
+// counts them: case matters, order doesn't, a repeat does.
+func TestTagChangesComparesAsTyped(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want []string
+	}{
+		{"dev;Approved", "dev", []string{"Approved"}},
+		{"Dev", "dev", []string{"Dev", "dev"}},
+		{"a;b", "b, a", nil},
+		{"a;a", "a", []string{"a"}},
+		{"", "", nil},
+	} {
+		if got := tagChanges(tc.a, tc.b); !slices.Equal(got, tc.want) {
+			t.Errorf("tagChanges(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+		if same := sameTags(tc.a, tc.b); same != (tc.want == nil) {
+			t.Errorf("sameTags(%q, %q) = %t", tc.a, tc.b, same)
+		}
+	}
+	// A mixed-case registered tag's removal is refused without Sys.Modify.
+	if tagNeeds(tagChanges("dev;Keep", "dev"), proxmox.TagAccess{Registered: []string{"Keep"}, CaseSensitive: true}, config.Config{}) == nil {
+		t.Error("removing registered tag Keep asks nothing")
+	}
+}
+
+// labelEdit is the tags an item's label or tag-set step adds or removes
+// (stepEdits).
+func labelEdit(it Item, cfg config.Config) []string {
+	for i, e := range stepEdits(it, nil, cfg) {
+		if st := it.Steps[i]; st == StepLabel || st == StepSetTag {
+			return e.tags
+		}
+	}
+	return nil
+}
+
+// deploy.approved_tag counts as registered only while the reader is shown
+// no registered tags; under user-allow free, a cluster that lists its
+// registered tags without it lets the tag change without Sys.Modify.
+func TestApprovedTagCountsRegisteredOnlyWhenNoneShown(t *testing.T) {
+	cfg := config.Default()
+	cfg.Deploy.ApprovedTag = "approved"
+	if tagNeeds([]string{"approved"}, proxmox.TagAccess{Mode: "free", Registered: []string{"other"}}, cfg) != nil {
+		t.Error("approved, not among the registered tags shown, asks Sys.Modify")
+	}
+	if tagNeeds([]string{"approved"}, proxmox.TagAccess{Mode: "free"}, cfg) == nil {
+		t.Error("approved, with no registered tags shown, asks nothing")
+	}
+}
+
+// A resumed create re-spells master_tag as the VM stores it, lower-cased,
+// so its label step changes no tag and asks no Sys.Modify.
+func TestResumedEnvCreateKeepsTheVMsTagSpelling(t *testing.T) {
+	f := envFake()
+	f.Add(proxmox.VM{VMID: 2200, Name: "gw.kilo.alpha", Node: "alder", Pool: "dev-02", Tags: "dev;kilo.alpha;router"},
+		map[string]string{"description": "battleship: base=gw-v1 dns=router"})
+	cfg := envConfig()
+	cfg.Deploy.MasterTag = "Dev"
+	plan, err := NewPlanner(f, cfg).EnvCreate(context.Background(), EnvRequest{Domain: "kilo.alpha", Slot: 2, Router: HostSpec{Host: "gw", Family: "gw"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := plan.Items[0]
+	if gw.Blocked != "" || slices.Contains(gw.Steps, StepClone) || gw.Tags != "dev;kilo.alpha;router" || labelEdit(gw, cfg) != nil {
+		t.Fatalf("router = %+v, tags changed %v", gw, labelEdit(gw, cfg))
+	}
+	acc := NewAccess(&fakePerms{listed: proxmox.Permissions{"/vms/2200": {"VM.Config.Options": false, "VM.Config.Network": false, "VM.PowerMgmt": false}},
+		tags: proxmox.TagAccess{Mode: "none"}})
+	if err := BlockUnpermitted(context.Background(), plan, acc, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.Items[0].Blocked; got != "" {
+		t.Errorf("blocked = %q", got)
 	}
 }

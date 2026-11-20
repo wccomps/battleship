@@ -1,0 +1,30 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/pods/51/vms",
+    "headers": {
+      "Authorization": "Bearer <practice.key>",
+      "X-Proxmox-Ticket": "<a Proxmox ticket of practice.principal>"
+    }
+  },
+  "status": 200,
+  "answer": {
+    "pod": "51",
+    "vms": [
+      {
+        "host": "dc",
+        "name": "team51-dc",
+        "node": "n1",
+        "status": "running",
+        "vmid": 15101
+      },
+      {
+        "host": "web",
+        "name": "team51-web",
+        "node": "n1",
+        "status": "running",
+        "vmid": 15102
+      }
+    ]
+  }
+}
