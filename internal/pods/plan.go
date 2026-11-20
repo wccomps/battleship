@@ -268,9 +268,10 @@ type Item struct {
 	// DetailsWas is an Edit notes's or Edit host's notes as read, for its
 	// review and fingerprint.
 	DetailsWas *NotesRead `json:"details_was,omitempty"`
-	// AsRead is the config as read of a VM the item keeps, which its
-	// steps start from; under StepClone they start from the clone source's
-	// (cloneSource). It only decides the rights the steps need.
+	// AsRead is the config as read of a VM the item keeps (an image
+	// deprecate's holds only its listed tags), which its steps start from;
+	// under StepClone they start from the clone source's (cloneSource). It
+	// only decides the rights the steps need.
 	AsRead map[string]string `json:"-"`
 	// Record is the domain a record or clear-record step writes into, or
 	// takes out of, Pool's comment.

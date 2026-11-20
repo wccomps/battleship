@@ -87,7 +87,6 @@ func HasCloudInit(cfg map[string]string) bool {
 	return false
 }
 
-// isCloudInitDrive reports whether drive value v is a cloud-init drive.
 func isCloudInitDrive(v string) bool {
 	head, opts := splitOptions(v)
 	return opts["media"] == "cdrom" && strings.Contains(head, "cloudinit")
