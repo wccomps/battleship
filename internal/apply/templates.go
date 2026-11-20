@@ -143,14 +143,8 @@ func (e *Executor) ensureTemplate(ctx context.Context, b *tplBuild) error {
 		e.emit(name, pods.StepClone, EventSkipped, "template exists")
 		return nil
 	case found:
-		e.mu.Lock()
-		o := e.owned[spec.VMID]
-		e.mu.Unlock()
-		if o == nil {
-			return fmt.Errorf("%s exists but is not a template and wasn't created by this run; re-plan with rebuild", name)
-		}
-		if o.state == cloneTaskFailed {
-			return fmt.Errorf("%s is the leftover of a failed copy; it will be removed, then re-run", name)
+		if err := e.mayConvert(spec.VMID, name); err != nil {
+			return err
 		}
 		b.node = cur.Node
 		return e.finishTemplate(ctx, spec, cur.Node)
@@ -350,6 +344,23 @@ func (e *Executor) settleCopy(vmid int, err error) {
 	case errors.As(err, &taskErr):
 		o.state = cloneTaskFailed
 	}
+}
+
+// mayConvert decides whether the template copy found at vmid under its
+// expected name may be converted: only one this run created whose task did
+// not fail. Cleanup removes a failed copy's leftover.
+func (e *Executor) mayConvert(vmid int, name string) error {
+	e.mu.Lock()
+	o := e.owned[vmid]
+	failed := o != nil && o.state == cloneTaskFailed
+	e.mu.Unlock()
+	switch {
+	case o == nil:
+		return fmt.Errorf("%s (%d) exists but is not a template and wasn't created by this run; re-plan with rebuild", name, vmid)
+	case failed:
+		return fmt.Errorf("%s is the leftover of a failed copy; it will be removed, then re-run", name)
+	}
+	return nil
 }
 
 func (e *Executor) teamVMUsing(host string) (proxmox.VM, bool) {

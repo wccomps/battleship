@@ -299,15 +299,17 @@ func (e *Executor) status(ctx context.Context, it *pods.Item) (string, error) {
 // startClone starts a clone into req.NewVMID on req.TargetNode and returns
 // its UPID. A timed-out POST may still have created the VM, so the target is
 // probed first; a VM with the expected name there means "" is returned (for
-// a template copy it must be this run's). Only a VM seen absent becomes this
-// run's, and stays so from the POST on even if the request times out.
+// a template copy, only if mayConvert allows it). Only a VM seen absent
+// becomes this run's, and stays so from the POST on even if the request
+// times out. A POST into a VMID this run already owns starts its state
+// afresh, unless told the VM exists.
 func (e *Executor) startClone(ctx context.Context, template bool, req proxmox.CloneRequest) (string, error) {
-	p, err := e.probeClone(ctx, req.TargetNode, req.NewVMID, req.Name)
+	p, isTemplate, err := e.probeClone(ctx, req.TargetNode, req.NewVMID, req.Name)
 	if err != nil {
 		return "", err
 	}
 	e.mu.Lock()
-	_, ours := e.owned[req.NewVMID]
+	o, ours := e.owned[req.NewVMID]
 	claimed := false
 	if p == probeAbsent && !ours {
 		e.owned[req.NewVMID] = &ownedVM{name: req.Name, node: req.TargetNode, template: template}
@@ -315,17 +317,25 @@ func (e *Executor) startClone(ctx context.Context, template bool, req proxmox.Cl
 	}
 	e.mu.Unlock()
 	if p == probeSame {
-		if template && !ours {
-			return "", fmt.Errorf("VMID %d appeared as %s while cloning; not converting a VM this run did not create", req.NewVMID, req.Name)
+		switch {
+		case template && isTemplate && !ours: // the probe finds a template the listing didn't show
+			return "", fmt.Errorf("template %s (%d) appeared while this run was creating it; re-run to use it", req.Name, req.NewVMID)
+		case template:
+			return "", e.mayConvert(req.NewVMID, req.Name)
 		}
 		return "", nil
 	}
 	upid, err := e.api.Clone(ctx, req)
-	if err != nil && claimed && e.classifier.Classify(err) == proxmox.Exists {
-		e.mu.Lock() // somebody else got there first
+	exists := err != nil && e.classifier.Classify(err) == proxmox.Exists
+	e.mu.Lock()
+	switch {
+	case claimed && exists: // somebody else got there first
 		delete(e.owned, req.NewVMID)
-		e.mu.Unlock()
+	case ours && !exists:
+		// What an earlier copy left is gone, so a VM there now is this POST's.
+		o.state = cloneUnknown
 	}
+	e.mu.Unlock()
 	return upid, err
 }
 
@@ -338,31 +348,31 @@ const (
 	probeOther               // some other VM: the POST would fail with "already exists"
 )
 
-// probeClone looks at vmid before a clone. Only "does not exist" counts as
-// absent; other read errors are returned rather than claim a VM it may not
-// have created. A locked VM is reported as proxmox.ErrLocked so the caller
-// backs off.
-func (e *Executor) probeClone(ctx context.Context, node string, vmid int, name string) (probe, error) {
+// probeClone looks at vmid before a clone and reports whether the VM there
+// is a template. Only "does not exist" counts as absent; other read errors
+// are returned rather than claim a VM it may not have created. A locked VM
+// is reported as proxmox.ErrLocked so the caller backs off.
+func (e *Executor) probeClone(ctx context.Context, node string, vmid int, name string) (probe, bool, error) {
 	cfg, err := e.api.VMConfig(ctx, node, vmid)
 	if err != nil {
 		if proxmox.IsNotFound(err) {
-			return probeAbsent, nil
+			return probeAbsent, false, nil
 		}
-		return probeOther, err
+		return probeOther, false, err
 	}
-	lock := cfg["lock"]
+	lock, isTemplate := cfg["lock"], cfg["template"] == "1"
 	if cfg["name"] != name {
 		if cfg["name"] == "" && lock != "" {
-			return probeOther, fmt.Errorf("VM %d is locked (%s) and has no name yet: %w", vmid, lock, proxmox.ErrLocked)
+			return probeOther, isTemplate, fmt.Errorf("VM %d is locked (%s) and has no name yet: %w", vmid, lock, proxmox.ErrLocked)
 		}
-		return probeOther, fmt.Errorf("VMID %d is used by %q; not cloning over it", vmid, cfg["name"])
+		return probeOther, isTemplate, fmt.Errorf("VMID %d is used by %q; not cloning over it", vmid, cfg["name"])
 	}
 	if lock != "" {
 		err := fmt.Errorf("VM %d is locked (%s): %w", vmid, lock, proxmox.ErrLocked)
 		e.emit(name, pods.StepClone, EventInfo, "waiting: "+err.Error())
-		return probeSame, err
+		return probeSame, isTemplate, err
 	}
-	return probeSame, nil
+	return probeSame, isTemplate, nil
 }
 
 // applyConfig applies the VM's config changes and reports whether any were
