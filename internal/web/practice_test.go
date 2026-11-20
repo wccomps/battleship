@@ -38,17 +38,17 @@ const (
 
 // practiceHarness is the harness with the session interface on for pods
 // 51-59, a principal holding every privilege, and "approved" a registered
-// tag.
+// tag; mut changes the config further.
 type practiceHarness struct {
 	*harness
 	practice http.Handler // PracticeHandler
 }
 
-func newPracticeHarness(t *testing.T) *practiceHarness {
+func newPracticeHarness(t *testing.T, mut ...func(*config.Config)) *practiceHarness {
 	t.Helper()
-	h := newHarness(t, func(c *config.Config) {
+	h := newHarness(t, append([]func(*config.Config){func(c *config.Config) {
 		c.Practice = config.Practice{Pods: "51-59", Principal: practicePrincipal, Listen: "127.0.0.1:8081", Key: practiceTestKey}
-	})
+	}}, mut...)...)
 	if err := h.cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +354,7 @@ func TestPracticeSetsMarkWhatCannotBeRead(t *testing.T) {
 	if lima.Error == "" || len(lima.Templates) != 0 || lima.Pod != (practiceSize{}) {
 		t.Errorf("the set that can't be planned = %+v, want an error and nothing else", lima)
 	}
-	if want := (practiceSize{MemoryBytes: 6 * gib, CPUs: 3, BootDiskBytes: 48 * gib}); kilo.Pod != want || kilo.Error != "" || len(kilo.Templates) != 2 {
+	if want := (practiceSize{MemoryBytes: 6 * gib, CPUs: 3}); kilo.Pod != want || kilo.Error != "" || len(kilo.Templates) != 2 { // linked clones: no boot disk
 		t.Errorf("kilo.alpha = %+v, want both templates and pod %+v", kilo, want)
 	}
 }
@@ -381,7 +381,7 @@ func TestPracticeSetsBlockWhatThePrincipalCannotClone(t *testing.T) {
 			if len(set.Blocked) != 1 || set.Blocked[0].Name != "dc.kilo.alpha.tpl" || !strings.Contains(set.Blocked[0].Reason, "VM.Clone on /vms/9001") {
 				t.Errorf("blocked = %+v, want dc's template for want of VM.Clone on /vms/9001", set.Blocked)
 			}
-			if want := (practiceSize{MemoryBytes: 4 * gib, CPUs: 2, BootDiskBytes: 32 * gib}); set.Pod != want {
+			if want := (practiceSize{MemoryBytes: 4 * gib, CPUs: 2}); set.Pod != want { // linked clones: no boot disk
 				t.Errorf("pod = %+v, want web's alone %+v", set.Pod, want)
 			}
 		})
@@ -413,20 +413,30 @@ func TestPracticeSetsBlockWhatThePrincipalCannotDeploy(t *testing.T) {
 }
 
 // One pod's size is the sum over the set's built templates, as Proxmox lists
-// each one.
+// each one; boot disks count only when deploys make full clones.
 func TestPracticeSetsReportPodSize(t *testing.T) {
-	p := newPracticeHarness(t)
-	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", false)
-	if got := p.sets()[0].Pod; got != (practiceSize{}) {
-		t.Errorf("pod with no template built = %+v, want nothing", got)
-	}
-	p.addTemplate("dc.kilo.alpha.tpl", 9001, 1, "5f1c2a9e-0000-4000-8000-000000000001")
-	if got, want := p.sets()[0].Pod, (practiceSize{MemoryBytes: 2 * gib, CPUs: 1, BootDiskBytes: 16 * gib}); got != want {
-		t.Errorf("pod with dc's template built = %+v, want %+v", got, want)
-	}
-	p.addTemplate("web.kilo.alpha.tpl", 9002, 2, "5f1c2a9e-0000-4000-8000-000000000002")
-	if got, want := p.sets()[0].Pod, (practiceSize{MemoryBytes: 6 * gib, CPUs: 3, BootDiskBytes: 48 * gib}); got != want {
-		t.Errorf("pod = %+v, want %+v", got, want)
+	for _, linked := range []bool{true, false} {
+		t.Run(fmt.Sprintf("linked %t", linked), func(t *testing.T) {
+			disk := func(b int64) int64 {
+				if linked {
+					return 0
+				}
+				return b
+			}
+			p := newPracticeHarness(t, func(c *config.Config) { c.Deploy.Linked = linked })
+			p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", false)
+			if got := p.sets()[0].Pod; got != (practiceSize{}) {
+				t.Errorf("pod with no template built = %+v, want nothing", got)
+			}
+			p.addTemplate("dc.kilo.alpha.tpl", 9001, 1, "5f1c2a9e-0000-4000-8000-000000000001")
+			if got, want := p.sets()[0].Pod, (practiceSize{MemoryBytes: 2 * gib, CPUs: 1, BootDiskBytes: disk(16 * gib)}); got != want {
+				t.Errorf("pod with dc's template built = %+v, want %+v", got, want)
+			}
+			p.addTemplate("web.kilo.alpha.tpl", 9002, 2, "5f1c2a9e-0000-4000-8000-000000000002")
+			if got, want := p.sets()[0].Pod, (practiceSize{MemoryBytes: 6 * gib, CPUs: 3, BootDiskBytes: disk(48 * gib)}); got != want {
+				t.Errorf("pod = %+v, want %+v", got, want)
+			}
+		})
 	}
 }
 

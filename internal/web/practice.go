@@ -186,7 +186,8 @@ type practiceSet struct {
 	// first session pod lacks one of the principal's rights, or which it may
 	// not clone into that pod (pods.Uncloneable), and why.
 	Blocked []practiceBlocked `json:"blocked"`
-	// Pod is what one pod of the set takes: the sum over Templates.
+	// Pod is what one pod of the set takes: its clones of Templates
+	// (pods.PodFootprint).
 	Pod practiceSize `json:"pod"`
 	// Error is why the set could not be planned; nothing else is then listed.
 	Error string `json:"error,omitempty"`
@@ -202,8 +203,9 @@ type practiceTemplate struct {
 type practiceSize struct {
 	MemoryBytes int64 `json:"memory_bytes"`
 	CPUs        int   `json:"cpus"`
-	// BootDiskBytes sums each template's boot disk, the one size Proxmox
-	// lists for a VM and pods.EstimateCapacity uses.
+	// BootDiskBytes is the boot disks a pod's full clones copy, the one size
+	// Proxmox lists for a VM; it is 0 under linked clones (deploy.linked),
+	// which share their template's, as pods.EstimateCapacity counts them.
 	BootDiskBytes int64 `json:"boot_disk_bytes"`
 }
 
@@ -275,6 +277,7 @@ func (s *Server) practiceSet(ctx context.Context, planner pods.Planner, set pods
 			unpermitted[it.Template] = it.Blocked
 		}
 	}
+	var cloned []pods.TemplateSpec
 	for _, t := range plan.Templates {
 		if !slices.Contains(out.Hosts, t.Host) {
 			out.Hosts = append(out.Hosts, t.Host)
@@ -292,11 +295,10 @@ func (s *Server) practiceSet(ctx context.Context, planner pods.Planner, set pods
 			continue
 		}
 		out.Templates = append(out.Templates, practiceTemplate{Host: t.Host, Name: t.Name, VMID: t.VMID, Digest: t.Digest})
-		vm := listed[t.VMID]
-		out.Pod.MemoryBytes += vm.MaxMem
-		out.Pod.CPUs += vm.MaxCPU
-		out.Pod.BootDiskBytes += vm.MaxDisk
+		cloned = append(cloned, t)
 	}
+	fp := pods.PodFootprint(cloned, listed, s.cfg.Deploy)
+	out.Pod = practiceSize{MemoryBytes: fp.MemoryBytes, CPUs: fp.CPUs, BootDiskBytes: fp.DiskBytes}
 	return out
 }
 
