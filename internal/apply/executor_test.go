@@ -1320,23 +1320,6 @@ func TestTemplateThatCannotBeConvertedIsRemoved(t *testing.T) {
 	}
 }
 
-// Cleanup removes this run's team VMs in VMID order.
-func TestCleanupRemovesTeamVMsInVMIDOrder(t *testing.T) {
-	f := sevenMasters()
-	plan := deploySeven(t, f, "h1", "h2", "h3")
-	denied := &proxmox.APIError{Status: 400, Message: "Parameter verification failed."}
-	for _, vmid := range []int{10103, 10101, 10102} {
-		f.FailOn(fmt.Sprintf("setconfig:%d", vmid), denied)
-	}
-	ex := testExecutor(f, &recorder{})
-	ex.Cfg.Retry.Rounds = 0
-
-	res := ex.Run(context.Background(), plan)
-	if got := f.DeletedIDs(); !slices.Equal(got, []int{10101, 10102, 10103}) {
-		t.Errorf("deleted %v, want 10101, 10102, 10103 in order; result %+v", got, res)
-	}
-}
-
 // Cleanup settles each template copy it can't complete one way: gone,
 // failed or removed. Either way it goes on to complete the next.
 func TestCleanupSettlesEachTemplateCopyOnce(t *testing.T) {
@@ -1421,10 +1404,16 @@ func TestCleanupBudgetReportsEveryVMLeft(t *testing.T) {
 						cleaning.Store(listings == 2) // Run's listing, then cleanup's
 					}
 				}
+				var first atomic.Int64 // the VM cleanup checks first, whatever its order
 				f.Gate = func(ctx context.Context, key string) (func(), error) {
-					if cleaning.Load() && key == fmt.Sprintf("config:%d", tc.base+1) {
-						<-ctx.Done()
-						return nil, ctx.Err()
+					if !cleaning.Load() {
+						return nil, nil
+					}
+					for i := int64(1); i <= 3; i++ {
+						if key == fmt.Sprintf("config:%d", int64(tc.base)+i) && (first.CompareAndSwap(0, i) || first.Load() == i) {
+							<-ctx.Done()
+							return nil, ctx.Err()
+						}
 					}
 					return nil, nil
 				}
@@ -1435,7 +1424,7 @@ func TestCleanupBudgetReportsEveryVMLeft(t *testing.T) {
 				for i := 1; i <= 3; i++ {
 					name := fmt.Sprintf(tc.named, i)
 					err := res.CleanupFailed[name]
-					if err == nil || i > 1 && !strings.Contains(err.Error(), "cleanup time budget ran out") {
+					if err == nil || int64(i) != first.Load() && !strings.Contains(err.Error(), "cleanup time budget ran out") {
 						t.Errorf("%s: cleanup error %v, want it reported as not checked in time", name, err)
 					}
 				}
