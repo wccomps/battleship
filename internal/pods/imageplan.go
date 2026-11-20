@@ -69,9 +69,27 @@ func vmsNamed(vms []proxmox.VM, name string) []proxmox.VM {
 	return out
 }
 
-// sourceBridges are the distinct bridges of a clone source's NICs.
+// sourceBridges are the SDN paths, below /sdn/zones/<zone>/, a clone of a VM
+// with config cfg asks SDN.Use on, distinct and sorted. Each NIC asks its
+// bridge, or <bridge>/<tag> when VLAN-tagged; a trunked NIC asks its bridge
+// too, as pve-guest-common's check_vnet_access does.
 func sourceBridges(cfg map[string]string) []string {
-	return slices.Compact(slices.Sorted(slices.Values(nicBridgesAll(cfg))))
+	var out []string
+	forEachNIC(cfg, func(_, v string) {
+		_, opts := splitOptions(v)
+		b, tag := opts["bridge"], opts["tag"]
+		if b == "" {
+			return
+		}
+		if tag != "" {
+			out = append(out, b+"/"+tag)
+		}
+		if tag == "" || opts["trunks"] != "" {
+			out = append(out, b)
+		}
+	})
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // ImageRegister plans copying a VM in as its family's next version.

@@ -175,8 +175,7 @@ type Source struct {
 	VMID int    `json:"vmid"`
 	Node string `json:"node"`
 	Name string `json:"name"`
-	// Bridges are its NICs' bridges: Proxmox checks SDN.Use on them for a
-	// clone.
+	// Bridges are what a clone of it asks SDN.Use on (sourceBridges).
 	Bridges []string `json:"bridges,omitempty"`
 	// Base, Notes and Unreadable are the source's notes, for its review: the
 	// version it edits (ImageEdit), and the user notes the copy keeps, less
@@ -213,8 +212,9 @@ type TemplateSpec struct {
 	// (clones regenerate the drive) only decide the privileges a deploy needs.
 	CPU       string `json:"cpu,omitempty"`
 	CloudInit bool   `json:"cloud_init,omitempty"`
-	// Bridges are the template's net0 and net1 bridges, which clones start on
-	// until the network step rewires them.
+	// Bridges are what a clone of the template asks SDN.Use on
+	// (sourceBridges): the template's NICs when reused, the master's, which
+	// the build copies, when built.
 	Bridges []string `json:"bridges,omitempty"`
 	// Digest is ConfigDigest of the template an ApprovedOnly deploy reuses:
 	// what the session interface lists, and checks against (Digests).
@@ -268,6 +268,10 @@ type Item struct {
 	// DetailsWas is an Edit notes's or Edit host's notes as read, for its
 	// review and fingerprint.
 	DetailsWas *NotesRead `json:"details_was,omitempty"`
+	// TagsChanged are the tags the label step adds to or removes from the
+	// VM's tags as read (tagChanges), where its planner read them; they only
+	// decide the rights the step needs.
+	TagsChanged []string `json:"tags_changed,omitempty"`
 	// Record is the domain a record or clear-record step writes into, or
 	// takes out of, Pool's comment.
 	Record string `json:"record,omitempty"`
@@ -687,7 +691,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, req DeployReque
 		MasterNode: m.Node,
 	}
 	spec.Interfaces, spec.GPU = p.describe(cfg)
-	spec.CPU, spec.CloudInit, spec.Bridges = cfg["cpu"], HasCloudInit(cfg), NICBridges(cfg)
+	spec.CPU, spec.CloudInit, spec.Bridges = cfg["cpu"], HasCloudInit(cfg), sourceBridges(cfg)
 	named := byName[spec.Name]
 	var existing proxmox.VM
 	exists := len(named) > 0
@@ -709,7 +713,7 @@ func (p Planner) templateSpec(ctx context.Context, m proxmox.VM, req DeployReque
 			return TemplateSpec{}, nil, fmt.Errorf("reading template %s: %w", spec.Name, err)
 		}
 		spec.Interfaces, spec.GPU = p.describe(tcfg)
-		spec.CPU, spec.CloudInit, spec.Bridges = tcfg["cpu"], HasCloudInit(tcfg), NICBridges(tcfg)
+		spec.CPU, spec.CloudInit, spec.Bridges = tcfg["cpu"], HasCloudInit(tcfg), sourceBridges(tcfg)
 		if req.ApprovedOnly {
 			spec.Digest = ConfigDigest(tcfg)
 		}

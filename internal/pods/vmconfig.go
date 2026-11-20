@@ -77,18 +77,6 @@ func CountInterfaces(cfg map[string]string) int {
 	return n
 }
 
-// NICBridges lists the bridges of net0 and net1, the NICs a deploy
-// rewires, in that order, skipping a missing NIC.
-func NICBridges(cfg map[string]string) []string {
-	var out []string
-	for _, k := range []string{"net0", "net1"} {
-		if b := nicBridge(cfg[k]); b != "" {
-			out = append(out, b)
-		}
-	}
-	return out
-}
-
 // HasCloudInit reports whether any drive is a cloud-init drive.
 func HasCloudInit(cfg map[string]string) bool {
 	for k, v := range cfg {
@@ -350,6 +338,25 @@ func sameTags(a, b string) bool {
 	slices.Sort(x)
 	slices.Sort(y)
 	return slices.Equal(x, y)
+}
+
+// tagChanges are the tags in one of tag lists a and b and not the other,
+// sorted: what Proxmox checks a tag edit's rights on.
+func tagChanges(a, b string) []string {
+	x, y := Tags(a), Tags(b)
+	var out []string
+	for _, t := range x {
+		if !slices.Contains(y, t) {
+			out = append(out, t)
+		}
+	}
+	for _, t := range y {
+		if !slices.Contains(x, t) {
+			out = append(out, t)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // AddTag adds tag to a tag list unless it is there.

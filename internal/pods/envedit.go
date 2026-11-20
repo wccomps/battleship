@@ -280,7 +280,7 @@ func (p Planner) EnvEdit(ctx context.Context, req HostEditInput) (*Plan, error) 
 		it.Rename = wantName
 	}
 	if it.Rename != "" || !sameTags(h.Tags, wantTags) || WithNotes(h.desc(), wantNotes) != h.desc() {
-		it.Tags = wantTags
+		it.Tags, it.TagsChanged = wantTags, tagChanges(h.Tags, wantTags)
 		it.Notes = &wantNotes
 		it.Steps = append(it.Steps, StepLabel)
 	}

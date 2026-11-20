@@ -42,6 +42,8 @@ var fingerprinted = map[string]map[string]bool{
 		"Set": false, "Sets": false,
 		// Says why Blocked is set, which Blocked already covers.
 		"Unpermitted": false,
+		// Only decides the privileges needed, which Blocked covers.
+		"TagsChanged": false,
 		// The notes an Edit notes writes over (TestFingerprintCoversNotesReplaced).
 		"DetailsWas": true,
 		"Record":     true,  // the domain a record step writes into its pool's comment

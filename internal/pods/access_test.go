@@ -10,6 +10,7 @@ import (
 	"testing/synctest"
 
 	"github.com/wccomps/battleship/internal/config"
+	"github.com/wccomps/battleship/internal/pods/podstest"
 	"github.com/wccomps/battleship/internal/proxmox"
 )
 
@@ -616,15 +617,18 @@ func TestCPUNeedsMappingOnlyForCustomModels(t *testing.T) {
 	}
 }
 
-// A clone source's team bridges need SDN.Use in the teams zone; a bridge
-// that is no vnet is left to Proxmox.
-func TestCloneNeedsSDNUseOnSourceTeamBridges(t *testing.T) {
+// A clone source's bridges need SDN.Use: a team bridge in the teams zone, a
+// plain bridge in zone localnetwork.
+func TestCloneNeedsSDNUseOnTeamAndPlainBridges(t *testing.T) {
 	cfg := config.Default()
+	vnets := []string{"/sdn/zones/teams/ext01", "/sdn/zones/localnetwork/vmbr0"}
 	g := grants{
 		"/vms/8002":                      {"VM.Clone"},
 		"/pool/pool-01":                  {"VM.Allocate"},
 		"/storage/" + cfg.Deploy.Storage: {"Datastore.AllocateSpace"},
-		"/sdn/zones/teams/ext01":         {"SDN.Use"},
+	}
+	for _, v := range vnets {
+		g[v] = []string{"SDN.Use"}
 	}
 	plan := func() *Plan {
 		return &Plan{Kind: KindDeploy, Items: []Item{{Team: "01", Name: "team01-teak", VMID: 10121,
@@ -632,12 +636,70 @@ func TestCloneNeedsSDNUseOnSourceTeamBridges(t *testing.T) {
 	}
 	p := plan()
 	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "" {
-		t.Errorf("with SDN.Use on ext01: blocked %q, %v", p.Items[0].Blocked, err)
+		t.Errorf("with SDN.Use on both: blocked %q, %v", p.Items[0].Blocked, err)
 	}
-	delete(g, "/sdn/zones/teams/ext01")
-	p = plan()
-	if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "you don't have SDN.Use on /sdn/zones/teams/ext01" {
-		t.Errorf("without SDN.Use on ext01: blocked %q, %v", p.Items[0].Blocked, err)
+	for _, v := range vnets {
+		delete(g, v)
+		p = plan()
+		if err := BlockUnpermitted(context.Background(), p, g, cfg); err != nil || p.Items[0].Blocked != "you don't have SDN.Use on "+v {
+			t.Errorf("without SDN.Use on %s: blocked %q, %v", v, p.Items[0].Blocked, err)
+		}
+		g[v] = []string{"SDN.Use"}
+	}
+}
+
+// A clone asks SDN.Use on every NIC of its template, as Proxmox does: net2 as
+// well as net0, a plain bridge under zone localnetwork, and a VLAN-tagged NIC
+// on its tag.
+func TestCloneNeedsSDNUseOnEveryTemplateNIC(t *testing.T) {
+	ctx := context.Background()
+	cfg := envConfig()
+	f := podstest.New("cedar")
+	nics := map[string]string{
+		"net0": "virtio=BC:24:11:00:01:21,bridge=vmbr0",
+		"net2": "virtio=BC:24:11:00:01:22,bridge=devint01",
+		"net3": "e1000=BC:24:11:00:01:23,bridge=vmbr1,tag=20",
+	}
+	f.Add(proxmox.VM{VMID: 121, Name: "teak.tango.delta", Node: "cedar", Tags: "dev"}, nics)
+	f.Add(proxmox.VM{VMID: 9021, Name: "teak.tango.delta.tpl", Node: "cedar", Template: true}, nics)
+	plan, err := NewPlanner(f, cfg).Deploy(ctx, DeployRequest{Pattern: "*.tango.delta", Teams: []string{"01"}})
+	if err != nil || len(plan.Templates) != 1 {
+		t.Fatalf("plan = %+v, %v", plan, err)
+	}
+	vnets := []string{"/sdn/zones/localnetwork/vmbr0", "/sdn/zones/" + cfg.Environments.SDNZone + "/devint01", "/sdn/zones/localnetwork/vmbr1/20"}
+	g := grants{
+		"/vms/9021":                      {"VM.Clone"},
+		"/pool/pool-01":                  {"VM.Allocate"},
+		"/storage/" + cfg.Deploy.Storage: {"Datastore.AllocateSpace"},
+	}
+	for _, v := range vnets {
+		g[v] = []string{"SDN.Use"}
+	}
+	if why, err := Uncloneable(ctx, g, cfg, plan.Templates[0], "01"); err != nil || why != "" {
+		t.Fatalf("with SDN.Use on every NIC: %q, %v", why, err)
+	}
+	for _, v := range vnets {
+		delete(g, v)
+		if why, err := Uncloneable(ctx, g, cfg, plan.Templates[0], "01"); err != nil || why != "you don't have SDN.Use on "+v {
+			t.Errorf("without SDN.Use on %s: %q, %v", v, why, err)
+		}
+		g[v] = []string{"SDN.Use"}
+	}
+}
+
+// Building a template clones its master, so it asks SDN.Use on the master's
+// bridges as a pod clone does on the template's.
+func TestTemplateBuildNeedsSDNUseOnMasterBridges(t *testing.T) {
+	cfg := envConfig()
+	vnet := "/sdn/zones/" + cfg.Environments.SDNZone + "/devint01"
+	plan := &Plan{Kind: KindDeploy, Templates: []TemplateSpec{{Name: "teak.x.tpl", VMID: 9021, MasterVMID: 121, Interfaces: 1, Bridges: []string{"devint01"}}}}
+	g := grants{
+		"/vms/121":                       {"VM.Clone"},
+		"/pool/" + cfg.Images.Pool:       {"VM.Allocate"},
+		"/storage/" + cfg.Deploy.Storage: {"Datastore.AllocateSpace"},
+	}
+	if err := BlockUnpermitted(context.Background(), plan, g, cfg); err != nil || plan.Templates[0].Blocked != "you don't have SDN.Use on "+vnet {
+		t.Errorf("without SDN.Use on devint01: blocked %q, %v", plan.Templates[0].Blocked, err)
 	}
 }
 

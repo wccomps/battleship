@@ -30,8 +30,9 @@ func TestAccessRemembersAFailedListing(t *testing.T) {
 }
 
 // Rewiring a NIC needs SDN.Use on the vnet it leaves as well as the one it
-// joins. A new clone's template bridges are checked when they are team
-// vnets of the zone; others (and an existing VM's) are left to Proxmox.
+// joins: a new clone's template bridges are checked, a team vnet in the
+// teams zone and a plain bridge in zone localnetwork; an existing VM's are
+// left to Proxmox.
 func TestNetworkNeedsSDNUseOnTheBridgeLeft(t *testing.T) {
 	cfg := config.Default()
 	tpl := TemplateSpec{Name: "teak.x.tpl", VMID: 9021, Exists: true, Interfaces: 1, Bridges: []string{"int07"}}
@@ -45,11 +46,10 @@ func TestNetworkNeedsSDNUseOnTheBridgeLeft(t *testing.T) {
 	if b := plan.Items[0].Blocked; b != "you don't have SDN.Use on /sdn/zones/teams/int07" {
 		t.Fatalf("blocked %q", b)
 	}
-	// A bridge outside the zone's team vnets isn't checked here.
 	tpl.Bridges = []string{"vmbr0"}
 	plan = &Plan{Kind: KindDeploy, Templates: []TemplateSpec{tpl}, Items: []Item{item}}
 	_ = BlockUnpermitted(context.Background(), plan, acc, cfg)
-	if b := plan.Items[0].Blocked; b != "" {
+	if b := plan.Items[0].Blocked; b != "you don't have SDN.Use on /sdn/zones/localnetwork/vmbr0" {
 		t.Fatalf("blocked %q for vmbr0", b)
 	}
 }

@@ -229,23 +229,28 @@ func cpuMapping(cpu string) string {
 	return ""
 }
 
-// cloneNeeds is what cloning VM src as vmid into pool needs. bridges are
-// src's NIC bridges, on which Proxmox checks SDN.Use when they are vnets,
-// and cpu its CPU model.
+// cloneNeeds is what cloning VM src as vmid into pool needs; cpu is src's CPU
+// model. For every user but root@pam, Proxmox's clone checks SDN.Use on
+// /sdn/zones/<zone>/<path> for each path in bridges (sourceBridges): a vnet's
+// zone, or localnetwork for a plain bridge. Battleship knows the zones of the
+// slot, edit and team vnets only, and takes any other bridge as plain.
 func cloneNeeds(cfg config.Config, src, vmid int, pool string, bridges []string, cpu string) []need {
 	ns := []need{
 		one(VMPath(src), "VM.Clone"),
 		on(vmid, pool, "VM.Allocate"),
 		one("/storage/"+cfg.Deploy.Storage, "Datastore.AllocateSpace"),
 	}
-	for _, b := range bridges {
+	for _, path := range bridges {
+		b, _, _ := strings.Cut(path, "/")
 		zone := catalogZone(cfg, b)
-		if zone == "" && isTeamBridge(cfg.Network, b) {
+		switch {
+		case zone != "":
+		case isTeamBridge(cfg.Network, b):
 			zone = cfg.Proxmox.SDNZone
+		default:
+			zone = "localnetwork"
 		}
-		if zone != "" {
-			ns = append(ns, one("/sdn/zones/"+zone+"/"+b, "SDN.Use"))
-		}
+		ns = append(ns, one("/sdn/zones/"+zone+"/"+path, "SDN.Use"))
 	}
 	if m := cpuMapping(cpu); m != "" {
 		ns = append(ns, one(m, "Mapping.Use"))
@@ -261,21 +266,15 @@ func Uncloneable(ctx context.Context, acc Access, cfg config.Config, tpl Templat
 	return missing(ctx, acc, cloneNeeds(cfg, tpl.VMID, n.CloneVMID(team, tpl.VMID), n.Pool(team), tpl.Bridges, tpl.CPU))
 }
 
-// templateNeeds is what building t needs; nothing when it is reused.
+// templateNeeds is what building t needs, a clone of its master into the
+// images pool and the clone's conversion; nothing when it is reused.
 func templateNeeds(t TemplateSpec, cfg config.Config) []need {
 	if !t.Builds() {
 		return nil
 	}
-	ns := []need{
-		one(VMPath(t.MasterVMID), "VM.Clone"),
-		on(t.VMID, cfg.Images.Pool, "VM.Allocate"), // the copy into the images pool, and its conversion
-		one("/storage/"+cfg.Deploy.Storage, "Datastore.AllocateSpace"),
-	}
+	ns := cloneNeeds(cfg, t.MasterVMID, t.VMID, cfg.Images.Pool, t.Bridges, t.CPU)
 	if t.Rebuild {
 		ns = append(ns, one(VMPath(t.VMID), "VM.Allocate")) // deleting the old template, wherever it is
-	}
-	if m := cpuMapping(t.CPU); m != "" {
-		ns = append(ns, one(m, "Mapping.Use"))
 	}
 	if t.WillStopMaster {
 		ns = append(ns, one(VMPath(t.MasterVMID), "VM.PowerMgmt"))
@@ -341,14 +340,14 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAc
 		case StepRecord, StepClearRecord:
 			// The step reads the comment it rewrites, so it keeps the rest.
 			ns = append(ns, one(PoolPath(it.Pool), "Pool.Allocate"), one(PoolPath(it.Pool), "Pool.Audit"))
-		case StepLabel, StepDetails, StepNotes:
+		case StepDetails, StepNotes:
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Options"))
-		case StepSetTag:
-			// Proxmox checks VM.Config.Options to edit tags, and when
-			// user-tag-access restricts tags (or registers set-<name>), only
-			// Sys.Modify on / bypasses the tag check.
+		case StepLabel, StepSetTag:
+			// Proxmox checks VM.Config.Options to edit tags, and for each tag
+			// added or removed that user-tag-access refuses (a registered one
+			// always), Sys.Modify on /.
 			ns = append(ns, on(it.VMID, pool, "VM.Config.Options"))
-			if it.Set != "" && !tags.Allows(it.Set.Tag()) {
+			if slices.ContainsFunc(changedTags(it, st), func(t string) bool { return !tags.Allows(t) }) {
 				ns = append(ns, one("/", "Sys.Modify"))
 			}
 		case StepConvert:
@@ -367,6 +366,18 @@ func itemNeeds(it Item, tpl *TemplateSpec, cfg config.Config, tags proxmox.TagAc
 		}
 	}
 	return ns
+}
+
+// changedTags are the tags step st of it adds or removes, as far as its plan
+// knows them: the label step's TagsChanged, the tag-set step's set tag.
+func changedTags(it Item, st Step) []string {
+	switch {
+	case st == StepLabel:
+		return it.TagsChanged
+	case st == StepSetTag && it.Set != "":
+		return []string{it.Set.Tag()}
+	}
+	return nil
 }
 
 // catalogZone is the SDN zone of a slot or edit bridge, or "" when it isn't
@@ -447,7 +458,7 @@ func BlockUnpermitted(ctx context.Context, plan *Plan, acc Access, cfg config.Co
 	}
 	var tags proxmox.TagAccess
 	for _, it := range plan.Items {
-		if it.Blocked == "" && it.Set != "" && slices.Contains(it.Steps, StepSetTag) {
+		if it.Blocked == "" && slices.ContainsFunc(it.Steps, func(st Step) bool { return len(changedTags(it, st)) > 0 }) {
 			var err error
 			tags, err = acc.TagAccess(ctx)
 			if err != nil {
