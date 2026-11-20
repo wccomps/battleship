@@ -24,16 +24,23 @@ func envFake() *podstest.Fake {
 	return f
 }
 
-func create(t *testing.T, p Planner, hosts ...string) *Plan {
+// hostSpecs parses each spec as ParseHostSpec does.
+func hostSpecs(t *testing.T, specs ...string) []HostSpec {
 	t.Helper()
-	req := EnvRequest{Domain: "kilo.alpha", Router: HostSpec{Host: "gw", Family: "gw"}}
-	for _, h := range hosts {
-		hs, err := ParseHostSpec(h)
+	var hosts []HostSpec
+	for _, s := range specs {
+		hs, err := ParseHostSpec(s)
 		if err != nil {
 			t.Fatal(err)
 		}
-		req.Hosts = append(req.Hosts, hs)
+		hosts = append(hosts, hs)
 	}
+	return hosts
+}
+
+func create(t *testing.T, p Planner, hosts ...string) *Plan {
+	t.Helper()
+	req := EnvRequest{Domain: "kilo.alpha", Router: HostSpec{Host: "gw", Family: "gw"}, Hosts: hostSpecs(t, hosts...)}
 	plan, err := p.EnvCreate(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
@@ -109,8 +116,7 @@ func TestEnvAddResumesExistingHost(t *testing.T) {
 		map[string]string{"description": "battleship: base=gw-v1 dns=router"})
 	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha"},
 		map[string]string{"net0": "virtio=BC:24:11:00:21:01,bridge=vmbr0", "description": "battleship: ip=192.168.100.77 os=linux base=debian-12-v1 dns=router"})
-	hs, _ := ParseHostSpec("teak=debian-12")
-	plan, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(), EnvRequest{Domain: "kilo.alpha", Hosts: []HostSpec{hs}})
+	plan, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(), EnvRequest{Domain: "kilo.alpha", Hosts: hostSpecs(t, "teak=debian-12")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,8 +136,7 @@ func TestEnvAddBlocksResumeOfAnotherKind(t *testing.T) {
 	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha"},
 		map[string]string{"net0": "virtio=BC:24:11:00:21:01,bridge=vmbr0", "description": "battleship: ip=192.168.100.77 os=linux base=debian-12-v1 dns=router"})
 	for _, spec := range []string{"teak=win2022", "teak=gw"} {
-		hs, _ := ParseHostSpec(spec)
-		plan, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(), EnvRequest{Domain: "kilo.alpha", Hosts: []HostSpec{hs}})
+		plan, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(), EnvRequest{Domain: "kilo.alpha", Hosts: hostSpecs(t, spec)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,9 +161,8 @@ func TestEnvAddResumesTheExistingRouter(t *testing.T) {
 	f := envFake()
 	f.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;router"},
 		map[string]string{"description": "battleship: base=gw-v1 dns=router"})
-	hs, _ := ParseHostSpec("oak=win2022")
 	plan, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(),
-		EnvRequest{Domain: "kilo.alpha", Router: HostSpec{Host: "gw", Family: "gw"}, Hosts: []HostSpec{hs}})
+		EnvRequest{Domain: "kilo.alpha", Router: HostSpec{Host: "gw", Family: "gw"}, Hosts: hostSpecs(t, "oak=win2022")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,8 +212,7 @@ func TestEnvAddUsesTheEnvironmentsDNSHost(t *testing.T) {
 		map[string]string{"description": "battleship: base=gw-v1 dns=teak"})
 	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha"},
 		map[string]string{"net0": "virtio=BC:24:11:00:21:01,bridge=devint01", "description": "battleship: ip=192.168.100.10 os=linux base=debian-12-v1 dns=teak"})
-	hs, _ := ParseHostSpec("oak=debian-12")
-	plan, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(), EnvRequest{Domain: "kilo.alpha", Hosts: []HostSpec{hs}})
+	plan, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(), EnvRequest{Domain: "kilo.alpha", Hosts: hostSpecs(t, "oak=debian-12")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,11 +228,7 @@ func TestEnvAddBlocksANameTakenOutsideThePool(t *testing.T) {
 	f.Add(proxmox.VM{VMID: 2100, Name: "gw.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha;router"},
 		map[string]string{"description": "battleship: base=gw-v1 dns=router"})
 	f.Add(proxmox.VM{VMID: 300, Name: "teak.kilo.alpha", Node: "alder"}, nil)
-	var hosts []HostSpec
-	for _, s := range []string{"teak=debian-12", "oak=debian-12"} {
-		hs, _ := ParseHostSpec(s)
-		hosts = append(hosts, hs)
-	}
+	hosts := hostSpecs(t, "teak=debian-12", "oak=debian-12")
 	plan, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(), EnvRequest{Domain: "kilo.alpha", Hosts: hosts})
 	if err != nil {
 		t.Fatal(err)
@@ -290,11 +289,7 @@ func TestEnvAddInAFullSlot(t *testing.T) {
 	for id := 2101; id <= 2199; id++ {
 		f.Add(proxmox.VM{VMID: id, Name: fmt.Sprintf("other%d", id), Node: "alder"}, nil)
 	}
-	var hosts []HostSpec
-	for _, s := range []string{"teak=debian-12", "oak=win2022"} {
-		hs, _ := ParseHostSpec(s)
-		hosts = append(hosts, hs)
-	}
+	hosts := hostSpecs(t, "teak=debian-12", "oak=win2022")
 	plan, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(), EnvRequest{Domain: "kilo.alpha", Router: HostSpec{Host: "gw", Family: "gw"}, Hosts: hosts})
 	if err != nil {
 		t.Fatal(err)
@@ -319,11 +314,7 @@ func TestEnvAddWithNoAddressLeft(t *testing.T) {
 		f.Add(proxmox.VM{VMID: 30000 + o, Name: fmt.Sprintf("h%d.kilo.alpha", o), Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha"},
 			map[string]string{"description": fmt.Sprintf("battleship: ip=192.168.100.%d os=linux base=debian-12-v1 dns=router", o)})
 	}
-	var hosts []HostSpec
-	for _, s := range []string{"teak=debian-12", "oak=win2022"} {
-		hs, _ := ParseHostSpec(s)
-		hosts = append(hosts, hs)
-	}
+	hosts := hostSpecs(t, "teak=debian-12", "oak=win2022")
 	plan, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(), EnvRequest{Domain: "kilo.alpha", Hosts: hosts})
 	if err != nil {
 		t.Fatal(err)
@@ -354,8 +345,7 @@ func TestEnvAddResumesAHostWithoutAnAddress(t *testing.T) {
 		map[string]string{"description": "battleship: base=gw-v1 dns=router"})
 	f.Add(proxmox.VM{VMID: 2101, Name: "teak.kilo.alpha", Node: "alder", Pool: "dev-01", Tags: "dev;kilo.alpha"},
 		map[string]string{"net0": "virtio=BC:24:11:00:21:01,bridge=devint01", "description": "battleship: os=linux base=debian-12-v1 dns=router"})
-	hs, _ := ParseHostSpec("teak=debian-12")
-	plan, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(), EnvRequest{Domain: "kilo.alpha", Hosts: []HostSpec{hs}})
+	plan, err := NewPlanner(f, envConfig()).EnvAdd(context.Background(), EnvRequest{Domain: "kilo.alpha", Hosts: hostSpecs(t, "teak=debian-12")})
 	if err != nil {
 		t.Fatal(err)
 	}

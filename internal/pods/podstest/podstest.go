@@ -142,10 +142,12 @@ type Fake struct {
 	Restarts map[int]Restart
 	// Execs are the guest commands run, in order, except setup state reads
 	// and SSH checks.
-	Execs   []ExecCall
-	execs   map[int]proxmox.ExecStatus // by PID
-	polls   map[int]int                // status reads, by PID
-	nextPID int
+	Execs []ExecCall
+	// SSHChecks are the live SSH check commands run, in order.
+	SSHChecks []ExecCall
+	execs     map[int]proxmox.ExecStatus // by PID
+	polls     map[int]int                // status reads, by PID
+	nextPID   int
 }
 
 // New returns an empty cluster whose online nodes are nodes.
