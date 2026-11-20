@@ -16,12 +16,14 @@ import (
 )
 
 // changeLog is an API that records the VMID of every change sent through
-// it. It embeds only pods.Reads, so it can't miss a change method.
+// it, and the pool of every pool change. It embeds only pods.Reads, so it
+// can't miss a change method.
 type changeLog struct {
 	pods.Reads
 	changes pods.Changes
 	mu      sync.Mutex
 	changed []int
+	pools   []string
 }
 
 func (c *changeLog) saw(vmid int) {
@@ -30,12 +32,12 @@ func (c *changeLog) saw(vmid int) {
 	c.changed = append(c.changed, vmid)
 }
 
-func (c *changeLog) take() []int {
+func (c *changeLog) take() ([]int, []string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := c.changed
-	c.changed = nil
-	return out
+	vms, pools := c.changed, c.pools
+	c.changed, c.pools = nil, nil
+	return vms, pools
 }
 
 func (c *changeLog) SetVMConfig(ctx context.Context, node string, vmid int, ch map[string]string) error {
@@ -89,14 +91,26 @@ func (c *changeLog) DeleteVolume(ctx context.Context, node, storage, volid strin
 	return c.changes.DeleteVolume(ctx, node, storage, volid)
 }
 
-// Every VM a job changes is one of its lock keys, so jobs that change it
-// wait for each other: the keys follow what the executor really does.
+func (c *changeLog) SetPoolComment(ctx context.Context, pool, comment string) error {
+	c.mu.Lock()
+	c.pools = append(c.pools, pool)
+	c.mu.Unlock()
+	return c.changes.SetPoolComment(ctx, pool, comment)
+}
+
+// Every VM a job changes is one of its lock keys, and every slot pool one
+// of its slots, so jobs that change it wait for each other: the keys follow
+// what the executor really does.
 func TestJobsLockEveryVMTheyChange(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
 	f := envCluster()
 	f.Add(proxmox.VM{VMID: 150, Name: "deb-fresh", Node: "alder", Status: "stopped"},
 		map[string]string{"agent": "1", "net0": "virtio=BC:24:11:00:01:50,bridge=vmbr0"})
+	f.PoolComments = map[string]string{}
+	for _, s := range pods.Slots(cfg.Environments) {
+		f.PoolComments[s.Pool] = ""
+	}
 	api := &changeLog{Reads: f, changes: f}
 	p := pods.NewPlanner(f, cfg)
 	exec := &apply.Executor{API: api, Cfg: cfg, Sleep: func(ctx context.Context, d time.Duration) error { return ctx.Err() }}
@@ -123,6 +137,9 @@ func TestJobsLockEveryVMTheyChange(t *testing.T) {
 		{"env add", func() (*pods.Plan, error) {
 			return p.EnvAdd(ctx, pods.EnvRequest{Domain: "kilo.alpha", Hosts: []pods.HostSpec{host}})
 		}},
+		{"env create without machines", func() (*pods.Plan, error) {
+			return p.EnvCreate(ctx, pods.EnvRequest{Domain: "lima.alpha"})
+		}},
 		{"image register", func() (*pods.Plan, error) {
 			return p.ImageRegister(ctx, pods.ImageRequest{VMID: 150, Family: "debian-12"})
 		}},
@@ -136,13 +153,19 @@ func TestJobsLockEveryVMTheyChange(t *testing.T) {
 		}
 		writes, _ := plan.LockKeys()
 		exec.Run(ctx, plan)
-		changed := api.take()
-		if len(changed) == 0 && len(plan.Runnable()) > 0 {
+		vms, pools := api.take()
+		if len(vms)+len(pools) == 0 && len(plan.Runnable()) > 0 {
 			t.Errorf("%s: ran %d items and changed nothing; the step list is stale", s.name, len(plan.Runnable()))
 		}
-		for _, id := range changed {
+		for _, id := range vms {
 			if !slices.Contains(writes, "vmid:"+strconv.Itoa(id)) {
 				t.Errorf("%s changed VMID %d, which isn't among its lock keys %v", s.name, id, writes)
+			}
+		}
+		for _, pool := range pools {
+			i := slices.IndexFunc(pods.Slots(cfg.Environments), func(s pods.Slot) bool { return s.Pool == pool })
+			if i < 0 || !slices.Contains(writes, "slot:"+pods.Slots(cfg.Environments)[i].Name) {
+				t.Errorf("%s changed pool %s, whose slot isn't among its lock keys %v", s.name, pool, writes)
 			}
 		}
 	}

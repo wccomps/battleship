@@ -139,6 +139,11 @@ const (
 	StepWaitAgent Step = "wait-agent"
 	StepGuest     Step = "configure-guest"
 	StepVerify    Step = "verify"
+
+	// An environment's record in its slot pool's comment (see EnvMarker),
+	// on an item named for the pool rather than a VM.
+	StepRecord      Step = "record"       // write the [env <domain>] marker
+	StepClearRecord Step = "clear-record" // take it out
 )
 
 // TypedConfirm reports whether kind k needs what it deletes typed to confirm:
@@ -260,6 +265,12 @@ type Item struct {
 	// DetailsWas is an Edit notes's or Edit host's notes as read, for its
 	// review and fingerprint.
 	DetailsWas *NotesRead `json:"details_was,omitempty"`
+	// Record is the domain a record or clear-record step writes into, or
+	// takes out of, Pool's comment.
+	Record string `json:"record,omitempty"`
+	// Last: the item runs after the plan's other items, and only if none of
+	// them failed.
+	Last bool `json:"last,omitempty"`
 }
 
 // TargetPool is the Proxmox pool of it: its Pool if set, else its team's

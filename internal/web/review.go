@@ -188,8 +188,9 @@ func (r *reviewView) applyNotesDiff(was pods.NotesRead, after pods.ImageNotes) {
 	}
 }
 
-// envReview describes a create or add: a row per machine, and what the
-// guest agent sets on the Windows and Linux hosts.
+// envReview describes a create or add: a row per machine, and one for a
+// blocked record item; and what the guest agent sets on the Windows and
+// Linux hosts.
 func envReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
 	r := &reviewView{Verb: op.Verb, Subject: in.Domain, Image: true, Addr: true}
 	specs := map[string]pods.HostSpec{}
@@ -202,7 +203,16 @@ func envReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *r
 	var clones, resumes, guests []string
 	var dns netip.Addr // the guests' DNS server
 	atRouter := false  // whether dns is their gateway
+	var record string  // what the record or clear-record item says
 	for _, it := range plan.Items {
+		if it.IsRecord() {
+			if it.Blocked != "" {
+				r.Rows = append(r.Rows, reviewRow{Name: it.Name, Blocked: it.Blocked})
+			} else {
+				record = recordSay(it)
+			}
+			continue
+		}
 		spec := specs[it.Host]
 		isRouter := slices.Contains(pods.Tags(it.Tags), pods.ImageRouter) || router.Host != "" && it.Host == router.Host
 		row := reviewRow{Name: it.Name, Router: isRouter, Image: spec.Family,
@@ -254,8 +264,19 @@ func envReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *r
 		say = append(say, "Then "+andList(guests)+byCount(len(guests), " gets its", " get their")+
 			" name, address, gateway ."+strconv.Itoa(pods.GatewayOctet)+" and DNS ("+at+") through the guest agent.")
 	}
+	if record != "" {
+		say = append(say, record)
+	}
 	r.Say = strings.Join(say, " ")
 	return r
+}
+
+// recordSay is what an unblocked record or clear-record item does.
+func recordSay(it pods.Item) string {
+	if slices.Contains(it.Steps, pods.StepClearRecord) {
+		return "Then clears the record of " + it.Record + " from the comment of pool " + it.Pool + "."
+	}
+	return "Records " + it.Record + " in the comment of pool " + it.Pool + ", with no machines yet; add hosts to it later."
 }
 
 // envEditReview describes editing an environment host: its renamed name,
@@ -356,12 +377,15 @@ func envDeleteHostReview(op operation, _ jobs.Inputs, plan *pods.Plan, _ config.
 	return r
 }
 
-// tallyTeardown builds r.Rows and r.Kept from plan, calling fill on each
-// row, and returns the number of VMs deleted and the sentence naming any
+// tallyTeardown builds r.Rows from plan's items but record ones, and r.Kept,
+// calling fill on each row, and returns the number of VMs deleted and the sentence naming any
 // leftover disks freed.
 func (r *reviewView) tallyTeardown(plan *pods.Plan, fill func(pods.Item, *reviewRow)) (deletes int, diskSay []string) {
 	var disks []string
 	for _, it := range plan.Items {
+		if it.IsRecord() {
+			continue
+		}
 		row := reviewRow{Name: it.Name, Where: orDash(it.VMID) + " · " + orDashString(it.Node), Blocked: it.Blocked}
 		fill(it, &row)
 		r.Rows = append(r.Rows, row)
@@ -380,9 +404,10 @@ func (r *reviewView) tallyTeardown(plan *pods.Plan, fill func(pods.Item, *review
 	return deletes, diskSay
 }
 
-// teardownReview describes tearing an environment down: a row per item
-// (each VM it deletes or can't, with its image and address from its notes,
-// and the disks it frees), and the VMs on its networks it leaves alone.
+// teardownReview describes tearing an environment down: a row per VM it
+// deletes or can't, with its image and address from its notes, and per
+// disks it frees; a row for the clear-record item only when it is blocked;
+// and the VMs on its networks it leaves alone.
 func teardownReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LAN) *reviewView {
 	r := &reviewView{Verb: op.Verb, Subject: in.Domain, Image: true, Addr: true, Deletes: true}
 	pool := poolOf(plan.Items)
@@ -410,11 +435,23 @@ func teardownReview(op operation, in jobs.Inputs, plan *pods.Plan, lan config.LA
 		say = append(say, "Deletes "+countVMs(deletes)+" in "+pool+".")
 	}
 	say = append(say, diskSay...)
+	for _, it := range plan.Items {
+		switch {
+		case !it.IsRecord():
+		case it.Blocked != "":
+			r.Rows = append(r.Rows, reviewRow{Name: it.Name, Blocked: it.Blocked})
+			left.Marker = it.Record
+		default:
+			say = append(say, recordSay(it))
+		}
+	}
 	switch {
 	case left.Free():
 		say = append(say, "The slot is free again afterwards.")
 	case len(left.Hosts) > 0:
 		say = append(say, "The blocked "+byCount(len(left.Hosts), "VM stays", "VMs stay")+", so the slot isn't free afterwards.")
+	case left.Marker != "":
+		say = append(say, "The record of "+left.Marker+" stays, so the slot isn't free afterwards.")
 	default:
 		say = append(say, "VMs outside "+pool+" stay on its networks, so the slot isn't free afterwards.")
 	}

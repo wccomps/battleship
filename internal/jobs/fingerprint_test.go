@@ -41,6 +41,8 @@ var fingerprinted = map[string]map[string]bool{
 		"Unpermitted": false,
 		// The notes an Edit notes writes over (TestFingerprintCoversNotesReplaced).
 		"DetailsWas": true,
+		"Record":     true,  // the domain a record step writes into its pool's comment
+		"Last":       false, // set from Steps (recordItem)
 	},
 	"Source": {
 		"VMID": true, "Node": true, "Name": true,

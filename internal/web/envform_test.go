@@ -48,16 +48,17 @@ type formRow struct{ name, image, octet, err, bad string }
 
 var (
 	hostRowRE  = regexp.MustCompile(`(?s)<div class="mrow" data-row>(.*?)\n</div>`)
+	spareRE    = regexp.MustCompile(`(?s)<template data-spare>.*?</template>`)
 	valueRE    = regexp.MustCompile(`name="host_(name|octet)" value="([^"]*)"`)
 	selectedRE = regexp.MustCompile(`<option value="([^"]*)" selected`)
 	ferrRE     = regexp.MustCompile(`<span class="ferr" id="([a-z0-9-]+)">([^<]*)</span>`)
 	invalidRE  = regexp.MustCompile(`name="(?:host|router)_(name|image|octet)"[^>]*aria-invalid="true" aria-describedby="([a-z0-9-]+)"`)
 )
 
-// formRows reads the host rows of a form.
+// formRows reads the host rows of a form, not its spare row.
 func formRows(body string) []formRow {
 	var rows []formRow
-	for _, m := range hostRowRE.FindAllStringSubmatch(body, -1) {
+	for _, m := range hostRowRE.FindAllStringSubmatch(spareRE.ReplaceAllString(body, ""), -1) {
 		var r formRow
 		for _, v := range valueRE.FindAllStringSubmatch(m[1], -1) {
 			if v[1] == "name" {
@@ -82,7 +83,7 @@ func formRows(body string) []formRow {
 
 // rowsForm is a form posting rows (name, image, octet each) and a router.
 func rowsForm(routerName, routerImage string, rows ...[3]string) url.Values {
-	f := url.Values{"router_name": {routerName}, "router_image": {routerImage}}
+	f := url.Values{"rows": {"posted"}, "router_name": {routerName}, "router_image": {routerImage}}
 	for _, r := range rows {
 		f.Add("host_name", r[0])
 		f.Add("host_image", r[1])
@@ -104,8 +105,9 @@ func selectOf(t *testing.T, body, name string) string {
 // Create environment says the LAN, router and host addresses from config,
 // offers the free slots (not those a queued job will fill) with the first
 // chosen, then the router row, fixed at .2 with its one image chosen, and
-// an empty host row whose images are grouped by kind, each family's
-// newest usable version. Enter reviews: the first submit button does.
+// an empty host row whose images, routers too, are grouped by kind, each
+// family's newest usable version. Every row has a − submit and + follows
+// them. Enter reviews: the first submit button does.
 func TestCreateEnvironmentForm(t *testing.T) {
 	lan, err := config.ParseLAN("10.50.7")
 	if err != nil {
@@ -122,7 +124,10 @@ func TestCreateEnvironmentForm(t *testing.T) {
 		`<input class="inp n" type="text" name="router_name" value="gw" aria-label="Router name"`,
 		`<div class="addr fixed a"><span class="pre l">10.50.7.</span><span class="pre s">.</span><b>2</b></div>`,
 		`<legend class="lbl">Machines</legend>`, `<button type="submit" class="btn pri">Review</button>`,
-		`<span class="pre l">10.50.7.</span><span class="pre s">.</span><input type="text" name="host_octet" value="" inputmode="numeric" placeholder="auto" aria-label="Host 1 last octet"`)
+		`<span class="pre l">10.50.7.</span><span class="pre s">.</span><input type="text" name="host_octet" value="" inputmode="numeric" placeholder="auto" aria-label="Host 1 last octet"`,
+		`<button type="submit" class="btn ghost sq x" name="drop" value="router" formnovalidate data-remove-row aria-label="Remove router">`,
+		`<button type="submit" class="btn ghost sq x" name="drop" value="1" formnovalidate data-remove-row aria-label="Remove host 1">`,
+		`<button type="submit" class="btn sq" name="more" value="yes" formnovalidate data-add-row aria-label="Add host" title="Add host">`)
 	slot := selectOf(t, body, "slot")
 	contains(t, "the slot choice", slot, `<option value="03" selected>dev-03 · first free</option><option value="04">dev-04</option>`, `<option value="10">dev-10</option>`)
 	lacks(t, "the slot choice", slot, `value="01"`, `value="02"`)
@@ -131,11 +136,11 @@ func TestCreateEnvironmentForm(t *testing.T) {
 		t.Errorf("host rows = %+v, want %d empty one", rows, blankRows)
 	}
 	images := selectOf(t, body, "host_image")
-	contains(t, "a host image choice", images, `<option value="">Choose image</option><optgroup label="Windows"><option value="win2019">win2019 · v1</option><option value="win2022">win2022 · v3</option></optgroup>`+
+	contains(t, "a host image choice", images, `<option value="">Choose image</option><optgroup label="Router"><option value="gw">gw · v1</option></optgroup><optgroup label="Windows"><option value="win2019">win2019 · v1</option><option value="win2022">win2022 · v3</option></optgroup>`+
 		`<optgroup label="Linux / BSD"><option value="debian-12">debian-12 · v1</option></optgroup><optgroup label="Other"><option value="appliance">appliance · v2</option></optgroup>`)
 	lacks(t, "a host image choice", images, "win10", "v2</option></optgroup><optgroup label=\"Linux / BSD\"")
-	if review, more := strings.Index(body, `<button type="submit" class="sr" tabindex="-1" aria-hidden="true">Review</button>`), strings.Index(body, `name="more"`); review < 0 || review > more {
-		t.Errorf("the first submit button isn't Review (at %d; Add host at %d)", review, more)
+	if review, drop := strings.Index(body, `<button type="submit" class="sr" tabindex="-1" aria-hidden="true">Review</button>`), strings.Index(body, `name="drop"`); review < 0 || review > drop {
+		t.Errorf("the first submit button isn't Review (at %d; the first − at %d)", review, drop)
 	}
 
 	// With two router images, none is chosen for the user.
@@ -305,6 +310,112 @@ func TestAddHostWithoutJS(t *testing.T) {
 	h.noJobs("Add host")
 }
 
+// Without JavaScript, − asks for the form again without its row, keeping
+// the other rows and fields as typed and checking nothing yet. The router's
+// row stays gone once removed, and the last host row's − leaves none.
+func TestRemoveRowWithoutJS(t *testing.T) {
+	h := newHarness(t)
+	addFormImages(h)
+	sess := h.login(asLead)
+	form := rowsForm("gw", "gw", [3]string{"dc", "win2022", "10"}, [3]string{"Bad", "", ""}, [3]string{"web", "debian-12", ""})
+	form.Set("domain", "kilo.bravo")
+	form.Set("slot", "03")
+	again := func(what string) string {
+		t.Helper()
+		rec := h.post(&sess, "/environments/new/preview", form)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s = %d", what, rec.Code)
+		}
+		body := rec.Body.String()
+		contains(t, what, body, `value="kilo.bravo"`, `<option value="03" selected>dev-03</option>`)
+		lacks(t, what, body, `role="alert"`, "ferr", "aria-invalid")
+		return body
+	}
+
+	form.Set("drop", "2")
+	body := again("removing host 2")
+	if rows := formRows(body); !slices.Equal(rows, []formRow{{name: "dc", image: "win2022", octet: "10"}, {name: "web", image: "debian-12"}}) {
+		t.Errorf("rows = %+v, want dc then web", rows)
+	}
+	contains(t, "removing host 2", body, `name="router_name" value="gw"`, `<option value="gw" selected>gw · v1</option>`, `aria-label="Remove host 2"`)
+
+	form.Set("drop", "router")
+	body = again("removing the router")
+	lacks(t, "removing the router", body, `name="router_name"`, `aria-label="Remove router"`)
+	contains(t, "removing the router", body, `<input type="hidden" name="rows" value="posted">`)
+	if rows := formRows(body); len(rows) != 3 || rows[1] != (formRow{name: "Bad"}) {
+		t.Errorf("rows = %+v, want all 3", rows)
+	}
+
+	// As that form posts: no router row.
+	form = rowsForm("", "", [3]string{"dc", "win2022", "10"})
+	form.Del("router_name")
+	form.Del("router_image")
+	form.Set("domain", "kilo.bravo")
+	form.Set("slot", "03")
+	form.Set("drop", "1")
+	body = again("removing the last host")
+	if rows := formRows(body); len(rows) != 0 {
+		t.Errorf("rows = %+v, want none", rows)
+	}
+	lacks(t, "removing the last host", body, `name="router_name"`)
+	h.noJobs("removing rows")
+}
+
+// Without JavaScript, dropping Add hosts' last row and then + gives a fresh
+// row, not a refusal.
+func TestAddHostsRemoveLastRowThenAddWithoutJS(t *testing.T) {
+	h := newHarness(t)
+	addImages(h)
+	addEnvs(h)
+	sess := h.login(asLead)
+	form := rowsForm("", "", [3]string{"oak", "debian-12", ""})
+	form.Del("router_name")
+	form.Del("router_image")
+	form.Set("drop", "1")
+	rec := h.post(&sess, "/environments/kilo.alpha/add/preview", form)
+	if rec.Code != http.StatusOK || len(formRows(rec.Body.String())) != 0 {
+		t.Fatalf("removing the last row = %d, rows %+v", rec.Code, formRows(rec.Body.String()))
+	}
+	// As that form posts: no rows, only the rows field.
+	rec = h.post(&sess, "/environments/kilo.alpha/add/preview", url.Values{"rows": {"posted"}, "more": {"yes"}})
+	if rows := formRows(rec.Body.String()); rec.Code != http.StatusOK || len(rows) != 1 || rows[0] != (formRow{}) {
+		t.Errorf("+ = %d, rows %+v, want one empty", rec.Code, rows)
+	}
+	h.noJobs("add rows")
+}
+
+// A new environment needs no machines: with the router row removed or
+// left blank and no host filled in, Review previews it, and the button
+// names the domain.
+func TestCreateWithoutMachines(t *testing.T) {
+	h := newHarness(t)
+	addImages(h)
+	sess := h.login(asLead)
+	for what, form := range map[string]url.Values{
+		"no rows":    {"domain": {"kilo.bravo"}, "rows": {"posted"}},
+		"blank rows": rowsForm("", "", [3]string{}),
+	} {
+		form.Set("domain", "kilo.bravo")
+		_, fields, body := h.preview(&sess, "/environments/new", form)
+		if fields.Get("domain") != "kilo.bravo" || fields.Has("router") || fields.Has("env_hosts") {
+			t.Errorf("%s: confirm fields = %v", what, fields)
+		}
+		contains(t, what, body, "Create kilo.bravo</button>")
+	}
+}
+
+// Adding to an environment that is only a marker counts the hosts, not
+// the item that clears the marker.
+func TestAddToMarkerOnlyCountsHosts(t *testing.T) {
+	h := newHarness(t)
+	addImages(h)
+	h.api.PoolComments = map[string]string{"dev-01": "[env kilo.alpha]"}
+	sess := h.login(asLead)
+	_, _, body := h.preview(&sess, "/environments/kilo.alpha/add", url.Values{"env_hosts": {"oak=debian-12:11"}})
+	contains(t, "the review", body, "Add 1 host</button>")
+}
+
 // Add hosts names its environment in the title, shows what is already
 // there (names and addresses, router first), and starts with one empty
 // host row and no router row. After Review, addresses already used are
@@ -328,7 +439,7 @@ func TestAddHostsForm(t *testing.T) {
 	if rows := formRows(noRouter); len(rows) != blankRows || rows[0] != (formRow{}) {
 		t.Errorf("oscar.lima host rows = %+v, want %d empty one", rows, blankRows)
 	}
-	_, fields, preview := h.preview(&sess, "/environments/oscar.lima/add", url.Values{"host_name": {"fw"}, "host_image": {"gw"}, "host_octet": {""}})
+	_, fields, preview := h.preview(&sess, "/environments/oscar.lima/add", url.Values{"rows": {"posted"}, "host_name": {"fw"}, "host_image": {"gw"}, "host_octet": {""}})
 	if fields.Get("env_hosts") != "fw=gw" {
 		t.Errorf("env_hosts = %q, want fw=gw", fields.Get("env_hosts"))
 	}
@@ -388,11 +499,13 @@ func TestPropMachineRows(t *testing.T) {
 			o, err := strconv.Atoi(octet)
 			return name != "" && pods.CheckHostname(name) == nil && (octet == "" || err == nil && strconv.Itoa(o) == octet && o >= 4 && o <= 254)
 		}
-		// The router row reaches the planner once it has a name and an
-		// image; it is then refused unless the image is the router gw, and
-		// its name counts as taken either way.
+		// A blank router row is no router. Otherwise the router row reaches
+		// the planner once it has a name and an image; it is then refused
+		// unless the image is the router gw, and its name counts as taken
+		// either way.
 		seen, claimed := map[string]bool{}, map[int]string{}
-		bad := !shapeOK(strings.TrimSpace(routerName), "") || strings.TrimSpace(routerImage) != "gw"
+		router := strings.TrimSpace(routerName) != "" || strings.TrimSpace(routerImage) != ""
+		bad := router && (!shapeOK(strings.TrimSpace(routerName), "") || strings.TrimSpace(routerImage) != "gw")
 		if shapeOK(strings.TrimSpace(routerName), "") && strings.TrimSpace(routerImage) != "" {
 			seen[strings.TrimSpace(routerName)] = true
 		}
@@ -447,7 +560,11 @@ func TestPropMachineRows(t *testing.T) {
 			if got := fields.Get("env_hosts"); got != strings.Join(kept, "\n") {
 				t.Fatalf("env_hosts %q, want %q", got, strings.Join(kept, "\n"))
 			}
-			if strings.Contains(body, `class="blk"`) || !strings.Contains(body, "Create "+countVMs(len(kept)+1)+"</button>") {
+			vms := len(kept)
+			if router {
+				vms++
+			}
+			if strings.Contains(body, `class="blk"`) || vms > 0 && !strings.Contains(body, "Create "+countVMs(vms)+"</button>") {
 				t.Fatalf("rows %q: the review blocks some\n%s", rows, body)
 			}
 			return
@@ -593,6 +710,9 @@ func (h *harness) reviewAgain(sess *authtest.Session, review string) *httptest.R
 			form.Set("slot", s[1])
 		}
 	}
+	if strings.Contains(page, `name="rows" value="posted"`) {
+		form.Set("rows", "posted")
+	}
 	if r := routerRE.FindStringSubmatch(page); r != nil {
 		form.Set("router_name", html.UnescapeString(r[1]))
 		form.Set("router_image", "")
@@ -702,9 +822,11 @@ func TestRetryAFailedAdd(t *testing.T) {
 }
 
 // The environment forms fit a phone, light and dark, with field errors
-// too. With the script, the form starts with one host row whose × is
-// hidden; Add host adds a row in place and × removes one, renumbering the
-// rest; Enter in a field reviews rather than adding rows.
+// too. With the script, the create form starts with the router row and one
+// host row, each with a shown −; + adds a row in place and − removes one,
+// the router's and the last host's too, renumbering the rest and moving
+// focus to a neighbour, else to +, which still adds a row when none is
+// left; Enter in a field reviews rather than adding rows.
 func TestBrowserEnvironmentForms(t *testing.T) {
 	h := browserHarness(t)
 	addFormImages(h)
@@ -718,8 +840,9 @@ func TestBrowserEnvironmentForms(t *testing.T) {
 			b.open("/environments/new")
 			b.noSideways("create")
 			b.shot("env-new-" + size.name)
-			if !b.is(rows + ` === 1 && document.querySelector("[data-row] [data-remove-row]").hidden`) {
-				t.Errorf("the create form doesn't start with 1 unremovable host row")
+			removable := `[...document.querySelectorAll(".mrow")].every(r => (x => x && !x.hidden && x.offsetParent !== null)(r.querySelector("[data-remove-row]")))`
+			if !b.is(rows + ` === 1 && document.querySelectorAll(".mrow.router").length === 1 && ` + removable) {
+				t.Errorf("the create form doesn't start with a router row and 1 host row, each removable")
 			}
 
 			b.run("filling the first row", chromedp.SendKeys("#domain", "kilo.bravo"),
@@ -728,7 +851,7 @@ func TestBrowserEnvironmentForms(t *testing.T) {
 				chromedp.SendKeys(`input[aria-label="Host 1 last octet"]`, "10", chromedp.ByQuery))
 			b.click(`[data-add-row]`)
 			b.waitFor("a second row", rows+` === 2`)
-			if !b.is(`location.pathname === "/environments/new" && document.activeElement.getAttribute("aria-label") === "Host 2 name" && document.activeElement.value === "" && [...document.querySelectorAll("[data-row] [data-remove-row]")].every(x => !x.hidden)`) {
+			if !b.is(`location.pathname === "/environments/new" && document.activeElement.getAttribute("aria-label") === "Host 2 name" && document.activeElement.value === "" && ` + removable) {
 				t.Errorf("Add host didn't add a second removable row in place and focus it: %s", b.where())
 			}
 			b.run("filling the second row", chromedp.SendKeys(`input[aria-label="Host 2 name"]`, "oak", chromedp.ByQuery))
@@ -745,13 +868,33 @@ func TestBrowserEnvironmentForms(t *testing.T) {
 			b.shot("env-new-rows-" + size.name)
 			b.click(`button[aria-label="Remove host 2"]`)
 			b.waitFor("one row", rows+` === 1`)
-			if !b.is(`document.querySelector("[data-row] [data-remove-row]").hidden`) {
-				t.Errorf("the last host row's remove button isn't hidden")
-			}
 
-			// Enter in a name field reviews.
+			// The router row goes, then the last host row; + then adds one.
+			b.click(`button[aria-label="Remove router"]`)
+			b.waitFor("no router row", `document.querySelector(".mrow.router") === null`)
+			if !b.is(rows + ` === 1 && document.activeElement.getAttribute("aria-label") === "Host 1 name"`) {
+				t.Errorf("removing the router didn't leave teak's row focused: %s", b.where())
+			}
+			b.click(`button[aria-label="Remove host 1"]`)
+			b.waitFor("no rows", `document.querySelectorAll(".mrow").length === 0`)
+			if !b.is(`document.activeElement.matches("[data-add-row]")`) {
+				t.Errorf("removing the last row didn't focus +: %s", b.where())
+			}
+			b.noSideways("create with no rows")
+			b.click(`[data-add-row]`)
+			b.waitFor("a row again", rows+` === 1`)
+			if !b.is(`document.activeElement.getAttribute("aria-label") === "Host 1 name" && ` + removable) {
+				t.Errorf("+ with no rows didn't add a removable row and focus it: %s", b.where())
+			}
+			b.run("filling the row", chromedp.SendKeys(`input[aria-label="Host 1 name"]`, "teak", chromedp.ByQuery),
+				chromedp.SetValue(`select[aria-label="Host 1 image"]`, "debian-12", chromedp.ByQuery))
+
+			// Enter in a name field reviews, with no router.
 			b.run("pressing Enter", chromedp.SendKeys(`input[aria-label="Host 1 name"]`, kb.Enter, chromedp.ByQuery))
 			b.waitFor("the review", `location.pathname === "/environments/new/preview" && document.querySelector('form[action="/environments/new/confirm"]') !== null`)
+			if !b.is(`document.querySelector('form[action="/environments/new/confirm"] [name=router]') === null`) {
+				t.Errorf("the review has a router after the router row was removed")
+			}
 			b.noSideways("create review")
 			b.shot("env-new-review-" + size.name)
 
@@ -788,13 +931,13 @@ func TestBrowserEnvironmentForms(t *testing.T) {
 				t.Errorf("phone %v: a row's image is under its name: %v", b.phone, under)
 			}
 
-			// Add hosts starts with one host row and no router row, even when
-			// the environment has no router.
+			// Add hosts starts with one removable host row and no router
+			// row, even when the environment has no router.
 			for _, domain := range []string{"kilo.alpha", "oscar.lima"} {
 				b.open("/environments/" + domain + "/add")
 				b.noSideways("add hosts " + domain)
-				if !b.is(rows + ` === 1 && document.querySelector(".mrow.router") === null && document.querySelector("[data-row] [data-remove-row]").hidden`) {
-					t.Errorf("%s add hosts doesn't start with 1 host row and no router row", domain)
+				if !b.is(rows + ` === 1 && document.querySelector(".mrow.router") === null && ` + removable) {
+					t.Errorf("%s add hosts doesn't start with 1 removable host row and no router row", domain)
 				}
 			}
 			b.shot("env-add-" + size.name)

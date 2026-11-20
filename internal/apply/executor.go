@@ -337,89 +337,127 @@ func (e *Executor) runItems(ctx context.Context, kind pods.Kind, items []pods.It
 			retry = append(retry, it)
 		}
 	}
-	for _, it := range items {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			b := builds[it.Template]
-			// Base-image and environment items clone a Source, not a template.
-			clones := b != nil && slices.Contains(it.Steps, pods.StepClone)
-			replaces := clones && slices.Contains(it.Steps, pods.StepDelete)
-			tearsDownFirst := replaces && !e.isTornDown(it.Name)
-			doneFree := func() {}
-			if tearsDownFirst && b.ready != nil && b.spec.Rebuild && !b.oldGone {
-				doneFree = sync.OnceFunc(b.freed.Done)
-			}
-			defer doneFree()
+	run := func(it pods.Item) {
+		defer wg.Done()
+		b := builds[it.Template]
+		// Base-image and environment items clone a Source, not a template.
+		clones := b != nil && slices.Contains(it.Steps, pods.StepClone)
+		replaces := clones && slices.Contains(it.Steps, pods.StepDelete)
+		tearsDownFirst := replaces && !e.isTornDown(it.Name)
+		doneFree := func() {}
+		if tearsDownFirst && b.ready != nil && b.spec.Rebuild && !b.oldGone {
+			doneFree = sync.OnceFunc(b.freed.Done)
+		}
+		defer doneFree()
 
-			cloneIdx := slices.Index(it.Steps, pods.StepClone)
-			start, started := 0, false
-			var err error
-			if tearsDownFirst {
-				var rerr error
-				err = workers.do(ctx, func() error {
-					rerr = e.runItem(ctx, kind, it, b, 0, cloneIdx, false)
-					return nil
-				})
-				if rerr != nil {
-					b.noteTeardownErr(fmt.Errorf("could not tear down %s: %w", it.Name, rerr))
-				}
-				doneFree()
-				if rerr != nil {
-					record(it, rerr)
-					return
-				}
-				if err == nil {
-					start, started = cloneIdx, true
-				}
+		cloneIdx := slices.Index(it.Steps, pods.StepClone)
+		start, started := 0, false
+		var err error
+		if tearsDownFirst {
+			var rerr error
+			err = workers.do(ctx, func() error {
+				rerr = e.runItem(ctx, kind, it, b, 0, cloneIdx, false)
+				return nil
+			})
+			if rerr != nil {
+				b.noteTeardownErr(fmt.Errorf("could not tear down %s: %w", it.Name, rerr))
 			}
-			afterTeardown := started || e.isTornDown(it.Name)
-			if err == nil && clones && b.ready != nil {
-				select {
-				case <-b.ready:
-				case <-ctx.Done():
-					err = ctx.Err()
-				}
-			}
-			if err == nil {
-				err = workers.do(ctx, func() error {
-					var rerr error
-					if clones && b.err != nil {
-						if !afterTeardown {
-							e.emit(it.Name, "", EventStarted, "")
-						}
-						step, idx := pods.Step(""), -1
-						if afterTeardown {
-							idx = cloneIdx
-							if errors.Is(b.err, context.Canceled) {
-								step = pods.StepClone
-							}
-						}
-						rerr = e.endItem(ctx, it, step, idx, false, fmt.Errorf("template %s: %w", it.Template, b.err))
-					} else {
-						rerr = e.runItem(ctx, kind, it, b, start, len(it.Steps), started)
-					}
-					record(it, rerr)
-					return nil
-				})
-			}
-			if err == nil {
+			doneFree()
+			if rerr != nil {
+				record(it, rerr)
 				return
 			}
-			mu.Lock()
-			defer mu.Unlock()
-			cut = true
-			retry = append(retry, it)
-			if afterTeardown {
-				failed[it.Name] = e.endItem(ctx, it, pods.StepClone, cloneIdx, false, err)
-			} else if failed[it.Name] != nil { // its earlier round's error is no longer its last word
-				failed[it.Name] = e.endItem(ctx, it, "", -1, false, err)
+			if err == nil {
+				start, started = cloneIdx, true
 			}
-		}()
+		}
+		afterTeardown := started || e.isTornDown(it.Name)
+		if err == nil && clones && b.ready != nil {
+			select {
+			case <-b.ready:
+			case <-ctx.Done():
+				err = ctx.Err()
+			}
+		}
+		if err == nil {
+			err = workers.do(ctx, func() error {
+				var rerr error
+				if clones && b.err != nil {
+					if !afterTeardown {
+						e.emit(it.Name, "", EventStarted, "")
+					}
+					step, idx := pods.Step(""), -1
+					if afterTeardown {
+						idx = cloneIdx
+						if errors.Is(b.err, context.Canceled) {
+							step = pods.StepClone
+						}
+					}
+					rerr = e.endItem(ctx, it, step, idx, false, fmt.Errorf("template %s: %w", it.Template, b.err))
+				} else {
+					rerr = e.runItem(ctx, kind, it, b, start, len(it.Steps), started)
+				}
+				record(it, rerr)
+				return nil
+			})
+		}
+		if err == nil {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		cut = true
+		retry = append(retry, it)
+		if afterTeardown {
+			failed[it.Name] = e.endItem(ctx, it, pods.StepClone, cloneIdx, false, err)
+		} else if failed[it.Name] != nil { // its earlier round's error is no longer its last word
+			failed[it.Name] = e.endItem(ctx, it, "", -1, false, err)
+		}
+	}
+	var last []pods.Item // Item.Last
+	for _, it := range items {
+		if it.Last {
+			last = append(last, it)
+			continue
+		}
+		wg.Add(1)
+		go run(it)
+	}
+	wg.Wait()
+	requeue := len(retry) > 0 // another round retries some other item
+	unfinished := cut
+	for name := range failed {
+		unfinished = unfinished || !slices.ContainsFunc(last, func(it pods.Item) bool { return it.Name == name })
+	}
+	for _, it := range last {
+		switch {
+		case ctx.Err() != nil: // a stop, not a failure, kept it from running
+			mu.Lock()
+			if errors.Is(failed[it.Name], errLastWaits) {
+				delete(failed, it.Name) // only a wait, so Run reports it not started
+			}
+			mu.Unlock()
+			continue
+		case unfinished:
+			e.emit(it.Name, "", EventStarted, "")
+			err := e.endItem(ctx, it, "", -1, false, errLastWaits)
+			if requeue {
+				record(it, err)
+			} else { // no round would retry the others, so it would only wait again
+				mu.Lock()
+				failed[it.Name] = err
+				mu.Unlock()
+			}
+			continue
+		}
+		wg.Add(1)
+		go run(it)
 	}
 	wg.Wait()
 	return retry, cut
 }
+
+var errLastWaits = errors.New("not run: it runs only once every other item has succeeded")
 
 func (e *Executor) refresh(ctx context.Context) error {
 	var vms []proxmox.VM

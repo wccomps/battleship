@@ -31,6 +31,7 @@ type Reads interface {
 	CurrentStatus(ctx context.Context, node string, vmid int) (string, error)
 	StorageContent(ctx context.Context, node, storage string, vmid int) ([]string, error)
 	VMIDHeld(ctx context.Context, vmid int) (bool, error)
+	Pools(ctx context.Context) ([]proxmox.Pool, error)
 	WaitTask(ctx context.Context, upid string, poll time.Duration) error
 	StopTask(ctx context.Context, upid string) error
 	NodeTasks(ctx context.Context, node string, since time.Time) ([]proxmox.Task, error)
@@ -51,6 +52,7 @@ type Changes interface {
 	Shutdown(ctx context.Context, node string, vmid int, timeout time.Duration) (string, error)
 	DeleteVM(ctx context.Context, node string, vmid int) (string, error)
 	DeleteVolume(ctx context.Context, node, storage, volid string) (string, error)
+	SetPoolComment(ctx context.Context, pool, comment string) error
 }
 
 var _ API = (*proxmox.Client)(nil)

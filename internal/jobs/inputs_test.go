@@ -207,6 +207,8 @@ func TestSplitList(t *testing.T) {
 func TestTeamlessInputsValidate(t *testing.T) {
 	good := []Inputs{
 		{Kind: pods.KindEnvCreate, Domain: "kilo.alpha", Router: "gw=opnsense", EnvHosts: []string{"teak=debian-12:10"}},
+		{Kind: pods.KindEnvCreate, Domain: "kilo.alpha", EnvHosts: []string{"teak=debian-12:10"}}, // no router
+		{Kind: pods.KindEnvCreate, Domain: "kilo.alpha"},                                          // no machines
 		{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"oak=win2022"}},
 		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha"},
 		{Kind: pods.KindEnvTeardown, Domain: "kilo.alpha", Slot: "03"},
@@ -220,7 +222,7 @@ func TestTeamlessInputsValidate(t *testing.T) {
 		}
 	}
 	bad := []Inputs{
-		{Kind: pods.KindEnvCreate, Domain: "kilo.alpha"},
+		{Kind: pods.KindEnvCreate},
 		{Kind: pods.KindEnvCreate, Domain: "kilo", Router: "gw=x"},
 		{Kind: pods.KindEnvAdd, Domain: "kilo.alpha", EnvHosts: []string{"teak"}},
 		{Kind: pods.KindEnvAdd, Domain: "kilo.alpha"},

@@ -1,5 +1,6 @@
 // Package pvetest is a fake Proxmox access layer for delegated-auth tests:
-// users, expiring tickets, per-path ACLs, 401/403, and the OpenID login.
+// users, expiring tickets, per-path ACLs, 401/403, the OpenID login, and
+// pools' comments.
 // Its IdP signs in, without a form, whoever SignIn named last.
 package pvetest
 
@@ -10,9 +11,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -40,6 +43,7 @@ type Server struct {
 	renews    int
 	perms     int // /access/permissions calls
 	tagAccess proxmox.TagAccess
+	pools     map[string]string // pool -> comment
 }
 
 type user struct {
@@ -61,13 +65,15 @@ type loginState struct {
 func New(t testing.TB) *Server {
 	t.Helper()
 	s := &Server{now: time.Now, users: map[string]*user{}, tickets: map[string]ticket{},
-		states: map[string]loginState{}, codes: map[string]string{}}
+		states: map[string]loginState{}, codes: map[string]string{}, pools: map[string]string{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api2/json/access/openid/auth-url", s.authURL)
 	mux.HandleFunc("POST /api2/json/access/openid/login", s.login)
 	mux.HandleFunc("POST /api2/json/access/ticket", s.renew)
 	mux.HandleFunc("GET /api2/json/access/permissions", s.permissions)
 	mux.HandleFunc("GET /api2/json/cluster/options", s.options)
+	mux.HandleFunc("GET /api2/json/pools", s.listPools)
+	mux.HandleFunc("PUT /api2/json/pools", s.updatePool)
 	mux.HandleFunc("GET /idp/authorize", s.authorize)
 	s.srv = httptest.NewTLSServer(mux)
 	t.Cleanup(s.srv.Close)
@@ -402,6 +408,70 @@ func (s *Server) options(w http.ResponseWriter, r *http.Request) {
 		out["user-tag-access"] = map[string]string{"user-allow": s.tagAccess.Mode}
 	}
 	reply(w, out)
+}
+
+// SetPool creates pool, or replaces its comment.
+func (s *Server) SetPool(pool, comment string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pools[pool] = comment
+}
+
+// PoolComment is pool's comment.
+func (s *Server) PoolComment(pool string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pools[pool]
+}
+
+// listPools answers GET /pools: as in Proxmox, only the pools the caller
+// holds Pool.Audit on, with their comments.
+func (s *Server) listPools(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	who := s.caller(w, r)
+	if who == "" {
+		return
+	}
+	out := []map[string]string{}
+	for _, p := range slices.Sorted(maps.Keys(s.pools)) {
+		if _, ok := s.effective(who, "/pool/"+p)["Pool.Audit"]; ok {
+			e := map[string]string{"poolid": p}
+			if c := s.pools[p]; c != "" {
+				e["comment"] = c
+			}
+			out = append(out, e)
+		}
+	}
+	reply(w, out)
+}
+
+// updatePool answers PUT /pools, which needs Pool.Allocate on the pool; it
+// sets only the comment.
+func (s *Server) updatePool(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	who := s.caller(w, r)
+	if who == "" {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		refuse(w, 400, err.Error())
+		return
+	}
+	pool := r.PostForm.Get("poolid")
+	if _, ok := s.effective(who, "/pool/"+pool)["Pool.Allocate"]; !ok {
+		refuse(w, 403, "Permission check failed (/pool/"+pool+", Pool.Allocate)")
+		return
+	}
+	if _, ok := s.pools[pool]; !ok {
+		refuse(w, 500, "pool '"+pool+"' does not exist")
+		return
+	}
+	if c, ok := r.PostForm["comment"]; ok {
+		s.pools[pool] = c[0]
+	}
+	reply(w, nil)
 }
 
 // CertPool holds the fake's certificate, as proxmox.ca_file would hold the

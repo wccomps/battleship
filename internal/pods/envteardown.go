@@ -13,9 +13,10 @@ import (
 // slot's pool (Environment.Hosts), stopped cleanly and then deleted as a team
 // teardown does. VMs outside the pool on its networks (Users) are never
 // touched; the plan keeps them (Kept). Its half-deleted VMs are listed
-// blocked, and disks gone VMs left in the slot's VMIDs are freed. Every
-// item carries the slot's pool. req.Slot, if set (a retry's), names the
-// slot, which may by then hold nothing of the domain but what a failed
+// blocked, and disks gone VMs left in the slot's VMIDs are freed. The
+// pool's marker of req.Domain, if any, is cleared last (recordItem).
+// Every item carries the slot's pool. req.Slot, if set (a retry's), names
+// the slot, which may by then hold nothing of the domain but what a failed
 // delete left.
 func (p Planner) EnvTeardown(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if err := CheckDomain(req.Domain); err != nil {
@@ -65,6 +66,9 @@ func (p Planner) EnvTeardown(ctx context.Context, req EnvRequest) (*Plan, error)
 	if err != nil {
 		return nil, err
 	}
+	if env.Marker == req.Domain {
+		plan.Items = append(plan.Items, recordItem(s, req.Domain, StepClearRecord))
+	}
 	return plan, nil
 }
 
@@ -80,8 +84,12 @@ func halfDeletedItem(vmid int, node string) Item {
 // tearing it down by one would leave the others half there.
 func teardownEnv(envs []Environment, req EnvRequest) (Environment, error) {
 	mixed := func(e Environment) error {
-		return fmt.Errorf("dev slot %s holds VMs of several domains, so it can't be torn down as %s; rename them to one domain or move the others out of %s first",
-			e.Slot.Name, req.Domain, e.Slot.Pool)
+		of := "VMs of several domains"
+		if e.Marker != "" {
+			of += " (its pool's comment records " + e.Marker + ")"
+		}
+		return fmt.Errorf("dev slot %s holds %s, so it can't be torn down as %s; rename them to one domain or move the others out of %s first",
+			e.Slot.Name, of, req.Domain, e.Slot.Pool)
 	}
 	if req.Slot != 0 {
 		env, err := slotN(envs, req.Slot)
@@ -99,7 +107,7 @@ func teardownEnv(envs []Environment, req EnvRequest) (Environment, error) {
 		return e, nil
 	}
 	for _, e := range envs {
-		if e.Mixed && slices.ContainsFunc(e.Hosts, func(h EnvHost) bool { return Domain(h.Name) == req.Domain }) {
+		if e.Mixed && (e.Marker == req.Domain || slices.ContainsFunc(e.Hosts, func(h EnvHost) bool { return Domain(h.Name) == req.Domain })) {
 			return Environment{}, mixed(e)
 		}
 	}

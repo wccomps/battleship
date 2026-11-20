@@ -148,6 +148,10 @@ type Fake struct {
 	execs     map[int]proxmox.ExecStatus // by PID
 	polls     map[int]int                // status reads, by PID
 	nextPID   int
+	// PoolComments are the pools' comments, by pool. Pools lists these and every
+	// pool a VM is in; SetPoolComment refuses any other pool, as Proxmox
+	// refuses one that doesn't exist.
+	PoolComments map[string]string
 }
 
 // New returns an empty cluster whose online nodes are nodes.
@@ -416,6 +420,59 @@ func (f *Fake) SetVMConfig(ctx context.Context, node string, vmid int, changes m
 		}
 		vm.Config[k] = v
 	}
+	return nil
+}
+
+func (f *Fake) Pools(ctx context.Context) ([]proxmox.Pool, error) {
+	done, err := f.enter(ctx, "pools")
+	defer done()
+	if err != nil {
+		return nil, err
+	}
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	if err := f.record("pools"); err != nil {
+		return nil, err
+	}
+	ids := map[string]bool{}
+	for p := range f.PoolComments {
+		ids[p] = true
+	}
+	for _, vm := range f.VMs {
+		if vm.Pool != "" {
+			ids[vm.Pool] = true
+		}
+	}
+	var out []proxmox.Pool
+	for _, p := range slices.Sorted(maps.Keys(ids)) {
+		out = append(out, proxmox.Pool{ID: p, Comment: f.PoolComments[p]})
+	}
+	return out, nil
+}
+
+func (f *Fake) SetPoolComment(ctx context.Context, pool, comment string) error {
+	key := "pool-comment:" + pool
+	done, err := f.enter(ctx, key)
+	defer done()
+	if err != nil {
+		return err
+	}
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	if err := f.record(key); err != nil {
+		return err
+	}
+	_, exists := f.PoolComments[pool]
+	for _, vm := range f.VMs {
+		exists = exists || vm.Pool == pool
+	}
+	if !exists {
+		return &proxmox.APIError{Method: http.MethodPut, Path: "/pools", Status: 500, Message: "pool '" + pool + "' does not exist"}
+	}
+	if f.PoolComments == nil {
+		f.PoolComments = map[string]string{}
+	}
+	f.PoolComments[pool] = comment
 	return nil
 }
 

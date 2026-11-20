@@ -38,11 +38,13 @@ type envForm struct {
 
 // machineRow is a router or host row as typed: its name, image family and
 // last address octet. After Review, Err says what is wrong with it and Bad
-// which input that is: name, image or addr. N numbers the host rows from 1.
+// which input that is: name, image or addr. N numbers the host rows from 1;
+// Spare is the blank row the script's Add host copies.
 type machineRow struct {
 	N                  int
 	Name, Image, Octet string
 	Err, Bad           string
+	Spare              bool
 }
 
 func (m machineRow) blank() bool { return m.Name == "" && m.Image == "" && m.Octet == "" }
@@ -91,35 +93,39 @@ func imageOpts(ims []pods.BaseImage) []imageOpt {
 	return out
 }
 
-// blankRows is how many empty host rows the form starts with, and how many
-// Add host adds without JavaScript.
+// blankRows is how many empty host rows a new form starts with, and how
+// many Add host adds without JavaScript.
 const blankRows = 1
 
-// newEnvForm reads p's rows from form if it posted them, else from p.In:
-// at least blankRows, plus blankRows for Add host without JavaScript.
+// dropRouter is the drop value of the router row's remove button; a host
+// row's is its number.
+const dropRouter = "router"
+
+// newEnvForm reads p's rows from form if it posted them (fieldRows), less
+// the row it drops, else from p.In with at least blankRows; Add host without
+// JavaScript adds blankRows. Posted, the router row stays only if posted.
 func (s *Server) newEnvForm(ctx context.Context, p catalogPage, form url.Values) envForm {
 	f := envForm{RouterImages: imageOpts(p.Routers), Gateway: pods.GatewayOctet, FirstOctet: pods.FirstHostOctet, LastOctet: pods.LastHostOctet}
-	images := p.Others
-	if p.Op.Kind == pods.KindEnvAdd {
-		images = append(slices.Clone(p.Routers), p.Others...)
-	}
-	for _, im := range images { // by kind (newCatalogPage)
+	for _, im := range append(slices.Clone(p.Routers), p.Others...) { // by kind (newCatalogPage)
 		if n := len(f.HostImages); n == 0 || f.HostImages[n-1].Kind != kindLabels[im.Kind] {
 			f.HostImages = append(f.HostImages, imageGroup{Kind: kindLabels[im.Kind]})
 		}
 		g := &f.HostImages[len(f.HostImages)-1]
 		g.Images = append(g.Images, imageOpts([]pods.BaseImage{im})...)
 	}
-	posted := form.Has(fieldHostName) || form.Has(fieldRouterImage)
+	posted := form.Has(fieldRows)
+	drop := form.Get(fieldDrop)
 	if p.Op.Kind == pods.KindEnvCreate {
 		switch {
-		case form.Has(fieldRouterImage):
-			r := rawRow(form.Get(fieldRouterName), form.Get(fieldRouterImage), "")
-			f.Router = &r
+		case posted:
+			if form.Has(fieldRouterName) && drop != dropRouter {
+				r := rawRow(form.Get(fieldRouterName), form.Get(fieldRouterImage), "")
+				f.Router = &r
+			}
 		case p.In.Router != "":
 			r := rowOfLine(p.In.Router)
 			f.Router = &r
-		default:
+		case p.In.Domain == "" && len(p.In.EnvHosts) == 0: // a new form
 			f.Router = &machineRow{Name: "gw"}
 			if len(p.Routers) == 1 {
 				f.Router.Image = p.Routers[0].Family
@@ -129,7 +135,10 @@ func (s *Server) newEnvForm(ctx context.Context, p catalogPage, form url.Values)
 	n := blankRows
 	if posted {
 		rows := postedRows(form)
-		n = max(n, len(rows))
+		if i, err := strconv.Atoi(drop); err == nil && i >= 1 && i <= len(rows) {
+			rows = slices.Delete(rows, i-1, i)
+		}
+		n = len(rows)
 		for _, row := range rows {
 			if !row.blank() {
 				f.Rows = append(f.Rows, row)
@@ -188,6 +197,10 @@ func postedRows(form url.Values) []machineRow {
 	return rows
 }
 
+func (f envForm) RowsAndSpare() []machineRow {
+	return append(slices.Clone(f.Rows), machineRow{N: len(f.Rows) + 1, Spare: true})
+}
+
 // QueuedRuns names the free slots queued jobs will fill (slotRuns).
 func (f envForm) QueuedRuns() string { return slotRuns(f.Queued) }
 
@@ -220,7 +233,7 @@ func (p *catalogPage) checkFields() bool {
 
 // request is the environment request the form's fields make, and the rows
 // of its hosts by pods.EnvProblem.Row (0 the router). A row not filled in
-// as a host is marked and left out.
+// as a host is marked and left out; a blank router row means no router.
 func (p *catalogPage) request() (pods.EnvRequest, map[int]*machineRow) {
 	create := p.Op.Kind == pods.KindEnvCreate
 	req := pods.EnvRequest{Domain: p.In.Domain}
@@ -235,7 +248,7 @@ func (p *catalogPage) request() (pods.EnvRequest, map[int]*machineRow) {
 		req.Slot = n
 	}
 	rows := map[int]*machineRow{}
-	if r := p.Router; r != nil {
+	if r := p.Router; r != nil && !r.blank() {
 		switch {
 		case !shapeOK(r, "the router"):
 		case r.Image == "":
@@ -314,5 +327,5 @@ func shapeOK(m *machineRow, what string) bool {
 }
 
 func machineInputs(op operation, form url.Values) bool {
-	return op.Machines && (form.Has(fieldHostName) || form.Has(fieldRouterImage))
+	return op.Machines && form.Has(fieldRows)
 }

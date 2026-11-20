@@ -171,7 +171,7 @@ func (s *Server) serverError(w http.ResponseWriter, r *http.Request, what string
 // initial (2 VMs)".
 func summaryOf(op operation, in jobs.Inputs, plan *pods.Plan) string {
 	if op.Kind.Teamless() {
-		return op.Noun + " " + strings.TrimSpace(in.Domain+" "+in.Family+" "+in.Image) + " (" + countVMs(len(plan.Runnable())) + ")"
+		return op.Noun + " " + strings.TrimSpace(in.Domain+" "+in.Family+" "+in.Image) + " (" + countVMs(runnableVMs(plan)) + ")"
 	}
 	teams := "pod " + strings.Join(plan.Teams, ", ")
 	if len(plan.Teams) != 1 {
@@ -186,5 +186,17 @@ func summaryOf(op operation, in jobs.Inputs, plan *pods.Plan) string {
 	case pods.KindSnapshot:
 		what = "snapshot " + in.Snapshot + " of " + teams
 	}
-	return what + " (" + countVMs(len(plan.Runnable())) + ")"
+	return what + " (" + countVMs(runnableVMs(plan)) + ")"
+}
+
+// runnableVMs counts plan's runnable items but record ones, which are a
+// pool's comment.
+func runnableVMs(plan *pods.Plan) int {
+	n := 0
+	for _, it := range plan.Runnable() {
+		if !it.IsRecord() {
+			n++
+		}
+	}
+	return n
 }

@@ -59,6 +59,8 @@ type envBlock struct {
 	Users []string
 	Mixed bool
 	Twin  string
+	// Empty: no VMs yet, only its pool's record of Domain (pods.EnvMarker).
+	Empty bool
 }
 
 // Acts reports whether the block offers Add hosts and Tear down.
@@ -241,7 +243,7 @@ func envBlocks(envs []pods.Environment, bases map[string]pods.BaseImage, addrs m
 		if e.Free() {
 			continue
 		}
-		b := envBlock{ID: "slot-" + e.Slot.Name, Domain: e.Domain, Slot: e.Slot.Pool, Users: e.Users, Mixed: e.Mixed}
+		b := envBlock{ID: "slot-" + e.Slot.Name, Domain: e.Domain, Slot: e.Slot.Pool, Users: e.Users, Mixed: e.Mixed, Empty: e.Empty()}
 		if e.Domain != "" {
 			if first, _ := pods.EnvByDomain(envs, e.Domain); first.Slot.N != e.Slot.N {
 				b.Twin = first.Slot.Pool

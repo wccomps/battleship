@@ -472,7 +472,6 @@
     typedConfirm(sheet);
     if (sheet.tagName === "FORM") updateHostToggle(sheet);
     each(sheet.querySelectorAll("form"), updateHostToggle);
-    machineRows(sheet);
     passwords(sheet);
     each(sheet.querySelectorAll("[data-fill]"), fill);
     var typed = sheet.querySelector("input[data-typed], input[type=text], input[type=number]");
@@ -664,40 +663,32 @@
 
   // -- Environment machine rows
 
-  // Add host appends an empty copy of the last host row; without this script
-  // it is a submit that asks the server for more rows, and the remove buttons
-  // stay hidden (a cleared row is ignored). The last host row stays.
-  function machineRows(root) {
-    each(root.querySelectorAll("[data-rows]"), function (box) {
-      var rows = box.querySelectorAll("[data-row]");
-      each(rows, function (r, i) {
-        r.querySelector("[data-remove-row]").hidden = rows.length < 2;
-        each(r.querySelectorAll("[aria-label]"), function (el) {
-          el.setAttribute("aria-label", el.getAttribute("aria-label").replace(/\d+/, i + 1));
-        });
+  // + appends a copy of the spare host row and − removes its row, the
+  // router's too, in place; without this script each is a submit that asks
+  // the server for the form with that row added or dropped.
+  function machineRows(box) {
+    each(box.querySelectorAll("[data-row]"), function (r, i) {
+      each(r.querySelectorAll("[aria-label]"), function (el) {
+        el.setAttribute("aria-label", el.getAttribute("aria-label").replace(/\d+/, i + 1));
       });
     });
   }
-  machineRows(document);
   document.addEventListener("click", function (e) {
     var add = e.target.closest("[data-add-row]"), remove = e.target.closest("[data-remove-row]");
     var box = add ? add.form && add.form.querySelector("[data-rows]") : remove && remove.closest("[data-rows]");
     if (!box) return;
     e.preventDefault();
     if (remove) {
-      var gone = remove.closest(".mrow"), next = gone.nextElementSibling || gone.previousElementSibling;
+      var gone = remove.closest(".mrow"), next = gone.nextElementSibling;
+      if (!next || !next.matches(".mrow")) next = gone.previousElementSibling;
       gone.remove();
-      (next && next.matches(".mrow") ? next.querySelector("input") : box.closest("fieldset").querySelector("[data-add-row]")).focus();
+      (next && next.matches(".mrow") ? next.querySelector("input, select") : box.closest("fieldset").querySelector("[data-add-row]")).focus();
     } else {
-      var rows = box.querySelectorAll("[data-row]"), row = rows[rows.length - 1].cloneNode(true);
-      each(row.querySelectorAll("input"), function (i) { i.value = ""; });
-      each(row.querySelectorAll("[data-stale], .ferr"), function (x) { x.remove(); });
-      each(row.querySelectorAll("select"), function (s) { s.selectedIndex = 0; });
-      each(row.querySelectorAll("[aria-invalid]"), function (x) { x.removeAttribute("aria-invalid"); x.removeAttribute("aria-describedby"); });
-      box.appendChild(row);
+      var spare = box.querySelector("template[data-spare]"), row = spare.content.firstElementChild.cloneNode(true);
+      box.insertBefore(row, spare);
       row.querySelector("input").focus();
     }
-    machineRows(box.parentNode);
+    machineRows(box);
   });
 
   // -- Passwords

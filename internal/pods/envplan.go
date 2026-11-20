@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -20,7 +21,7 @@ type EnvRequest struct {
 	// Slot is the dev slot (Slot.N) a new environment goes in, or a teardown
 	// acts on; 0 takes the first free one, or the slot holding Domain.
 	Slot   int
-	Router HostSpec   // create (required); add (only if the environment has none)
+	Router HostSpec   // create, add: optional; add only if the environment has none
 	Hosts  []HostSpec // create, add
 }
 
@@ -31,19 +32,21 @@ func (p Planner) envPlanIn(kind Kind, slot Slot, domain string) *Plan {
 
 // EnvCreate plans a new environment in req.Slot, or else the lowest free
 // slot. A chosen slot must be free, or hold req.Domain already: a create
-// that stopped partway, which is resumed there.
+// that stopped partway, which is resumed there. Without a router, the first
+// router-kind host is the router, as for EnvAdd. A create of no machines
+// records the environment in the slot's pool instead (recordItem).
 func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if err := CheckDomain(req.Domain); err != nil {
 		return nil, err
-	}
-	if req.Router.Host == "" {
-		return nil, errNoRouter
 	}
 	envs, vms, err := p.Environments(ctx)
 	if err != nil {
 		return nil, err
 	}
-	hosts := append([]HostSpec{req.Router}, req.Hosts...)
+	hosts := req.Hosts
+	if req.Router.Host != "" {
+		hosts = append([]HostSpec{req.Router}, hosts...)
+	}
 	var env Environment
 	if req.Slot != 0 {
 		env, err = p.chosenSlot(ctx, envs, vms, req)
@@ -53,7 +56,12 @@ func (p Planner) EnvCreate(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return p.envPlan(ctx, KindEnvCreate, env, hosts, true, vms)
+	if len(hosts) == 0 {
+		plan := p.envPlanIn(KindEnvCreate, env.Slot, env.Domain)
+		plan.Items = []Item{recordItem(env.Slot, env.Domain, StepRecord)}
+		return plan, nil
+	}
+	return p.envPlan(ctx, KindEnvCreate, env, hosts, req.Router.Host != "", vms)
 }
 
 // firstOpenSlot is the lowest slot of envs a new environment for domain may
@@ -203,7 +211,8 @@ func (p Planner) OpenSlots(ctx context.Context, envs []Environment) (open, queue
 }
 
 // EnvAdd plans adding hosts to the environment with req.Domain. Hosts that
-// already exist there are resumed.
+// already exist there are resumed; a marker of req.Domain is cleared last
+// unless a host is blocked.
 func (p Planner) EnvAdd(ctx context.Context, req EnvRequest) (*Plan, error) {
 	env, vms, err := p.findEnv(ctx, req.Domain)
 	if err != nil {
@@ -219,7 +228,14 @@ func (p Planner) EnvAdd(ctx context.Context, req EnvRequest) (*Plan, error) {
 	if len(hosts) == 0 {
 		return nil, errors.New("name at least one host to add")
 	}
-	return p.envPlan(ctx, KindEnvAdd, env, hosts, req.Router.Host != "", vms)
+	plan, err := p.envPlan(ctx, KindEnvAdd, env, hosts, req.Router.Host != "", vms)
+	if err != nil {
+		return nil, err
+	}
+	if env.Marker == env.Domain && !slices.ContainsFunc(plan.Items, func(it Item) bool { return it.Blocked != "" }) {
+		plan.Items = append(plan.Items, recordItem(env.Slot, env.Domain, StepClearRecord))
+	}
+	return plan, nil
 }
 
 func (p Planner) findEnv(ctx context.Context, domain string) (Environment, []proxmox.VM, error) {

@@ -51,7 +51,7 @@ func TestPropCheckEnvAgreesWithThePlanner(t *testing.T) {
 				Octet:  rapid.SampledFrom([]int{0, 0, 10, 20, 30}).Draw(t, label+" octet"),
 			}
 		}
-		if kind == KindEnvCreate || rapid.Bool().Draw(t, "router") {
+		if rapid.Bool().Draw(t, "router") {
 			req.Router = spec("router")
 		}
 		for i := range rapid.IntRange(0, 4).Draw(t, "hosts") {
@@ -179,17 +179,23 @@ func TestRouterRowNeedsARouterImage(t *testing.T) {
 	}
 }
 
-// Only a router before it makes a router host a second one; another host
-// doesn't.
+// The first router-kind host is the router, wherever it is listed; only a
+// later one is a second router.
 func TestCheckEnvRouterAfterOtherHosts(t *testing.T) {
 	p := checkFake()
 	envs, vms, err := p.Environments(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := EnvRequest{Domain: "kilo.bravo", Slot: 2, Hosts: []HostSpec{{Host: "web", Family: "debian-12"}, {Host: "fw", Family: "gw"}}}
-	if got := CheckEnv(KindEnvCreate, envs, nil, BaseImages(vms), req); !slices.Equal(got, []EnvProblem{errNoRouter}) {
-		t.Errorf("CheckEnv = %+v, want only the missing router row", got)
+	hosts := []HostSpec{{Host: "web", Family: "debian-12"}, {Host: "fw", Family: "gw"}}
+	req := EnvRequest{Domain: "kilo.bravo", Slot: 2, Hosts: hosts}
+	if got := CheckEnv(KindEnvCreate, envs, nil, BaseImages(vms), req); len(got) != 0 {
+		t.Errorf("CheckEnv = %+v, want none: fw is the router", got)
+	}
+	req.Hosts = append(hosts, HostSpec{Host: "fw2", Family: "gw"})
+	want := []EnvProblem{{Row: 3, Field: FieldImage, Why: "an environment has one router"}}
+	if got := CheckEnv(KindEnvCreate, envs, nil, BaseImages(vms), req); !slices.Equal(got, want) {
+		t.Errorf("CheckEnv = %+v, want %+v", got, want)
 	}
 }
 

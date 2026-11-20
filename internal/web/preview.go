@@ -154,14 +154,14 @@ func (s *Server) opPreview(op operation) http.Handler {
 			in.Snapshot = s.cfg.Deploy.SnapshotName
 		}
 		if machineInputs(op, form) {
-			// Add host without JavaScript, or Review: the form again, with
-			// more rows or what is wrong with the fields.
+			// Add host or a row's remove without JavaScript, or Review: the
+			// form again, with the rows changed or what is wrong with the fields.
 			p, ok := s.catalogForm(r, op, in, "")
 			switch {
 			case !ok:
 				s.noEnv(w, r, in.Domain)
 				return
-			case form.Get(fieldMore) == yes:
+			case form.Get(fieldMore) == yes || form.Has(fieldDrop):
 				s.renderCatalogForm(w, r, http.StatusOK, p)
 				return
 			case p.checkFields():
@@ -233,7 +233,7 @@ func (s *Server) showPreview(w http.ResponseWriter, r *http.Request, code int, o
 			Nonce:       nonce,
 			Fingerprint: fp,
 			RetryOf:     opts.retryOf,
-			Button:      confirmLabel(op, in, plan.Runnable()),
+			Button:      confirmLabel(op, in, plan),
 			Danger:      destructive(in, plan.Runnable()),
 		}
 		if op.Kind.TypedConfirm() {
@@ -275,14 +275,17 @@ func newNonce() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-func confirmLabel(op operation, in jobs.Inputs, runnable []pods.Item) string {
-	n := len(runnable)
+func confirmLabel(op operation, in jobs.Inputs, plan *pods.Plan) string {
+	runnable, n := plan.Runnable(), runnableVMs(plan)
 	if n == 1 && op.ConfirmVerb != "" {
 		return op.ConfirmVerb + " " + runnable[0].Name
 	}
 	vms := countVMs(n)
 	switch op.Kind {
 	case pods.KindEnvCreate:
+		if n == 0 { // only the marker
+			return "Create " + in.Domain
+		}
 		return "Create " + vms
 	case pods.KindEnvAdd:
 		return "Add " + strconv.Itoa(n) + byCount(n, " host", " hosts")
@@ -333,10 +336,14 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 		}
 	}
 	p.Blocked = len(plan.Items) - runnable
+	vms := 0
 	for _, it := range plan.Items {
 		row := itemRow{Name: it.Name, Node: orDashString(it.Node), Steps: stepsText(it), Blocked: it.Blocked}
 		if op.Kind == pods.KindPower {
 			row.Steps = strings.ToLower(powerLabel(in.Action)) // its one step, "power", by name
+		}
+		if !it.IsRecord() {
+			vms++
 		}
 		p.Items = append(p.Items, row)
 	}
@@ -383,7 +390,7 @@ func (s *Server) newPreviewPage(ctx context.Context, op operation, in jobs.Input
 	}
 	p.TemplateSummary = strings.Join(tplParts, ", ")
 	p.ItemsFold = p.Blocked == 0 && deletedVMs(plan.Items) == 0 && (op.Kind == pods.KindDeploy || len(p.Items) > 8)
-	p.ItemsSummary = countVMs(len(p.Items))
+	p.ItemsSummary = countVMs(vms)
 	if len(rebuilt) > 0 && len(stopped) > 0 && nCreate == 0 {
 		if len(rebuilt) == 1 && len(stopped) == 1 {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("Rebuilding %s deletes the old template and stops master %s, which is running, until the copy finishes.", rebuilt[0], stopped[0]))
@@ -745,6 +752,12 @@ func stepsText(it pods.Item) string {
 	parts := make([]string, len(it.Steps))
 	for i, st := range it.Steps {
 		parts[i] = string(st)
+		switch st {
+		case pods.StepRecord:
+			parts[i] = "record " + it.Record + " on " + it.Pool
+		case pods.StepClearRecord:
+			parts[i] = "clear the record of " + it.Record
+		}
 		if st == pods.StepRollback && it.Snapshot != "" {
 			parts[i] += " to " + it.Snapshot
 		}

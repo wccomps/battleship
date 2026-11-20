@@ -82,19 +82,25 @@ func RetryInputs(job store.Job, items []store.Item) (Inputs, error) {
 	return in, nil
 }
 
-// envRetry is RetryInputs for an environment's create, add or teardown.
+// envRetry is RetryInputs for an environment's create, add or teardown. A
+// record item is no VM to narrow to: a create of no machines plans it
+// again whole.
 func envRetry(id int64, in Inputs, plan pods.Plan, planned map[string]pods.Item, items []store.Item) (Inputs, error) {
 	var names []string
+	retried := false
 	for _, it := range items {
 		if !store.ItemStatus(it.Status).Retryable() {
 			continue
 		}
-		if _, ok := planned[it.Name]; !ok {
+		p, ok := planned[it.Name]
+		if !ok {
 			return Inputs{}, fmt.Errorf("job %d's plan has no VM named %s", id, it.Name)
 		}
-		names = append(names, it.Name)
+		if retried = true; !p.IsRecord() {
+			names = append(names, it.Name)
+		}
 	}
-	if len(names) == 0 {
+	if !retried {
 		return Inputs{}, ErrNothingToRetry
 	}
 	if !in.Kind.RetriedWhole() {

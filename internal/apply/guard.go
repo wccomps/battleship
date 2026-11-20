@@ -179,3 +179,10 @@ func (g guardedAPI) DeleteVM(ctx context.Context, node string, vmid int) (string
 func (g guardedAPI) DeleteVolume(ctx context.Context, node, storage, volid string) (string, error) {
 	return guard(ctx, g, func(ctx context.Context) (string, error) { return g.changes.DeleteVolume(ctx, node, storage, volid) })
 }
+
+func (g guardedAPI) SetPoolComment(ctx context.Context, pool, comment string) error {
+	_, err := guard(ctx, g, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, g.changes.SetPoolComment(ctx, pool, comment)
+	})
+	return err
+}
