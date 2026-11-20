@@ -43,11 +43,10 @@ const (
 	practiceMaxBody = 16 << 10
 	// practiceSetPlans caps the sets GET /v1/sets plans at once, and
 	// practiceSetTimeout each plan, so a node that hangs fails the sets that
-	// wait on it. Sets unplanned when practiceAnswerMargin is left of the call
-	// carry that error, so the call still answers.
-	practiceSetPlans     = 4
-	practiceSetTimeout   = 15 * time.Second
-	practiceAnswerMargin = 5 * time.Second
+	// wait on it. Sets the call runs out of time for carry that error; the
+	// listener's write timeout leaves the answer time to go out.
+	practiceSetPlans   = 4
+	practiceSetTimeout = 15 * time.Second
 )
 
 // PracticeCallTimeout bounds one call of the session interface. The
@@ -234,18 +233,12 @@ func (s *Server) practiceSets(w http.ResponseWriter, r *http.Request, cred proxm
 		listed[vm.VMID] = vm
 	}
 	lo, _, _ := config.ParseRange(s.cfg.Practice.Pods) // validated at startup
-	plans := ctx
-	if deadline, ok := ctx.Deadline(); ok {
-		var cancel context.CancelFunc
-		plans, cancel = context.WithDeadline(ctx, deadline.Add(-practiceAnswerMargin))
-		defer cancel()
-	}
 	sets := make([]practiceSet, len(approved))
 	var g errgroup.Group
 	g.SetLimit(practiceSetPlans)
 	for i, set := range approved {
 		g.Go(func() error {
-			sets[i] = s.practiceSet(plans, planner, set, pods.FormatTeam(lo), listed)
+			sets[i] = s.practiceSet(ctx, planner, set, pods.FormatTeam(lo), listed)
 			return nil
 		})
 	}

@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wccomps/battleship/internal/auth/authtest"
 	"github.com/wccomps/battleship/internal/config"
@@ -356,6 +357,36 @@ func TestPracticeSetsMarkWhatCannotBeRead(t *testing.T) {
 	}
 	if want := (practiceSize{MemoryBytes: 6 * gib, CPUs: 3}); kilo.Pod != want || kilo.Error != "" || len(kilo.Templates) != 2 { // linked clones: no boot disk
 		t.Errorf("kilo.alpha = %+v, want both templates and pod %+v", kilo, want)
+	}
+}
+
+// Nodes that hang until the call runs out of time fail the sets that wait on
+// them, each with its error; the call still answers 200.
+func TestPracticeSetsAnswerWhenTheCallRunsOut(t *testing.T) {
+	p := newPracticeHarness(t)
+	p.addSet("kilo.alpha", 5001, "dev;approved", "dev;approved", true)
+	p.addSet("lima.bravo", 5021, "dev;approved", "dev;approved", true)
+	p.api.Mu.Lock()
+	p.api.gate = make(chan struct{}) // every config read hangs
+	p.api.Mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second) // the listing before the plans takes far less
+	defer cancel()
+	rec := p.call(http.MethodGet, "/v1/sets", "", func(r *http.Request) { *r = *r.WithContext(ctx) })
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /v1/sets = %d %s, want 200", rec.Code, rec.Body)
+	}
+	var got struct{ Sets []practiceSet }
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Sets) != 2 {
+		t.Fatalf("sets = %+v, want both", got.Sets)
+	}
+	for _, set := range got.Sets {
+		if set.Error == "" || len(set.Templates) != 0 {
+			t.Errorf("set %s = %+v, want its error and nothing else", set.Name, set)
+		}
 	}
 }
 
