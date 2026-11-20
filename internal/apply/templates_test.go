@@ -406,6 +406,22 @@ func (l *laggingListing) ClusterVMs(ctx context.Context) ([]proxmox.VM, error) {
 	return slices.DeleteFunc(vms, func(vm proxmox.VM) bool { return vm.VMID == int(l.hidden.Load()) }), err
 }
 
+// failCopyOnce fails the first wait for the copy of master 121, running
+// then (if not nil) with f.Mu held as the copy's task fails.
+func failCopyOnce(f *podstest.Fake, then func()) {
+	copyTask := podstest.UPID("cedar", "qmclone", 121)
+	f.WaitHook = func(_ context.Context, upid string) error { // runs with f.Mu held
+		if upid != copyTask {
+			return nil
+		}
+		f.WaitHook = nil
+		if then != nil {
+			then()
+		}
+		return &proxmox.TaskError{UPID: upid, ExitStatus: "clone failed: storage error"}
+	}
+}
+
 // A copy whose task failed may leave its VM behind, and the next round's
 // listing may not show it yet. The clone's probe then finds it under the
 // expected name, or misses it too and the POST is told it exists. Either
@@ -417,18 +433,12 @@ func TestFailedCopyLeftoverMissingFromTheListingIsNotConverted(t *testing.T) {
 			f := newCluster()
 			plan := deployTeak(t, f, "01")
 			api := &laggingListing{Fake: f}
-			copyTask := podstest.UPID("cedar", "qmclone", 121)
-			f.WaitHook = func(_ context.Context, upid string) error { // runs with f.Mu held
-				if upid != copyTask {
-					return nil
-				}
-				f.WaitHook = nil
+			failCopyOnce(f, func() {
 				api.hidden.Store(9021) // the next listing misses the leftover
 				if probeMisses {
 					f.FailOn("config:9021", notExist(9021)) // and so does the next probe
 				}
-				return &proxmox.TaskError{UPID: upid, ExitStatus: "clone failed: storage error"}
-			}
+			})
 			ex := testExecutor(f, &recorder{})
 			ex.API = api
 
@@ -450,17 +460,11 @@ func TestFailedCopyLeftoverMissingFromTheListingIsNotConverted(t *testing.T) {
 func TestCopyIntoAFailedCopysRemovedTargetIsConverted(t *testing.T) {
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
-	copyTask := podstest.UPID("cedar", "qmclone", 121)
-	f.WaitHook = func(_ context.Context, upid string) error { // runs with f.Mu held
-		if upid != copyTask {
-			return nil
-		}
-		f.WaitHook = nil
+	failCopyOnce(f, func() {
 		delete(f.VMs, 9021) // Proxmox removes a failed clone's target
 		maps.DeleteFunc(f.Vols, func(_ string, owner int) bool { return owner == 9021 })
 		f.CloneThenFail = map[int]error{9021: &proxmox.APIError{Status: 502, Message: "Bad Gateway"}} // the next round's POST
-		return &proxmox.TaskError{UPID: upid, ExitStatus: "clone failed: storage error"}
-	}
+	})
 
 	res := testExecutor(f, &recorder{}).Run(context.Background(), plan)
 	if !slices.Contains(res.Succeeded, "team01-teak") {
@@ -499,14 +503,7 @@ func TestFailedCopyLeftoverIsRemovedThoughCleanupsListingMissesIt(t *testing.T) 
 	f := newCluster()
 	plan := deployTeak(t, f, "01")
 	api := &laggingListing{Fake: f}
-	copyTask := podstest.UPID("cedar", "qmclone", 121)
-	f.WaitHook = func(_ context.Context, upid string) error { // runs with f.Mu held
-		if upid != copyTask {
-			return nil
-		}
-		f.WaitHook = nil
-		return &proxmox.TaskError{UPID: upid, ExitStatus: "clone failed: storage error"}
-	}
+	failCopyOnce(f, nil)
 	ex := testExecutor(f, &recorder{})
 	ex.API = api
 	ex.OnEvent = func(ev Event) {
