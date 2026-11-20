@@ -33,14 +33,8 @@ import (
 	"github.com/wccomps/battleship/internal/store"
 )
 
-// The browser tests drive the real pages, script and stylesheet in
-// headless Chrome. They need a browser's DevTools endpoint, e.g.
-//
-//	docker run -d --rm --network host chromedp/headless-shell
-//	BATTLESHIP_BROWSER=http://127.0.0.1:9222 go test ./internal/web -run Browser
-//
-// and are skipped without it. BATTLESHIP_SHOTS, if set, is a directory for
-// screenshots of each state.
+// The browser tests drive the real pages in headless Chrome; README.md's
+// Tests section says how to run them. They skip without BATTLESHIP_BROWSER.
 
 // browser is a tab on the app under test.
 type browser struct {
@@ -159,7 +153,10 @@ func newBrowser(t *testing.T, h *harness, sess *authtest.Session, width, height 
 		emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: scheme}}),
 	}
 	if sess != nil {
-		tasks = append(tasks, network.SetCookie(sess.Cookie.Name, sess.Cookie.Value).WithURL(srv.URL).WithHTTPOnly(true))
+		// Without the ticket cookie every page goes through the Proxmox sign-in, whose fake IdP's certificate Chrome refuses.
+		for _, c := range sess.Cookies() {
+			tasks = append(tasks, network.SetCookie(c.Name, c.Value).WithURL(srv.URL).WithPath(c.Path).WithHTTPOnly(c.HttpOnly))
+		}
 	}
 	if err := chromedp.Run(ctx, tasks); err != nil {
 		t.Fatalf("starting the browser: %v", err)
